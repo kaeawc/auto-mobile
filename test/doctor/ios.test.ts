@@ -36,7 +36,7 @@ import type {
   IosRunnerInspectorHooks,
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
-import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
+import type { SecurityClientApi } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { CtrlProxyHierarchy } from "../../src/features/observe/ios/types";
@@ -98,7 +98,8 @@ const baseDependencies: IosDoctorDependencies = {
   securityClient: {
     getDiagnostics: async () => ({ available: true, version: null }),
     listCodeSigningIdentities: async () => [],
-  } as SecurityClient,
+    decodeCms: async () => "",
+  } satisfies SecurityClientApi,
   logger: new FakeLogger(),
   createSimctlClient: () => ({
     setDevice: () => {},
@@ -123,6 +124,16 @@ const baseDependencies: IosDoctorDependencies = {
     terminateApp: async () => {},
     getScreenSize: async () => ({ width: 100, height: 100 }),
     setAppearance: async () => {},
+    executeCommandArgs: async () => createExecResult(""),
+    startCommandArgs: async () => new FakeChildProcess(),
+    eraseSimulator: async () => {},
+    installApp: async () => {},
+    uninstallApp: async () => {},
+    enumerateDisplays: async () => [],
+    screenshot: async () => Buffer.alloc(0),
+    openSimulatorApp: async () => true,
+    presentSimulatorAfterStart: async () => {},
+    pushNotification: async () => ({ success: true }),
   }),
   runnerInspector: {
     inspectBootedRunners: async () => [],
@@ -685,7 +696,7 @@ describe("iOS doctor checks", () => {
         securityClient: {
           ...baseDependencies.securityClient,
           listCodeSigningIdentities: async () => [],
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("warn");
@@ -700,7 +711,7 @@ describe("iOS doctor checks", () => {
           listCodeSigningIdentities: async () => [
             { fingerprint: "ABC123", name: "Apple Development: test@test.com" },
           ],
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("pass");
@@ -726,7 +737,7 @@ describe("iOS doctor checks", () => {
             timeoutMs = options?.timeoutMs;
             return { available: true, version: null };
           },
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(timeoutMs).toBe(5000);
@@ -738,7 +749,7 @@ describe("iOS doctor checks", () => {
         securityClient: {
           ...baseDependencies.securityClient,
           getDiagnostics: async () => ({ available: false, version: null }),
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("fail");
@@ -755,7 +766,7 @@ describe("iOS doctor checks", () => {
           getDiagnostics: async () => {
             throw new Error("security probe failed");
           },
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("fail");
@@ -984,7 +995,7 @@ describe("iOS doctor checks", () => {
           listCodeSigningIdentities: async () => {
             throw new Error("security exploded");
           },
-        } as SecurityClient,
+        } satisfies SecurityClientApi,
       });
 
       expect(result.status).toBe("warn");
@@ -1265,7 +1276,7 @@ describe("iOS doctor cancellation", () => {
             observedSignal = options?.signal;
             observedTimeoutMs = options?.timeoutMs;
             await new Promise<void>((resolve) => {
-              options?.signal?.addEventListener("abort", resolve, { once: true });
+              options?.signal?.addEventListener("abort", () => resolve(), { once: true });
             });
             try {
               options?.signal?.throwIfAborted();

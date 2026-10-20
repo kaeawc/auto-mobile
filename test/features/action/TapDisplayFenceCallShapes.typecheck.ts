@@ -11,45 +11,38 @@ declare const fence: DisplayFence;
 declare const tapOnElement: TapOnElement;
 declare const element: Parameters<TapOnElement["executeAndroidTap"]>[4];
 void tapOnElement.executeAndroidTap("tap", 10, 10, 50, element);
-void tapOnElement.executeAndroidTap("tap", 10, 10, 50, element, undefined, {
-  action: "tap",
-  displayFence: fence,
+void tapOnElement.executeAndroidTap("tap", 10, 10, 50, element, {
+  options: {
+    action: "tap",
+    displayFence: fence,
+  },
 });
-const talkBackFlag = tapOnElement.executeAndroidTap.bind(
-  tapOnElement,
-  "tap",
-  10,
-  10,
-  50,
-  element,
-  undefined,
-  { action: "tap" },
-);
-void talkBackFlag(false);
-// @ts-expect-error The eighth slot is a boolean, never a display fence.
-void talkBackFlag(fence);
-// @ts-expect-error The eighth slot is a boolean, never an array.
-void talkBackFlag([]);
-// @ts-expect-error The eighth slot is a boolean, never an object.
-void talkBackFlag({});
-// @ts-expect-error The eighth slot is a boolean, never an object.
-void talkBackFlag({ assertCurrent: 1 });
+const talkBackFlag = tapOnElement.executeAndroidTap.bind(tapOnElement, "tap", 10, 10, 50, element);
+void talkBackFlag({ isTalkBackEnabled: false });
+// @ts-expect-error The TalkBack flag is a boolean, never a display fence.
+void talkBackFlag({ isTalkBackEnabled: fence });
+// @ts-expect-error The TalkBack flag is a boolean, never an array.
+void talkBackFlag({ isTalkBackEnabled: [] });
+// @ts-expect-error The TalkBack flag is a boolean, never an object.
+void talkBackFlag({ isTalkBackEnabled: {} });
+// @ts-expect-error The TalkBack flag is a boolean, never an object.
+void talkBackFlag({ isTalkBackEnabled: { assertCurrent: 1 } });
 
 // TapOnElement.executeAndroidTap
 declare const call0: TapOnElement["executeAndroidTap"];
 declare const args0: Parameters<typeof call0>;
 void call0(...args0);
-const options0 = call0.bind(undefined, args0[0], args0[1], args0[2], args0[3], args0[4], args0[5]);
-void options0(args0[6], args0[7]);
-void options0({ action: "tap", displayFence: fence }, args0[7]);
+const options0 = call0.bind(undefined, args0[0], args0[1], args0[2], args0[3], args0[4]);
+void options0(args0[5]);
+void options0({ options: { action: "tap", displayFence: fence } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options0({ action: "tap", displayFence: [] }, args0[7]);
+void options0({ options: { action: "tap", displayFence: [] } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options0({ action: "tap", displayFence: {} }, args0[7]);
+void options0({ options: { action: "tap", displayFence: {} } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options0({ action: "tap", displayFence: { assertCurrent: 1 } }, args0[7]);
+void options0({ options: { action: "tap", displayFence: { assertCurrent: 1 } } });
 // @ts-expect-error Arrays are not dispatch options.
-void options0([], args0[7]);
+void options0([]);
 // @ts-expect-error Extra positional slots never carry a fence.
 void call0(...args0, []);
 // @ts-expect-error Extra positional slots never carry a fence.
@@ -115,22 +108,18 @@ declare const call3: TapOnElement["retryTapIfNoChange"];
 declare const args3: Parameters<typeof call3>;
 void call3(...args3);
 const options3 = call3.bind(undefined, args3[0], args3[1], args3[2], args3[3], args3[4]);
-void options3(args3[5], args3[6], args3[7], args3[8], args3[9]);
-void options3({ action: "tap", displayFence: fence }, args3[6], args3[7], args3[8], args3[9]);
+void options3(args3[5]);
+void options3({ ...args3[5], options: { action: "tap", displayFence: fence } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options3({ action: "tap", displayFence: [] }, args3[6], args3[7], args3[8], args3[9]);
+void options3({ ...args3[5], options: { action: "tap", displayFence: [] } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options3({ action: "tap", displayFence: {} }, args3[6], args3[7], args3[8], args3[9]);
+void options3({ ...args3[5], options: { action: "tap", displayFence: {} } });
 void options3(
   // @ts-expect-error A fence must implement assertCurrent(): void.
-  { action: "tap", displayFence: { assertCurrent: 1 } },
-  args3[6],
-  args3[7],
-  args3[8],
-  args3[9],
+  { ...args3[5], options: { action: "tap", displayFence: { assertCurrent: 1 } } },
 );
 // @ts-expect-error Arrays are not dispatch options.
-void options3([], args3[6], args3[7], args3[8], args3[9]);
+void options3([]);
 // @ts-expect-error Extra positional slots never carry a fence.
 void call3(...args3, []);
 // @ts-expect-error Extra positional slots never carry a fence.
@@ -164,7 +153,7 @@ void call4(...args4, { assertCurrent: 1 });
 declare const call5: TapOnElement["executeiOSTap"];
 declare const args5: Parameters<typeof call5>;
 void call5(...args5);
-const options5 = call5.bind(undefined, args5[0], args5[1], args5[2], args5[3], args5[4], args5[5]);
+const options5 = call5.bind(undefined, args5[0], args5[1], args5[2], args5[3], args5[4]);
 void options5();
 void options5({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -230,7 +219,7 @@ void call7(...args7, { assertCurrent: 1 });
 declare const call8: TapOnElement["executeAndroidLongPress"];
 declare const args8: Parameters<typeof call8>;
 void call8(...args8);
-const options8 = call8.bind(undefined, args8[0], args8[1], args8[2], args8[3], args8[4], args8[5]);
+const options8 = call8.bind(undefined, args8[0], args8[1], args8[2], args8[3]);
 void options8();
 void options8({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.

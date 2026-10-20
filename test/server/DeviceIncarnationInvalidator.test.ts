@@ -73,6 +73,7 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
   test("clears window state, closes and evicts CtrlProxy, and marks installed apps stale", async () => {
     let windowInvalidations = 0;
     const windowCacheInvalidator: DeviceWindowCacheInvalidator = {
+      retireAppProcess: () => {},
       invalidate: () => {
         windowInvalidations += 1;
       },

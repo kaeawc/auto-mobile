@@ -44,7 +44,7 @@ object AutoMobileSharedUtils {
       process.destroyForcibly()
       // Wait a bit to ensure process is destroyed
       process.waitFor(5, TimeUnit.SECONDS)
-      throw RuntimeException("Command execution timed out after ${timeoutMs}ms")
+      throw IllegalStateException("Command execution timed out after ${timeoutMs}ms")
     }
 
     val exitCode = process.exitValue()
@@ -119,39 +119,11 @@ constructor(
   @Volatile private var probeFailed = false
 
   companion object {
-    private const val MAX_RETRIES = 3
     private const val INITIAL_BACKOFF_MS = 500L
     private const val COMMAND_TIMEOUT_MS = 10000L // 10 seconds per attempt
-    private val TRANSIENT_ADB_MESSAGES =
-      listOf(
-        "adb server didn't ack",
-        "address already in use",
-        "failed to start daemon",
-        "cannot connect to daemon",
-        "protocol fault",
-        "daemon not running",
-        "failed to check server version",
-        "connection reset",
-        "broken pipe",
-        "device still connecting",
-        "device offline",
-      )
-    private val MISSING_BINARY_MESSAGES =
-      listOf(
-        "error=2",
-        "error=13",
-        "No such file or directory",
-        "Permission denied",
-        "Cannot run program",
-      )
 
-    internal fun countAvailableDevices(output: String): Int = countDevicesInState(output, "device")
-
-    private fun countDevicesInState(output: String, state: String): Int =
-      output.lineSequence().count { line ->
-        val trimmed = line.trim()
-        !trimmed.startsWith("*") && trimmed.split(Regex("\\s+")).getOrNull(1) == state
-      }
+    internal fun countAvailableDevices(output: String): Int =
+      DeviceProbeDiagnostics.countDevicesInState(output, "device")
 
     // JVM-wide lock to prevent parallel test executors from racing on ADB server startup
     private val adbLock = java.util.concurrent.locks.ReentrantLock()
@@ -196,24 +168,24 @@ constructor(
 
   private fun checkDevicesWithRetries(command: List<String>) {
     var lastDiagnostic: String? = null
-    for (attempt in 1..MAX_RETRIES) {
+    for (attempt in 1..DeviceProbeDiagnostics.MAX_RETRIES) {
       try {
-        val result = executeCommand(command, COMMAND_TIMEOUT_MS)
-        logDeviceCheckResult(result, attempt)
+        val result = commandExecutor(command, COMMAND_TIMEOUT_MS)
+        DeviceProbeDiagnostics.logDeviceCheckResult(result, attempt)
         if (acceptDeviceCheckResult(result, attempt)) return
-        lastDiagnostic = buildAdbErrorMessage(result)
-        logRetryableFailure(result, attempt)
+        lastDiagnostic = DeviceProbeDiagnostics.buildAdbErrorMessage(result)
+        DeviceProbeDiagnostics.logRetryableFailure(result, attempt)
       } catch (e: Exception) {
         lastDiagnostic = e.message ?: e.javaClass.name
         println("Error during device availability check (attempt $attempt): ${e.message}")
-        if (isMissingBinary(e)) {
+        if (DeviceProbeDiagnostics.isMissingBinary(e)) {
           lastDiagnostic = "Cannot execute adb: $lastDiagnostic"
           break
         }
       }
 
       // An idempotent probe retries unknown failures too, but never sleeps after the last attempt.
-      if (attempt < MAX_RETRIES) {
+      if (attempt < DeviceProbeDiagnostics.MAX_RETRIES) {
         val backoffMs = INITIAL_BACKOFF_MS * (1 shl (attempt - 1))
         println("Retrying in ${backoffMs}ms...")
         sleeper(backoffMs)
@@ -226,20 +198,13 @@ constructor(
     checkComplete = true
   }
 
-  private fun logDeviceCheckResult(result: CommandResult, attempt: Int) {
-    val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
-    if (debugMode || attempt > 1) {
-      println("Device check attempt $attempt output:\n${result.output}")
-      if (result.errorOutput.isNotEmpty()) {
-        println("Device check attempt $attempt errors:\n${result.errorOutput}")
-      }
-      println("Device check attempt $attempt exit code: ${result.exitCode}")
-    }
-  }
-
   private fun acceptDeviceCheckResult(result: CommandResult, attempt: Int): Boolean {
     if (result.exitCode != 0) return false
-    if (attempt < MAX_RETRIES && hasOnlyConnectingDevices(result.output)) return false
+    if (
+      attempt < DeviceProbeDiagnostics.MAX_RETRIES &&
+        DeviceProbeDiagnostics.hasOnlyConnectingDevices(result.output)
+    )
+      return false
 
     deviceCount = countAvailableDevices(result.output)
     if (deviceCount > 0) {
@@ -252,53 +217,6 @@ constructor(
     probeFailed = false
     checkComplete = true
     return true
-  }
-
-  private fun hasOnlyConnectingDevices(output: String): Boolean =
-    countAvailableDevices(output) == 0 && countDevicesInState(output, "connecting") > 0
-
-  private fun isTransientFailure(result: CommandResult): Boolean =
-    TRANSIENT_ADB_MESSAGES.any { message ->
-      result.errorOutput.contains(message, ignoreCase = true) ||
-        result.output.contains(message, ignoreCase = true)
-    }
-
-  private fun isMissingBinary(exception: Exception): Boolean =
-    exception is java.io.IOException &&
-      MISSING_BINARY_MESSAGES.any { exception.message?.contains(it, ignoreCase = true) == true }
-
-  private fun logRetryableFailure(result: CommandResult, attempt: Int) {
-    if (result.exitCode == 0) {
-      println("ADB device still connecting (attempt $attempt/$MAX_RETRIES)")
-    } else {
-      println("Warning: Device check failed with exit code ${result.exitCode}")
-      if (isTransientFailure(result)) {
-        println("ADB server issue detected (attempt $attempt/$MAX_RETRIES)")
-        if (attempt == MAX_RETRIES) {
-          println(
-            "ADB server failed to start after $MAX_RETRIES attempts. This may be a CI environment issue.",
-          )
-        }
-      }
-    }
-  }
-
-  private fun buildAdbErrorMessage(result: CommandResult): String {
-    val diagnostic = result.errorOutput.ifEmpty { result.output }
-    val errorDetails = StringBuilder()
-    errorDetails.append("ADB device check failed (exit code ${result.exitCode})")
-
-    if (diagnostic.contains("Address already in use", ignoreCase = true)) {
-      errorDetails.append(": ADB server port conflict - another process may be using port 5037")
-    } else if (diagnostic.contains("failed to start daemon", ignoreCase = true)) {
-      errorDetails.append(": ADB daemon failed to start")
-    } else if (diagnostic.contains("cannot connect to daemon", ignoreCase = true)) {
-      errorDetails.append(": Cannot connect to ADB daemon")
-    } else if (diagnostic.isNotEmpty()) {
-      errorDetails.append(": ${diagnostic.take(200)}")
-    }
-
-    return errorDetails.toString()
   }
 
   /** Get the last error message from device availability check, if any. */
@@ -327,10 +245,6 @@ constructor(
       checkDeviceAvailability()
     }
     return deviceCount
-  }
-
-  private fun executeCommand(command: List<String>, timeoutMs: Long): CommandResult {
-    return commandExecutor(command, timeoutMs)
   }
 
   private fun getAndroidHome(): String? {

@@ -19,7 +19,7 @@ const patchOps = [{ op: "add", path: "/data/items/-", value: "x" }];
 function dependencies(shownSpecs: PrototypeShownSpecs): PrototypePatchDependencies {
   return {
     store: { shownSpecs, recordPatchedData: () => {} },
-    transport: { patch: async () => ({ success: true }) },
+    transport: { patch: async () => ({ success: true, delivery: "answered" }) },
     supportsPatch: async () => true,
     platform: "android",
     queue: createPrototypePatchQueue(),

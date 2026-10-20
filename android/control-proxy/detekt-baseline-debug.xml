@@ -35,8 +35,6 @@
     <ID>ComplexCondition:TextInputController.kt:TextInputController$node != null &amp;&amp; node.refresh() &amp;&amp; node.isEditable &amp;&amp; node.isFocused &amp;&amp; !node.isPassword</ID>
     <ID>ComplexCondition:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$entry.index &gt; i &amp;&amp; bounds.left &lt; node.bounds.right &amp;&amp; bounds.right &gt; node.bounds.left &amp;&amp; bounds.top &lt; node.bounds.bottom &amp;&amp; bounds.bottom &gt; node.bounds.top</ID>
     <ID>ComplexCondition:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy == null &amp;&amp; activeWindowRoot != null &amp;&amp; (!primaryAppWindowHasNullRoot || activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)</ID>
-    <ID>CyclomaticComplexMethod:CaCertificateController.kt:CaCertificateController$suspend fun performRemoveCaCertificate</ID>
-    <ID>CyclomaticComplexMethod:ClipboardController.kt:ClipboardController$suspend fun performClipboard</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
@@ -96,7 +94,6 @@
     <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun validate: SavedPrototypeSaveResult.Rejected?</ID>
     <ID>CyclomaticComplexMethod:SdkTelemetryReceivers.kt:NavigationEventReceiver$override fun onReceive</ID>
-    <ID>CyclomaticComplexMethod:SettingsController.kt:SettingsController$suspend fun performSettingsList</ID>
     <ID>CyclomaticComplexMethod:StructuralHasher.kt:StructuralHasher$private fun computeElementHash: Int</ID>
     <ID>CyclomaticComplexMethod:TextInputController.kt:TextInputController$suspend fun performImeAction</ID>
     <ID>CyclomaticComplexMethod:TextInputController.kt:TextInputController$suspend fun performInsertText</ID>
@@ -114,8 +111,6 @@
     <ID>InjectDispatcher:CtrlProxy.kt:CtrlProxy$IO</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$Default</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$IO</ID>
-    <ID>InjectDispatcher:ScreenshotController.kt:ScreenshotController$IO</ID>
-    <ID>InstanceOfCheckForException:DisplayIdentity.kt:PanelUniqueIdResolver$error is IllegalArgumentException</ID>
     <ID>LargeClass:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
     <ID>LargeClass:GestureController.kt:GestureController</ID>
     <ID>LargeClass:PrototypeController.kt:PrototypeController</ID>
@@ -125,7 +120,6 @@
     <ID>LargeClass:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>
     <ID>LargeClass:WebSocketServer.kt:WebSocketServer</ID>
     <ID>LongMethod:CaCertificateController.kt:CaCertificateController$suspend fun performRemoveCaCertificate</ID>
-    <ID>LongMethod:ClipboardController.kt:ClipboardController$suspend fun performClipboard</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastSdkEvent</ID>
@@ -270,26 +264,14 @@
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun collectOcclusionNodes: Int</ID>
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
     <ID>LongParameterList:WebSocketServer.kt:WebSocketServer</ID>
-    <ID>NestedBlockDepth:ClipboardController.kt:ClipboardController$suspend fun performClipboard</ID>
-    <ID>NestedBlockDepth:NodeActionController.kt:NodeActionController$fun performAccessibilityLinkActivation</ID>
     <ID>NestedBlockDepth:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$override fun pin: PinOutcome</ID>
-    <ID>NestedBlockDepth:SettingsController.kt:SettingsController$suspend fun performSettingsList</ID>
-    <ID>NestedBlockDepth:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
-    <ID>NestedBlockDepth:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
     <ID>RedundantSuspendModifier:PrototypeTrace.kt:PrototypeTrace$suspend</ID>
     <ID>RedundantSuspendModifier:SavedPrototypeScreenState.kt:suspend</ID>
     <ID>RedundantSuspendModifier:WebSocketServer.kt:WebSocketServer$suspend</ID>
-    <ID>SwallowedException:ElementBounds.kt:ElementBounds.Companion$e: Exception</ID>
-    <ID>SwallowedException:PackageController.kt:PackageController$e: Exception</ID>
-    <ID>SwallowedException:PackageController.kt:PackageController$e: PackageManager.NameNotFoundException</ID>
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: Exception</ID>
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: IllegalStateException</ID>
     <ID>SwallowedException:PrototypeAssetController.kt:PrototypeAssetController$error: IllegalArgumentException</ID>
     <ID>SwallowedException:RetrofitPrototypeHttpClient.kt:RetrofitPrototypeHttpClient$error: ConnectException</ID>
-    <ID>SwallowedException:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: IllegalArgumentException</ID>
-    <ID>SwallowedException:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: SecurityException</ID>
-    <ID>SwallowedException:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$e: Exception</ID>
-    <ID>SwallowedException:WebSocketServer.kt:WebSocketServer.Companion$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AndroidPinnedShortcutPlatform.kt:AndroidPinnedShortcutPlatform$error: Exception</ID>
     <ID>TooGenericExceptionCaught:CommandReceivers.kt:CommandReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CorrelatedErrorReporter.kt:CorrelatedErrorReporter$e: Exception</ID>
@@ -368,7 +350,5 @@
     <ID>TooManyFunctions:TextInputController.kt:TextInputController</ID>
     <ID>TooManyFunctions:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>
     <ID>TooManyFunctions:WebSocketServer.kt:WebSocketServer</ID>
-    <ID>UnnecessaryNotNullOperator:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy!!</ID>
-    <ID>UnsafeCallOnNullableType:TextInputController.kt:TextInputController$focusedNode!!</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -1,5 +1,6 @@
 import { parseDeviceLock } from "./parseDeviceLock";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
+import { rethrowDeviceTransportUnavailable } from "./AdbDeviceTransportUnavailableError";
 
 import { parseDumpsysUsers, parsePmListUsers } from "./parseAndroidUsers";
 
@@ -170,6 +171,9 @@ export class AdbDeviceReadings {
       logger.debug("[ADB] dumpsys user parsing returned no users, falling back to pm list users");
       return await this.listUsersLegacy(signal);
     } catch (error) {
+      signal?.throwIfAborted();
+      rethrowDeviceTransportUnavailable(error);
+      // Older Android versions may lack dumpsys user; pm can still enumerate users.
       logger.debug(
         `[ADB] dumpsys user failed: ${(error as Error).message}, falling back to pm list users`,
       );
@@ -209,6 +213,8 @@ export class AdbDeviceReadings {
       // An unparseable response is not evidence that user 0 is active.
       return [];
     } catch (error) {
+      signal?.throwIfAborted();
+      rethrowDeviceTransportUnavailable(error);
       logger.warn(`[ADB] Failed to list users via pm: ${(error as Error).message}`);
       // An unavailable user service is not evidence that user 0 is active.
       return [];

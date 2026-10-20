@@ -12,6 +12,7 @@ import android.util.Base64
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileInputStream
+import java.io.IOException
 import java.io.InputStream
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -253,14 +254,7 @@ object AutoMobileNotifications {
     }
 
     if (trimmed.startsWith("content://")) {
-      return try {
-        decodeBitmapFromStream(
-          context.contentResolver.openInputStream(android.net.Uri.parse(trimmed)),
-        )
-      } catch (e: Exception) {
-        AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }
-        null
-      }
+      return loadContentBitmap(context, trimmed)
     }
 
     val candidatePaths =
@@ -277,7 +271,9 @@ object AutoMobileNotifications {
           FileInputStream(file).use { stream ->
             return decodeBitmapFromStream(stream)
           }
-        } catch (e: Exception) {
+        } catch (e: IOException) {
+          AutoMobileSDK.logger.w(TAG, e) { "Failed to read image file at $path" }
+        } catch (e: SecurityException) {
           AutoMobileSDK.logger.w(TAG, e) { "Failed to read image file at $path" }
         }
       }
@@ -286,11 +282,23 @@ object AutoMobileNotifications {
     return decodeBitmapFromBase64(trimmed)
   }
 
+  private fun loadContentBitmap(context: Context, uri: String): Bitmap? {
+    return try {
+      decodeBitmapFromStream(
+        context.contentResolver.openInputStream(android.net.Uri.parse(uri)),
+      )
+    } catch (e: Exception) {
+      // Content providers belong to other apps and can fail with arbitrary runtime exceptions.
+      AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }
+      null
+    }
+  }
+
   private fun decodeBitmapFromBase64(base64Data: String): Bitmap? {
     return try {
       val bytes = Base64.decode(base64Data, Base64.DEFAULT)
       decodeBitmapFromBytes(bytes)
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
       AutoMobileSDK.logger.w(TAG, e) { "Failed to decode base64 image" }
       null
     }

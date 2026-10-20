@@ -31,7 +31,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# shellcheck source=scripts/lib/vcs-diff.sh disable=SC1091
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
 
 repo_root="$(vcs_root)"
@@ -54,16 +54,18 @@ if [[ "$(pwd -P)" != "${repo_root}" ]]; then
 fi
 
 if [[ -z "${base_ref}" ]]; then
-  # shellcheck disable=SC2310 # A false result selects the Git default below.
-  if vcs_uses_jj; then
+  if [[ -d .jj && ! -e .git ]]; then
     base_ref="origin/main"
   else
     base_ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || printf '%s' origin/main)"
   fi
 fi
 base_ref="$(vcs_base_ref "${base_ref}")"
-# shellcheck disable=SC2310 # A false result is reported as an invalid base.
-if ! vcs_base_exists "${base_ref}"; then
+set +e
+vcs_base_exists "${base_ref}"
+base_status=$?
+set -e
+if [[ "$base_status" -ne 0 ]]; then
   echo "error: base ref does not exist: ${base_ref}" >&2
   exit 2
 fi

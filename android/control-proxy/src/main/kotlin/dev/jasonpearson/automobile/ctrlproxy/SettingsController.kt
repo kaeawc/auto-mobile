@@ -205,19 +205,7 @@ internal class SettingsController(
         if (uri == null) {
           error = "Unknown namespace: $namespace"
         } else {
-          val map = HashMap<String, String>()
-          contentResolver().query(uri, arrayOf("name", "value"), null, null, null)?.use { cursor ->
-            val nameIdx = cursor.getColumnIndex("name")
-            val valueIdx = cursor.getColumnIndex("value")
-            if (nameIdx >= 0 && valueIdx >= 0) {
-              while (cursor.moveToNext()) {
-                val name = cursor.getString(nameIdx) ?: continue
-                val v = cursor.getString(valueIdx) ?: ""
-                map[name] = v
-              }
-            }
-          }
-          entries = map
+          entries = readSettingsEntries(contentResolver(), uri)
           success = true
         }
         perfProvider.endOperation("listSettings")
@@ -360,3 +348,22 @@ private inline fun <T> withSettingsFailures(onFailure: (Exception) -> T, block: 
   } catch (e: android.database.sqlite.SQLiteException) {
     onFailure(e)
   }
+
+private fun readSettingsEntries(
+  resolver: android.content.ContentResolver,
+  uri: android.net.Uri,
+): Map<String, String> {
+  val map = HashMap<String, String>()
+  resolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { cursor ->
+    val nameIdx = cursor.getColumnIndex("name")
+    val valueIdx = cursor.getColumnIndex("value")
+    if (nameIdx >= 0 && valueIdx >= 0) {
+      while (cursor.moveToNext()) {
+        val name = cursor.getString(nameIdx) ?: continue
+        val v = cursor.getString(valueIdx) ?: ""
+        map[name] = v
+      }
+    }
+  }
+  return map
+}

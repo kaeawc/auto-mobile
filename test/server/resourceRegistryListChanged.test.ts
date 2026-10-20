@@ -153,7 +153,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       deviceId: "NEWEST-INVENTORY-DEVICE",
     };
     const manager = new FakeDeviceUtils();
-    const oldDiscovery = Promise.withResolvers<readonly (typeof oldDevice)[]>();
+    const oldDiscovery = Promise.withResolvers<(typeof oldDevice)[]>();
     const getBootedDevices = manager.getBootedDevices.bind(manager);
     let discoveryCalls = 0;
     manager.getBootedDevices = async () => {

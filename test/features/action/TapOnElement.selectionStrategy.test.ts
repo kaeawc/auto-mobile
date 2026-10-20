@@ -1,3 +1,4 @@
+import { capturedFlatNodeForTest, type FlatHierarchyNode } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { runBlockWith, runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { isolatedTapStrategy } from "../../helpers/observedInteractionStub";
@@ -266,7 +267,7 @@ describe("TapOnElement selectionStrategy", () => {
     const { result, tapped } = await executeFocus(editableElement({ selected: "true" }));
 
     expect(tapped).toBe(true);
-    expect(result.wasAlreadyFocused).toBeUndefined();
+    expect("wasAlreadyFocused" in result ? result.wasAlreadyFocused : undefined).toBeUndefined();
     expect(result.focusVerified).toBe(false);
     expect(result.success).toBe(false);
     expect(result.error).toContain("Failed to confirm focus");
@@ -278,7 +279,7 @@ describe("TapOnElement selectionStrategy", () => {
     );
 
     expect(tapped).toBe(false);
-    expect(result.wasAlreadyFocused).toBe(true);
+    expect("wasAlreadyFocused" in result && result.wasAlreadyFocused).toBe(true);
     expect(result.focusVerified).toBe(true);
     expect(result.success).toBe(true);
   });
@@ -298,7 +299,7 @@ describe("TapOnElement selectionStrategy", () => {
       });
       const { result, tapped } = await executeFocus(
         second,
-        { hierarchy: { node: [first, second] } },
+        { hierarchy: { node: capturedFlatNodeForTest([first, second]) } },
         identifier === "resource ID" ? "com.example:id/phone" : undefined,
         undefined,
         1,
@@ -321,7 +322,7 @@ describe("TapOnElement selectionStrategy", () => {
     });
     const { result, tapped } = await executeFocus(
       second,
-      { hierarchy: { node: [first, { ...second, focused: true }] } },
+      { hierarchy: { node: capturedFlatNodeForTest([first, { ...second, focused: true }]) } },
       "com.example:id/phone",
       undefined,
       1,
@@ -345,7 +346,7 @@ describe("TapOnElement selectionStrategy", () => {
     };
     const { result, tapped } = await executeFocus(
       second,
-      { hierarchy: { node: [first, shifted] } },
+      { hierarchy: { node: capturedFlatNodeForTest([first, shifted]) } },
       "com.example:id/phone",
       undefined,
       1,
@@ -374,7 +375,7 @@ describe("TapOnElement selectionStrategy", () => {
       });
       const { result } = await executeFocus(
         first,
-        { hierarchy: { node: [postFirst, second] } },
+        { hierarchy: { node: capturedFlatNodeForTest([postFirst, second]) } },
         "com.example:id/phone",
         undefined,
         undefined,
@@ -405,7 +406,7 @@ describe("TapOnElement selectionStrategy", () => {
     });
     const { result, tapped } = await executeFocus(
       before,
-      { hierarchy: { node: [after, otherFocused] } },
+      { hierarchy: { node: capturedFlatNodeForTest([after, otherFocused]) } },
       "com.example:id/phone",
     );
 
@@ -438,7 +439,7 @@ describe("TapOnElement selectionStrategy", () => {
     });
     const { result, tapped } = await executeFocus(
       before,
-      { hierarchy: { node: [after, otherFocused] } },
+      { hierarchy: { node: capturedFlatNodeForTest([after, otherFocused]) } },
       undefined,
       undefined,
       undefined,
@@ -473,7 +474,9 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.focusVerified).toBe(true);
   });
 
-  const emptyComposeField = (properties: Partial<Element> = {}): Element => ({
+  const emptyComposeField = (
+    properties: Partial<Element & FlatHierarchyNode> = {},
+  ): Element & FlatHierarchyNode => ({
     class: "android.widget.EditText",
     text: "Basic Text Field",
     bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
@@ -580,7 +583,7 @@ describe("TapOnElement selectionStrategy", () => {
     const before = emptyComposeField();
     const { result, tapped } = await executeFocus(
       before,
-      { hierarchy: { node: fields } },
+      { hierarchy: { node: capturedFlatNodeForTest(fields) } },
       undefined,
       before,
       undefined,
@@ -771,10 +774,12 @@ describe("TapOnElement selectionStrategy", () => {
     }
     if (difference === "ambiguous") {
       post.hierarchy = {
-        node: postFields
-          .filter((field) => field.rootGroup === 0)
-          .slice(0, 2)
-          .map((field) => field.source),
+        node: capturedFlatNodeForTest(
+          postFields
+            .filter((field) => field.rootGroup === 0)
+            .slice(0, 2)
+            .map((field) => field.source),
+        ),
       };
       post.windows = undefined;
     }
@@ -866,7 +871,7 @@ describe("TapOnElement selectionStrategy", () => {
         attributes["view-id"] = "s2-other-field";
       }
       if (difference === "different bounds") {
-        field.source.bounds = [84, 1120, 996, 1267];
+        field.source.bounds = { left: 84, top: 1120, right: 996, bottom: 1267 };
       }
       if (difference === "Email also focused") {
         const emailFields = nodes.filter(
@@ -1109,7 +1114,7 @@ describe("TapOnElement selectionStrategy", () => {
       bounds: { left: 0, top: 150, right: 100, bottom: 190 },
     };
     const { result } = await executeFocus(before, {
-      hierarchy: { node: [focused, anotherFocused] },
+      hierarchy: { node: capturedFlatNodeForTest([focused, anotherFocused]) },
     });
 
     expect(result.focusVerified).toBe(false);

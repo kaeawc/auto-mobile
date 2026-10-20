@@ -785,7 +785,7 @@ internal class TextInputController(
           ImeActionStep.EDITOR_PREVIOUS -> editorActionResult == true
           ImeActionStep.NEXT -> {
             // Find next focusable element and focus it
-            val nextNode = findNextFocusableNode(root, focusedNode!!)
+            val nextNode = findNextFocusableNode(root, checkNotNull(focusedNode))
             if (nextNode != null) {
               val focusSuccess =
                 nextNode.performAction(
@@ -800,7 +800,7 @@ internal class TextInputController(
           }
           ImeActionStep.PREVIOUS -> {
             // Find previous focusable element and focus it
-            val prevNode = findPreviousFocusableNode(root, focusedNode!!)
+            val prevNode = findPreviousFocusableNode(root, checkNotNull(focusedNode))
             if (prevNode != null) {
               val focusSuccess =
                 prevNode.performAction(
@@ -819,7 +819,7 @@ internal class TextInputController(
             val actionId =
               android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER
                 .id
-            val imeResult = focusedNode!!.performAction(actionId)
+            val imeResult = checkNotNull(focusedNode).performAction(actionId)
             Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
             imeResult
           }

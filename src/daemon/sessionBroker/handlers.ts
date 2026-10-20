@@ -47,7 +47,7 @@ const releaseParams = z
       z
         .number()
         .transform((value) => Math.max(0, Math.min(value, SESSION_BROKER_RELEASE_REPLY_BUDGET_MS)))
-        .optional(),
+        .nullish(),
     ),
   })
   .strict();
@@ -261,7 +261,7 @@ export async function handleReleaseBrokerSession(
       success: true,
       result: {
         ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason, {
-          replyBudgetMs: parsed.data.replyBudgetMs,
+          replyBudgetMs: parsed.data.replyBudgetMs ?? undefined,
         })),
       },
     };

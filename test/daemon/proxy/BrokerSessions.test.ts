@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  BROKER_RELEASE_REPLY_BUDGET_MS,
-  BrokerSessions,
-  type BrokerSessionsPort,
-} from "../../../src/daemon/proxy/BrokerSessions";
+import { BrokerSessions, type BrokerSessionsPort } from "../../../src/daemon/proxy/BrokerSessions";
 import type { DaemonClientLike } from "../../../src/daemon/client";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResult";
@@ -138,7 +134,7 @@ describe("BrokerSessions", () => {
         expect(params).toEqual({
           sessionId: "session-1",
           livenessOwnerToken: "owner-1",
-          replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
+          replyBudgetMs: attempts === 0 ? 6_500 : 6_380,
         });
         expect(brokerSessions.sessions.has("session-1")).toBe(true);
         expect(events).not.toContain("forget:session-1");
@@ -169,7 +165,7 @@ describe("BrokerSessions", () => {
 
     test(`prepared release exhausts one budget for repeated handoff ${thrown ? "errors" : "results"}`, async () => {
       let attempts = 0;
-      const { brokerSessions, events, state2, timer } = rig(({ method }) => {
+      const { brokerSessions, calls, events, state2, timer } = rig(({ method }) => {
         if (method !== "daemon/releaseBrokerSession") {
           return ready;
         }
@@ -192,6 +188,8 @@ describe("BrokerSessions", () => {
       const result = await brokerSessions.acquire(config);
 
       expect(attempts).toBe(58);
+      const releases = calls.filter(({ method }) => method === "daemon/releaseBrokerSession");
+      expect(releases.at(-1)?.params.replyBudgetMs).toBe(250);
       expect(timer.now() - started).toBe(6_840);
       expect(timer.getSleepHistory()).toEqual(Array<number>(57).fill(120));
       expect(result.cleanupPending).toBe(true);
@@ -446,6 +444,7 @@ describe("BrokerSessions", () => {
 
     const releases = calls.filter(({ method }) => method === "daemon/releaseBrokerSession");
     expect(releases).toHaveLength(2);
+    expect(releases.map(({ params }) => params.replyBudgetMs)).toEqual([1_000, 880]);
     expect(releases.every(({ params }) => params.reason === "session_owner_exited")).toBe(true);
     expect(timer.now() - started).toBe(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
     expect(events.filter((event) => event === "forget:session-1")).toHaveLength(1);

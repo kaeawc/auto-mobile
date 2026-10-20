@@ -774,6 +774,7 @@ describe("session broker daemon handlers", () => {
 
   test.each([
     { input: undefined, expected: undefined },
+    { input: null, expected: undefined },
     { input: 750, expected: 750 },
     { input: 0, expected: 0 },
     { input: -10, expected: 0 },
@@ -797,7 +798,7 @@ describe("session broker daemon handlers", () => {
     }
   });
 
-  test.each(["500", null, {}])("release rejects a non-number replyBudgetMs=%p", async (input) => {
+  test.each(["500", {}])("release rejects a non-number replyBudgetMs=%p", async (input) => {
     broker.sessionOwners.set(SESSION, TOKEN);
     expect(
       await handleReleaseBrokerSession(

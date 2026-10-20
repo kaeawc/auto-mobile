@@ -321,8 +321,9 @@ budget is `SESSION_BROKER_RELEASE_REPLY_BUDGET_MS`, configurable through broker
 options with an injected `Timer`. The 30-second default gives native destruction
 time to return an honest `released`, well within the CLI's 240-second transport
 timeout. An optional per-call `replyBudgetMs` is clamped to [0, 30,000]; non-finite
-numbers are ignored. The proxy requests its remaining release budget minus 500 ms
-(with a 250 ms minimum), so the daemon can answer before the proxy's own timeout.
+numbers and null are ignored. On each attempt the proxy requests its remaining
+budget minus 500 ms (with a 250 ms minimum), so retries request shorter waits and
+the daemon has time to answer before the proxy's own timeout.
 Database commitment is required before the reply budget starts; a failed
 commitment still rejects without acknowledging release ownership.
 

@@ -723,6 +723,7 @@ describe("session-only broker lifecycle", () => {
       broker = new SessionBroker({ ...options, timer, cleanupWaitMs: 100 });
       const uuid = await ready("recovery-rpc");
       await options.store.beginRelease(uuid, OWNER);
+      const begin = spyOn(options.store, "beginRelease");
       const entered = Promise.withResolvers<AbortSignal>();
       const complete = Promise.withResolvers<void>();
       const destroy = spyOn(options.devices, "destroy").mockImplementation(
@@ -740,9 +741,11 @@ describe("session-only broker lifecycle", () => {
       const signal = await entered.promise;
       let closing: Promise<void> | undefined;
       try {
+        expect(begin).toHaveBeenCalledTimes(1);
         const reply = broker.release(uuid, undefined, { replyBudgetMs });
         expect(await replyAfterBudget(reply)).toMatchObject({ outcome: "cleanup_pending" });
         expect(destroy).toHaveBeenCalledTimes(1);
+        expect(begin).toHaveBeenCalledTimes(1);
         expect(devices.released).toEqual([uuid]);
         let closed = false;
         closing = broker.close().then(() => {
@@ -758,6 +761,7 @@ describe("session-only broker lifecycle", () => {
         await closing;
         await broker.joinReleases();
         destroy.mockRestore();
+        begin.mockRestore();
       }
       expect(await broker.status("recovery-rpc")).toMatchObject({ cleanupPending: true });
     });

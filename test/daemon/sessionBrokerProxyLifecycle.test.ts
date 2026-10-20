@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { DaemonBoundSessionExpiredError, DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { BROKER_RELEASE_REPLY_BUDGET_MS } from "../../src/daemon/proxy/BrokerSessions";
 import {
   DAEMON_PREPARE_SESSION_METHOD,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
@@ -141,7 +140,7 @@ describe("session broker proxy lifecycle", () => {
         params: {
           sessionId: SESSION,
           livenessOwnerToken: TOKEN,
-          replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
+          replyBudgetMs: 1_000,
         },
       },
     ]);
@@ -173,7 +172,7 @@ describe("session broker proxy lifecycle", () => {
           sessionId: SESSION,
           livenessOwnerToken: TOKEN,
           reason: "session_owner_exited",
-          replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
+          replyBudgetMs: 1_000,
         },
       },
     ]);
@@ -203,7 +202,7 @@ describe("session broker proxy lifecycle", () => {
           sessionId: SESSION,
           livenessOwnerToken: TOKEN,
           reason: "session_owner_exited",
-          replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
+          replyBudgetMs: 1_000,
         },
       },
     ]);
@@ -226,7 +225,7 @@ describe("session broker proxy lifecycle", () => {
         params: {
           sessionId: SESSION,
           livenessOwnerToken: TOKEN,
-          replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
+          replyBudgetMs: 1_000,
         },
       },
     ]);
@@ -244,7 +243,7 @@ describe("session broker proxy lifecycle", () => {
     expect(releaseCalls(clients)[0]?.params).toEqual({
       sessionId: SESSION,
       livenessOwnerToken: TOKEN,
-      replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
+      replyBudgetMs: 1_000,
     });
   });
 

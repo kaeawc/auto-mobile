@@ -281,7 +281,7 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
   "daemon/sessionBroker/SessionBrokerStoppingError":
     "Shutdown refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
   "daemon/sessionBroker/SessionBrokerInvariantError":
-    "Store precondition code is internal to clean-release failure classification (test/daemon/sessionBroker/brokerCleanReleaseRetry.test.ts); it is not serialized as a typed tool refusal.",
+    "Reaches daemon RPCs only as an untyped rethrow: brokerRejection rethrows unknown errors; store requireValue/ownedResource can throw it out of releaseOnce. It is not serialized as a typed tool refusal.",
 };
 
 interface CodedErrorModule {

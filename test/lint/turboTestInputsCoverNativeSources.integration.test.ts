@@ -75,6 +75,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/desktop-core/src/test/resources/sample.h264",
     // ownerTokenClientInventory.test.ts reads the JUnit socket and heartbeat owner fields.
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonHeartbeat.kt",
+    "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/HeartbeatTransport.kt",
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
     // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
     // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).

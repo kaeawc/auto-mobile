@@ -55,6 +55,23 @@ describe("mutating ide/* routes reach the device ownership gate (#10827)", () =>
     methods = new Map();
     for (const relative of [
       "socketServer.ts",
+      "socketServerParts/ClientRequestCancellation.ts",
+      "socketServerParts/DaemonSocketQueueOverflowError.ts",
+      "socketServerParts/McpBindings.ts",
+      "socketServerParts/McpExecution.ts",
+      "socketServerParts/McpRouting.ts",
+      "socketServerParts/ReleasedBoundSessionError.ts",
+      "socketServerParts/SocketAdmission.ts",
+      "socketServerParts/SocketIdeRoutes.ts",
+      "socketServerParts/SocketInput.ts",
+      "socketServerParts/SocketLifecycle.ts",
+      "socketServerParts/SocketServerRuntime.ts",
+      "socketServerParts/SocketTextInput.ts",
+      "socketServerParts/SocketTransport.ts",
+      "socketServerParts/createSocketServerOperations.ts",
+      "socketServerParts/socketServerContracts.ts",
+      "socketServerParts/socketServerOperations.ts",
+
       "socketServer/ideDeviceRoutes.ts",
       "socketServer/inputDeviceGating.ts",
       "socketServer/inputStrokes.ts",

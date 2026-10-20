@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import {
   createAndroidHierarchyConverter,
   wireHierarchyFrom,
@@ -306,9 +307,12 @@ async function executeAt(
   observeScreen.setObserveResult(observation);
   const points: Array<{ x: number; y: number }> = [];
   let actionError: unknown;
-  tap.observedInteraction = async (action) => {
+  tap.observedInteraction = async (action, options) => {
     try {
-      return { ...(await action(recordObservationRead(observation))), observation };
+      return await runBlockWithEnvelope(() => recordObservationRead(observation), { observation })(
+        action,
+        options,
+      );
     } catch (error) {
       actionError = error;
       throw error;

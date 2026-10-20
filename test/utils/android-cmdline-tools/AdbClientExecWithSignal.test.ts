@@ -1,4 +1,6 @@
-import { EventEmitter } from "node:events";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
+import { createExecResult } from "../../../src/utils/execResult";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "child_process";
@@ -16,8 +18,8 @@ import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const children: ChildProcess[] = [];
-function createChild(): ChildProcess {
-  const child = new EventEmitter() as ChildProcess;
+function createChild(): FakeChildProcess {
+  const child = new FakeChildProcess(new FakeTimer());
   children.push(child);
   return child;
 }
@@ -35,7 +37,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
   test("streams stdout before host settlement and removes its listener afterwards", async () => {
     const child = createChild();
     const stdout = new PassThrough();
-    Object.assign(child, { stdout });
+    child.stdout = stdout;
     const pending = Promise.withResolvers<Awaited<ReturnType<AdbClient["execute"]>>>();
     adbHostProcessExecutor.executeCommandWithChild = () => ({ child, result: pending.promise });
     const client = new AdbClient(null, null, {
@@ -61,7 +63,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     stdout.write("42\n");
     expect(chunks).toEqual(["42", "42\n"]);
     expect(settled).toBe(false);
-    pending.resolve({ stdout: "4242\n", stderr: "" });
+    pending.resolve(createExecResult("4242\n", ""));
     expect(await result).toMatchObject({ stdout: "4242\n" });
     expect(stdout.listenerCount("data")).toBe(0);
   });
@@ -138,8 +140,11 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       const child = createChild();
       child.kill = () => true;
       let injectedDispatches = 0;
-      const injectedExecutor = {
-        executeCommandWithChild: (): StartedHostCommand => {
+      const injectedExecutor = new (class
+        extends FakeProcessExecutor
+        implements HostProcessExecutor
+      {
+        override executeCommandWithChild(): StartedHostCommand {
           injectedDispatches++;
           return {
             child,
@@ -157,8 +162,8 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
               },
             }),
           };
-        },
-      } as HostProcessExecutor;
+        }
+      })();
       const realExecutorSpy = spyOn(adbHostProcessExecutor, "executeCommandWithChild");
       const client = new AdbClient(null, null, {
         retryExecutor: defaultRetryExecutor,

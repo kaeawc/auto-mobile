@@ -29,6 +29,7 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
     name: device.name,
     platform: "android",
     source: "local",
+    isRunning: true,
   }));
   readonly calls = new Map<string, number>();
   private readonly nextAvailable = new Map<string, number>();

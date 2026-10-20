@@ -136,32 +136,7 @@ fun PerformanceListScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
         items(performanceItems, key = { it.id }) { item ->
-          AutoMobileContentCard(
-            modifier =
-              Modifier.fillMaxWidth().semantics { testTag = "performance_item_${item.id}" },
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth().padding(16.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-              Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-              ) {
-                Text(text = item.title, style = MaterialTheme.typography.titleMedium)
-                Text(text = item.subtitle, style = MaterialTheme.typography.bodySmall)
-                Text(text = item.price, style = MaterialTheme.typography.bodySmall)
-              }
-              AutoMobileContentButton(
-                onClick = { onNavigateToDetail(item.id) },
-                modifier = Modifier.semantics { testTag = "performance_item_${item.id}_action" },
-              ) {
-                Text("View")
-              }
-            }
-          }
+          PerformanceListItem(item, onNavigateToDetail)
         }
       }
     }
@@ -227,6 +202,35 @@ fun PerformanceDetailScreen(
         ) {
           Text("Back to List")
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun PerformanceListItem(item: PerformanceItem, onNavigateToDetail: (Int) -> Unit) {
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "performance_item_${item.id}" },
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(16.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+      ) {
+        Text(text = item.title, style = MaterialTheme.typography.titleMedium)
+        Text(text = item.subtitle, style = MaterialTheme.typography.bodySmall)
+        Text(text = item.price, style = MaterialTheme.typography.bodySmall)
+      }
+      AutoMobileContentButton(
+        onClick = { onNavigateToDetail(item.id) },
+        modifier = Modifier.semantics { testTag = "performance_item_${item.id}_action" },
+      ) {
+        Text("View")
       }
     }
   }

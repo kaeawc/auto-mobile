@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.ide.yaml
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.vfs.VirtualFile
 import org.yaml.snakeyaml.Yaml
+import org.yaml.snakeyaml.error.YAMLException
 
 /**
  * Detects if a YAML file is an AutoMobile test plan based on:
@@ -44,9 +46,13 @@ object TestPlanDetector {
     return try {
       val parsed = yaml.load<Map<String, Any>>(content)
       parsed != null && parsed.containsKey("name") && parsed.containsKey("steps")
-    } catch (e: Exception) {
+    } catch (e: YAMLException) {
       // If we can't parse it, we might still want to show schema errors
       // so return true to allow validation
+      Logger.getInstance(TestPlanDetector::class.java).debug("Unable to parse test plan", e)
+      true
+    } catch (e: ClassCastException) {
+      Logger.getInstance(TestPlanDetector::class.java).debug("Test plan root is not a mapping", e)
       true
     }
   }

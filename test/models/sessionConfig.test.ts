@@ -13,13 +13,13 @@ import { logger } from "../../src/utils/logger";
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 
 const config = {
-  contractVersion: 1,
+  contractVersion: 1 as const,
   requestId: "request-1",
   device: {
-    schemaVersion: 1,
-    platform: "android",
-    hardware: { kind: "omitted" },
-    os: { kind: "major", major: 35 },
+    schemaVersion: 1 as const,
+    platform: "android" as const,
+    hardware: { kind: "omitted" as const },
+    os: { kind: "major" as const, major: 35 },
   },
   executionOwnerPid: 4242,
 };

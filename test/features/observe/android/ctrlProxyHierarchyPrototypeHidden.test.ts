@@ -1,8 +1,12 @@
 import { createAndroidHierarchyConverter } from "../../../helpers/androidHierarchyConverter";
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test, afterEach, mock } from "bun:test";
 import capture from "../../../fixtures/android-launcher/launcher-recents-emulator-5602.json";
 import type { AccessibilityHierarchy } from "../../../../src/features/observe/android/types";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 for (const path of ["main", "rootless", "failure"] as const) {
   for (const reason of ["app_layer_window_hidden", "device_blocked", "future_reason", undefined]) {

@@ -1,6 +1,6 @@
 import type { SwipeGestureRequest } from "../../../../src/features/action/swipeon/types";
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { beforeEach, describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
@@ -21,6 +21,10 @@ import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/T
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import type { ViewHierarchyResult } from "../../../../src/models";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const DEVICE: BootedDevice = {
   name: "test-device",

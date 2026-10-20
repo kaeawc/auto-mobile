@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
@@ -39,6 +39,10 @@ import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { DaemonRequest } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",

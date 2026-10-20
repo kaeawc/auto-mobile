@@ -343,7 +343,7 @@ export function logDisconnectMisses(
       // Also lower pre-plan misses so a plan-driven restart gets the same grace.
       deviceDisconnectMisses.set(deviceId, misses);
     }
-    const missState = budgetExhausted ? "transitional, budget exhausted" : "absent";
+    const missState = budgetExhausted ? "budget exhausted" : "absent";
     const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
     if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
       logger.debug(message);

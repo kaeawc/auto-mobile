@@ -181,9 +181,7 @@ async function isCurrentReset(
   store: SqliteSessionBrokerStore,
   expected: BrokerResourceRecord,
 ): Promise<boolean> {
-  const current = (await store.listResources()).find(
-    (resource) => resource.resourceId === expected.resourceId,
-  );
+  const current = await store.getResource(expected.resourceId);
   return (
     current?.state === "resetting" &&
     current.revision === expected.revision &&
@@ -221,7 +219,7 @@ async function assertBrokerInventoryOwned(
   registry: SqliteBindingRegistry,
   scopeKey: string,
 ): Promise<void> {
-  const resources = await registry.sessionBrokerStore(scopeKey).listResources();
+  const resources = await registry.sessionBrokerStore(scopeKey).listLiveResources();
   const occupied = new Set(
     resources
       .filter((resource) => resource.state !== "destroyed")

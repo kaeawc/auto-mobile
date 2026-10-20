@@ -218,7 +218,13 @@ Time sequential requests against the daemon's stateless MCP HTTP endpoint
 (`/auto-mobile/streamable`, #13068) on a loopback port. Device discovery is a
 fake whose cost is modelled by `--discovery-cost-ms`, so no device, emulator,
 simulator or resident daemon is touched; the report counts discovery probes per
-request, which must stay at zero once warm:
+request, which must stay at zero once warm. The harness injects its own token and
+sends `Authorization: Bearer <token>` on every request to harden daemon HTTP
+ingress with a per-daemon token. Local external clients read the daemon token
+file (or use `AUTOMOBILE_DAEMON_HTTP_TOKEN`); there is no unauthenticated fallback.
+See [daemon HTTP ingress](../docs/design-docs/mcp/daemon.md#http-ingress).
+
+Run the benchmark:
 
 ```bash
 bun scripts/benchmark-stateless-endpoint.ts --iterations 200 --warmup 30 --discovery-cost-ms 5

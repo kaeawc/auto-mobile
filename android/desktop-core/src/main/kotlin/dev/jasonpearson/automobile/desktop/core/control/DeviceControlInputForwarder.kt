@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.daemon.SwipeInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TapInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TextInput
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 
 /**
@@ -64,11 +67,14 @@ class DeviceControlInputForwarder {
 
     forward(onError) {
       client.inputTap(
-        x = point.x.toDouble(),
-        y = point.y.toDouble(),
-        platform = platform,
-        deviceId = deviceId,
-        frameContext = frameContext,
+        input =
+          TapInput(
+            x = point.x.toDouble(),
+            y = point.y.toDouble(),
+            platform = platform,
+            deviceId = deviceId,
+            frameContext = frameContext,
+          ),
       )
     }
   }
@@ -101,14 +107,17 @@ class DeviceControlInputForwarder {
 
     forward(onError) {
       client.inputSwipe(
-        startX = start.x.toDouble(),
-        startY = start.y.toDouble(),
-        endX = end.x.toDouble(),
-        endY = end.y.toDouble(),
-        platform = platform,
-        deviceId = deviceId,
-        durationMs = durationMs,
-        frameContext = frameContext,
+        input =
+          SwipeInput(
+            startX = start.x.toDouble(),
+            startY = start.y.toDouble(),
+            endX = end.x.toDouble(),
+            endY = end.y.toDouble(),
+            platform = platform,
+            deviceId = deviceId,
+            durationMs = durationMs,
+            frameContext = frameContext,
+          ),
       )
     }
   }
@@ -170,11 +179,14 @@ class DeviceControlInputForwarder {
     if (client == null) return
     forward(onError) {
       client.inputTypeText(
-        text = text,
-        platform = platform,
-        deviceId = deviceId,
-        append = true,
-        frameContext = frameContext,
+        input =
+          TextInput(
+            text = text,
+            platform = platform,
+            deviceId = deviceId,
+            append = true,
+            frameContext = frameContext,
+          ),
       )
     }
   }

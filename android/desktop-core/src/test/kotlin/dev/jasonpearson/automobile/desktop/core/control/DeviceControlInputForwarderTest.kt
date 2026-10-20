@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.daemon.SwipeInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TapInput
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
 import kotlin.test.assertEquals
@@ -110,14 +112,10 @@ class DeviceControlInputForwarderTest {
   fun `thrown client exception surfaces its message instead of propagating`() {
     val throwing =
       object : AutoMobileClient by FakeAutoMobileClient() {
-        override fun inputTap(
-          x: Double,
-          y: Double,
-          platform: String,
-          deviceId: String?,
-          duration: Int?,
-          frameContext: String?,
-        ): InputActionResult = throw IllegalStateException("daemon socket closed")
+        override fun inputTap(input: TapInput): InputActionResult =
+          with(input) {
+            throw IllegalStateException("daemon socket closed")
+          }
       }
     var error: String? = null
 
@@ -234,16 +232,10 @@ class DeviceControlInputForwarderTest {
   fun `a thrown client exception during a swipe surfaces its message`() {
     val throwing =
       object : AutoMobileClient by FakeAutoMobileClient() {
-        override fun inputSwipe(
-          startX: Double,
-          startY: Double,
-          endX: Double,
-          endY: Double,
-          platform: String,
-          deviceId: String?,
-          durationMs: Int?,
-          frameContext: String?,
-        ): InputActionResult = throw IllegalStateException("daemon socket closed")
+        override fun inputSwipe(input: SwipeInput): InputActionResult =
+          with(input) {
+            throw IllegalStateException("daemon socket closed")
+          }
       }
     var error: String? = null
 

@@ -384,7 +384,13 @@ class McpDaemonClientInputTest {
             inputRequestTimeoutMs = 1_234,
           )
 
-        client.inputTap(x = 1.0, y = 2.0)
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
         client.callTool("observe", JsonObject(emptyMap()))
 
         val requests = server.awaitRequests()
@@ -412,9 +418,23 @@ class McpDaemonClientInputTest {
             inputSessionUuidProvider = { current },
           )
 
-        client.inputTap(x = 1.0, y = 2.0, deviceId = "emulator-5554")
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              deviceId = "emulator-5554",
+            ),
+        )
         current = null
-        client.inputTap(x = 1.0, y = 2.0, deviceId = "emulator-5554")
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              deviceId = "emulator-5554",
+            ),
+        )
 
         val requests = server.awaitRequests()
         assertEquals("desktop-1", requests[0].params["sessionUuid"]?.jsonPrimitive?.content)
@@ -456,12 +476,15 @@ class McpDaemonClientInputTest {
     val result =
       captureInputRequest(responseResult) { client ->
         client.inputTap(
-          x = 240.5,
-          y = 640.25,
-          platform = "android",
-          deviceId = "emulator-5554",
-          duration = 50,
-          frameContext = "android:41",
+          input =
+            TapInput(
+              x = 240.5,
+              y = 640.25,
+              platform = "android",
+              deviceId = "emulator-5554",
+              duration = 50,
+              frameContext = "android:41",
+            ),
         )
       }
 
@@ -485,7 +508,13 @@ class McpDaemonClientInputTest {
   fun `an input without a frame context omits the param for legacy daemons`() {
     val result =
       captureInputRequest("""{ "action": "input/tap", "success": true }""") { client ->
-        client.inputTap(x = 1.0, y = 2.0)
+        client.inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
       }
 
     assertFalse("frameContext" in result.request.params)
@@ -510,14 +539,17 @@ class McpDaemonClientInputTest {
     val result =
       captureInputRequest(responseResult) { client ->
         client.inputSwipe(
-          startX = 520.75,
-          startY = 1700.5,
-          endX = 520.25,
-          endY = 500.5,
-          platform = "android",
-          deviceId = "emulator-5554",
-          durationMs = 350,
-          frameContext = "android:42",
+          input =
+            SwipeInput(
+              startX = 520.75,
+              startY = 1700.5,
+              endX = 520.25,
+              endY = 500.5,
+              platform = "android",
+              deviceId = "emulator-5554",
+              durationMs = 350,
+              frameContext = "android:42",
+            ),
         )
       }
 
@@ -559,11 +591,14 @@ class McpDaemonClientInputTest {
         """{ "action": "input/typeText", "success": true, "textLength": 5, "submitted": true }""",
       ) { client ->
         client.inputTypeText(
-          text = "hello",
-          platform = "ios",
-          deviceId = "device-2",
-          submit = true,
-          frameContext = "ios:43",
+          input =
+            TextInput(
+              text = "hello",
+              platform = "ios",
+              deviceId = "device-2",
+              submit = true,
+              frameContext = "ios:43",
+            ),
         )
       }
     val key =
@@ -641,13 +676,19 @@ class McpDaemonClientInputTest {
       .use { server ->
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .inputTypeText(
-            text = "a",
-            append = true,
+            input =
+              TextInput(
+                text = "a",
+                append = true,
+              ),
           )
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .inputTypeText(
-            text = "b",
-            append = true,
+            input =
+              TextInput(
+                text = "b",
+                append = true,
+              ),
           )
 
         assertEquals(
@@ -671,8 +712,11 @@ class McpDaemonClientInputTest {
         val result =
           McpDaemonClient(socketPathValue = server.socketPath.toString())
             .inputTypeText(
-              text = "a",
-              append = true,
+              input =
+                TextInput(
+                  text = "a",
+                  append = true,
+                ),
             )
 
         assertEquals("daemon/capabilities", server.awaitRequest().method)
@@ -698,8 +742,11 @@ class McpDaemonClientInputTest {
         val result =
           McpDaemonClient(socketPathValue = server.socketPath.toString())
             .inputTypeText(
-              text = "a",
-              append = true,
+              input =
+                TextInput(
+                  text = "a",
+                  append = true,
+                ),
             )
 
         assertEquals(
@@ -724,8 +771,11 @@ class McpDaemonClientInputTest {
             clientVersion = "1.2.0",
           )
           .inputTypeText(
-            text = "a",
-            append = true,
+            input =
+              TextInput(
+                text = "a",
+                append = true,
+              ),
           )
 
       assertEquals("daemon/capabilities", server.awaitRequest().method)
@@ -744,8 +794,11 @@ class McpDaemonClientInputTest {
       val result =
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .inputTypeText(
-            text = "a",
-            append = true,
+            input =
+              TextInput(
+                text = "a",
+                append = true,
+              ),
           )
 
       assertEquals(listOf("daemon/capabilities"), server.awaitRequests().map { it.method })
@@ -759,13 +812,16 @@ class McpDaemonClientInputTest {
     TestDaemonSocket(resultJson = """{ "success": true }""").use { server ->
       McpDaemonClient(socketPathValue = server.socketPath.toString())
         .setKeyValue(
-          deviceId = "ios-sim-1",
-          appId = "com.example.app",
-          fileName = "prefs",
-          key = "theme",
-          value = "dark",
-          type = "STRING",
-          platform = "ios",
+          input =
+            SetKeyValueRequest(
+              deviceId = "ios-sim-1",
+              appId = "com.example.app",
+              fileName = "prefs",
+              key = "theme",
+              value = "dark",
+              type = "STRING",
+              platform = "ios",
+            ),
         )
 
       val request = server.awaitRequest()
@@ -787,11 +843,14 @@ class McpDaemonClientInputTest {
       .use { server ->
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .removeKeyValue(
-            deviceId = "ios-sim-1",
-            appId = "com.example.app",
-            fileName = "prefs",
-            key = "theme",
-            platform = "ios",
+            input =
+              RemoveKeyValueRequest(
+                deviceId = "ios-sim-1",
+                appId = "com.example.app",
+                fileName = "prefs",
+                key = "theme",
+                platform = "ios",
+              ),
           )
         McpDaemonClient(socketPathValue = server.socketPath.toString())
           .clearKeyValueFile(
@@ -815,7 +874,14 @@ class McpDaemonClientInputTest {
   fun `input helpers reject malformed success payloads`() {
     TestDaemonSocket(resultJson = "{}", error = null).use { server ->
       assertFailsWith<SerializationException> {
-        McpDaemonClient(socketPathValue = server.socketPath.toString()).inputTap(x = 10.0, y = 20.0)
+        McpDaemonClient(socketPathValue = server.socketPath.toString())
+          .inputTap(
+            input =
+              TapInput(
+                x = 10.0,
+                y = 20.0,
+              ),
+          )
       }
       assertEquals("input/tap", server.awaitRequest().method)
     }
@@ -825,7 +891,13 @@ class McpDaemonClientInputTest {
   fun `input helpers reject success payloads for a different action`() {
     val result =
       captureInputRequest("""{ "action": "input/swipe", "success": true }""") { client ->
-        client.inputTap(x = 10.0, y = 20.0)
+        client.inputTap(
+          input =
+            TapInput(
+              x = 10.0,
+              y = 20.0,
+            ),
+        )
       }
 
     assertEquals(false, result.response.success)
@@ -837,8 +909,24 @@ class McpDaemonClientInputTest {
 
   @Test
   fun `non socket clients explicitly report unsupported typed input`() {
-    val httpResult = McpHttpClient("http://localhost:1/auto-mobile/streamable").inputTap(1.0, 2.0)
-    val stdioResult = McpStdioClient("unused").inputTap(1.0, 2.0)
+    val httpResult =
+      McpHttpClient("http://localhost:1/auto-mobile/streamable")
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
+    val stdioResult =
+      McpStdioClient("unused")
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+            ),
+        )
 
     assertEquals(false, httpResult.success)
     assertEquals("input/tap", httpResult.action)
@@ -883,12 +971,15 @@ class McpDaemonClientInputTest {
       val error =
         assertFailsWith<DaemonUnavailableException> {
           client.inputTap(
-            x = 1.0,
-            y = 2.0,
-            platform = "android",
-            deviceId = "emulator-5554",
-            duration = null,
-            frameContext = null,
+            input =
+              TapInput(
+                x = 1.0,
+                y = 2.0,
+                platform = "android",
+                deviceId = "emulator-5554",
+                duration = null,
+                frameContext = null,
+              ),
           )
         }
       assertTrue(error.message.orEmpty().contains("timed out"))
@@ -932,7 +1023,14 @@ class McpDaemonClientInputTest {
         )
       val error =
         assertFailsWith<DaemonUnavailableException> {
-          client.inputTypeText(text = "hello", platform = "android", append = true)
+          client.inputTypeText(
+            input =
+              TextInput(
+                text = "hello",
+                platform = "android",
+                append = true,
+              ),
+          )
         }
       assertTrue(error.message.orEmpty().contains("timed out"))
     } finally {

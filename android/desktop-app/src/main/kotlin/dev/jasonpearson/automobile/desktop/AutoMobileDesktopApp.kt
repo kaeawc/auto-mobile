@@ -59,6 +59,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlE
 import dev.jasonpearson.automobile.desktop.core.workspace.DesktopOverlayState
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceSessionSupersededForwarder
+import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
@@ -85,6 +86,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
@@ -528,18 +530,22 @@ fun AutoMobileDesktopApp(
             // makes the workspace non-empty, which drops the picker for WorkspaceShell.
             pickerOpen || workspaceState is WorkspaceUiState.Empty ->
               DevicePicker(
-                state = pickerState,
-                onAction = pickerViewModel::onAction,
-                onClose = { pickerOpen = false },
-                // Only offer Close when there is an observed workspace to return to.
-                canClose = workspaceState is WorkspaceUiState.Content,
-                bootstrapState = bootstrapState,
-                // Retry shares the workspace status-dot's coalescing recovery (#6082 / #6080), so a
-                // wedged daemon is restarted rather than short-circuited past; a no-op on an
-                // inactive
-                // (non-daemon) transport.
-                onRecoverDaemon = { recoveryLauncher.launch() },
-                sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                options =
+                  DevicePickerOptions(
+                    state = pickerState,
+                    onAction = pickerViewModel::onAction,
+                    onClose = { pickerOpen = false },
+                    // Only offer Close when there is an observed workspace to return to.
+                    canClose = workspaceState is WorkspaceUiState.Content,
+                    bootstrapState = bootstrapState,
+                    // Retry shares the workspace status-dot's coalescing recovery (#6082 / #6080),
+                    // so a
+                    // wedged daemon is restarted rather than short-circuited past; a no-op on an
+                    // inactive
+                    // (non-daemon) transport.
+                    onRecoverDaemon = { recoveryLauncher.launch() },
+                    sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                  ),
               )
             else ->
               Box(Modifier.fillMaxSize()) {
@@ -680,14 +686,19 @@ fun AutoMobileDesktopApp(
                       )
                     Box {
                       DeviceStreamView(
-                        column,
-                        sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-                        enableDeviceControl = controlActive,
-                        control = control,
-                        // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
-                        // auto-adjust) and persists the choice across sessions.
-                        settings = settings,
-                        streamingEnabled = streamingEnabled,
+                        options =
+                          DeviceStreamOptions(
+                            column = column,
+                            sessionUuidProvider =
+                              desktopDaemonSession?.sessionUuidProvider ?: { null },
+                            enableDeviceControl = controlActive,
+                            control = control,
+                            // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS
+                            // +
+                            // auto-adjust) and persists the choice across sessions.
+                            settings = settings,
+                            streamingEnabled = streamingEnabled,
+                          ),
                       )
                       if (heldElsewhere) {
                         DeviceViewingNotice(

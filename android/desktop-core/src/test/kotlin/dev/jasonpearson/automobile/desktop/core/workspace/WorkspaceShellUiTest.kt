@@ -500,7 +500,15 @@ class WorkspaceShellUiTest {
           state = WorkspaceUiState.Content(columns = listOf(column.value), focusedDeviceId = "a"),
           onAction = {},
           onOpenPicker = {},
-          streamContent = { DeviceStreamView(it, sourceFactory = { _, _ -> source }) },
+          streamContent = {
+            DeviceStreamView(
+              options =
+                DeviceStreamOptions(
+                  column = it,
+                  sourceFactory = { _, _ -> source },
+                ),
+            )
+          },
         )
       }
     }

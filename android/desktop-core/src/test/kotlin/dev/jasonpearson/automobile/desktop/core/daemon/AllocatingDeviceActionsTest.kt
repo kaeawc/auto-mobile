@@ -167,7 +167,15 @@ class AllocatingDeviceActionsTest {
   fun `a control input allocates its device before it reaches the daemon`() {
     val control = inputAllocatingClient({ client }) { allocation }!!
 
-    control.inputTap(1.0, 2.0, "android", "emulator-5554")
+    control.inputTap(
+      input =
+        TapInput(
+          x = 1.0,
+          y = 2.0,
+          platform = "android",
+          deviceId = "emulator-5554",
+        ),
+    )
 
     assertEquals(listOf("emulator-5554@0"), allocations)
     assertEquals(1, client.inputTapCalls.size)
@@ -178,7 +186,16 @@ class AllocatingDeviceActionsTest {
     allowed = false
     val control = inputAllocatingClient({ client }) { allocation }!!
 
-    val result = control.inputTap(1.0, 2.0, "android", "emulator-5554")
+    val result =
+      control.inputTap(
+        input =
+          TapInput(
+            x = 1.0,
+            y = 2.0,
+            platform = "android",
+            deviceId = "emulator-5554",
+          ),
+      )
 
     assertEquals(listOf("emulator-5554@0"), allocations)
     assertTrue(client.inputTapCalls.isEmpty())
@@ -191,12 +208,32 @@ class AllocatingDeviceActionsTest {
     val refusing = DesktopInputAllocation { false }
 
     assertTrue(
-      inputAllocatingClient({ client }) { current }!!.inputTap(1.0, 2.0, "android", "e").success,
+      inputAllocatingClient({ client }) { current }!!
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              platform = "android",
+              deviceId = "e",
+            ),
+        )
+        .success,
     )
     current = refusing
     assertEquals(
       false,
-      inputAllocatingClient({ client }) { current }!!.inputTap(1.0, 2.0, "android", "e").success,
+      inputAllocatingClient({ client }) { current }!!
+        .inputTap(
+          input =
+            TapInput(
+              x = 1.0,
+              y = 2.0,
+              platform = "android",
+              deviceId = "e",
+            ),
+        )
+        .success,
     )
     assertEquals(1, client.inputTapCalls.size)
   }

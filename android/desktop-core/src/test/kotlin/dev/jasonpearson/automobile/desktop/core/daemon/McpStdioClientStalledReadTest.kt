@@ -197,7 +197,14 @@ class McpStdioClientStalledReadTest {
   // -- Test doubles --
 
   private fun clientFor(server: FakeStdioServer): McpStdioClient =
-    McpStdioClient(command = "unused", processStarter = { server.start() }).also { clients += it }
+    McpStdioClient(
+        command = "unused",
+        options =
+          McpStdioOptions(
+            processStarter = { server.start() },
+          ),
+      )
+      .also { clients += it }
 
   private fun startThread(block: () -> Unit): Thread =
     Thread(block, "stalled-read-caller")

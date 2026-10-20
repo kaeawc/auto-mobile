@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -47,7 +48,7 @@ class ObservationForegroundAppResolver(
       }
     } catch (cancellation: CancellationException) {
       throw cancellation
-    } catch (error: Exception) {
+    } catch (error: IOException) {
       LOG.warn("Foreground-app resolve failed for $deviceId: ${error.message}", error)
       null
     } finally {

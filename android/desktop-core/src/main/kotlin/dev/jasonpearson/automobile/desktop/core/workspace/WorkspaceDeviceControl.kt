@@ -120,8 +120,11 @@ fun rememberWorkspaceDeviceControl(
         platform = { column.platform.wireName() },
         deviceId = column.deviceId,
         tracer = tracer,
-        streamingEnabled = GestureStreamingConfig.enabled,
-        onDeviceHeldElsewhere = { heldElsewhereSink(column.deviceId) },
+        options =
+          VideoInputOptions(
+            streamingEnabled = GestureStreamingConfig.enabled,
+            onDeviceHeldElsewhere = { heldElsewhereSink(column.deviceId) },
+          ),
       )
     }
 

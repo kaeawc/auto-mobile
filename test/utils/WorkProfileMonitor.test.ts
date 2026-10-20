@@ -223,7 +223,7 @@ describe("WorkProfileMonitor", () => {
         return Promise.resolve(packageListResult());
       }
       return new Promise<ExecResult>((_resolve, reject) => {
-        timer.setTimeout(() => reject(new Error("ADB command timed out")), timeoutMs);
+        timer.setTimeout(() => reject(new Error("ADB command timed out")), timeoutMs ?? 0);
       });
     });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});

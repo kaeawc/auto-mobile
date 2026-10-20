@@ -713,7 +713,8 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         socket,
       );
       await wrote;
-      expect(socket.listenerCount("drain")).toBe(1);
+      // The connection outbox and the backfill waiter each own one drain listener.
+      expect(socket.listenerCount("drain")).toBe(2);
       socket.emit("drain");
       await drainingBackfill;
       expect(socket.listenerCount("drain")).toBe(0);

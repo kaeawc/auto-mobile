@@ -1,3 +1,4 @@
+import { CtrlProxyLaunchTimeoutError } from "./CtrlProxyLaunchTimeoutError";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import { RemoteServicePortUnavailableError } from "./RemoteServicePortUnavailableError";
 import type { SharedCtrlProxyStart } from "./IosCtrlProxyLifecycleSteps";
@@ -47,6 +48,7 @@ interface IosCtrlProxyStartupHost {
     perf: PerformanceTracker,
     delayMs: number,
     windowMs: number,
+    firstLaunchOwned: boolean,
   ): Promise<boolean>;
   checkHealthEndpointOnPortForDevice(
     port: number,
@@ -84,6 +86,7 @@ export class IosCtrlProxyStartup {
       | "sharedStart"
       | "timer"
       | "isStopping"
+      | "isProcessSupervisorRestarting"
       | "xcTestProcessId"
       | "servicePort"
       | "device"
@@ -255,11 +258,9 @@ export class IosCtrlProxyStartup {
     // coming up, which then triggers a kill+respawn livelock (#2834).
     const delayMs = 500;
     const defaultHealthPollDurationMs = this.host.resolveHealthPollMaxAttempts() * delayMs;
-    sharedStart.defaultHealthPollDeadlineMs = this.state.timer.now() + defaultHealthPollDurationMs;
+    const healthPollStartedAt = this.state.timer.now();
+    sharedStart.defaultHealthPollDeadlineMs = healthPollStartedAt + defaultHealthPollDurationMs;
     this.host.refreshHealthPollDeadline(sharedStart);
-    const timeoutSeconds = Math.round(
-      ((sharedStart.healthPollDeadlineMs ?? 0) - this.state.timer.now()) / 1000,
-    );
 
     if (
       await this.host.waitForHealthRestartingUnresponsiveRunner(
@@ -267,11 +268,16 @@ export class IosCtrlProxyStartup {
         perf,
         delayMs,
         defaultHealthPollDurationMs,
+        !waitedForStartingRunner && !this.state.isProcessSupervisorRestarting,
       )
     ) {
       return;
     }
 
+    // The owned first launch may have raised the shared deadline above the default.
+    const timeoutSeconds = Math.round(
+      ((sharedStart.healthPollDeadlineMs ?? 0) - healthPollStartedAt) / 1000,
+    );
     if (
       await this.recoverDeferredRunner(
         sharedStart,
@@ -289,13 +295,15 @@ export class IosCtrlProxyStartup {
       return;
     }
     if (heldProcesses.length > 0) {
-      throw new Error(
+      throw new CtrlProxyLaunchTimeoutError(
         `CtrlProxy failed to start within timeout (${timeoutSeconds}s); port ${this.state.servicePort} ` +
           `still held by ${this.host.formatListeningProcesses(heldProcesses)}`,
       );
     }
 
-    throw new Error(`CtrlProxy failed to start within timeout (${timeoutSeconds}s)`);
+    throw new CtrlProxyLaunchTimeoutError(
+      `CtrlProxy failed to start within timeout (${timeoutSeconds}s)`,
+    );
   }
 
   private async prepareRunnerForStartup(

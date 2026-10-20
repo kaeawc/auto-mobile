@@ -73,6 +73,16 @@ const baseFiles: Record<string, string> = {
 };
 
 describe("hashAppBundle", () => {
+  test("length framing distinguishes the legacy one-file/two-file collision", async () => {
+    const single = bundle(ROOT, { a: "X\0b\0Y" });
+    const pair = bundle(ROOT, { a: "X", b: "Y" });
+    expect(await hashAppBundle(ROOT, single)).toBe(await hashAppBundle(ROOT, pair));
+    const options = { includeSigningMetadata: true, lengthPrefixed: true };
+    expect(await hashAppBundle(ROOT, single, options)).not.toBe(
+      await hashAppBundle(ROOT, pair, options),
+    );
+  });
+
   test("is stable across repeated hashing of identical contents", async () => {
     expect(await hashOf(baseFiles)).toBe(await hashOf(baseFiles));
   });
@@ -97,6 +107,18 @@ describe("hashAppBundle", () => {
   for (const { label, extra } of skipArtifacts) {
     test(`ignores ${label}`, async () => {
       expect(await hashOf({ ...baseFiles, ...extra })).toBe(await hashOf(baseFiles));
+    });
+  }
+
+  for (const { label, extra } of skipArtifacts) {
+    test(`includes ${label} when hashing a signed runner`, async () => {
+      const original = await hashAppBundle(ROOT, bundle(ROOT, baseFiles), {
+        includeSigningMetadata: true,
+      });
+      const changed = await hashAppBundle(ROOT, bundle(ROOT, { ...baseFiles, ...extra }), {
+        includeSigningMetadata: true,
+      });
+      expect(changed).not.toBe(original);
     });
   }
 

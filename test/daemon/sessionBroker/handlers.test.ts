@@ -38,6 +38,7 @@ import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResu
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { DaemonRequest } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
 afterEach(() => {
@@ -572,10 +573,55 @@ describe("session broker daemon handlers", () => {
         retryable: restartHandoff,
         ...(restartHandoff ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
       };
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        expect(
+          await handleReleaseBrokerSession(
+            request({ sessionId: SESSION, livenessOwnerToken: TOKEN }),
+            state,
+          ),
+        ).toEqual(expected);
+        expect(
+          await handleAbandonBrokerSessionRequest(
+            request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+            state,
+          ),
+        ).toEqual(expected);
+        expect(restartHandoff ? debug : warning).toHaveBeenCalledTimes(2);
+        expect(restartHandoff ? warning : debug).not.toHaveBeenCalled();
+      } finally {
+        warning.mockRestore();
+        debug.mockRestore();
+      }
+    });
+  }
+
+  test("prepare and abandon return stopping refusals at debug without granting a session", async () => {
+    await broker.markRestartHandoff();
+    const prepare = spyOn(broker, "prepare").mockImplementation((...args) =>
+      SessionBroker.prototype.prepare.call(broker, ...args),
+    );
+    const abandon = spyOn(broker, "abandon").mockImplementation((...args) =>
+      SessionBroker.prototype.abandon.call(broker, ...args),
+    );
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    scopes.bind("stopping-socket", { scopeKey: SCOPE, sessionUuids: [SESSION] });
+    const expected: DaemonMethodResult = {
+      success: false,
+      code: "session_broker_stopping",
+      error: "Session broker is stopping",
+      retryable: true,
+      retryAfterMs: 5_000,
+    };
+    try {
       expect(
-        await handleReleaseBrokerSession(
-          request({ sessionId: SESSION, livenessOwnerToken: TOKEN }),
+        await handlePrepareBrokerSession(
+          request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
           state,
+          undefined,
+          "stopping-socket",
         ),
       ).toEqual(expected);
       expect(
@@ -584,13 +630,49 @@ describe("session broker daemon handlers", () => {
           state,
         ),
       ).toEqual(expected);
-    });
-  }
+      expect(scopes.get("stopping-socket")?.sessionUuids.size).toBe(0);
+      expect(debug).toHaveBeenCalledTimes(2);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      prepare.mockRestore();
+      abandon.mockRestore();
+      warning.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
+  test("export identity mismatch remains a warning", async () => {
+    broker.prepareError = new SessionExportIdentityMismatchError();
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      expect(
+        await handlePrepareBrokerSession(
+          request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
+          state,
+        ),
+      ).toMatchObject({ success: false, code: "session_export_identity_mismatch" });
+      expect(warning).toHaveBeenCalledWith(
+        `Session broker rejected export identity: ${broker.prepareError.message}`,
+      );
+      expect(debug).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+      debug.mockRestore();
+    }
+  });
 
   test("release and abandon rethrow unknown failures", async () => {
     broker.sessionOwners.set(SESSION, TOKEN);
     const failure = new Error("unexpected storage failure");
     broker.mutationError = failure;
+    broker.prepareError = failure;
+    await expect(
+      handlePrepareBrokerSession(
+        request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).rejects.toBe(failure);
     await expect(
       handleReleaseBrokerSession(request({ sessionId: SESSION, livenessOwnerToken: TOKEN }), state),
     ).rejects.toBe(failure);

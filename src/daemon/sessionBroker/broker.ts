@@ -1,4 +1,5 @@
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
+import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
@@ -129,7 +130,8 @@ export class SessionBroker {
     exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
     if (this.stopping) {
-      return Promise.reject(new ActionableError("Session broker is stopping"));
+      // Refuse before prepareOnce/failureFor: no terminal receipt prevents a successor retry.
+      return Promise.reject(new SessionBrokerStoppingError());
     }
     const controller = new AbortController();
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -429,7 +431,7 @@ export class SessionBroker {
 
   async abandon(requestId: string, ownerToken: string): Promise<SessionBrokerResult> {
     if (this.stopping) {
-      throw new ActionableError("Session broker is stopping");
+      throw new SessionBrokerStoppingError();
     }
     const abandonment = await this.options.store.abandon(requestId, this.options.owner, ownerToken);
     for (const preparation of this.preparationOwners.values()) {
@@ -618,7 +620,12 @@ export class SessionBroker {
   }
 
   async close(): Promise<void> {
-    await this.markRestartHandoff();
+    try {
+      await this.markRestartHandoff();
+    } catch (error) {
+      // Preparations are already aborted; retry the handoff after joining their native work.
+      logger.warn(`Session broker restart handoff failed: ${errorMessage(error)}`, error);
+    }
     await Promise.allSettled([...this.preparationOwners.keys()]);
     // Retry after joining preparations in case the first snapshot or an inline mark failed;
     // the store makes each mark idempotent.
@@ -645,6 +652,7 @@ export class SessionBroker {
   async markRestartHandoff(): Promise<void> {
     this.stopping = true;
     for (const preparation of this.preparationOwners.values()) {
+      // Already admitted work still fails through failureFor and retains its terminal receipt.
       preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
     const requests = await this.options.store.listRecoverableRequests();
@@ -690,7 +698,7 @@ export class SessionBroker {
     if (this.stopping) {
       return;
     }
-    for (const resource of await this.options.store.listResources()) {
+    for (const resource of await this.options.store.listLiveResources()) {
       if (this.stopping) {
         return;
       }
@@ -882,9 +890,7 @@ export class SessionBroker {
   private async requestResource(
     request: BrokerRequestRecord,
   ): Promise<BrokerResourceRecord | undefined> {
-    return (await this.options.store.listResources()).find(
-      (entry) => entry.resourceId === request.resourceId,
-    );
+    return request.resourceId ? this.options.store.getResource(request.resourceId) : undefined;
   }
 
   private async result(request: BrokerRequestRecord): Promise<SessionBrokerResult> {
@@ -957,10 +963,8 @@ export class SessionBroker {
   }
 
   private async tryCleanup(ticket: DestructionTicket): Promise<void> {
-    const resource = (await this.options.store.listResources()).find(
-      (entry) => entry.resourceId === ticket.resourceId && entry.revision === ticket.revision,
-    );
-    if (resource?.state === "destroying") {
+    const resource = await this.options.store.getResource(ticket.resourceId);
+    if (resource?.state === "destroying" && resource.revision === ticket.revision) {
       try {
         await this.destroy(resource);
       } catch (error) {

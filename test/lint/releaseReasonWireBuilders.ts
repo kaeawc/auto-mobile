@@ -1,10 +1,5 @@
-import {
-  parseSync,
-  Visitor,
-  type Expression,
-  type ObjectExpression,
-  type ObjectProperty,
-} from "oxc-parser";
+import { type Expression, type ObjectExpression, type ObjectProperty } from "oxc-parser";
+import { parseGuardSource, guardTextMayMatch, GuardVisitor as Visitor } from "./astGuard";
 
 export interface ReleaseReasonSerialisation {
   file: string;
@@ -190,9 +185,14 @@ export function scanReleaseReasonSerialisations(
   source: string,
   options: { hostsWireBuilder: boolean } = { hostsWireBuilder: false },
 ): ReleaseReasonSerialisation[] {
-  const { program, errors } = parseSync(file, source);
-  if (errors.length > 0) {
-    throw new Error(`${file}: ${errors[0].message}`);
+  // Serializations name a reason property; the remaining finding is an idleReleaseField call.
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /reason|idleReleaseField/i),
+  );
+  if (!program) {
+    return [];
   }
   const imports = new Set<string>();
   const classes: { start: number; end: number; name: string }[] = [];

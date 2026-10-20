@@ -1,3 +1,4 @@
+import { discoverySourceFor } from "../utils/discoverySource";
 import type { BootedDevice } from "../models";
 import type { BootedDeviceDiscovery, MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { transitionalHeldSimulators } from "./adbOfflineHeldDevices";
@@ -6,7 +7,7 @@ import {
   interruptVideoRecording,
   type listActiveVideoRecordings,
   stopVideoRecordingUnattended,
-} from "../server/videoRecordingManager";
+} from "./videoRecordingManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -63,14 +64,22 @@ export async function discoverAndReconcile(
     planActive,
     platform = "either",
     bypassAndroidDeviceListCache = false,
+    heldDevices = [],
   }: {
     planActive: boolean;
+    heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
   },
 ) {
   const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
     bypassAndroidDeviceListCache,
+    skipAndroidProfileEnrichment: true,
+    // An unpooled held device still needs liveness evidence from its own source.
+    skipPhysicalIosDiscovery: ![
+      ...devicePool.getAllDevices().map((device) => ({ platform: device.platform, id: device.id })),
+      ...heldDevices.map((device) => ({ platform: device.platform, id: device.assignedDevice })),
+    ].some((device) => discoverySourceFor(device.platform, device.id) === "ios-physical"),
   });
   discovery.devices = await mapMonitorAndroidDiscovery(devicePool, discovery.devices);
   // Reconciliation can quarantine identity and cancel in-flight work. During

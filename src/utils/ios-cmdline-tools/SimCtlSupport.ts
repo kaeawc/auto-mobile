@@ -58,6 +58,8 @@ export interface AppleDevice {
   deviceTypeIdentifier?: string;
   /** Device data directory size in bytes, as reported by `simctl list devices`. */
   dataPathSize?: number;
+  /** CoreSimulator last boot/use stamp from `simctl list devices`. */
+  lastUsedAt?: string;
   runtime?: string;
   model?: string;
   os_version?: string;

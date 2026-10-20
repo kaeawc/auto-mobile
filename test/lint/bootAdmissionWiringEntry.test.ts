@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
+import { parseGuardSource, relativePosix, typeScriptFiles, readGuardFile } from "./astGuard";
 import { bootAdmissionServicesInstalled } from "../../src/devices/bootAdmissionServices";
 import { ctrlProxyManagerHostInstalled } from "../../src/ctrlProxy/ctrlProxyManagerHost";
 
@@ -22,7 +22,7 @@ const BEFORE_WIRING = new Set([
 ]);
 
 function importSpecifiersInOrder(file: string): string[] {
-  const program = parseGuardSource(file, readFileSync(file, "utf8"));
+  const program = parseGuardSource(file, readGuardFile(file));
   return program.body.flatMap((node) =>
     node.type === "ImportDeclaration" ? [node.source.value] : [],
   );
@@ -31,7 +31,7 @@ function importSpecifiersInOrder(file: string): string[] {
 describe("boot admission wiring at process entries", () => {
   test("src/index.ts is the only process entry in src/", () => {
     const entries = typeScriptFiles(path.join(ROOT, "src"))
-      .filter((file) => readFileSync(file, "utf8").includes("import.meta.main"))
+      .filter((file) => readGuardFile(file).includes("import.meta.main"))
       .map((file) => relativePosix(ROOT, file));
     // A new entry must install the boot admission wiring and be added here deliberately.
     expect(entries).toEqual(["src/index.ts"]);

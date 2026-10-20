@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { resetVideoRecordingManagerDependencies } from "../../src/server/videoRecordingManager";
+import { resetVideoRecordingManagerDependencies } from "../../src/daemon/videoRecordingManager";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 
 describe("video recording incarnation listener", () => {

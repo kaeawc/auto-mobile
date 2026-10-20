@@ -12,7 +12,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../../src/server/videoRecordingManager";
+} from "../../../src/daemon/videoRecordingManager";
 import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 import { FakeTimer } from "../../fakes/FakeTimer";

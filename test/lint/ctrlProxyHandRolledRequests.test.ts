@@ -1,8 +1,15 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor, type Expression } from "oxc-parser";
-import { parseGuardSource, relativePosix, typeScriptFiles, unwrapCallee } from "./astGuard";
+import { type Expression } from "oxc-parser";
+import {
+  parseGuardSource,
+  relativePosix,
+  typeScriptFiles,
+  unwrapCallee,
+  readGuardFile,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 
 const EXEMPT = new Set([
   "src/features/observe/DeviceServiceUtils.ts",
@@ -89,7 +96,7 @@ describe("CtrlProxy hand-rolled requests can only shrink", () => {
     for (const file of typeScriptFiles(path.join(root, "src/features/observe"))) {
       const relative = relativePosix(root, file);
       if (!EXEMPT.has(relative)) {
-        facts.set(relative, scan(relative, readFileSync(file, "utf8")));
+        facts.set(relative, scan(relative, readGuardFile(file)));
       }
     }
   });

@@ -274,6 +274,12 @@ export class SessionBrokerService {
   private async stop(): Promise<void> {
     this.stopped = true;
     this.wake?.();
+    try {
+      await this.broker.markRestartHandoff();
+    } catch (error) {
+      // Preparations are already aborted; close retries the best-effort handoff after recovery.
+      logger.warn(`Session broker restart handoff failed: ${errorMessage(error)}`, error);
+    }
     await this.running;
     await this.broker.close();
     // Keep ownership if broker shutdown throws: the process's eventual exit makes the lock
@@ -291,6 +297,9 @@ export class SessionBrokerService {
         await this.broker.recover();
       } catch (error) {
         logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
+      }
+      if (this.stopped) {
+        return;
       }
       await this.pruneIfDue();
     }

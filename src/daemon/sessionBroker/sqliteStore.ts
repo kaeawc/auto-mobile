@@ -1,3 +1,4 @@
+import { SessionRequestOwnerMismatchError } from "./SessionRequestOwnerMismatchError";
 import type { Kysely, Selectable, Transaction } from "kysely";
 import {
   readExport,
@@ -357,7 +358,7 @@ export class SqliteSessionBrokerStore {
         };
       }
       if (!sameOwner(previous.owner, owner)) {
-        throw new ActionableError("Session request belongs to another daemon process generation");
+        throw new SessionRequestOwnerMismatchError(previous.restartHandoff === true);
       }
       let ticket: DestructionTicket | undefined;
       if (previous.resourceId) {
@@ -952,7 +953,7 @@ export class SqliteSessionBrokerStore {
   ): Promise<BrokerRequestRecord> {
     const request = requireValue(await this.readRequest(db, id), "Unknown session request");
     if (!sameOwner(request.owner, owner)) {
-      throw new ActionableError("Session request belongs to another daemon process generation");
+      throw new SessionRequestOwnerMismatchError(request.restartHandoff === true);
     }
     return request;
   }

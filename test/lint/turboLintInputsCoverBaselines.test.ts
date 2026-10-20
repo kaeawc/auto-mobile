@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 // Declared manifest of lint-chain configuration and baseline reads. Update it
@@ -38,7 +39,7 @@ function coveredBy(inputs: readonly string[], path: string): boolean {
 
 describe("turbo lint inputs cover declared configuration and baseline reads", () => {
   const root = join(import.meta.dir, "../..");
-  const turbo = JSON.parse(readFileSync(join(root, "turbo.json"), "utf8")) as {
+  const turbo = JSON.parse(readGuardFile(join(root, "turbo.json"))) as {
     tasks: { lint: { inputs: string[]; env: string[] } };
   };
 
@@ -49,7 +50,7 @@ describe("turbo lint inputs cover declared configuration and baseline reads", ()
   });
 
   test("configured oxlint plugins are represented in the manifest", () => {
-    const config = Bun.JSONC.parse(readFileSync(join(root, ".oxlintrc.json"), "utf8")) as {
+    const config = Bun.JSONC.parse(readGuardFile(join(root, ".oxlintrc.json"))) as {
       jsPlugins: string[];
     };
     expect(config.jsPlugins.length).toBeGreaterThan(0);

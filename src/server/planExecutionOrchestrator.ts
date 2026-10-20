@@ -75,7 +75,7 @@ import {
   rollbackVideoRecordingStart as defaultRollbackVideoRecordingStart,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
-} from "./videoRecordingManager";
+} from "../daemon/videoRecordingManager";
 export {
   convertDebugStepsToRecords,
   convertPerDeviceSkippedStepsToRecords,

@@ -7,6 +7,8 @@ const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 export interface SingleFlightIntervalOptions {
   /** Maximum time shutdown waits for work already started by an interval tick. */
   stopTimeoutMs?: number;
+  /** Admission for scheduled ticks only; explicit run() still forces an epoch. */
+  shouldRun?: () => boolean | Promise<boolean>;
   /** Receives a rejected background tick after its in-flight state is cleared. */
   onError?: (error: unknown) => void;
 }
@@ -28,7 +30,7 @@ export class SingleFlightInterval {
     private readonly timer: Timer = defaultTimer,
     private readonly intervalMs: number,
     private readonly task: () => Promise<void>,
-    options: SingleFlightIntervalOptions = {},
+    private readonly options: SingleFlightIntervalOptions = {},
   ) {
     this.stopTimeoutMs = options.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
     this.onError =
@@ -43,7 +45,11 @@ export class SingleFlightInterval {
       return;
     }
     this.intervalHandle = this.timer.setInterval(() => {
-      void this.run();
+      void this.runTask(async () => {
+        if (!this.options.shouldRun || (await this.options.shouldRun())) {
+          await this.task();
+        }
+      });
     }, this.intervalMs);
 
     const handle = this.intervalHandle as { unref?: () => void };
@@ -54,13 +60,17 @@ export class SingleFlightInterval {
 
   /** Run one polling epoch, sharing an already-active invocation if present. */
   run(): Promise<void> {
+    return this.runTask(this.task);
+  }
+
+  private runTask(task: () => Promise<void>): Promise<void> {
     if (this.inFlight) {
       return this.inFlight;
     }
 
     let inFlight: Promise<void>;
     try {
-      inFlight = this.task();
+      inFlight = task();
     } catch (error) {
       inFlight = Promise.reject(error);
     }

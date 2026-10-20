@@ -228,7 +228,7 @@ function applyStalledClearAll(
       : result.message;
   result.message += result.success
     ? " Warning: a matching notification remains in the UI, but the app notification inventory is empty."
-    : " A matching notification remains; dismissal was not confirmed or the swipe limit or deadline was reached.";
+    : " A matching notification may remain; dismissal was not confirmed or the swipe limit or deadline was reached.";
 }
 
 type ExpandedMatch = Awaited<ReturnType<typeof expandAndRematchIfCollapsed>>["match"];
@@ -761,6 +761,7 @@ export class SystemTray {
     this.restoreFailedClearAll = undefined;
     const payload = {
       ...result,
+      ...(drained.stalled ? { swipeCount: drained.swipeCount, stalled: true } : {}),
       observation: nextObservation,
     };
     return result.success ? ok(payload) : failed(payload);

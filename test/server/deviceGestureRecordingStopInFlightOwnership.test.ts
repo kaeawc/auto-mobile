@@ -13,7 +13,7 @@ import {
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import type {
   AbandonablePendingDeviceCleanup,
   SessionManager,

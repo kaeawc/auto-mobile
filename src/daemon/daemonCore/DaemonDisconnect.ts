@@ -5,6 +5,7 @@ import { type Session } from "../sessionManager";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "../deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "../devicePool";
+import { holderOf, isIdle } from "../deviceBinding";
 import { deviceLossCancellationReason } from "../emulatorLossIncident";
 import { executionTracker } from "../executionTracker";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
@@ -57,6 +58,19 @@ interface CapturedDisconnectRecoveryOptions {
 }
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
+const DEVICE_DISCONNECT_IDLE_INTERVAL_MS = 30_000;
+
+export interface DisconnectMonitorCadence {
+  activeIntervalMs: number;
+  idleIntervalMs: number;
+}
+
+/** The pool reads used to decide whether disconnect discovery must stay on its active cadence. */
+export interface DisconnectMonitorPool {
+  getAllDevices(): readonly Pick<PooledDevice, "id">[];
+  getDevice(id: string): Pick<PooledDevice, "status" | "sessionId" | "health"> | null;
+  isDeviceLeasedForAndroidStartup: DevicePool["isDeviceLeasedForAndroidStartup"];
+}
 export interface DaemonDisconnectHost extends Pick<
   DaemonRecordingHost,
   "listActiveVideoRecordings"
@@ -214,6 +228,10 @@ export class DaemonDisconnect {
     listRecordings: DaemonDisconnectHost["listActiveVideoRecordings"] = this.host
       .listActiveVideoRecordings,
     transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
+    cadence: DisconnectMonitorCadence = {
+      activeIntervalMs: DEVICE_DISCONNECT_POLL_INTERVAL_MS,
+      idleIntervalMs: DEVICE_DISCONNECT_IDLE_INTERVAL_MS,
+    },
   ): void {
     if (this.host.lifecycle.deviceDisconnectMonitor()) {
       return;
@@ -230,10 +248,11 @@ export class DaemonDisconnect {
       transportRestarts,
     );
 
+    let lastSweepAt = this.host.services.timer().now();
     this.host.lifecycle.setDeviceDisconnectMonitor(
       new SingleFlightInterval(
         this.host.services.timer(),
-        DEVICE_DISCONNECT_POLL_INTERVAL_MS,
+        cadence.activeIntervalMs,
         async () => {
           const planActive = serverConfig.isPlanExecutionActive();
           const sweep: { planActive: boolean; adbServerResetCohort: readonly PooledDevice[] } = {
@@ -258,6 +277,28 @@ export class DaemonDisconnect {
             }
           }
         },
+        {
+          shouldRun: async () => {
+            const pool: DisconnectMonitorPool = this.host.services.devicePool();
+            const watching =
+              this.host.services.sessionManager().getAllSessions().length > 0 ||
+              pool.getAllDevices().some(({ id }) => {
+                const device = pool.getDevice(id);
+                return (
+                  (device !== null && (!isIdle(device) || holderOf(device))) ||
+                  pool.isDeviceLeasedForAndroidStartup(id)
+                );
+              }) ||
+              serverConfig.isPlanExecutionActive() ||
+              (await listRecordings()).length > 0;
+            const now = this.host.services.timer().now();
+            if (!watching && now - lastSweepAt < cadence.idleIntervalMs) {
+              return false;
+            }
+            lastSweepAt = now;
+            return true;
+          },
+        },
       ),
     );
     this.host.lifecycle.deviceDisconnectMonitor()!.start();
@@ -267,7 +308,13 @@ export class DaemonDisconnect {
     deviceManager: Parameters<typeof discoverAndReconcile>[1],
     options: Parameters<typeof discoverAndReconcile>[2],
   ) {
-    return discoverAndReconcile(this.host.services.devicePool(), deviceManager, options);
+    return discoverAndReconcile(this.host.services.devicePool(), deviceManager, {
+      ...options,
+      heldDevices: [
+        ...this.host.services.sessionManager().getAllSessions(),
+        ...(options.heldDevices ?? []),
+      ],
+    });
   }
 
   private logDisconnectMisses(...args: LogDisconnectMissesArgs): void {
@@ -755,12 +802,17 @@ export class DaemonDisconnect {
     const { planActive } = sweep;
 
     this.startDeferredSessionRecoverySweep(planActive);
+    const activeRecordings = planActive ? [] : await listRecordings();
+    const heldDevices = activeRecordings.map(({ deviceId, platform }) => ({
+      assignedDevice: deviceId,
+      platform,
+    }));
     let discovery = await this.discoverAndReconcile(deviceManager, {
       planActive,
+      heldDevices,
     });
     let succeededPlatforms = discovery.succeededPlatforms;
     let bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
-    const activeRecordings = planActive ? [] : await listRecordings();
     const missingByDevice = new Map<string, string[]>();
     const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
       this.collectDisconnectCandidates(activeRecordings);
@@ -795,6 +847,7 @@ export class DaemonDisconnect {
         // the pre-recovery absence for miss counting or ADB-reset detection.
         discovery = await this.discoverAndReconcile(deviceManager, {
           planActive,
+          heldDevices,
           bypassAndroidDeviceListCache: true,
         });
         succeededPlatforms = discovery.succeededPlatforms;

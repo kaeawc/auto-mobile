@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 
 /**
@@ -17,7 +18,7 @@ import path from "node:path";
  *     replays a stale verdict when the base moves.
  */
 const repoRoot = path.resolve(import.meta.dir, "../..");
-const turbo = JSON.parse(readFileSync(path.join(repoRoot, "turbo.json"), "utf8"));
+const turbo = JSON.parse(readGuardFile(path.join(repoRoot, "turbo.json")));
 
 describe("turbo caching safety (#5124)", () => {
   test("typecheck task declares its full input set", () => {

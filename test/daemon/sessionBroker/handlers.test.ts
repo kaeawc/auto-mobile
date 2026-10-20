@@ -11,6 +11,7 @@ import type {
 import { BrokerConnectionScopes } from "../../helpers/brokerHandlerFixtures";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import {
+  BROKER_DAEMON_METHOD_HANDLERS,
   bindBrokerRegistration,
   handleAbandonBrokerSessionRequest,
   handleBrokerSessionStatus,
@@ -19,6 +20,10 @@ import {
   handlePrepareBrokerSession,
   handleReleaseBrokerSession,
 } from "../../../src/daemon/sessionBroker/handlers";
+import {
+  SessionRequestOwnerMismatchError,
+  SESSION_BROKER_RETRY_AFTER_MS,
+} from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import {
@@ -88,6 +93,7 @@ function request(params: unknown): DaemonRequest {
 
 class HandlerBroker extends SessionBroker {
   prepareError: Error | undefined;
+  mutationError: Error | undefined;
   prepareResult = result("request-1", "failed");
   ownedStatusError: Error | undefined;
   readonly statuses = new Map<string, SessionBrokerResult>();
@@ -175,11 +181,17 @@ class HandlerBroker extends SessionBroker {
 
   override async abandon(requestId: string, token: string): Promise<SessionBrokerResult> {
     this.abandonCalls.push({ requestId, token });
+    if (this.mutationError) {
+      throw this.mutationError;
+    }
     return result(requestId, "failed");
   }
 
   override async release(sessionId: string) {
     this.releaseCalls.push(sessionId);
+    if (this.mutationError) {
+      throw this.mutationError;
+    }
     return { sessionUuid: sessionId, outcome: "cleanup_pending" as const };
   }
 }
@@ -544,6 +556,75 @@ describe("session broker daemon handlers", () => {
     });
     expect(broker.statusCalls).toEqual([{ requestId: "request-1", token: "wrong-owner" }]);
   });
+
+  for (const restartHandoff of [true, false]) {
+    test(`release and abandon return typed generation refusals (restartHandoff=${restartHandoff})`, async () => {
+      broker.sessionOwners.set(SESSION, TOKEN);
+      broker.mutationError = new SessionRequestOwnerMismatchError(restartHandoff);
+      const expected: DaemonMethodResult = {
+        success: false,
+        code: restartHandoff ? "session_restart_handoff_pending" : "session_owner_mismatch",
+        error: "Session request belongs to another daemon process generation",
+        retryable: restartHandoff,
+        ...(restartHandoff ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
+      };
+      expect(
+        await handleReleaseBrokerSession(
+          request({ sessionId: SESSION, livenessOwnerToken: TOKEN }),
+          state,
+        ),
+      ).toEqual(expected);
+      expect(
+        await handleAbandonBrokerSessionRequest(
+          request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+          state,
+        ),
+      ).toEqual(expected);
+    });
+  }
+
+  test("release and abandon rethrow unknown failures", async () => {
+    broker.sessionOwners.set(SESSION, TOKEN);
+    const failure = new Error("unexpected storage failure");
+    broker.mutationError = failure;
+    await expect(
+      handleReleaseBrokerSession(request({ sessionId: SESSION, livenessOwnerToken: TOKEN }), state),
+    ).rejects.toBe(failure);
+    await expect(
+      handleAbandonBrokerSessionRequest(
+        request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).rejects.toBe(failure);
+  });
+
+  for (const configured of [true, false]) {
+    test(`every missing-service handler reports retry hints (configured=${configured})`, async () => {
+      const unavailableState: DaemonStateAccess = {
+        ...state,
+        isSessionBrokerMode: () => configured,
+        getSessionBrokerService: () => undefined,
+      };
+      const expected: DaemonMethodResult = {
+        success: false,
+        code: "session_broker_unavailable",
+        error: expect.any(String),
+        retryable: configured,
+        ...(configured ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
+      };
+      for (const [, handler] of BROKER_DAEMON_METHOD_HANDLERS) {
+        expect(await handler(request({}), unavailableState, undefined, undefined, {})).toEqual(
+          expected,
+        );
+      }
+      expect(
+        await bindBrokerRegistration(unavailableState, SESSION, {
+          requestId: "request-1",
+          livenessOwnerToken: TOKEN,
+        }),
+      ).toEqual(expected);
+    });
+  }
 
   test("abandon validates and forwards the original request identity and owner", async () => {
     expect(

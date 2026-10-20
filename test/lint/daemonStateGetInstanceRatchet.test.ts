@@ -1,6 +1,6 @@
-import { typeScriptFiles, relativePosix } from "./astGuard";
+import { typeScriptFiles, relativePosix, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 import { countDaemonStateGetInstanceCalls } from "./daemonStateGetInstanceCalls";
 
@@ -69,7 +69,7 @@ describe("DaemonState.getInstance() has no call sites in src/ outside the exempt
 
   beforeAll(() => {
     for (const file of typeScriptFiles(SRC_DIR)) {
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       if (!source.includes("DaemonState")) {
         continue;
       }

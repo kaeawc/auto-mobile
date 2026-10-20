@@ -15,7 +15,6 @@
 1970	src/daemon/sessionBroker/provisioning/reconciler.ts
 1048	src/daemon/sessionDeviceStateRestore.ts
 9809	src/daemon/sessionManager.ts
-5794	src/daemon/socketServer.ts
 1180	src/daemon/videoStreamSocketServer.ts
 1401	src/db/navigationRetention.ts
 1390	src/devices/deviceBootService.ts

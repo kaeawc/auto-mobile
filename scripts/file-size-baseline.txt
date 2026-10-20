@@ -24,7 +24,6 @@
 1256	src/features/action/TapAnyElement.ts
 3514	src/features/action/TapOnElement.ts
 1234	src/features/device/SetPosture.ts
-5761	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1874	src/features/observe/android/ctrlProxyProtocol.ts
 1364	src/features/observe/ios/IOSCtrlProxyClient.ts
 2135	src/features/observe/output/ObserveResultOutput.ts

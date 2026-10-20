@@ -239,7 +239,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "features/deviceLifecycle/PooledAvdIdentityError": nsPooledAvdIdentityError,
   "daemon/deviceControlTransportFailure": controlTransport,
   "daemon/toolUnavailableError": toolUnavailable,
-  "features/deviceLifecycle/deviceLifecycleCore": deviceLifecycleCore,
+  "features/deviceLifecycle/core/provisioning": deviceLifecycleCore,
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */

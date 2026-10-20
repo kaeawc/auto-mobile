@@ -1424,7 +1424,6 @@ test/server/prototypeWindowOptions.test.ts
 test/server/provisionCancellationOutcomes.test.ts
 test/server/provisionDevice.property.test.ts
 test/server/provisionDeviceRecoveryEvidence.test.ts
-test/server/proxyServerSessionBroker.test.ts
 test/server/queryParamValidation.property.test.ts
 test/server/queryParamValidation.test.ts
 test/server/registerAllTools.test.ts

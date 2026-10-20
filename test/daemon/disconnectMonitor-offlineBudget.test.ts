@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import {
   evaluateDeviceDisconnects,
@@ -82,7 +83,13 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
       reconnects++;
     }
   }
-  const device = { id: deviceId, platform: "android", incarnation: 1 };
+  const device = {
+    id: deviceId,
+    platform: "android",
+    incarnation: 1,
+    status: "busy" as const,
+    sessionId: "owner",
+  };
   const cleanedUp: string[] = [];
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
@@ -100,8 +107,11 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
       reconcileDiscoveryObservation: async () => {},
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAndroidTransportAliases: (): string[] => [],
-      getAllDevices: () => [device],
-      isDeviceLeasedForAndroidStartup: () => false,
+      ...({
+        getAllDevices: () => [device],
+        getDevice: (id) => (id === device.id ? device : null),
+        isDeviceLeasedForAndroidStartup: () => false,
+      } satisfies DisconnectMonitorPool),
       releaseAdbServerResetCohortReservations: async () => {},
     },
     sessionManager: {

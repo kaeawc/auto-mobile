@@ -87,6 +87,7 @@ function bindSocketAdmission(
 
 function bindMcpExecution(target: McpExecution): Pick<McpExecution, keyof McpExecution> {
   return {
+    forgetSocketDiscovery: target.forgetSocketDiscovery.bind(target),
     rejectOnHandshakeMismatch: target.rejectOnHandshakeMismatch.bind(target),
     runKeyedMcpForward: target.runKeyedMcpForward.bind(target),
     runMcpForwardForCurrentRoute: target.runMcpForwardForCurrentRoute.bind(target),

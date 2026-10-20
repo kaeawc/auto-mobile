@@ -13,6 +13,7 @@ import type { FeatureFlagApplier } from "./FeatureFlagApplier";
 import { DefaultFeatureFlagApplier } from "./FeatureFlagApplier";
 import type { ToolListChangedNotifier } from "./ToolListChangedNotifier";
 import { NoopToolListChangedNotifier } from "./ToolListChangedNotifier";
+import { ListChangedBroadcaster } from "../../daemon/listChangedBroadcast";
 
 interface FeatureFlagState {
   key: FeatureFlagKey;
@@ -97,6 +98,7 @@ export class FeatureFlagService {
     }
 
     this.initialized = true;
+    ListChangedBroadcaster.invalidate("tools");
   }
 
   async listFlags(): Promise<FeatureFlagState[]> {

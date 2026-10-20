@@ -1,3 +1,7 @@
+import {
+  SessionRequestOwnerMismatchError,
+  SESSION_BROKER_RETRY_AFTER_MS,
+} from "./SessionRequestOwnerMismatchError";
 import { z } from "zod";
 import { SessionExportIdentityMismatchError } from "./store";
 import { parseSessionConfig } from "../../devices/sessionConfig";
@@ -47,7 +51,7 @@ export async function handlePrepareBrokerSession(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   // Fail closed before validation/acquisition: this connection is never a generic allocator.
   bind(state, socketSessionId, service.scopeKey, []);
@@ -75,7 +79,7 @@ export async function handlePrepareBrokerSession(
       parsed.data.export,
     );
   } catch (error) {
-    return exportRejection(error);
+    return brokerRejection(error);
   }
   if (!signal?.aborted) {
     bind(
@@ -109,7 +113,7 @@ async function handleSessionExport(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   // Reading proof or releasing its pin neither grants nor revokes this connection's device
   // control, so the existing binding is deliberately left untouched.
@@ -134,11 +138,21 @@ async function handleSessionExport(
           error: "No session export has that prepare identity",
         };
   } catch (error) {
-    return exportRejection(error);
+    return brokerRejection(error);
   }
 }
 
-function exportRejection(error: unknown): DaemonMethodResult {
+function brokerRejection(error: unknown): DaemonMethodResult {
+  if (error instanceof SessionRequestOwnerMismatchError) {
+    logger.warn(`Session broker rejected request ownership: ${errorMessage(error)}`);
+    return {
+      success: false,
+      code: error.code,
+      error: errorMessage(error),
+      retryable: error.retryable,
+      ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+    };
+  }
   if (!(error instanceof SessionExportIdentityMismatchError)) {
     throw error;
   }
@@ -153,7 +167,7 @@ export async function handleBrokerSessionStatus(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   // A malformed or unauthorized recovery request must not retain an earlier grant.
   bind(state, socketSessionId, service.scopeKey, []);
@@ -186,17 +200,21 @@ export async function handleAbandonBrokerSessionRequest(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   const parsed = abandonParams.safeParse(request.params);
   if (!parsed.success) {
     return { success: false, error: "requestId and livenessOwnerToken are required" };
   }
-  const result = await service.broker.abandon(
-    parsed.data.requestId,
-    parsed.data.livenessOwnerToken,
-  );
-  return { success: true, result: { ...result } };
+  try {
+    const result = await service.broker.abandon(
+      parsed.data.requestId,
+      parsed.data.livenessOwnerToken,
+    );
+    return { success: true, result: { ...result } };
+  } catch (error) {
+    return brokerRejection(error);
+  }
 }
 
 export async function handleReleaseBrokerSession(
@@ -205,26 +223,30 @@ export async function handleReleaseBrokerSession(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   const parsed = releaseParams.safeParse(request.params);
   if (!parsed.success) {
     return { success: false, error: "sessionId and livenessOwnerToken are required" };
   }
-  const receipt = await service.broker.ownedSessionRequest(
-    parsed.data.sessionId,
-    parsed.data.livenessOwnerToken,
-  );
-  if (!receipt) {
+  try {
+    const receipt = await service.broker.ownedSessionRequest(
+      parsed.data.sessionId,
+      parsed.data.livenessOwnerToken,
+    );
+    if (!receipt) {
+      return {
+        success: true,
+        result: { sessionUuid: parsed.data.sessionId, outcome: "unknown_session" },
+      };
+    }
     return {
       success: true,
-      result: { sessionUuid: parsed.data.sessionId, outcome: "unknown_session" },
+      result: { ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason)) },
     };
+  } catch (error) {
+    return brokerRejection(error);
   }
-  return {
-    success: true,
-    result: { ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason)) },
-  };
 }
 
 /** Reconnect proves request ownership and derives private binding from the receipt. */
@@ -236,7 +258,7 @@ export async function bindBrokerRegistration(
 ): Promise<DaemonMethodResult | undefined> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   bind(state, socketSessionId, service.scopeKey, []);
   const result = await service.broker.ownedStatus(
@@ -275,11 +297,15 @@ function bind(
   }
 }
 
-function unavailable(): DaemonMethodResult {
+function unavailable(state: DaemonStateAccess): DaemonMethodResult {
+  // Broker mode is set from the configured host path before installation and survives close.
+  const retryable = state.isSessionBrokerMode?.() === true;
   return {
     success: false,
     code: "session_broker_unavailable",
     error: "Session-broker mode is not available in this provider",
+    retryable,
+    ...(retryable ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
   };
 }
 

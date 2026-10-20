@@ -50,6 +50,8 @@ export interface BootedDeviceScanOptions {
   targetDeviceId?: string;
   deadlineMs?: number;
   readinessOnly?: boolean;
+  /** Keep identity probes, but skip metadata and display I/O unused by liveness. */
+  skipProfileEnrichment?: boolean;
   /**
    * List what is attached and stop there: no `emu avd name`, no
    * `getprop ro.boot.qemu.avd_name`, no `getprop ro.product.model`. Every
@@ -266,7 +268,9 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             remainingScanMs(),
           );
           const model =
-            modelRemainingMs > 0 && !(options.readinessOnly && options.coalesceInventoryEnrichment)
+            modelRemainingMs > 0 &&
+            !options.skipProfileEnrichment &&
+            !(options.readinessOnly && options.coalesceInventoryEnrichment)
               ? await this.modelForBootedEmulator(
                   device,
                   avdName,
@@ -280,7 +284,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             remainingScanMs(),
           );
           const architecture =
-            architectureRemainingMs > 0 && !options.readinessOnly
+            architectureRemainingMs > 0 && this.includesFullMetadata(options)
               ? await this.resolveEmulatorArchitecture(
                   device,
                   avdName,
@@ -325,7 +329,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         ]);
         runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
       }
-      if (!options.readinessOnly) {
+      if (this.includesFullMetadata(options)) {
         await Promise.all(
           runningDevices.map(async (device) => {
             const snapshotDevice = devices.find(
@@ -348,7 +352,14 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     }
   }
 
+  private includesFullMetadata(options: BootedDeviceScanOptions): boolean {
+    return !options.readinessOnly && !options.skipProfileEnrichment;
+  }
+
   private physicalScanTimeout(options: BootedDeviceScanOptions, timeoutMs: number): number {
+    if (options.skipProfileEnrichment) {
+      return 0;
+    }
     // Inventory overlays consume only emulator names; handset metadata cannot contribute.
     return options.readinessOnly && options.coalesceInventoryEnrichment ? 0 : timeoutMs;
   }

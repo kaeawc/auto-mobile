@@ -42,6 +42,19 @@ export class CtrlProxySdkScreenIdentity {
     return applicationId ? this.sdkScreenIdentitiesByApplicationId.get(applicationId) : undefined;
   }
 
+  /** Whether the last accepted navigation event covers this device-clock capture. */
+  hasSdkScreenIdentityForCapture(applicationId?: string, capturedAt?: number): boolean {
+    const timestamp = applicationId
+      ? this.sdkScreenIdentityOrdersByApplicationId.get(applicationId)?.timestamp
+      : undefined;
+    return (
+      capturedAt !== undefined &&
+      Number.isFinite(capturedAt) &&
+      timestamp !== undefined &&
+      capturedAt <= timestamp
+    );
+  }
+
   /** Remove SDK navigation state after an app process is replaced. */
   public clearSdkScreenIdentity(applicationId?: string): void {
     this.host.invalidateSdkCapabilities();

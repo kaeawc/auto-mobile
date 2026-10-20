@@ -55,6 +55,11 @@ describe("createPathClassifier", () => {
     expect(classify(["src/a.ts", "test/a.test.ts"])).toBe("ts-only");
     expect(classify(["android/app/build.gradle.kts", "src/a.ts"])).toBe("android");
     expect(classify(["ios/App/App.swift"])).toBe("ios");
+    expect(
+      classify([
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift",
+      ]),
+    ).toBe("ios");
     expect(classify(["ios/App/App.swift", "android/app/Main.kt"])).toBe("mixed");
   });
 

@@ -18,6 +18,8 @@ import { isTerminalReleaseReason, type SessionReleaseReason } from "../releaseRe
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionRecoveryIdentityLossError,
+  getDefaultSessionHeartbeatTimeoutMs,
+  type CreateSessionOptions,
   type PreCliLivenessSnapshot,
   type ReleaseCommitFence,
   type Session,
@@ -25,9 +27,11 @@ import {
   type SessionExecutionMetadata,
   type SessionLivenessPolicy,
   type SessionRecoveryFailureReason,
+  type SessionRecoveryLiveness,
   type SessionRecoveryTarget,
   type SessionReleaseOperation,
   type SessionReleaseSnapshot,
+  type SessionReleaseStage,
 } from "../sessionManager";
 import { SessionSlots } from "../sessionSlots";
 import { type TerminalReleaseIntent } from "../terminalReleaseJournal";
@@ -299,3 +303,59 @@ export type SessionLifecycleSlots = SessionSlots<
   TerminalReleaseReservation,
   TerminalReleaseIntent
 >;
+
+export function setReleaseStage(
+  operation: SessionReleaseOperation | undefined,
+  stage: SessionReleaseStage,
+): void {
+  if (operation) {
+    operation.stage = stage;
+  }
+}
+
+export function withCreateSessionDefaults(
+  options: CreateSessionOptions,
+): CreateSessionOptions & { initialOwnership: "owned" | "awaiting-owner" } {
+  return { ...options, initialOwnership: options.initialOwnership ?? "owned" };
+}
+
+export function sessionCreationLiveness(
+  timeoutMs: number | undefined,
+  heartbeatTimeoutMs: number | undefined,
+  recoveredLiveness: SessionRecoveryLiveness | undefined,
+  defaultSessionTimeoutMs: number,
+): Pick<
+  Session,
+  | "sessionTimeoutMs"
+  | "heartbeatTimeoutMs"
+  | "heartbeatTimeoutSource"
+  | "hasReceivedHeartbeat"
+  | "livenessPolicy"
+  | "preCliLiveness"
+> {
+  if (recoveredLiveness) {
+    return {
+      sessionTimeoutMs: recoveredLiveness.sessionTimeoutMs,
+      heartbeatTimeoutMs: recoveredLiveness.heartbeatTimeoutMs,
+      heartbeatTimeoutSource: recoveredLiveness.heartbeatTimeoutSource,
+      hasReceivedHeartbeat: recoveredLiveness.hasReceivedHeartbeat,
+      livenessPolicy: recoveredLiveness.livenessPolicy,
+      preCliLiveness: recoveredLiveness.preCliLiveness,
+    };
+  }
+  return {
+    sessionTimeoutMs: timeoutMs ?? defaultSessionTimeoutMs,
+    heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
+    heartbeatTimeoutSource: heartbeatTimeoutMs === undefined ? "default" : "custom",
+    hasReceivedHeartbeat: false,
+    livenessPolicy: "heartbeat",
+  };
+}
+
+export function managedExecutionReleaseMarker(
+  session: Pick<Session, "livenessPolicy">,
+): Pick<SessionReleaseSnapshot, "livenessPolicy"> {
+  return session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
+    ? { livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY }
+    : {};
+}

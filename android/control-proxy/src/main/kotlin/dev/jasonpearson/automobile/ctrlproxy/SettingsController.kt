@@ -125,41 +125,9 @@ internal class SettingsController(
         },
       ) {
         perfProvider.startOperation("writeSetting")
-        if (value == null) {
-          success = writeSettingString(namespace, key, null)
-        } else {
-          success =
-            when (valueType) {
-              "int" -> {
-                val intVal = value.toIntOrNull()
-                if (intVal == null) {
-                  error = "Invalid int value: $value"
-                  false
-                } else {
-                  writeSettingInt(namespace, key, intVal)
-                }
-              }
-              "long" -> {
-                val longVal = value.toLongOrNull()
-                if (longVal == null) {
-                  error = "Invalid long value: $value"
-                  false
-                } else {
-                  writeSettingLong(namespace, key, longVal)
-                }
-              }
-              "float" -> {
-                val floatVal = value.toFloatOrNull()
-                if (floatVal == null) {
-                  error = "Invalid float value: $value"
-                  false
-                } else {
-                  writeSettingFloat(namespace, key, floatVal)
-                }
-              }
-              else -> writeSettingString(namespace, key, value)
-            }
-        }
+        val write = SettingWrite(namespace, key, value, valueType)
+        success = write.apply()
+        error = write.error
         perfProvider.endOperation("writeSetting")
         if (!success && error == null) {
           error = "Unknown namespace: $namespace"
@@ -178,6 +146,53 @@ internal class SettingsController(
           totalTimeMs = totalTime,
         ),
       )
+    }
+  }
+
+  private inner class SettingWrite(
+    private val namespace: String,
+    private val key: String,
+    private val value: String?,
+    private val valueType: String,
+  ) {
+    var error: String? = null
+      private set
+
+    fun apply(): Boolean {
+      if (value == null) {
+        return writeSettingString(namespace, key, null)
+      } else {
+        return when (valueType) {
+          "int" -> {
+            val intVal = value.toIntOrNull()
+            if (intVal == null) {
+              error = "Invalid int value: $value"
+              false
+            } else {
+              writeSettingInt(namespace, key, intVal)
+            }
+          }
+          "long" -> {
+            val longVal = value.toLongOrNull()
+            if (longVal == null) {
+              error = "Invalid long value: $value"
+              false
+            } else {
+              writeSettingLong(namespace, key, longVal)
+            }
+          }
+          "float" -> {
+            val floatVal = value.toFloatOrNull()
+            if (floatVal == null) {
+              error = "Invalid float value: $value"
+              false
+            } else {
+              writeSettingFloat(namespace, key, floatVal)
+            }
+          }
+          else -> writeSettingString(namespace, key, value)
+        }
+      }
     }
   }
 

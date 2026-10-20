@@ -55,3 +55,9 @@ PAIRS=(
   [[ "$output" == *$'pull_request\tbuild-ide-plugin\tBuild IDE Plugin'* ]]
   [[ "$output" == *$'merge\tide-plugin-unit-tests\tRun IDE Plugin Unit Tests'* ]]
 }
+
+@test "pull_request.yml path filters include each shared action's directory" {
+  for action in ci-build-desktop-core ci-build-ide-plugin ci-ide-plugin-unit-tests ci-desktop-app-unit-tests; do
+    grep -qF "'.github/actions/$action/**'" .github/workflows/pull_request.yml
+  done
+}

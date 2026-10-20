@@ -288,6 +288,9 @@ jobs:
               - 'test/fixtures/refusal-wire/**'
               - 'scripts/generate-refusal-wire-fixtures.ts'
               - 'test/daemon/refusalWireContract.test.ts'
+              # Shared job bodies live in composite actions; editing one must run
+              # the jobs that consume it.
+              - '.github/actions/ci-build-desktop-core/**'
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin
@@ -296,6 +299,8 @@ jobs:
           filters: |
             ide_plugin:
               - 'android/ide-plugin/**'
+              - '.github/actions/ci-build-ide-plugin/**'
+              - '.github/actions/ci-ide-plugin-unit-tests/**'
 
       - name: "Check for Desktop App changes"
         id: filter-desktop-app
@@ -305,6 +310,7 @@ jobs:
             desktop_app:
               - 'android/desktop-app/**'
               - 'android/desktop-core/**'
+              - '.github/actions/ci-desktop-app-unit-tests/**'
 
       # Native (Kotlin/Swift) build+test jobs gate on the native source trees ONLY.
       # src/** is intentionally NOT here: a pure-TypeScript change cannot break the

@@ -78,7 +78,7 @@ async function flushDispatch() {
   }
 }
 
-const keystoreState = {
+const keystoreState: Awaited<ReturnType<CtrlProxyStorage["discoverKeystore"]>> = {
   schemaVersion: 1,
   capability: "storage.keystore",
   outcome: "disabled",
@@ -95,7 +95,33 @@ const snapshot = {
   policy: { captureHeaders: false, captureBodies: false, allowMutations: false },
 };
 const subscription = { packageName: "pkg", fileName: "prefs", subscriptionId: "pkg:prefs" };
-const methods = [
+type StorageResult = Awaited<
+  ReturnType<
+    CtrlProxyStorage[
+      | "getPreference"
+      | "listPreferenceFiles"
+      | "getPreferenceEntries"
+      | "discoverKeystore"
+      | "getSdkCapabilities"
+      | "subscribeStorage"
+      | "unsubscribeStorage"
+      | "setPreference"
+      | "removePreference"
+      | "clearPreferenceStore"]
+  >
+>;
+const methods: Array<{
+  operation: string;
+  label: string;
+  invoke: (storage: CtrlProxyStorage) => Promise<StorageResult>;
+  frame: (
+    requestId: string,
+  ) => ReturnType<(typeof ctrlProxyRequests)[keyof typeof ctrlProxyRequests]>;
+  literal: string;
+  response: object;
+  result: StorageResult;
+  write?: boolean;
+}> = [
   {
     operation: "list_preference_files",
     label: "List preference files",

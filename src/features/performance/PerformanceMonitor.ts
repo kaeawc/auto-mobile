@@ -1,3 +1,11 @@
+import { PS_SNAPSHOT_ARGS } from "../../devices/bootAdmission/psSnapshot";
+import {
+  collectIOSPerformanceMetrics,
+  createIOSPerformanceProcessResolver,
+  type IOSPerformanceProcessResolver,
+} from "./iosPerformanceProcessSnapshot";
+import { defaultExecFileAsync, defaultSimCtlClientFactory } from "./PerformanceMonitorDefaults";
+export { defaultSimCtlClientFactory } from "./PerformanceMonitorDefaults";
 import {
   getDeviceDataStreamServer,
   PerformanceStreamData,
@@ -8,12 +16,8 @@ import {
   LivePerformanceData,
   PerformancePushSocketServer,
 } from "../../daemon/performancePushSocketServer";
-import type {
-  FrameTimePercentiles,
-  MemoryBreakdownMb,
-  StartupTimingSummary,
-} from "../../models/PerfSnapshot";
-import { execFileAsync as sharedExecFileAsync } from "../../utils/HostCommandExecutor";
+import type { FrameTimePercentiles, MemoryBreakdownMb } from "../../models/PerfSnapshot";
+
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 import {
   AdbClientFactory,
@@ -21,13 +25,21 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
-import { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
-import { DefaultSimCtlClientFactory } from "./DefaultSimCtlClientFactory";
+
 import { getPerfWindowBuffer, PerfWindowBuffer } from "./PerfWindowBuffer";
 import type { PerformanceMonitorDependencies } from "./PerformanceMonitorDependencies";
+import {
+  CpuMetricsResult,
+  ExecFileAsyncFn,
+  MonitoredDevice,
+  PerformanceDataPusher,
+  PerformanceTelemetryEmitter,
+  ServerGetter,
+  SimCtlClientFactory,
+} from "./PerformanceMonitorTypes";
 import { RecompositionTracker } from "./RecompositionTracker";
 import { getSdkFrameMetricsStore, SdkFrameMetricsStore } from "./SdkFrameMetricsStore";
 import type { GfxMetrics, RawJankCounters } from "./performanceMetricAnalysis";
@@ -39,100 +51,17 @@ import {
   parseMemoryBreakdown,
   resolveAndroidFrameMetrics,
 } from "./performanceMetricAnalysis";
-
-const defaultExecFileAsync: ExecFileAsyncFn = async (file, args) => {
-  const result = await sharedExecFileAsync(file, args);
-  return { stdout: String(result.stdout), stderr: String(result.stderr) };
-};
-
-/** Minimal interface for performance telemetry emission. */
-export interface PerformanceTelemetryEmitter {
-  setContext(deviceId: string | null, sessionId: string | null): void;
-  recordPerformanceEvent: TelemetryRecorder["recordPerformanceEvent"];
-}
-
-/**
- * Type for the exec function used to run host commands.
- * Injected for testing.
- */
-export type ExecFileAsyncFn = (
-  file: string,
-  args: string[],
-) => Promise<{ stdout: string; stderr: string }>;
-
-/**
- * Factory interface for creating SimCtlClient instances.
- * Enables dependency injection for testing.
- */
-export interface SimCtlClientFactory {
-  create(deviceId: string): SimCtl;
-}
-
-/**
- * Singleton instance of the default factory.
- */
-export const defaultSimCtlClientFactory: SimCtlClientFactory = new DefaultSimCtlClientFactory();
-
-interface PreviousCpuSample {
-  processTicks: number;
-  uptimeSeconds: number;
-}
-
-interface CpuMetricsResult {
-  cpuUsagePercent: number | null;
-  sample: PreviousCpuSample | null;
-}
-
-export interface MonitoredDevice {
-  deviceId: string;
-  packageName: string;
-  /**
-   * Monotonically increasing token bumped on every package switch. Lets an
-   * in-flight sample detect an A→B→A sequence that a package-name comparison
-   * alone would miss (the name is back to A, but it's a different session).
-   */
-  monitoringGeneration: number;
-  platform: "android" | "ios";
-  lastFastTick: number;
-  lastMediumTick: number;
-  lastSlowTick: number;
-  cachedCpu: number | null;
-  cachedMemory: number | null;
-  /** Cached meminfo App Summary breakdown, carried between slow ticks. */
-  cachedMemoryBreakdown: MemoryBreakdownMb | null;
-  /** Cached FPS from last interval with actual frames */
-  cachedFps: number | null;
-  /** Cached frame time from last interval with actual frames */
-  cachedFrameTime: number | null;
-  /** Cached touch latency from last interval with actual frames */
-  cachedTouchLatency: number | null;
-  /** Previous jank counters for computing deltas */
-  prevJankCounters: RawJankCounters | null;
-  /** PID of the app process (cached for iOS since it requires a lookup) */
-  cachedPid: number | null;
-  /** Previous Android process CPU sample for interval-delta calculation */
-  previousCpuSample: PreviousCpuSample | null;
-  /** Whether the cumulative first gfxinfo sample has already been primed */
-  gfxPrimed: boolean;
-  /** Previous per-metric health for detecting threshold crossings */
-  previousMetricHealth: Record<string, string>;
-}
-
-/**
- * Interface for pushing performance data, used for testing.
- */
-export interface PerformanceDataPusher {
-  pushPerformanceData(data: LivePerformanceData): void;
-}
-
-export interface PerformanceSamplingCoordinator {
-  withDeviceSamplingPaused<T>(deviceId: string, operation: () => Promise<T>): Promise<T>;
-}
-
-/**
- * Function type for getting the performance push server.
- */
-export type ServerGetter = () => PerformanceDataPusher | null;
+import { getLastTtiMs, ttiStore } from "./performanceStartupTiming";
+export {
+  type ExecFileAsyncFn,
+  type MonitoredDevice,
+  type PerformanceDataPusher,
+  type PerformanceSamplingCoordinator,
+  type PerformanceTelemetryEmitter,
+  type ServerGetter,
+  type SimCtlClientFactory,
+} from "./PerformanceMonitorTypes";
+export { getLastStartupTimingMs, setLastTtiMs } from "./performanceStartupTiming";
 
 export class PerformanceMonitor {
   static readonly TICK_INTERVAL_MS = 500;
@@ -189,11 +118,11 @@ export class PerformanceMonitor {
   }
 
   /**
-   * Start the background monitoring interval.
-   * Does nothing if already started.
+   * Arm the interval when devices are monitored; idle monitors have no timer.
+   * Does nothing if already armed.
    */
   start(): void {
-    if (this.intervalHandle) {
+    if (this.intervalHandle || this.monitoredDevices.size === 0) {
       return;
     }
 
@@ -291,6 +220,7 @@ export class PerformanceMonitor {
       gfxPrimed: false,
       previousMetricHealth: {},
     });
+    this.start();
     logger.info(
       `[PerformanceMonitor] Started monitoring ${packageName} on ${deviceId} (${platform})`,
     );
@@ -302,6 +232,10 @@ export class PerformanceMonitor {
   stopMonitoring(deviceId: string): void {
     this.cancelActiveAndroidSample(deviceId, "Performance monitoring stopped for device");
     if (this.monitoredDevices.delete(deviceId)) {
+      if (this.monitoredDevices.size === 0 && this.intervalHandle) {
+        this.timer.clearInterval(this.intervalHandle);
+        this.intervalHandle = null;
+      }
       // Discard retained samples so a later reconnect of the same deviceId
       // cannot surface stale metrics from the prior session.
       this.perfWindowBuffer.clear(deviceId);
@@ -435,12 +369,15 @@ export class PerformanceMonitor {
 
     const now = this.timer.now();
     const promises: Promise<void>[] = [];
+    const resolveIOSProcess = createIOSPerformanceProcessResolver(() =>
+      this.execFileAsync("ps", [...PS_SNAPSHOT_ARGS]),
+    );
 
     for (const device of this.monitoredDevices.values()) {
       if (this.pausedDeviceCounts.has(device.deviceId)) {
         continue;
       }
-      promises.push(this.sampleDevice(device, now, server));
+      promises.push(this.sampleDevice(device, now, server, resolveIOSProcess));
     }
 
     await Promise.all(promises);
@@ -453,6 +390,7 @@ export class PerformanceMonitor {
     device: MonitoredDevice,
     now: number,
     server: PerformanceDataPusher,
+    resolveIOSProcess: IOSPerformanceProcessResolver,
   ): Promise<void> {
     if (device.platform === "android") {
       const controller = new AbortController();
@@ -470,7 +408,7 @@ export class PerformanceMonitor {
       return;
     }
     try {
-      await this.sampleIOSDevice(device, now, server);
+      await this.sampleIOSDevice(device, now, server, resolveIOSProcess);
     } catch (error) {
       logger.debug(`[PerformanceMonitor] Error sampling ${device.deviceId}: ${error}`);
     }
@@ -611,6 +549,7 @@ export class PerformanceMonitor {
     device: MonitoredDevice,
     now: number,
     server: PerformanceDataPusher,
+    resolveIOSProcess: IOSPerformanceProcessResolver,
   ): Promise<void> {
     // Identity captured before any await (see sampleAndroidDevice).
     const samplingPackage = device.packageName;
@@ -621,23 +560,20 @@ export class PerformanceMonitor {
     const shouldCollectCpu =
       device.lastMediumTick === 0 ||
       now - device.lastMediumTick >= PerformanceMonitor.MEDIUM_INTERVAL_MS;
-    const cpuPromise = shouldCollectCpu
-      ? this.collectIOSCpuMetrics(device)
-      : Promise.resolve(device.cachedCpu);
-
-    // Collect slow metrics (memory) if interval elapsed or first collection
     const shouldCollectMemory =
       device.lastSlowTick === 0 || now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
-    const memoryPromise = shouldCollectMemory
-      ? this.collectIOSMemoryMetrics(device)
-      : Promise.resolve(device.cachedMemory);
-
-    const [cpu, memory] = await Promise.all([cpuPromise, memoryPromise]);
+    const { cpu, memory, pid } = await collectIOSPerformanceMetrics(
+      device,
+      shouldCollectCpu,
+      shouldCollectMemory,
+      resolveIOSProcess,
+    );
 
     if (!this.isSampleCurrent(device, samplingPackage, samplingGeneration)) {
       return;
     }
 
+    device.cachedPid = pid;
     device.lastFastTick = now;
     if (shouldCollectCpu) {
       device.lastMediumTick = now;
@@ -1013,155 +949,6 @@ export class PerformanceMonitor {
       return { totalPssMb: null, breakdown: null };
     }
   }
-
-  /**
-   * Resolve the host `ps aux` columns for a simulator app process, scoped to a
-   * single simulator.
-   *
-   * iOS Simulator apps run as ordinary macOS processes whose command line is the
-   * app binary under `.../CoreSimulator/Devices/<UDID>/data/...`, so the device
-   * UDID is always present in the process line. Matching on the bundle id alone
-   * (the previous behavior) picked the *first* process on the host, so when the
-   * same bundle runs on two booted simulators both device-keyed snapshots
-   * received the first match's metrics (#5109). Requiring both the device's
-   * UDID (`device.deviceId`) and the bundle id in the same line scopes the match
-   * to this simulator. For a single simulator this is behavior-identical — the
-   * one matching line already contains its own UDID.
-   *
-   * Returns the whitespace-split `ps aux` columns of the matching line, or null
-   * when no process for this device+bundle is found. Caches the resolved PID.
-   */
-  private async resolveIOSProcessColumns(device: MonitoredDevice): Promise<string[] | null> {
-    // Run ps on the HOST (not inside simulator) to find the app process.
-    const { stdout } = await this.execFileAsync("ps", ["aux"]);
-
-    const lines = stdout.split("\n");
-    for (const line of lines) {
-      // Scope to this simulator: the command line carries both the device UDID
-      // (in the CoreSimulator data-container path) and the bundle id.
-      if (line.includes(device.deviceId) && line.includes(device.packageName)) {
-        // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
-        const parts = line.trim().split(/\s+/);
-        const pid = parseInt(parts[1], 10);
-        if (!isNaN(pid) && pid > 0) {
-          device.cachedPid = pid;
-        }
-        return parts;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Collect CPU usage for an iOS app.
-   * iOS Simulator apps run as macOS processes, so we use `ps` on the host,
-   * scoped to this simulator's UDID (see resolveIOSProcessColumns).
-   */
-  private async collectIOSCpuMetrics(device: MonitoredDevice): Promise<number | null> {
-    try {
-      const parts = await this.resolveIOSProcessColumns(device);
-      if (!parts) {
-        return null;
-      }
-      const cpuPercent = parseFloat(parts[2]);
-      if (isNaN(cpuPercent)) {
-        return null;
-      }
-      return Math.min(cpuPercent, 100); // Cap at 100%
-    } catch (error) {
-      logger.debug(`[PerformanceMonitor] iOS CPU metrics failed for ${device.deviceId}: ${error}`);
-      return null;
-    }
-  }
-
-  /**
-   * Collect memory usage for an iOS app.
-   * iOS Simulator apps run as macOS processes, so we use `ps` on the host,
-   * scoped to this simulator's UDID (see resolveIOSProcessColumns).
-   * Returns RSS (Resident Set Size) in megabytes.
-   */
-  private async collectIOSMemoryMetrics(device: MonitoredDevice): Promise<number | null> {
-    try {
-      const parts = await this.resolveIOSProcessColumns(device);
-      if (!parts) {
-        return null;
-      }
-      // RSS is in KB on macOS.
-      const rssKb = parseInt(parts[5], 10);
-      if (isNaN(rssKb)) {
-        return null;
-      }
-      return rssKb / 1024; // Convert to MB
-    } catch (error) {
-      logger.debug(
-        `[PerformanceMonitor] iOS memory metrics failed for ${device.deviceId}: ${error}`,
-      );
-      return null;
-    }
-  }
-}
-
-// TTI (Time to Interactive) store - tracks last known TTI per device and package
-// TTI is an event-based metric captured at app launch, not continuous
-const ttiStore = new Map<string, Map<string, { ttiMs: number; timestamp: number }>>();
-
-/** Startup timing is only relevant for recent launches (within 5 minutes). */
-const STARTUP_MAX_AGE_MS = 5 * 60 * 1000;
-
-/**
- * Store the last known TTI for a package.
- * Called by LaunchApp after measuring displayed time.
- */
-export function setLastTtiMs(deviceId: string, packageName: string, ttiMs: number): void {
-  let timings = ttiStore.get(deviceId);
-  if (!timings) {
-    timings = new Map();
-    ttiStore.set(deviceId, timings);
-  }
-  timings.set(packageName, { ttiMs, timestamp: defaultTimer.now() });
-  logger.debug(`[PerformanceMonitor] Stored TTI for ${packageName}: ${ttiMs}ms`);
-}
-
-/**
- * Get the last known TTI for a package.
- * Returns null if no TTI has been recorded or if it's stale (>5 minutes old).
- */
-function getLastTtiMs(deviceId: string, packageName: string): number | null {
-  const timings = ttiStore.get(deviceId);
-  const entry = timings?.get(packageName);
-  if (!entry) {
-    return null;
-  }
-  if (defaultTimer.now() - entry.timestamp > STARTUP_MAX_AGE_MS) {
-    timings?.delete(packageName);
-    return null;
-  }
-  return entry.ttiMs;
-}
-
-/**
- * Startup timing for a package's most recent launch, for the observe
- * `perfSnapshot`. Reads the same in-memory launch cache as {@link getLastTtiMs}
- * (populated by `launchApp` from the ActivityManager "Displayed" time), so it
- * adds no device work. Returns null when no launch is recorded or the last one
- * is stale (>5 minutes).
- */
-export function getLastStartupTimingMs(
-  deviceId: string,
-  packageName: string,
-): StartupTimingSummary | null {
-  const timings = ttiStore.get(deviceId);
-  const entry = timings?.get(packageName);
-  if (!entry) {
-    return null;
-  }
-  const ageMs = defaultTimer.now() - entry.timestamp;
-  if (ageMs > STARTUP_MAX_AGE_MS) {
-    timings?.delete(packageName);
-    return null;
-  }
-  return { displayedMs: entry.ttiMs, ageMs };
 }
 
 // Singleton instance

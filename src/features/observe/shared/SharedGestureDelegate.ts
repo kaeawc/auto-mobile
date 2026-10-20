@@ -7,6 +7,8 @@
  * - roundCoordinates: Android rounds to integers, iOS passes exact values
  */
 
+import type { TapCoordinatesRequest } from "../../../utils/interfaces/TapCoordinatesRequest";
+export type { TapCoordinatesRequest } from "../../../utils/interfaces/TapCoordinatesRequest";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   DelegateContext,
@@ -102,18 +104,20 @@ export class SharedGestureDelegate {
     return {};
   }
 
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration: number = 0,
-    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<BaseResult> {
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<BaseResult> {
+    const {
+      x,
+      y,
+      duration = 0,
+      timeoutMs = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      perf,
+      frameContext,
+      signal,
+      onDispatch,
+      displayId,
+      beforeSend,
+    } = request;
+
     return sendCommand<BaseResult>(
       this.context,
       this.tapCommandOptions({
@@ -260,35 +264,8 @@ export class SharedGestureDelegate {
    * pinch (start horizontal, end rotated) — a combined pinch+rotate, not a pinch along a fixed
    * rotated axis. `0` is a plain zoom. Same convention on Android and iOS. See issue #2911.
    */
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<GestureTimingResult> {
-    return sendCommand<GestureTimingResult>(
-      this.context,
-      this.pinchCommandOptions({
-        centerX,
-        centerY,
-        distanceStart,
-        distanceEnd,
-        rotationDegrees,
-        duration,
-        timeoutMs,
-        perf,
-        signal,
-        displayId,
-        beforeSend,
-      }),
-    );
+  async requestPinch(request: PinchRequest): Promise<GestureTimingResult> {
+    return sendCommand<GestureTimingResult>(this.context, this.pinchCommandOptions(request));
   }
 
   /** The wire request for a pinch; platform delegates reuse it to wrap their own dispatch contract. */

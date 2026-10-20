@@ -11,9 +11,9 @@ import {
 } from "../../src/daemon/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

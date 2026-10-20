@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { installFakeCtrlProxyManagers } from "../helpers/hermeticDeviceTools";
 import { maskRealCtrlProxyWebSocketOptIn } from "../helpers/maskRealCtrlProxyWebSocketOptIn";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -37,18 +36,15 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     deviceId: "emulator-5554",
     name: "Pixel_8_API_34",
     platform: "android",
-    isEmulator: true,
   };
   let timer: FakeTimer;
   /** The client's own clock, so stepping through restart backoff does not idle the holder out. */
   let clientTimer: FakeTimer;
   let sessions: SessionManager;
   let client: AndroidCtrlProxyClient;
-  let restoreProviders: () => void;
   let restoreFactory: () => void;
 
   const arrange = async (): Promise<void> => {
-    restoreProviders = installFakeCtrlProxyManagers();
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
       barrier: () => new FakeDbWriteBarrier(),
@@ -86,7 +82,6 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     sessions.stopCleanupTimer();
     DaemonState.getInstance().reset();
     restoreFactory();
-    restoreProviders();
   };
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
   function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {

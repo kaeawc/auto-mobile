@@ -55,10 +55,20 @@ These tools accept `raw` to return the raw hierarchy and `project` to choose
 `pinchOn`, `pressButton`, `recentApps`, `rotate`, `selectAllText`, `sendKeys`,
 `shake`, `swipeAt`, `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`.
 
+These tools also accept `includeExtras: true` to opt in to raw accessibility
+`extras` metadata in `structuredContent` only (default off). This is meaningful
+with `project: "full"` or `raw: true`; text content always strips `extras`.
+
 Skeleton output contains actionable entries; the collapsed keyboard marker `<ime>` is not a
 selector. Use `sendKeys` or `keyboard` for keyboard input.
 
 ## Observe & navigate
+
+By default, `observe` returns the same JSON payload in `structuredContent` and
+`content[0].text`, with every `extras` property stripped. To inspect raw
+accessibility metadata, pass `includeExtras: true` with `project: "full"` or
+`raw: true`: only `structuredContent` retains `extras`; text remains compact.
+Error results (`isError: true`) carry their JSON error detail in `content[0].text`.
 
 The default skeleton projection optionally includes `windowTruncations`:
 `[{ windowId: 67, package: "com.android.systemui", reasons: ["max_nodes"] }]`.
@@ -140,7 +150,10 @@ artifact and the response supplies its artifact pointer.
 field reports the resulting selector string, or `null` after an explicit clear
 or a device rebind that clears a pin. The next plain call after a clear omits
 `displayPin`, as does a never-pinned session, preserving the existing response bytes. No output schema or
-`structuredContent` is added for this tool.
+`structuredContent` is added for this tool. For tools that return both, the
+structured payload equals the parsed text payload by default. `extras` require
+`includeExtras: true` and appear only in structured content; text always strips
+them. Error results carry their JSON error detail in `content[0].text`.
 
 Use `setActiveDevice({deviceId, sessionUuid, display})` to pin a panel key or role
 (`inner`, `cover`, `rear`, `external`) for that session and device. Omission leaves
@@ -860,8 +873,11 @@ reports `pinned`: `pinned` (already on the home screen), `pending` (the launcher
 screen" dialog is open; the icon exists only once a person accepts it, and declining sends no
 signal) or `unsupported` (the default launcher cannot pin; the prototype is still saved). A
 `device_locked` or `pin_failed` pin error returns `success:false` with `saved` kept, so retrying
-the same save is safe. `autoConfirm:true` (needs `pin`) only adds a reminder: accepting the launcher
-dialog automatically is tracked in #12266. `deleteSaved` disables the shortcut; the disabled icon
+the same save is safe. `autoConfirm:true` (needs `pin`) waits up to 5 s for the launcher dialog, taps its
+"Add to home screen" button (a bare "Add" only beside "Cancel"; Cancel is never tapped) with
+`adb shell input tap`, and reports `pinned` only once `listSaved` shows the shortcut pinned. Otherwise
+it stays `pending` with a reason (`confirmation_unrecognized` lists the dialog's buttons). Matching is
+by English label; resource-id and Samsung matching are not done yet (#12266). `deleteSaved` disables the shortcut; the disabled icon
 stays on the home screen. With `removeIcon:true` the host runs `cmd shortcut clear-shortcuts` for
 CtrlProxy only when no saved prototype remains, because that command clears every CtrlProxy
 shortcut; otherwise the response says the icon remains and can be removed by hand. On iOS,
@@ -2313,6 +2329,8 @@ fails the result carries a `warnings` entry saying so.
 Both `rotate` and `setPosture` declare output schemas and return the same JSON
 payload in text content and `structuredContent`. Ordinary clients receive
 `structuredContent` unless `--tool-results-no-structured-content` is enabled.
+`extras` are stripped from both by default; where supported, `includeExtras: true` retains them
+only in structured content. Error detail remains in `content[0].text`.
 
 `setPosture` accepts exactly one of `posture` or `hingeAngle`. `hingeAngle` is a
 finite number of degrees from **0 through 180 inclusive** and is **BEST EFFORT**,
@@ -3136,7 +3154,9 @@ without `appId`; their `resolvedStore` is the domain name, which cannot start wi
 `wakeAndUnlock`, `pressButton`, `launchApp`, `terminateApp`, `getDeviceState`, and
 `setDeviceState` declare output schemas and return the same JSON payload in text
 content and `structuredContent`. Ordinary clients receive `structuredContent`
-unless `--tool-results-no-structured-content` is enabled. Each schema requires
+unless `--tool-results-no-structured-content` is enabled. Both strip `extras` by
+default; where supported, `includeExtras: true` retains them only in structured
+content. Errors carry their JSON error detail in `content[0].text`. Each schema requires
 `message`; variant fields are optional, and additional fields are accepted.
 
 `startDevice` also declares an output schema. Its `readiness` evidence contains

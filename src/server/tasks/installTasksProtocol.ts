@@ -15,8 +15,8 @@ import {
   requestDeclaresTasks,
   taskLookupError,
   toGetTaskResult,
-} from "./mcpTasksExtension";
-import type { TaskManager } from "./TaskManager";
+} from "../../daemon/tasks/mcpTasksExtension";
+import type { TaskManager } from "../../daemon/tasks/TaskManager";
 
 export interface TasksProtocolDeps {
   readonly taskManager: TaskManager;

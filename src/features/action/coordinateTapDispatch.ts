@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { inputDurationArgument } from "./touchscreenInput";
 import {
@@ -20,24 +21,14 @@ import type { TalkBackNavigationDriver } from "../talkback/TalkBackNavigationDri
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
-export interface CoordinateTapClient<Dispatch = never> {
+export interface CoordinateTapClient {
   requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: unknown,
-    frameContext?: string,
-    onDispatch?: Dispatch,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
+    request: TapCoordinatesRequest,
   ): Promise<{ success: boolean; error?: string }>;
 }
 
 /**
- * The iOS client's coordinate-tap subset. Position seven is the abort signal and position eight
- * the dispatch marker (Android's client has them the other way round, see `CoordinateTapClient`).
+ * The iOS client's coordinate-tap subset, including its dispatch outcome metadata.
  * `dispatched`/`acknowledged` follow `sendIOSPressCommand`: a reply from the runner, including a
  * refusal, is acknowledged; a timeout or transport failure after the write is not.
  */
@@ -51,16 +42,7 @@ export interface IosCoordinateTapClient {
     onDispatch?: () => void,
   ): ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>;
 
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: unknown,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<{
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<{
     success: boolean;
     error?: string;
     errorCode?: string;
@@ -105,23 +87,17 @@ export async function dispatchAndroidCoordinateTap(
   const onDispatch = () => {
     dispatched = true;
   };
-  // TapAtCoordinate stores both platform clients under the shared interface.
-  // Only the Android client accepts a dispatch callback in position seven;
-  // the iOS client uses that position for an abort signal.
-  const androidService = accessibilityService as CoordinateTapClient<() => void>;
   const timeoutMs = resolveCoordinateTapCtrlProxyTimeoutMs(durationMs);
-  const result = await androidService.requestTapCoordinates(
+  const result = await accessibilityService.requestTapCoordinates({
     x,
     y,
-    durationMs,
+    duration: durationMs,
     timeoutMs,
-    undefined,
     frameContext,
     onDispatch,
     signal,
-    undefined,
-    assertCurrent,
-  );
+    beforeSend: assertCurrent,
+  });
   if (result.success) {
     onTapDelivered?.();
   }
@@ -224,16 +200,15 @@ async function dispatchIosTap(
   try {
     result = doubleTap
       ? await client.requestDoubleTapCoordinates(x, y, timeoutMs, frameContext, signal, onDispatch)
-      : await client.requestTapCoordinates(
+      : await client.requestTapCoordinates({
           x,
           y,
-          durationMs,
+          duration: durationMs,
           timeoutMs,
-          undefined,
           frameContext,
           signal,
           onDispatch,
-        );
+        });
   } catch (error) {
     if (isUnconfirmedIosTapThrow(error, dispatched, signal)) {
       logger.warn(`[coordinateTapDispatch] iOS ${failureLabel} transport failed`, error);
@@ -357,7 +332,7 @@ function talkBackDisplayTapDispatch(
 
 /** Shared tapOn/tapAny routing; non-default panels require an advertised CtrlProxy capability. */
 export async function androidDisplayTapDispatch(
-  client: CoordinateTapClient<() => void> & {
+  client: CoordinateTapClient & {
     supportsCommand?: (name: string) => Promise<boolean>;
   },
   adb: AdbExecutor,
@@ -396,18 +371,16 @@ export async function androidDisplayTapDispatch(
       const onDispatch = () => {
         dispatched = true;
       };
-      const result = await client.requestTapCoordinates(
+      const result = await client.requestTapCoordinates({
         x,
         y,
         duration,
-        resolveCoordinateTapCtrlProxyTimeoutMs(duration),
-        undefined,
-        undefined,
+        timeoutMs: resolveCoordinateTapCtrlProxyTimeoutMs(duration),
         onDispatch,
         signal,
-        target.displayId === 0 ? undefined : target.displayId,
-        target.assertCurrent,
-      );
+        displayId: target.displayId === 0 ? undefined : target.displayId,
+        beforeSend: target.assertCurrent,
+      });
       if (result.success) {
         onTapDelivered();
       }

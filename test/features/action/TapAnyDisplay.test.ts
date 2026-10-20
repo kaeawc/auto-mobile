@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { expect, spyOn } from "bun:test";
@@ -20,7 +21,7 @@ import {
   TALKBACK_ACTIVATION_WARNING,
   TalkBackTapStrategy,
 } from "../../../src/features/talkback/TalkBackTapStrategy";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
 
 const inner = "4619827259835644672";
@@ -94,7 +95,10 @@ function harness(
   action.observeScreen = observe;
   // Keep post-observation bookkeeping out of the transport regression test.
   action.observedInteraction = async (block, options) => ({
-    ...(await block(recordObservationRead(options.previousObservation ?? observation))),
+    ...(await runBlockWithEnvelope(
+      () => recordObservationRead(options.previousObservation ?? observation),
+      {},
+    )(block, options)),
     observation,
   });
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
@@ -102,10 +106,10 @@ function harness(
   const dispatches: Array<number | undefined> = [];
   let onDispatch = () => {};
   const tap = spyOn(client, "requestTapCoordinates").mockImplementation(async (...args) => {
-    args[9]?.();
-    dispatches.push(args[8]);
+    args[0].beforeSend?.();
+    dispatches.push(args[0].displayId);
     onDispatch();
-    return { success: true };
+    return { success: true, totalTimeMs: 0 };
   });
   restores.push(
     () => capability.mockRestore(),
@@ -314,13 +318,10 @@ test.each(["settle-throws", "throws", "settle-transition"] as const)(
 
 test("tapAny block refusal before dispatch never receives the dispatched marker", async () => {
   const h = harness(true);
-  h.action.observedInteraction = async () => {
+  h.action.observedInteraction = (block, options) => {
     h.transitions.transition();
-    return {
-      success: false,
-      error: "Unable to get view hierarchy, cannot tap on element",
-      observation: { ...h.observation, viewHierarchy: undefined },
-    };
+    const observation = { ...h.observation, viewHierarchy: undefined };
+    return runBlockWithEnvelope(observation, { observation })(block, options);
   };
   const result = await h.action.execute({ action: "tap", display: "cover" });
   expect(result.success).toBe(false);

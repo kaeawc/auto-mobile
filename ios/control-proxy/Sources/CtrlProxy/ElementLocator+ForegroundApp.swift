@@ -222,6 +222,10 @@ extension ElementLocator {
             // ~40 static ids is ~40 sequential state IPCs on the app's main
             // thread, so a recent miss is cached briefly to avoid repeating the
             // full fan-out on every extraction (issue #5474).
+            return detectForegroundSystemApp(currentBundleId: currentBundleId, observedBundleIds: observedBundleIds)
+        }
+
+        private func detectForegroundSystemApp(currentBundleId: String?, observedBundleIds: Set<String>) -> String? {
             return tracked("checkSystemApps") {
                 let now = DispatchTime.now().uptimeNanoseconds
                 guard Self.shouldRunSystemAppSweep(

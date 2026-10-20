@@ -30,6 +30,7 @@ import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig
 import { IosBaselineReset } from "./iosBaselineReset";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import type { BrokerResourceRecord } from "./store";
+import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "./timing";
 
 export interface SessionBrokerHostLock {
   acquire(): void;
@@ -181,9 +182,7 @@ async function isCurrentReset(
   store: SqliteSessionBrokerStore,
   expected: BrokerResourceRecord,
 ): Promise<boolean> {
-  const current = (await store.listResources()).find(
-    (resource) => resource.resourceId === expected.resourceId,
-  );
+  const current = await store.getResource(expected.resourceId);
   return (
     current?.state === "resetting" &&
     current.revision === expected.revision &&
@@ -221,7 +220,7 @@ async function assertBrokerInventoryOwned(
   registry: SqliteBindingRegistry,
   scopeKey: string,
 ): Promise<void> {
-  const resources = await registry.sessionBrokerStore(scopeKey).listResources();
+  const resources = await registry.sessionBrokerStore(scopeKey).listLiveResources();
   const occupied = new Set(
     resources
       .filter((resource) => resource.state !== "destroyed")
@@ -274,6 +273,12 @@ export class SessionBrokerService {
   private async stop(): Promise<void> {
     this.stopped = true;
     this.wake?.();
+    try {
+      await this.broker.markRestartHandoff();
+    } catch (error) {
+      // Preparations are already aborted; close retries the best-effort handoff after recovery.
+      logger.warn(`Session broker restart handoff failed: ${errorMessage(error)}`, error);
+    }
     await this.running;
     await this.broker.close();
     // Keep ownership if broker shutdown throws: the process's eventual exit makes the lock
@@ -291,6 +296,9 @@ export class SessionBrokerService {
         await this.broker.recover();
       } catch (error) {
         logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
+      }
+      if (this.stopped) {
+        return;
       }
       await this.pruneIfDue();
     }
@@ -319,7 +327,7 @@ export class SessionBrokerService {
         this.wake = undefined;
         resolve();
       };
-      const timeout = this.timer.setTimeout(done, 5_000);
+      const timeout = this.timer.setTimeout(done, SESSION_BROKER_RECOVERY_INTERVAL_MS);
       this.wake = () => {
         this.timer.clearTimeout(timeout);
         done();

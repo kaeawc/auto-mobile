@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { FakeSimctl as FakeSimCtl } from "../../fakes/FakeSimctl";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   PerformanceMonitor,
@@ -197,11 +199,12 @@ describe("PerformanceMonitor", () => {
   });
 
   describe("start() and stop()", () => {
-    it("should start the monitoring interval", () => {
+    it("should start the monitoring interval for a monitored device", () => {
       monitor = new PerformanceMonitor(fakeTimer, {
         adbClientFactory: fakeAdbFactory,
         serverGetter,
       });
+      monitor.startMonitoring("device-1", "com.example.app");
       monitor.start();
 
       expect(fakeTimer.getPendingIntervalCount()).toBe(1);
@@ -212,6 +215,7 @@ describe("PerformanceMonitor", () => {
         adbClientFactory: fakeAdbFactory,
         serverGetter,
       });
+      monitor.startMonitoring("device-1", "com.example.app");
       monitor.start();
       monitor.start();
 
@@ -1202,91 +1206,6 @@ describe("PerformanceMonitor", () => {
 /**
  * Fake SimCtl implementation for testing iOS monitoring.
  */
-class FakeSimCtl implements SimCtl {
-  private commandResults = new Map<string, ExecResult>();
-  private commandErrors = new Map<string, Error>();
-
-  setCommandResult(command: string, stdout: string, stderr = ""): void {
-    this.commandResults.set(command, { stdout, stderr });
-  }
-
-  setCommandError(command: string, error: Error): void {
-    this.commandErrors.set(command, error);
-  }
-
-  async executeCommand(command: string): Promise<ExecResult> {
-    if (this.commandErrors.has(command)) {
-      throw this.commandErrors.get(command);
-    }
-    const result = this.commandResults.get(command);
-    if (result) {
-      return result;
-    }
-    // Return empty result by default
-    return { stdout: "", stderr: "" };
-  }
-
-  async executeCommandArgs(args: string[]): Promise<ExecResult> {
-    return this.executeCommand(args.join(" "));
-  }
-
-  // Implement other SimCtl methods as no-ops for testing
-  setDevice(): void {}
-  async isAvailable(): Promise<boolean> {
-    return true;
-  }
-  async isSimulatorRunning(): Promise<boolean> {
-    return false;
-  }
-  async startSimulator(): Promise<any> {
-    return {};
-  }
-  async killSimulator(): Promise<void> {}
-  async waitForSimulatorReady(): Promise<any> {
-    return {};
-  }
-  async listSimulatorImages(): Promise<any[]> {
-    return [];
-  }
-  async getBootedSimulators(): Promise<any[]> {
-    return [];
-  }
-  async getDeviceInfo(): Promise<any> {
-    return null;
-  }
-  async bootSimulator(): Promise<any> {
-    return {};
-  }
-  async getDeviceTypes(): Promise<any[]> {
-    return [];
-  }
-  async getRuntimes(): Promise<any[]> {
-    return [];
-  }
-  async createSimulator(): Promise<string> {
-    return "";
-  }
-  async deleteSimulator(): Promise<void> {}
-  async listApps(): Promise<any[]> {
-    return [];
-  }
-  async launchApp(): Promise<any> {
-    return { success: true };
-  }
-  async terminateApp(): Promise<void> {}
-  async installApp(): Promise<void> {}
-  async uninstallApp(): Promise<void> {}
-  async getScreenSize(): Promise<any> {
-    return { width: 390, height: 844 };
-  }
-  async setAppearance(): Promise<void> {}
-  async openSimulatorApp(): Promise<boolean> {
-    return true;
-  }
-  async pushNotification(): Promise<{ success: boolean; error?: string }> {
-    return { success: true };
-  }
-}
 
 /**
  * Fake SimCtlClientFactory for testing.
@@ -1319,8 +1238,14 @@ function createFakeExecFileAsync(options: {
   };
 }
 
+const IOS_PS_CAPTURE = readFileSync(
+  new URL("../../fixtures/ios-sim-fleet/ps-snapshot-two-booted-simulators.txt", import.meta.url),
+  "utf8",
+);
+const IOS_APP_ROW = IOS_PS_CAPTURE.split("\n").find((line) => line.includes("Playground.app"))!;
+
 /**
- * Build a realistic host `ps aux` line for a simulator app process. Simulator
+ * Build a realistic host process snapshot row for a simulator app process. Simulator
  * apps run as macOS processes whose command line is the app binary under the
  * device's CoreSimulator data container, so the line carries both the device
  * UDID and the bundle id — the two substrings the device-scoped matcher
@@ -1333,14 +1258,13 @@ function iosSimPsLine(opts: {
   deviceId: string;
   bundleId: string;
 }): string {
-  const command =
-    `/Users/mobile/Library/Developer/CoreSimulator/Devices/${opts.deviceId}` +
-    `/data/Containers/Bundle/Application/6C1FAA48-3F5D-43ED-BCDA-5B57C4331B56` +
-    `/${opts.bundleId}.app/${opts.bundleId}`;
-  return `mobile ${opts.pid} ${opts.cpu}  2.3  1234567 ${opts.rssKb}   ??  Ss   10:00AM   1:23.45 ${command}`;
+  return IOS_APP_ROW.replace(
+    "90012 90011 150000   1.2",
+    `${opts.pid} 90011 ${opts.rssKb} ${opts.cpu}`,
+  )
+    .replaceAll("2300914A-231E-4874-8F8A-40C3D2F1E24B", opts.deviceId)
+    .replaceAll("Playground", opts.bundleId);
 }
-
-const IOS_PS_HEADER = "USER     PID %CPU %MEM      VSZ    RSS   TT  STAT STARTED      TIME COMMAND";
 
 describe("PerformanceMonitor iOS", () => {
   let fakeTimer: FakeTimer;
@@ -1370,12 +1294,10 @@ describe("PerformanceMonitor iOS", () => {
     fakeTimer.reset();
   });
 
-  it("should collect iOS CPU metrics via ps aux", async () => {
-    // Set up fake ps aux response on the host
+  it("should collect iOS CPU metrics via the shared ps snapshot", async () => {
+    // Set up fake ps snapshot response on the host
     const fakeExec = createFakeExecFileAsync({
-      stdout: `${IOS_PS_HEADER}
-root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launchd
-${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
+      stdout: `${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
     });
 
     monitor = new PerformanceMonitor(fakeTimer, {
@@ -1396,11 +1318,10 @@ ${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", 
     expect(data!.metrics.cpuUsagePercent).toBe(15.5);
   });
 
-  it("should collect iOS memory metrics via ps aux (RSS)", async () => {
-    // Set up fake ps aux response on the host
+  it("should collect iOS memory metrics via the shared ps snapshot (RSS)", async () => {
+    // Set up fake ps snapshot response on the host
     const fakeExec = createFakeExecFileAsync({
-      stdout: `${IOS_PS_HEADER}
-${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
+      stdout: `${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
     });
 
     monitor = new PerformanceMonitor(fakeTimer, {
@@ -1497,10 +1418,9 @@ ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", 
   }
 
   it("should handle iOS process not found gracefully", async () => {
-    // ps aux returns output but doesn't include our bundle ID
+    // The captured host snapshot does not include our bundle ID
     const fakeExec = createFakeExecFileAsync({
-      stdout: `USER     PID %CPU %MEM      VSZ    RSS   TT  STAT STARTED      TIME COMMAND
-root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launchd`,
+      stdout: IOS_PS_CAPTURE,
     });
 
     monitor = new PerformanceMonitor(fakeTimer, {
@@ -1542,7 +1462,7 @@ root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launch
   });
 
   it("scopes iOS metrics per simulator when two sims run the same bundle (#5109)", async () => {
-    // Same bundle booted on two simulators. The host `ps aux` lists both
+    // Same bundle booted on two simulators. The host process snapshot lists both
     // processes; each app line carries its own simulator UDID in the
     // CoreSimulator data-container path. Metrics must be scoped by deviceId,
     // not resolved to the first matching process.
@@ -1550,8 +1470,7 @@ root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launch
     const udidA = "AAAAAAAA-0000-0000-0000-000000000001";
     const udidB = "BBBBBBBB-0000-0000-0000-000000000002";
     const fakeExec = createFakeExecFileAsync({
-      stdout: `${IOS_PS_HEADER}
-${iosSimPsLine({ pid: 111, cpu: 11.0, rssKb: 51200, deviceId: udidA, bundleId })}
+      stdout: `${iosSimPsLine({ pid: 111, cpu: 11.0, rssKb: 51200, deviceId: udidA, bundleId })}
 ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId })}`,
     });
 

@@ -157,7 +157,7 @@ describe("sessionless identity quarantine", () => {
     const commands: string[] = [];
     const client = new AdbClient(
       device,
-      async (command) => {
+      async (command: string) => {
         commands.push(command);
         return {
           stdout: "",

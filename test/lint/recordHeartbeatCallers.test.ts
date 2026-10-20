@@ -1,22 +1,22 @@
-import { typeScriptFiles, relativePosix } from "./astGuard";
+import { typeScriptFiles, relativePosix, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+
 import path from "node:path";
-import { scanRecordHeartbeatCalls } from "./recordHeartbeatCallers";
+import {
+  scanRecordHeartbeatCalls,
+  scanNamedCalls,
+  scanNamedCallOwners,
+} from "./recordHeartbeatCallers";
 
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
-const BASELINE_FILE = path.join(import.meta.dir, "record-heartbeat-callers-baseline.txt");
-// Equals the baseline's line count; the UPDATE command below keeps it in sync.
-const BASELINE_CEILING = 0;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 const HARNESS_FILE = "test/helpers/livenessScenarioHarness.ts";
 /**
  * Files that unit-test `recordHeartbeat` itself, so the direct call IS the subject under test and
  * delivering a `daemon/heartbeat` frame would test a different layer. A permanent, reasoned
- * exemption, not baseline debt: an exempt file must still call it (else drop the entry).
+ * exemption: an exempt file must still call it (else drop the entry).
  */
 const EXEMPT_FILES: Readonly<Record<string, string>> = {
   "test/daemon/sessionLivenessLease.test.ts":
@@ -74,6 +74,11 @@ describe("scanRecordHeartbeatCalls", () => {
         "\nmanager.recordHeartbeat(id);\n\nrecordHeartbeat(id);",
       ),
     ).toEqual([{ line: 2 }, { line: 4 }]);
+    for (const name of ["foo\nbar", 'foo"bar', "foo/bar", "foo\\bar"]) {
+      const source = `manager[${JSON.stringify(name).replaceAll("/", "\\/")}]();`;
+      expect(scanNamedCalls("fixture.ts", source, name)).toEqual([{ line: 1 }]);
+      expect(scanNamedCallOwners("fixture.ts", source, name)).toEqual(["<module>"]);
+    }
   });
 
   test("ignores definitions, spies, mentions and longer names", () => {
@@ -100,11 +105,7 @@ describe("scanRecordHeartbeatCalls", () => {
   });
 });
 
-const UPDATE_COMMAND =
-  "UPDATE_RECORD_HEARTBEAT_BASELINE=1 bun test test/lint/recordHeartbeatCallers.test.ts";
-
-describe("direct recordHeartbeat callers stay within the baseline", () => {
-  let baseline: readonly string[] = [];
+describe("tests do not call recordHeartbeat directly", () => {
   let found: readonly string[] = [];
   let exemptFound: readonly string[] = [];
   let callSites: readonly { file: string; line: number }[] = [];
@@ -112,7 +113,7 @@ describe("direct recordHeartbeat callers stay within the baseline", () => {
   beforeAll(() => {
     callSites = typeScriptFiles(TEST_DIR).flatMap((file) => {
       const relative = relativePosix(REPO_ROOT, file);
-      return scanRecordHeartbeatCalls(relative, readFileSync(file, "utf8")).map((finding) => ({
+      return scanRecordHeartbeatCalls(relative, readGuardFile(file)).map((finding) => ({
         file: relative,
         line: finding.line,
       }));
@@ -122,42 +123,17 @@ describe("direct recordHeartbeat callers stay within the baseline", () => {
     );
     callSites = callSites.filter((finding) => !(finding.file in EXEMPT_FILES));
     found = [...new Set(callSites.map((finding) => finding.file))].sort();
-    if (process.env.UPDATE_RECORD_HEARTBEAT_BASELINE === "1") {
-      // Regenerate exactly the still-offending files and sync the ceiling.
-      writeFileSync(BASELINE_FILE, found.map((entry) => `${entry}\n`).join(""));
-      const self = fileURLToPath(import.meta.url);
-      writeFileSync(
-        self,
-        readFileSync(self, "utf8").replace(
-          /BASELINE_CEILING = \d+;/,
-          `BASELINE_CEILING = ${found.length};`,
-        ),
-      );
-    }
-    baseline = readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
-  test("no file outside the baseline calls recordHeartbeat directly", () => {
-    const added = callSites.filter((finding) => !baseline.includes(finding.file));
-    if (added.length > 0) {
+  test("no file calls recordHeartbeat directly", () => {
+    if (callSites.length > 0) {
       throw new Error(
-        `New direct recordHeartbeat calls:\n  ${added.map(({ file, line }) => `${file}:${line}`).join("\n  ")}\n` +
+        `Direct recordHeartbeat calls:\n  ${callSites.map(({ file, line }) => `${file}:${line}`).join("\n  ")}\n` +
           `Drive heartbeats through deliverDaemonHeartbeat in test/helpers/daemonHeartbeatHandler.ts ` +
           `(daemon/heartbeat frames). A test that unit-tests recordHeartbeat itself belongs in ` +
           `EXEMPT_FILES with a reason.`,
       );
     }
-  });
-
-  test("the baseline lists only still-offending files, so it can only shrink", () => {
-    const stale = baseline.filter((entry) => !found.includes(entry));
-    if (stale.length > 0) {
-      throw new Error(
-        `Stale baseline lines (file fixed, renamed or deleted):\n  ${stale.join("\n  ")}\n` +
-          `Run: ${UPDATE_COMMAND}  and commit the result.`,
-      );
-    }
-    expect(baseline.length).toBe(BASELINE_CEILING);
   });
 
   test("every exemption names a file that still calls recordHeartbeat directly", () => {
@@ -168,12 +144,7 @@ describe("direct recordHeartbeat callers stay within the baseline", () => {
     }
   });
 
-  test("the baseline is sorted and free of duplicates", () => {
-    expect(baseline).toEqual([...new Set(baseline)].sort());
-  });
-
-  test("the liveness scenario harness never calls recordHeartbeat directly or enters the baseline", () => {
+  test("the liveness scenario harness never calls recordHeartbeat directly", () => {
     expect(found).not.toContain(HARNESS_FILE);
-    expect(baseline).not.toContain(HARNESS_FILE);
   });
 });

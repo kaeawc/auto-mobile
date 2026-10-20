@@ -181,7 +181,7 @@ describe("Simctl", function () {
       expect(commandSignal?.aborted).toBe(true);
     });
 
-    test("preserves explicit cancellation without adding a default timeout", async function () {
+    test("preserves explicit cancellation with a default timeout", async function () {
       const timer = new FakeTimer();
       let commandSignal: AbortSignal | undefined;
       mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
@@ -194,14 +194,14 @@ describe("Simctl", function () {
 
       const caller = new AbortController();
       const command = simctl.executeCommandArgs(["list", "devices"], undefined, caller.signal);
-      expect(commandSignal).toBe(caller.signal);
-      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(commandSignal?.aborted).toBe(false);
+      expect(timer.getPendingTimeouts()).toEqual([60_000]);
 
       caller.abort(new Error("caller cancelled"));
       await expect(command).rejects.toThrow("caller cancelled");
     });
 
-    test("preserves ambient cancellation without adding a default timeout", async function () {
+    test("preserves ambient cancellation with a default timeout", async function () {
       const timer = new FakeTimer();
       let commandSignal: AbortSignal | undefined;
       mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
@@ -216,8 +216,8 @@ describe("Simctl", function () {
       const command = runWithAbortSignal(caller.signal, () =>
         simctl.executeCommand("list devices"),
       );
-      expect(commandSignal).toBe(caller.signal);
-      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(commandSignal?.aborted).toBe(false);
+      expect(timer.getPendingTimeouts()).toEqual([60_000]);
 
       caller.abort(new Error("request cancelled"));
       await expect(command).rejects.toThrow("request cancelled");
@@ -1989,7 +1989,7 @@ describe("Simctl", function () {
         const reason = new Error(`${method} request cancelled`);
 
         try {
-          const result = runWithAbortSignal(controller.signal, () =>
+          const result = runWithAbortSignal(controller.signal, async () =>
             method === "getBootedSimulators"
               ? simctl.getBootedSimulators()
               : simctl.getDeviceInfo("some-udid"),

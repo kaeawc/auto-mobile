@@ -15,6 +15,20 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { BootedDevice, Platform } from "../../src/models";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolText } from "../helpers/toolResponse";
+
+/** Awaits a promise that must reject with an Error and returns that Error. */
+async function rejectionOf(pending: Promise<unknown>): Promise<Error> {
+  try {
+    await pending;
+  } catch (caught: unknown) {
+    if (caught instanceof Error) {
+      return caught;
+    }
+    throw new Error(`expected an Error rejection, got ${String(caught)}`);
+  }
+  throw new Error("expected the call to reject");
+}
 
 isolateToolRegistry();
 
@@ -104,7 +118,7 @@ describe("iOS database inspection server integration", function () {
       undefined,
       true,
     );
-    const payload = JSON.parse(response.content[0].text);
+    const payload = JSON.parse(toolText(response));
     expect(payload).toEqual({
       message: "Query returned 1 row(s)",
       type: "query",
@@ -134,7 +148,7 @@ describe("iOS database inspection server integration", function () {
         query: "INSERT INTO notes (title) VALUES ('new')",
       });
 
-      const payload = JSON.parse(response.content[0].text);
+      const payload = JSON.parse(toolText(response));
       expect(payload.type).toBe("mutation");
       expect(payload.rowsAffected).toBe(1);
       expect(notifyResourceUpdated).toHaveBeenCalledWith(
@@ -208,7 +222,7 @@ describe("iOS database inspection server integration", function () {
         databasePath: "sessions.sqlite",
         query: "BEGIN",
       });
-      const error = await thrown.catch((caught: unknown) => caught as Error);
+      const error = await rejectionOf(thrown);
       expect(error.message).toBe(expectedMessage);
       expect(error.message.includes("setEnabled(true)")).toBe(includesSetupAdvice);
       expect(error.message).not.toContain("database inspection unavailable");
@@ -265,11 +279,13 @@ describe("iOS database inspection server integration", function () {
 
       registerDatabaseTools(iosClient);
       const tool = ToolRegistry.getTool("sqlQuery");
-      const error = await tool!.deviceAwareHandler!(iosDevice, {
-        appId: "com.example.app",
-        databasePath: "/app/Documents/app.db",
-        query,
-      }).catch((caught: unknown) => caught as Error);
+      const error = await rejectionOf(
+        tool!.deviceAwareHandler!(iosDevice, {
+          appId: "com.example.app",
+          databasePath: "/app/Documents/app.db",
+          query,
+        }),
+      );
       expect(error.message).toContain(expectedFragment);
     },
   );

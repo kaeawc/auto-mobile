@@ -1,3 +1,4 @@
+import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -277,6 +278,7 @@ export class OpenURL extends BaseVisualChange {
         }
       } catch (error) {
         throwIfAborted(signal);
+        rethrowDeviceTransportUnavailable(error);
         logger.warn(
           `[OpenURL] Exception while launching app ${packageName}: ${errorMessage(error)}`,
           error,

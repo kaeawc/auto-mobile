@@ -1,5 +1,3 @@
-import { ActionableError } from "../../models/ActionableError";
-
 const NEWLINE = 0x0a;
 
 /*
@@ -65,14 +63,6 @@ export const DAEMON_CLIENT_MAX_FRAME_BYTES = CONTROL_SOCKET_MAX_FRAME_BYTES;
  * per device), never video bytes. The auxiliary 1 MiB budget leaves ample room.
  */
 export const DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES = AUX_SOCKET_MAX_FRAME_BYTES;
-
-/** Client-local transport failure: retrying could repeat an already executed tool. */
-export class DaemonFrameTooLargeError extends ActionableError {
-  constructor(readonly limitBytes: number) {
-    super(`Daemon response frame exceeded ${limitBytes} bytes; the daemon connection was closed.`);
-    this.name = "DaemonFrameTooLargeError";
-  }
-}
 
 /** `acknowledge` carries an id list the protocol does not bound; see the table above. */
 export const FAILURES_STREAM_MAX_FRAME_BYTES = 8 * 1024 * 1024;

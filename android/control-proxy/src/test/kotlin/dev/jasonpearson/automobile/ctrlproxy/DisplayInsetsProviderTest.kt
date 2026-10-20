@@ -45,6 +45,25 @@ class DisplayInsetsProviderTest {
   }
 
   @Test
+  fun `injected API above the runtime preserves the mapping`() {
+    val lookup = FakeWindowInsetsLookup(windowInsets())
+    val provider =
+      WindowMetricsDisplayInsetsProvider(Build.VERSION_CODES.TIRAMISU, lookup::insetsFor)
+
+    assertEquals(expectedInsets(), provider.insetsFor(7, dimensions))
+    assertEquals(listOf(7), lookup.requestedDisplayIds)
+  }
+
+  @Test
+  fun `injected API below 30 skips lookup on an API 30 runtime`() {
+    val lookup = FakeWindowInsetsLookup(failure = IllegalStateException("must not be called"))
+    val provider = WindowMetricsDisplayInsetsProvider(Build.VERSION_CODES.Q, lookup::insetsFor)
+
+    assertEquals(unavailableInsets(), provider.insetsFor(2, dimensions))
+    assertEquals(emptyList<Int>(), lookup.requestedDisplayIds)
+  }
+
+  @Test
   @Config(sdk = [29])
   fun `API 29 is unavailable without consulting the lookup`() {
     val lookup = FakeWindowInsetsLookup(failure = IllegalStateException("must not be called"))

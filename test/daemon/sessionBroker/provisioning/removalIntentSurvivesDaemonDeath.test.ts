@@ -389,7 +389,7 @@ test("a device not created by this attempt is rolled back without flag or delete
   expect(h.inventory.has("UDID-1")).toBe(true);
 });
 
-test.each(["binding", "free"] as const)(
+test.each(["committed binding", "reported binding holder"] as const)(
   "discard preserves a device held by a winning %s",
   async (holder) => {
     const h = await harness(true);
@@ -399,7 +399,7 @@ test.each(["binding", "free"] as const)(
         return advance(id, input);
       }
       const assignment = (await h.registry.getAssignment(h.key))!;
-      if (holder === "binding") {
+      if (holder === "committed binding") {
         await h.registry.commitBinding(
           h.key,
           { generation: assignment.generation, stableDeviceId: null },
@@ -416,20 +416,7 @@ test.each(["binding", "free"] as const)(
         if (!scope) {
           throw new Error("missing scope");
         }
-        h.registry.findDeviceHolder = async () => ({
-          kind: "free",
-          device: {
-            platform: "ios",
-            stableDeviceId: "UDID-1",
-            fromScopeKey: scope.scopeKey,
-            specFingerprint: "winner",
-            freedAtMs: h.timer.now(),
-            state: "free",
-            deletion: null,
-            stopClaimedBy: null,
-            stopClaimedAtMs: null,
-          },
-        });
+        h.registry.findDeviceHolder = async () => ({ kind: "binding", scope, assignment });
       }
       return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
     };

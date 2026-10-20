@@ -12,19 +12,19 @@ import os
     extension GesturePerformer {
         // MARK: - Text Input
 
-        func fieldText(_ el: XCUIElement) -> String {
+        func fieldText(_ element: XCUIElement) -> String {
             do {
-                let snapshot = try catchingObjCException { try el.snapshot() }
+                let snapshot = try catchingObjCException { try element.snapshot() }
                 return GesturePerformer.fieldText(
                     snapshotValue: snapshot.value as? String,
-                    value: el.value as? String,
+                    value: element.value as? String,
                     placeholderValue: snapshot.placeholderValue
                 )
             } catch {
                 // Text can still be read from the element when its snapshot is unavailable.
                 logger.warning("Text field snapshot failed; reading element value: \(error)")
-                let value = el.value as? String
-                let placeholder = el.placeholderValue
+                let value = element.value as? String
+                let placeholder = element.placeholderValue
                 return value == placeholder ? "" : value ?? ""
             }
         }

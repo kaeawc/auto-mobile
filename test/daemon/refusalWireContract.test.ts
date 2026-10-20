@@ -2,11 +2,12 @@ import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Server } from "@modelcontextprotocol/server";
 import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
 import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
-import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal } from "../../src/daemon/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from "oxc-parser";
+import { parseSync, Visitor, type Class } from "oxc-parser";
+import type { ServerContext } from "@modelcontextprotocol/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -14,10 +15,15 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
+import * as downloadsStageRefusal from "../../src/server/StageSessionDownloadsRefusal";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import * as deviceLost from "../../src/models/DeviceLostError";
 import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import * as bindingRefusals from "../../src/daemon/sessionBroker/provisioning/refusal";
+import * as bindingDiscoveryIncompleteErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import * as bindingRegistrySchemaUnsupportedErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import * as bindingOwnershipLostErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
+import * as bindingOwnershipUnconfirmedErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import * as sessionConfig from "../../src/devices/sessionConfig";
 import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError.base";
 import * as androidDiscoveryRefusals from "../../src/models/AndroidBootedDeviceDiscoveryIncompleteError";
@@ -31,13 +37,25 @@ import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentE
 import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
 import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
 import * as restartAdmission from "../../src/daemon/daemonRestartAdmission";
+import * as restartPending from "../../src/daemon/daemonRestartPending";
 import * as deviceSessionResolver from "../../src/daemon/deviceSessionResolver";
-import * as orphanRecorderRefusal from "../../src/server/orphanRecorderRefusal";
+import * as orphanRecorderRefusal from "../../src/daemon/orphanRecorderRefusal";
 import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
-import * as daemonErrors from "../../src/daemon/proxy/daemonErrors";
+import * as nsDaemonAmbiguousSessionSelectorError from "../../src/daemon/proxy/DaemonAmbiguousSessionSelectorError";
+import * as nsDaemonAssetVersionMismatchError from "../../src/daemon/proxy/DaemonAssetVersionMismatchError";
+import * as nsDaemonBoundSessionExpiredError from "../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import * as nsDaemonBuildMismatchError from "../../src/daemon/proxy/DaemonBuildMismatchError";
+import * as nsDaemonConnectionSessionReleasedError from "../../src/daemon/proxy/DaemonConnectionSessionReleasedError";
+import * as nsDaemonSessionStalledError from "../../src/daemon/proxy/DaemonSessionStalledError";
+import * as nsDaemonToolOutcomeUnknownError from "../../src/daemon/proxy/DaemonToolOutcomeUnknownError";
+import * as nsDaemonToolUnavailableError from "../../src/daemon/proxy/DaemonToolUnavailableError";
+import * as nsDaemonVersionMismatchError from "../../src/daemon/proxy/DaemonVersionMismatchError";
+import * as nsLifecycleConnectionInFlightError from "../../src/daemon/proxy/LifecycleConnectionInFlightError";
 import * as sessionManager from "../../src/daemon/sessionManager";
+import * as nsSessionRecoveryIdentityLossError from "../../src/daemon/sessionManager/SessionRecoveryIdentityLossError";
+import * as sessionErrors from "../../src/daemon/sessionErrors";
 import * as sessionOwnership from "../../src/models/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
 import * as provisioning from "../../src/devices/exactDeviceProvisioning";
@@ -47,23 +65,42 @@ import * as deviceBootTimeout from "../../src/devices/DeviceBootTimeoutError";
 import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
+import * as sessionReleasedDuringCreation from "../../src/models/SessionReleasedDuringCreationError";
+import * as deviceShuttingDown from "../../src/models/DeviceShuttingDownError";
+import * as sessionCreationTimeout from "../../src/models/SessionCreationTimeoutError";
+import * as retryableDeviceAcquisition from "../../src/models/RetryableDeviceAcquisitionError";
+import * as deviceOwnedByOtherDaemon from "../../src/models/DeviceOwnedByOtherDaemonError";
+import * as deviceCleanupInProgress from "../../src/models/DeviceCleanupInProgressError";
+import * as deviceUnhealthy from "../../src/models/DeviceUnhealthyError";
+import * as deviceTransportOffline from "../../src/models/DeviceTransportOfflineError";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
 import * as inputOwnedError from "../../src/models/InputDeviceOwnedError";
 import * as deviceAssignedToBinding from "../../src/models/DeviceAssignedToBindingError";
 import * as brokerConnectionRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
-import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
-import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
-import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
+import * as boundSessionRefusal from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import * as deviceOutsideBoundSession from "../../src/daemon/DeviceOutsideBoundSessionError";
+import * as sessionOutsideBoundSession from "../../src/daemon/SessionOutsideBoundSessionError";
+import * as planLockRefusal from "../../src/daemon/planExecutionInProgressRefusal";
+import * as adbTransportUnavailable from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import * as ambiguousTargetRefusal from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import * as daemonTypes from "../../src/daemon/types";
 import * as daemonConstants from "../../src/daemon/constants";
 import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
 import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
-import * as daemonClient from "../../src/daemon/client";
+import * as nsDaemonRequestNotDeliveredError from "../../src/daemon/DaemonRequestNotDeliveredError";
+import * as nsDaemonUnavailableError from "../../src/daemon/DaemonUnavailableError";
+import * as nsUnknownToolError from "../../src/daemon/UnknownToolError";
+import * as nsReleaseErrors from "../../src/daemon/releaseErrors";
+import * as nsDaemonSessionCreationRejectedError from "../../src/daemon/sessionErrors/DaemonSessionCreationRejectedError";
+import * as nsPooledAvdIdentityError from "../../src/features/deviceLifecycle/PooledAvdIdentityError";
+import * as daemonHandshakeMismatch from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
-import * as toolUnavailable from "../../src/server/toolUnavailableError";
+import * as toolUnavailable from "../../src/daemon/toolUnavailableError";
 import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
@@ -86,10 +123,8 @@ import {
 import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  DaemonRestartDeferredError,
-  DaemonRestartPendingError,
-} from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../../src/daemon/daemonRestartPending";
 import {
   EXTERNALLY_CAPTURED_SURFACE_FIXTURES,
   EXEMPT_REFUSAL_ERROR_CLASSES,
@@ -119,10 +154,18 @@ import {
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
   "server/downloadsFixtureService": downloadsRefusals,
+  "server/StageSessionDownloadsRefusal": downloadsStageRefusal,
   "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
   "models/DeviceLostError": deviceLost,
   "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
   "daemon/sessionBroker/provisioning/refusal": bindingRefusals,
+  "daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError":
+    bindingDiscoveryIncompleteErrorModule,
+  "daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError":
+    bindingRegistrySchemaUnsupportedErrorModule,
+  "daemon/sessionBroker/provisioning/BindingOwnershipLostError": bindingOwnershipLostErrorModule,
+  "daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError":
+    bindingOwnershipUnconfirmedErrorModule,
   "devices/sessionConfig": sessionConfig,
   "models/BootedDeviceDiscoveryIncompleteError.base": discoveryRefusals,
   "models/AndroidBootedDeviceDiscoveryIncompleteError": androidDiscoveryRefusals,
@@ -136,13 +179,28 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/streamSubscriptionPolicy": streamPolicy,
   "daemon/sharedNamespaceGuard": namespaceGuard,
   "daemon/daemonRestartAdmission": restartAdmission,
+  "daemon/daemonRestartPending": restartPending,
   "daemon/deviceSessionResolver": deviceSessionResolver,
   "daemon/deviceGestureRecordingStartAdmission": recordingAdmission,
-  "server/orphanRecorderRefusal": orphanRecorderRefusal,
+  "daemon/orphanRecorderRefusal": orphanRecorderRefusal,
   "daemon/daemonHandoffInterruption": handoffInterruption,
   "daemon/daemonMcpProxy": daemonProxy,
-  "daemon/proxy/daemonErrors": daemonErrors,
+  "daemon/proxy/DaemonAmbiguousSessionSelectorError": nsDaemonAmbiguousSessionSelectorError,
+  "daemon/proxy/DaemonAssetVersionMismatchError": nsDaemonAssetVersionMismatchError,
+  "daemon/proxy/DaemonBoundSessionExpiredError": nsDaemonBoundSessionExpiredError,
+  "daemon/proxy/DaemonBuildMismatchError": nsDaemonBuildMismatchError,
+  "daemon/proxy/DaemonConnectionSessionReleasedError": nsDaemonConnectionSessionReleasedError,
+  "daemon/proxy/DaemonSessionStalledError": nsDaemonSessionStalledError,
+  "daemon/proxy/DaemonToolOutcomeUnknownError": nsDaemonToolOutcomeUnknownError,
+  "daemon/proxy/DaemonToolUnavailableError": nsDaemonToolUnavailableError,
+  "daemon/proxy/DaemonVersionMismatchError": nsDaemonVersionMismatchError,
+  "daemon/proxy/LifecycleConnectionInFlightError": nsLifecycleConnectionInFlightError,
   "daemon/sessionManager": sessionManager,
+  "daemon/sessionManager/SessionRecoveryIdentityLossError": nsSessionRecoveryIdentityLossError,
+  "daemon/sessionErrors/SessionHeldByRecoveryError": sessionErrors,
+  "daemon/sessionErrors/SessionRebindingError": sessionErrors,
+  "daemon/sessionErrors/SessionSuspectError": sessionErrors,
+  "daemon/sessionErrors/SessionTerminalReleaseInProgressError": sessionErrors,
   "models/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,
   "devices/exactDeviceProvisioning": provisioning,
@@ -150,25 +208,40 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "devices/ProvisionDeviceCreateRejectedError": provisionDeviceCreateRejected,
   "devices/deviceBootService": deviceBoot,
   "devices/DeviceBootTimeoutError": deviceBootTimeout,
-  "models/deviceAcquisitionRefusals": acquisitionRefusals,
+  "models/SessionReleasedDuringCreationError": sessionReleasedDuringCreation,
+  "models/DeviceShuttingDownError": deviceShuttingDown,
+  "models/SessionCreationTimeoutError": sessionCreationTimeout,
+  "models/RetryableDeviceAcquisitionError": retryableDeviceAcquisition,
+  "models/DeviceOwnedByOtherDaemonError": deviceOwnedByOtherDaemon,
+  "models/DeviceCleanupInProgressError": deviceCleanupInProgress,
+  "models/DeviceUnhealthyError": deviceUnhealthy,
+  "models/DeviceTransportOfflineError": deviceTransportOffline,
   "models/InputDeviceOwnedError": inputOwnedError,
   "models/DeviceAssignedToBindingError": deviceAssignedToBinding,
   "daemon/inputDeviceOwnership": inputOwnership,
   "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
-  "server/deviceOutsideBoundSessionRefusal": boundSessionRefusal,
-  "server/planExecutionInProgressRefusal": planLockRefusal,
-  "server/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
+  "daemon/DeviceOutsideBoundSessionError": deviceOutsideBoundSession,
+  "daemon/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
+  "daemon/planExecutionInProgressRefusal": planLockRefusal,
+  "daemon/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
+  "utils/android-cmdline-tools/AdbDeviceTransportUnavailableError": adbTransportUnavailable,
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
   "models/SdkTooOldError": sdkTooOld,
   "features/prototype/prototypeHidden": prototypeHidden,
   "features/prototype/prototypeSuspended": prototypeSuspended,
-  "daemon/client": daemonClient,
+  "daemon/DaemonHandshakeMismatchError": daemonHandshakeMismatch,
+  "daemon/DaemonRequestNotDeliveredError": nsDaemonRequestNotDeliveredError,
+  "daemon/DaemonUnavailableError": nsDaemonUnavailableError,
+  "daemon/UnknownToolError": nsUnknownToolError,
+  "daemon/releaseErrors": nsReleaseErrors,
+  "daemon/sessionErrors/DaemonSessionCreationRejectedError": nsDaemonSessionCreationRejectedError,
+  "features/deviceLifecycle/PooledAvdIdentityError": nsPooledAvdIdentityError,
   "daemon/deviceControlTransportFailure": controlTransport,
-  "server/toolUnavailableError": toolUnavailable,
-  "features/deviceLifecycle/deviceLifecycleCore": deviceLifecycleCore,
+  "daemon/toolUnavailableError": toolUnavailable,
+  "features/deviceLifecycle/core/provisioning": deviceLifecycleCore,
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
@@ -199,6 +272,12 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/PrototypeViewerOverrideError": INSTALLER_ERROR_EXEMPTION,
   "features/prototype/ios/installerErrors/PrototypeViewerExtractError": INSTALLER_ERROR_EXEMPTION,
+  "daemon/sessionBroker/store":
+    "Export identity mismatch is mapped to a {success:false, code} daemon reply by the export handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionRequestOwnerMismatchError":
+    "Request owner mismatch is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply (retryAfterMs only when retryable) by the release/abandon handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionBrokerStoppingError":
+    "Shutdown refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
 };
 
 interface CodedErrorModule {
@@ -214,7 +293,7 @@ interface ScannedClass {
   exported: boolean;
 }
 
-type ScannedClassNode = ClassDeclaration | ClassExpression;
+type ScannedClassNode = Class;
 
 function declaresCode(node: ScannedClassNode): boolean {
   return node.body.body.some((member) => {
@@ -265,7 +344,9 @@ function scanClasses(module: string, source: string): ScannedClass[] {
       }
       if (!node.source && node.exportKind !== "type") {
         for (const specifier of node.specifiers) {
-          exportedNames.add(specifier.local.name);
+          exportedNames.add(
+            specifier.local.type === "Literal" ? specifier.local.value : specifier.local.name,
+          );
         }
       }
     },
@@ -369,7 +450,7 @@ beforeAll(() => {
   const root = join(import.meta.dir, "..", "..", "src");
   codedErrorInventory = Object.freeze(
     codedErrorModules(
-      readdirSync(root, { recursive: true })
+      readdirSync(root, { recursive: true, encoding: "utf8" })
         .filter((file) => file.endsWith(".ts"))
         .map((file) => ({
           module: file.split(sep).join("/").slice(0, -3),
@@ -407,10 +488,12 @@ function missingErrorClasses(
  */
 /** The codes a payload names on the wire, outermost first. */
 function wireCodes(payload: WirePayload): string[] {
-  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code];
+  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code].filter(
+    (code): code is string => code !== undefined,
+  );
   const nested =
     typeof payload.error === "object" ? payload.error.acquisitionFailure?.code : undefined;
-  return nested ? [...codes, nested] : codes.filter((code): code is string => code !== undefined);
+  return nested ? [...codes, nested] : codes;
 }
 
 const WAIT_CODES: ReadonlySet<string> = new Set([
@@ -612,12 +695,18 @@ const surfaceExpectations = readSurfaceExpectations(
   readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
 );
 
+type ToolsCallHandler = (request: unknown, ctx: ServerContext) => Promise<unknown>;
+
+function isToolsCallHandler(value: unknown): value is ToolsCallHandler {
+  return typeof value === "function";
+}
+
 // Capture private production builders through their registered public handlers, using only fakes.
 const ownedSurfaceFixtures: RefusalSurfaceFixture[] = [];
 beforeAll(async () => {
   const registration = spyOn(Server.prototype, "setRequestHandler");
   let harness: ReturnType<typeof createProxyMcpServer>;
-  let registrations: typeof registration.mock.calls;
+  let registrations: ReadonlyArray<readonly unknown[]>;
   try {
     harness = createProxyMcpServer({
       proxyConfig: {
@@ -632,10 +721,10 @@ beforeAll(async () => {
   } finally {
     registration.mockRestore();
   }
-  const handler = registrations.findLast(([schema]) => schema === "tools/call")?.[1];
+  const handler = registrations.findLast(([method]) => method === "tools/call")?.[1];
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    if (!handler) {
+    if (!isToolsCallHandler(handler)) {
       throw new Error("Missing tools/call handler");
     }
     const cases = [
@@ -646,7 +735,7 @@ beforeAll(async () => {
           "explicit-release",
         ),
       ],
-      ["daemon_shutting_down", new daemonClient.DaemonShuttingDownError()],
+      ["daemon_shutting_down", new DaemonShuttingDownError()],
     ] as const;
     for (const [name, error] of cases) {
       const call = spyOn(harness.proxy, "callTool").mockRejectedValue(error);
@@ -665,7 +754,7 @@ beforeAll(async () => {
       }
     }
     const sessionUuid = "11111111-2222-4333-8444-555555555555";
-    const loss = new daemonClient.DaemonBoundSessionLostError({
+    const loss = new DaemonBoundSessionLostError({
       code: "bound_session_lost",
       sessionUuid,
       reason: "daemon-shutdown",

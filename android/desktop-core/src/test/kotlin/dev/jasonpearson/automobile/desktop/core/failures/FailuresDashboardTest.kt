@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.failures
 
+import dev.jasonpearson.automobile.desktop.core.daemon.subscribeRequest
 import dev.jasonpearson.automobile.desktop.core.time.FakeClock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

@@ -18,10 +18,8 @@ import {
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  JsonToolOutputArtifactWriter,
-  type ToolOutputArtifactFileSystem,
-} from "../../src/server/toolOutputArtifactWriter";
+import { JsonToolOutputArtifactWriter } from "../../src/server/toolOutputArtifactWriter";
+import { type ToolOutputArtifactFileSystem } from "../../src/server/nodeToolOutputArtifactFileSystem";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

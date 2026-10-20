@@ -20,6 +20,8 @@ import {
 } from "../../../src/daemon/sessionBroker/service";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { SESSION_BROKER_RETRY_AFTER_MS } from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
+import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "../../../src/daemon/sessionBroker/timing";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
 const OWNER: BindingProcessIdentity = {
@@ -86,6 +88,11 @@ class ControlledBroker extends SessionBroker {
   override async close(): Promise<void> {
     this.events.push("broker:close");
   }
+
+  override async markRestartHandoff(): Promise<void> {
+    this.events.push("broker:handoff");
+    await super.markRestartHandoff();
+  }
 }
 
 describe("session broker service lifecycle", () => {
@@ -126,7 +133,9 @@ describe("session broker service lifecycle", () => {
     const broker = new ControlledBroker(registry.sessionBrokerStore(BROKER_SCOPE_KEY));
     const service = new SessionBrokerService(broker, BROKER_SCOPE_KEY, lock, timer);
     service.start();
-    expect(timer.getPendingTimeouts()).toEqual([5_000]);
+    expect(SESSION_BROKER_RETRY_AFTER_MS).toBe(5_000);
+    expect(SESSION_BROKER_RETRY_AFTER_MS).toBe(SESSION_BROKER_RECOVERY_INTERVAL_MS);
+    expect(timer.getPendingTimeouts()).toEqual([SESSION_BROKER_RETRY_AFTER_MS]);
 
     const first = service.close();
     const second = service.close();
@@ -134,7 +143,7 @@ describe("session broker service lifecycle", () => {
     expect(second).toBe(first);
     await first;
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    expect(broker.events).toEqual(["broker:close"]);
+    expect(broker.events).toEqual(["broker:handoff", "broker:close"]);
     expect(lock.events).toEqual(["lock:release"]);
   });
 
@@ -155,10 +164,16 @@ describe("session broker service lifecycle", () => {
     await Promise.resolve();
     expect(closed).toBe(false);
     expect(lock.events).toEqual([]);
+    expect(broker.events).toEqual(["recover:start", "broker:handoff"]);
 
     broker.finishRecovery.resolve();
     await closing;
-    expect(broker.events).toEqual(["recover:start", "recover:end", "broker:close"]);
+    expect(broker.events).toEqual([
+      "recover:start",
+      "broker:handoff",
+      "recover:end",
+      "broker:close",
+    ]);
     expect(lock.events).toEqual(["lock:release"]);
   });
 

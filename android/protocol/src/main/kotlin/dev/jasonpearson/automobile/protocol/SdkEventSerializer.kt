@@ -33,6 +33,8 @@ import kotlinx.serialization.serializer
  * ```
  */
 object SdkEventSerializer {
+  private val logger = java.util.logging.Logger.getLogger(SdkEventSerializer::class.java.name)
+
   /** Intent action for SDK event batch broadcasts. */
   const val ACTION_SDK_EVENT_BATCH = "dev.jasonpearson.automobile.sdk.EVENT_BATCH"
 
@@ -90,7 +92,10 @@ object SdkEventSerializer {
   fun fromJson(jsonString: String): SdkEvent? {
     return try {
       json.decodeFromString(serializer<SdkEvent>(), jsonString)
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      // Generated serializers and JSON decoding report invalid input as IllegalArgumentException
+      // (including SerializationException). The nullable API deliberately rejects it as missing.
+      logger.log(java.util.logging.Level.FINE, "Invalid protocol JSON", e)
       null
     }
   }

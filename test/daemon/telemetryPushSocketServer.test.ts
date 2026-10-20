@@ -1,5 +1,8 @@
 import { Socket } from "node:net";
-import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
+import {
+  TelemetryPushSocketServer,
+  type TelemetryFilter,
+} from "../../src/daemon/telemetryPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
@@ -46,13 +49,13 @@ streamSubscribeAuthCases(
   (timer, authenticator) => new AuthTelemetryServer(timer, authenticator),
 );
 
-type BackfillFilter = ReturnType<BackfillTelemetryServer["filter"]>;
+type BackfillFilter = TelemetryFilter;
 
 class BackfillTelemetryServer extends TelemetryPushSocketServer {
   override waitForDrain(socket: Socket): Promise<boolean> {
     return super.waitForDrain(socket);
   }
-  filter(category: string | null = null, sessionId: string | null = null) {
+  filter(category: string | null = null, sessionId: string | null = null): TelemetryFilter {
     return { category, deviceSessionUuid: null, deviceId: null, sessionId };
   }
   subscribe(socket: Socket, filter: BackfillFilter): void {
@@ -490,10 +493,13 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
   });
 
   test("session mismatch and duplicate continue without writes or incrementing yield count", async () => {
+    // The row dedupe key rides on a wire field the typed row does not declare.
+    const duplicateA = { ...row(1, "session"), id: "duplicate" };
+    const duplicateB = { ...row(2, "session"), id: "duplicate" };
     navigationSpy.mockResolvedValue([
       row(0, "other"),
-      { ...row(1, "session"), id: "duplicate" },
-      { ...row(2, "session"), id: "duplicate" },
+      duplicateA,
+      duplicateB,
       ...Array.from({ length: 49 }, (_, i) => row(i + 3, "session")),
     ]);
     const filter = server.filter("navigation", "session");
@@ -523,6 +529,9 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
       });
       const drain = spyOn(server, "waitForDrain").mockImplementation(async () => {
         order.push("drain");
+        if (drained) {
+          socket.emit("drain");
+        }
         return drained;
       });
       restores.push(() => drain.mockRestore());

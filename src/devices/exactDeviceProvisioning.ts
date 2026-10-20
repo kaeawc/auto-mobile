@@ -2,13 +2,11 @@ export {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   ProvisionDeviceError,
   type IosRuntimeIncompatibility,
-  type ProvisionDeviceCapacityDetails,
   type ProvisionDeviceFailureCode,
 } from "./ProvisionDeviceError";
 export { ProvisionDeviceCreateRejectedError } from "./ProvisionDeviceCreateRejectedError";
 export {
   FileAndroidAvdConfigWriter,
-  type AndroidAvdConfigWriteOptions,
   type AndroidAvdConfigWriter,
 } from "./FileAndroidAvdConfigWriter";
 import { ProvisionDeviceError, type IosRuntimeIncompatibility } from "./ProvisionDeviceError";
@@ -35,6 +33,7 @@ import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/Android
 import type { CreateAvdParams } from "../utils/android-cmdline-tools/avdmanager";
 import {
   SimCtlClient,
+  type SimCtlCatalog,
   type AppleDeviceRuntime,
   type AppleDeviceType,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
@@ -121,6 +120,8 @@ export interface ExactIosSimulatorClient {
 
 /** Read-only simctl catalog used to validate an exact pair before creation. */
 export interface ExactIosRuntimeCatalog {
+  /** Atomic cached snapshot when the transport supports it; legacy catalogs remain compatible. */
+  getCatalogChecked?(signal?: AbortSignal): Promise<SimCtlCatalog>;
   getRuntimesChecked(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]>;
   getDeviceTypesChecked(signal?: AbortSignal): Promise<AppleDeviceType[]>;
 }

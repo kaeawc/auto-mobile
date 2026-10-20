@@ -26,12 +26,12 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -194,9 +194,9 @@ describe("lifecycle: deleteDevice typed refusals match killDevice's", () => {
 
 describe("deleteDevice failure mapping agrees with killDevice's wire shaping", () => {
   const args = {
-    target: { platform: "ios" as const, isVirtual: true, stableId: "IOS-PEER" },
+    target: { platform: "ios" as const, isVirtual: true as const, stableId: "IOS-PEER" },
     mode: "destroy" as const,
-    verifyAbsence: true,
+    verifyAbsence: true as const,
     timeoutMs: 60_000,
   };
   const sessionRefusal = (code: string, retryable: boolean, extra: object = {}) =>

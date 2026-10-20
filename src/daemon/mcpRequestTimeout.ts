@@ -13,7 +13,7 @@ import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
 } from "../features/prototype/prototypeAssets";
-import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../server/observationResourceUris";
+import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "./observationResourceUris";
 import {
   DEFAULT_WAIT_FOR_TIMEOUT_MS,
   DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
@@ -62,6 +62,7 @@ import {
 } from "../features/action/TapAnyElement";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
 import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "../features/action/installAppTimeout";
+import { ENV } from "../config/env";
 
 export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS, MAX_SETTIMEOUT_DELAY_MS };
 
@@ -276,8 +277,8 @@ const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
  * without changing callers.
  */
 export const DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS = 90_000;
-export const OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
-export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS";
+export const OPEN_LINK_MCP_TIMEOUT_ENV_VAR = ENV.OPEN_LINK_MCP_TIMEOUT_MS.name;
+export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = ENV.OPEN_LINK_MCP_TIMEOUT_MS.legacyName;
 
 /**
  * Floor for `observe` — on iOS the first observe after a device becomes active
@@ -290,8 +291,8 @@ export const LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OPEN_LINK_MCP_T
  * raise it in lockstep without a code change.
  */
 export const DEFAULT_OBSERVE_MCP_TIMEOUT_MS = 90_000;
-export const OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS";
-export const LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR = "AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS";
+export const OBSERVE_MCP_TIMEOUT_ENV_VAR = ENV.OBSERVE_MCP_TIMEOUT_MS.name;
+export const LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR = ENV.OBSERVE_MCP_TIMEOUT_MS.legacyName;
 
 export function resolveEnvTimeoutFloorMs(
   primaryEnvVar: string,

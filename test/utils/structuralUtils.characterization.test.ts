@@ -12,6 +12,12 @@ import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeImageBackend } from "../fakes/FakeImageBackend";
 
+// These spies cover the UTF-8 overloads used by PlanSerializer.
+const logFileSystem: {
+  readdir(path: string): Promise<string[]>;
+  readFile(path: string, encoding: BufferEncoding): Promise<string>;
+} = fs;
+
 const createdAt = "2026-01-01T00:00:00.000Z";
 const version = releaseVersion(getMcpServerVersion());
 const logPaths = {
@@ -51,13 +57,13 @@ describe("Plan export characterization", () => {
         `${logEntry("observe", 5, false)}\n${logEntry("inputText", 2, false)}\n${logEntry("listDevices", 4)}\n`,
       ],
     ]);
-    const listing = spyOn(fs, "readdir").mockResolvedValue([
+    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue([
       "c.json",
       "ignored.txt",
       "b.json",
       "a.json",
     ]);
-    const reading = spyOn(fs, "readFile").mockImplementation(async (file) => {
+    const reading = spyOn(logFileSystem, "readFile").mockImplementation(async (file) => {
       const content = logs.get(String(file));
       if (content === undefined) {
         throw new Error("unreadable");
@@ -110,8 +116,8 @@ describe("Plan export characterization", () => {
     },
     { files: ["a.json"], content: logEntry("killDevice", 0), expected: { success: true } },
   ])("handles empty and omitted calls: $files $content", async ({ files, content, expected }) => {
-    const listing = spyOn(fs, "readdir").mockResolvedValue(files);
-    const reading = spyOn(fs, "readFile").mockResolvedValue(content);
+    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue([...files]);
+    const reading = spyOn(logFileSystem, "readFile").mockResolvedValue(content);
     const writing = spyOn(fs, "writeFile").mockResolvedValue(undefined);
     const date = spyOn(Date.prototype, "toISOString").mockReturnValue(createdAt);
     try {
@@ -140,8 +146,8 @@ describe("Plan export characterization", () => {
   });
 
   test.each(["readdir", "writeFile"] as const)("preserves %s errors", async (method) => {
-    const listing = spyOn(fs, "readdir").mockResolvedValue(["a.json"]);
-    const reading = spyOn(fs, "readFile").mockResolvedValue(logEntry("tapOn", 0));
+    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue(["a.json"]);
+    const reading = spyOn(logFileSystem, "readFile").mockResolvedValue(logEntry("tapOn", 0));
     const writing = spyOn(fs, "writeFile").mockResolvedValue(undefined);
     const errorLog = spyOn(logger, "error").mockImplementation(() => {});
     (method === "readdir" ? listing : writing).mockRejectedValue(new Error("denied"));
@@ -388,7 +394,7 @@ describe("Retry characterization", () => {
               totalTimeMs: sleeps.reduce((sum, delay) => sum + delay, 0),
             },
       );
-      expect(timer.getSleepHistory()).toEqual(sleeps);
+      expect(timer.getSleepHistory()).toEqual([...sleeps]);
       expect(calls).toEqual(Array.from({ length: attempts }, (_, i) => i + 1));
       const expectedEvents: string[] = [];
       for (let attempt = 1; attempt <= attempts; attempt++) {

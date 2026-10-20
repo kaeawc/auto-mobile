@@ -9,6 +9,8 @@ import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { event } from "../helpers/prototypeTestEvent";
+import { toolIsError, toolStructured } from "../helpers/toolResponse";
+import { createExecResult } from "../../src/utils/execResult";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 /**
@@ -57,7 +59,7 @@ describe("prototype display together with assets", () => {
     client = new FakeCtrlProxy(timer);
     client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
-    adb.setCommandResponse(INVENTORY, { stdout: BOTH_PANELS, stderr: "" });
+    adb.setCommandResponse(INVENTORY, createExecResult(BOTH_PANELS, ""));
     reader = new FakePrototypeAssetFileReader().addFile("/img/logo.png", png);
     unsubscribe = registerPrototypeTools({
       clientFactory: () => client,
@@ -75,8 +77,12 @@ describe("prototype display together with assets", () => {
 
   async function call(input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return { response, payload: prototypeOutputSchema.parse(response.structuredContent) };
+    return { response, payload: prototypeOutputSchema.parse(toolStructured(response)) };
   }
+  const shownDisplayId = (index: number) => {
+    const entry = client.getPrototypeHistory()[index];
+    return entry?.method === "show" ? entry.displayId : undefined;
+  };
   const inventoryReads = () =>
     adb.getExecutedCommands().filter((command) => command.includes("get-displays")).length;
 
@@ -93,7 +99,7 @@ describe("prototype display together with assets", () => {
       return show(...args);
     };
     const { response, payload } = await call({ action: "show", spec, assets, display: "inner" });
-    expect(response.isError).not.toBe(true);
+    expect(toolIsError(response)).toBe(false);
     expect(order).toEqual(["put:logo", "show:2"]);
     expect(payload.uploadedAssets).toEqual([{ id: "logo", mimeType: "image/png", bytes: 12 }]);
     expect(payload.lastResult?.displayId).toBe(2);
@@ -103,7 +109,7 @@ describe("prototype display together with assets", () => {
   test("a refused display uploads nothing and reads no asset file", async () => {
     client.setSupportedCommands([]);
     const { response, payload } = await call({ action: "show", spec, assets, display: "inner" });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain("prototype_display_id_v2");
     expect(client.getPrototypeAssetHistory()).toEqual([]);
     expect(client.getPrototypeHistory()).toEqual([]);
@@ -112,9 +118,9 @@ describe("prototype display together with assets", () => {
   });
 
   test("an unknown display fails before assets are uploaded", async () => {
-    adb.setCommandResponse(INVENTORY, { stdout: COVER_ONLY, stderr: "" });
+    adb.setCommandResponse(INVENTORY, createExecResult(COVER_ONLY, ""));
     const { response } = await call({ action: "show", spec, assets, display: "inner" });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(client.getPrototypeAssetHistory()).toEqual([]);
     expect(client.getPrototypeHistory()).toEqual([]);
   });
@@ -126,7 +132,7 @@ describe("prototype display together with assets", () => {
     client.requestShowPrototype = async (...args) => {
       shows += 1;
       if (shows === 1) {
-        adb.setCommandResponse(INVENTORY, { stdout: COVER_ONLY, stderr: "" });
+        adb.setCommandResponse(INVENTORY, createExecResult(COVER_ONLY, ""));
       }
       return show(...args);
     };
@@ -170,7 +176,7 @@ describe("prototype display together with assets", () => {
     expect(payload.success).toBe(true);
     expect(payload.lastResult?.displayId).toBe(2);
     expect(payload.warning).toBeUndefined();
-    expect(client.getPrototypeHistory()[1]?.displayId).toBe(2);
+    expect(shownDisplayId(1)).toBe(2);
     expect(inventoryReads()).toBe(1);
   });
 
@@ -183,7 +189,7 @@ describe("prototype display together with assets", () => {
     };
     const { payload } = await call({ action: "show", spec, assets });
     expect(payload.success).toBe(true);
-    expect(client.getPrototypeHistory()[1]?.displayId).toBe(2);
+    expect(shownDisplayId(1)).toBe(2);
     expect(payload.lastResult?.displayId).toBe(2);
     expect(inventoryReads()).toBe(1);
   });

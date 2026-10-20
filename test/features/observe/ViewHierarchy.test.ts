@@ -1,7 +1,6 @@
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
-import { installFakeCtrlProxyManagers } from "../../helpers/hermeticDeviceTools";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ViewHierarchy,
@@ -26,14 +25,6 @@ const setupReadFileMock = () => {
 const teardownReadFileMock = () => {
   /* no-op: patched dependency was removed */
 };
-
-let restoreDeviceToolProviders: () => void;
-beforeEach(() => {
-  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
-});
-afterEach(() => {
-  restoreDeviceToolProviders();
-});
 
 describe("ViewHierarchy", function () {
   describe("Unit Tests for Public Methods", function () {
@@ -421,7 +412,7 @@ describe("ViewHierarchy", function () {
           hierarchy: null,
           fresh: false,
           reconnectStatus: {
-            state: "cooldown",
+            state: "cooldown" as const,
             retryAfterMs: 1800,
             retryAfterSeconds: 2,
             connectionAttempts: 3,
@@ -443,7 +434,7 @@ describe("ViewHierarchy", function () {
 
         expect(result.hierarchy.error).toBe("CtrlProxy reconnecting, retry in 2s");
         expect(result.ctrlProxyReconnect).toEqual({
-          state: "cooldown",
+          state: "cooldown" as const,
           retryAfterMs: 1800,
           retryAfterSeconds: 2,
           connectionAttempts: 3,
@@ -590,7 +581,7 @@ describe("ViewHierarchy", function () {
             ? {
                 hierarchy: null,
                 reconnectStatus: {
-                  state: "cooldown",
+                  state: "cooldown" as const,
                   retryAfterMs: 1000,
                   retryAfterSeconds: 1,
                   connectionAttempts: 3,
@@ -637,7 +628,7 @@ describe("ViewHierarchy", function () {
             unavailableReason: "connection_lost",
             unavailableDetail: "runner socket closed",
             reconnectStatus: {
-              state: "cooldown",
+              state: "cooldown" as const,
               retryAfterMs: 1000,
               retryAfterSeconds: 1,
               connectionAttempts: 3,
@@ -677,7 +668,7 @@ describe("ViewHierarchy", function () {
         hierarchy: { text: "Cached screen" },
       };
       const reconnectStatus = {
-        state: "cooldown",
+        state: "cooldown" as const,
         retryAfterMs: 1800,
         retryAfterSeconds: 2,
         connectionAttempts: 3,

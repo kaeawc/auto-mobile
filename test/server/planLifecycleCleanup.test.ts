@@ -31,6 +31,9 @@ import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
+import { ControlDiscoveryCache } from "../../src/daemon/socketServer/controlRoutes";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import type { McpForwardContext } from "../../src/daemon/socketServerParts/socketServerContracts";
 
 const devices: BootedDevice[] = [
   { name: "Pixel A", deviceId: "device-A", platform: "android" },
@@ -252,6 +255,45 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(events.filter((event) => event.startsWith("release:"))).toEqual(["release:device-A"]);
     expect(timer.getSleepHistory()).toEqual([]);
   });
+
+  arranged(
+    "deleting released session overrides refreshes a warm sessionUuid-routed tool list",
+    async () => {
+      await acquire([devices[0]], false);
+      const disabled = new Set(["base"]);
+      const cache = new ControlDiscoveryCache(async () => {});
+      const context: McpForwardContext = {
+        request: { id: "list", type: "mcp_request", method: "tools/list", params: {} },
+        route: { clientKey: "base", executionKey: "base", sessionUuid: "base" },
+        socketSessionId: "socket",
+        totalTimeoutMs: 1000,
+        deadline: new ProgressExtendableDeadline(timer.now(), 1000),
+      };
+      let loads = 0;
+      const list = () =>
+        cache.read(context, async () => {
+          loads++;
+          return { tools: disabled.has("base") ? [] : [{ name: "restoredTool" }] };
+        });
+      expect(await list()).toEqual({ tools: [] });
+      expect(await list()).toEqual({ tools: [] });
+      expect(loads).toBe(1);
+      await lifecycle.afterExecution(
+        input({
+          args: {},
+          sessionToolSelectionService: {
+            deleteSession: async (sessionUuid) => {
+              disabled.delete(sessionUuid);
+            },
+          },
+        }),
+      );
+      expect(disabled.size).toBe(0);
+      expect(await list()).toEqual({ tools: [{ name: "restoredTool" }] });
+      expect(await list()).toEqual({ tools: [{ name: "restoredTool" }] });
+      expect(loads).toBe(2);
+    },
+  );
 
   describe("holdSessionOnFailure (#10834)", () => {
     const failedResult: ExecutePlanResult = { success: false, executedSteps: 1, totalSteps: 2 };

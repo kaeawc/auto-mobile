@@ -7,7 +7,7 @@ import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncid
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -26,10 +26,6 @@ import { executionTracker } from "../../src/daemon/executionTracker";
 // SessionReleaseBroadcaster, so a connected proxy learns of a real release
 // instead of guessing with the replay TTL.
 
-interface DaemonSessionReleaseInternals {
-  cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
-}
-
 /**
  * Point a daemon-owned pool's discovery at a fake that lists exactly these
  * devices. A pooled Android entry is re-proved present against discovery before
@@ -39,7 +35,7 @@ interface DaemonSessionReleaseInternals {
 function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): void {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [...devices];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
 }
 
 describe("Daemon session-release signal wiring", () => {
@@ -131,7 +127,6 @@ describe("Daemon session-release signal wiring", () => {
     const daemon = new Daemon({}, { deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
-    const internals = daemon as unknown as DaemonSessionReleaseInternals;
     const sessionId = "terminal-persistence-failure";
     const deviceId = "physical-device";
     const emitted: string[] = [];
@@ -149,7 +144,7 @@ describe("Daemon session-release signal wiring", () => {
       await devicePool.assignDeviceToSession(sessionId, "android");
 
       await expect(
-        internals.cancelAndReleaseSession(
+        daemon.cancelAndReleaseSession(
           sessionId,
           deviceLossCancellationReason(deviceId, "incident-1"),
         ),
@@ -168,7 +163,7 @@ describe("Daemon session-release signal wiring", () => {
       expect(emitted).toEqual([]);
 
       markReleasedSpy.mockResolvedValue(undefined);
-      await internals.cancelAndReleaseSession(
+      await daemon.cancelAndReleaseSession(
         sessionId,
         deviceLossCancellationReason(deviceId, "incident-1"),
       );

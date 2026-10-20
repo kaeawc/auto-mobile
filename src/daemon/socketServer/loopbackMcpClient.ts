@@ -8,7 +8,7 @@ import {
   SdkErrorCode,
   type StandardSchemaV1,
 } from "@modelcontextprotocol/client";
-import { toV1ClientError } from "../../server/mcpError";
+import { toV1ClientError } from "../mcpError";
 
 /**
  * The SDK v2 `Client` the control socket forwards through to the daemon's loopback MCP

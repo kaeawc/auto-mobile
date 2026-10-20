@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -183,6 +183,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       readPidFile: () => incumbentRecord,
       persistPidFile: () => {},
       isProcessRunning: (pid) => pid === incumbentRecord.pid,
+      readProcessGenerationToken: () => undefined,
       selfPid: 4242,
     };
     const incumbentOwnerGuard = new IncumbentOwnerGuard(guardDependencies);

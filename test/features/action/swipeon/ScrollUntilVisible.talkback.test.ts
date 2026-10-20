@@ -1,6 +1,6 @@
 import type { SwipeGestureRequest } from "../../../../src/features/action/swipeon/types";
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { beforeEach, describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
@@ -22,6 +22,10 @@ import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import type { ViewHierarchyResult } from "../../../../src/models";
 
+afterEach(() => {
+  mock.restore();
+});
+
 const DEVICE: BootedDevice = {
   name: "test-device",
   platform: "android",
@@ -31,7 +35,9 @@ const DEVICE: BootedDevice = {
 const SCREEN_SIZE = { width: 400, height: 900 };
 
 const makeObserveResult = (hierarchyId: number = 0): ObserveResult => ({
-  timestamp: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  updatedAt: 0,
   screenSize: SCREEN_SIZE,
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: {
@@ -732,7 +738,10 @@ test("review: TalkBack searches three disjoint keyed pages without scroll_backwa
     observeResults: [],
     talkBackExecutor: executor,
     resolveObservation: () => ({
-      timestamp: timer.now(),
+      observationId: "test-observation",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: timer.now(),
       screenSize: SCREEN_SIZE,
       viewHierarchy: {
         hierarchy: {

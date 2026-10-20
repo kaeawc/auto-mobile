@@ -136,7 +136,8 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
     const found: unknown = await lookups[name](w);
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
 
-    expect([null, undefined, false, "not-found"]).toContain(found);
+    const notFound: unknown[] = [null, undefined, false, "not-found"];
+    expect(notFound).toContain(found);
     expect(w.released).toEqual([]);
     expect(w.manager.hasSession(BASE)).toBe(true);
     expect(w.manager.hasSession(LABEL)).toBe(true);

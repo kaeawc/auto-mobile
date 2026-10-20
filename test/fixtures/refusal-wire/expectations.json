@@ -43,6 +43,15 @@
         "acquireNewSession": false
       }
     },
+    "device_transport_unavailable": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_transport_unavailable",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
     "session_released_during_creation": {
       "expected": "acquire-new-session",
       "fields": {

@@ -17,7 +17,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
   createDefaultDeviceClientProvider,
   DeviceSessionManager,
-} from "../../src/devices/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceSessionManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -131,7 +131,7 @@ describe("device-client admission seam", () => {
   test("current quarantine refusal preserves selection and never discovers a replacement", async () => {
     const refusal = new DeviceIdentityQuarantinedError("identity unresolved");
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(),
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
       new FakeAdbClientFactory(),
       {
         admissionGate: {

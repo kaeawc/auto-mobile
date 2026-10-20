@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=scripts/lib/vcs-diff.sh disable=SC1091
+# shellcheck source=scripts/lib/vcs-diff.sh
 source scripts/lib/vcs-diff.sh
 default_base=origin/main
 if [[ "${GITHUB_ACTIONS:-}" == true && -n "${GITHUB_BASE_REF:-}" ]]; then
@@ -9,15 +9,24 @@ if [[ "${GITHUB_ACTIONS:-}" == true && -n "${GITHUB_BASE_REF:-}" ]]; then
 fi
 base_ref="${1:-$default_base}"
 # Predicate failures mean absent refs and are explicitly handled below.
-# shellcheck disable=SC2310
-if ! vcs_base_exists "$base_ref"; then
+set +e
+vcs_base_exists "$base_ref"
+base_status=$?
+set -e
+if [[ "$base_status" -ne 0 ]]; then
   # vcs_uses_jj is a boolean filesystem predicate, not an operation.
-  # shellcheck disable=SC2310
-  if ! vcs_uses_jj && [[ "${GITHUB_ACTIONS:-}" == true && -n "${GITHUB_BASE_REF:-}" && "$base_ref" == "origin/$GITHUB_BASE_REF" ]]; then
-    base_ref="$(vcs_fetch_pr_base "$GITHUB_BASE_REF" || printf '%s' "$base_ref")"
+  if [[ ! -d .jj || -e .git ]] && [[ "${GITHUB_ACTIONS:-}" == true && -n "${GITHUB_BASE_REF:-}" && "$base_ref" == "origin/$GITHUB_BASE_REF" ]]; then
+    set +e
+    fetched_base="$(vcs_fetch_pr_base "$GITHUB_BASE_REF")"
+    fetch_status=$?
+    set -e
+    if [[ "$fetch_status" -eq 0 ]]; then base_ref="$fetched_base"; fi
   fi
-  # shellcheck disable=SC2310 # Deliberately test ref existence after fetching.
-  if ! vcs_base_exists "$base_ref"; then
+  set +e
+  vcs_base_exists "$base_ref"
+  base_status=$?
+  set -e
+  if [[ "$base_status" -ne 0 ]]; then
     echo "Cannot check element-resolution ratchet: missing base $base_ref" >&2
     exit 2
   fi
@@ -28,8 +37,7 @@ case_path=test/features/element-resolution/observeContractCaseKeys.json
 scratch_dir="$(mktemp -d)"
 trap 'rm -rf "$scratch_dir"' EXIT
 # Resolve the merge base separately so an unavailable history fails closed.
-# shellcheck disable=SC2310 # Boolean repository-kind predicate.
-if vcs_uses_jj; then
+if [[ -d .jj && ! -e .git ]]; then
   merge_base="$(jj log -r "fork_point(@ | $(vcs_base_ref "$base_ref"))" --no-graph -T commit_id)"
   jj file list -r "$merge_base" > "$scratch_dir/files"
 else

@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
-import { readMcpSessionKey } from "../server/mcpSessionKey";
+import { readMcpSessionKey } from "./mcpSessionKey";
 import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
@@ -98,7 +98,7 @@ export interface StatelessMcpHttpEndpointDeps<
   ): Promise<number>;
   /**
    * Forget the bindings a keyless request recorded under its one-off scope id
-   * (`daemonSessionToolBindingStore().forget`): nothing will present that id again.
+   * (`forgetDaemonSessionBindingScope`): nothing will present that id again.
    */
   forgetScopeBindings(requestScopeId: string): void;
   /** Why a request that closes now is cancelled: the handoff error during shutdown. */

@@ -64,6 +64,8 @@ export interface WebpBinaryResolverOptions {
   archiveExtractor?: ArchiveExtractor;
   processExecutor?: HostProcessExecutor;
   checksumCalculator?: ChecksumCalculator;
+  /** Observer invoked each time this resolver asks for an archive to be provisioned. */
+  onArchiveProvisionRequested?: () => void;
 }
 
 export interface ResolvedWebpBinaries {
@@ -98,6 +100,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly processExecutor: HostProcessExecutor;
   private readonly checksumCalculator: ChecksumCalculator;
   private readonly fileSystem: WebpBinaryFileSystem;
+  private readonly onArchiveProvisionRequested: (() => void) | undefined;
 
   constructor(options: WebpBinaryResolverOptions = {}) {
     this.timer = options.timer;
@@ -112,6 +115,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     this.processExecutor = options.processExecutor ?? new DefaultHostCommandExecutor();
     this.checksumCalculator = options.checksumCalculator ?? new DefaultChecksumCalculator();
     this.fileSystem = options.fileSystem ?? defaultWebpBinaryFileSystem;
+    this.onArchiveProvisionRequested = options.onArchiveProvisionRequested;
   }
 
   async resolve(): Promise<ResolvedWebpBinaries> {
@@ -298,6 +302,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   }
 
   private async provisionArchiveOnce(archive: WebpArchiveInfo, cacheDir: string): Promise<void> {
+    this.onArchiveProvisionRequested?.();
     const archivePath = path.resolve(cacheDir, archive.archiveName);
     const existing = archiveProvisioningByPath.get(archivePath);
     if (existing) {

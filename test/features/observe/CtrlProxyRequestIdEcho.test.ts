@@ -56,7 +56,6 @@ async function harness() {
     streamPushes.push(data.hierarchy?.text ?? "");
   };
   client["startScreenshotBackoff"] = () => {};
-  client["shouldUseHierarchyNavigation"] = () => false;
   spyOn(client["deviceConnectionLostNotifier"], "onDeviceConnectionLost").mockImplementation(
     () => {},
   );

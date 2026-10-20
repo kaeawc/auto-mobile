@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyManager,
@@ -14,7 +15,6 @@ import { AdbClient, AdbCommandTimeoutError } from "../../src/utils/android-cmdli
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice, type ExecResult } from "../../src/models";
 import * as fs from "fs/promises";
-import type { Dirent } from "fs";
 import { readFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -29,9 +29,10 @@ import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { logger } from "../../src/utils/logger";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
+import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { FakeSavedPrototypeMirror } from "../fakes/FakeSavedPrototypeMirror";
 import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
-import type { SavedPrototypeRestoreReport } from "../../src/features/prototype/savedPrototypeRestore";
+import type { SavedPrototypeRestoreReport } from "../../src/models/SavedPrototypeRestoreReport";
 import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { createExecResult } from "../../src/utils/execResult";
 
@@ -90,6 +91,7 @@ function accessibilityFixture(state: AccessibilityFixtureState): string {
 }
 
 describe("CtrlProxyManager", function () {
+  useFakeCtrlProxyManagerHost();
   let accessibilityServiceClient: AndroidCtrlProxyManager;
   let fakeAdb: FakeAdbExecutor;
   let fakeAdbFactory: AdbClientFactory;
@@ -110,7 +112,6 @@ describe("CtrlProxyManager", function () {
       const adb = new FakeAdbExecutor();
       const timer = new FakeTimer();
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
-      manager.setSavedPrototypeMirrorForTesting(mirror);
       const order: string[] = [];
       const warn = spyOn(logger, "warn").mockImplementation((message) => {
         order.push(`warn:${message}`);
@@ -133,12 +134,20 @@ describe("CtrlProxyManager", function () {
       );
       const report: SavedPrototypeRestoreReport = { restored: ["panel"], skipped: [], failed: [] };
       let restoreCalls = 0;
-      manager.setSavedPrototypeRestorerForTesting(async (serial, usedMirror) => {
-        expect(serial).toBe(testDevice.deviceId);
-        expect(usedMirror).toBe(mirror);
+      let restorer: () => Promise<SavedPrototypeRestoreReport> = async () => {
         restoreCalls++;
         order.push("restore");
         return report;
+      };
+      const setRestorer = (next: () => Promise<SavedPrototypeRestoreReport>) => {
+        restorer = next;
+      };
+      manager.setSavedPrototypeServiceForTesting({
+        list: (serial) => mirror.list(serial),
+        restore: async (device) => {
+          expect(device.deviceId).toBe(testDevice.deviceId);
+          return restorer();
+        },
       });
       const invoke = (installed = true, force = true) =>
         manager.installDownloadedApkGuarded(
@@ -167,6 +176,7 @@ describe("CtrlProxyManager", function () {
         invoke,
         record,
         restoreCalls: () => restoreCalls,
+        setRestorer,
         uninstall,
         install,
         binding,
@@ -226,7 +236,7 @@ describe("CtrlProxyManager", function () {
         const h = reinstallHarness();
         try {
           await h.record();
-          h.manager.setSavedPrototypeRestorerForTesting(async () => {
+          h.setRestorer(async () => {
             if (mode === "throws") {
               throw new Error("restore exploded");
             }
@@ -1018,6 +1028,17 @@ describe("CtrlProxyManager", function () {
         warn.mockRestore();
         error.mockRestore();
       }
+    });
+
+    test("status probe preserves an exhausted transport refusal without confirming loss", async () => {
+      const typed = new AdbDeviceTransportUnavailableError(
+        testDevice.deviceId,
+        new Error("adb: device 'test-device' not found"),
+      );
+      fakeAdb.setCommandError(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, typed);
+      await expect(accessibilityServiceClient.isInstalled()).rejects.toBe(typed);
+      const setup = await accessibilityServiceClient.setup();
+      expect(setup).toMatchObject({ success: false, category: "deviceConnection", cause: typed });
     });
 
     test.each(["adb: device offline", "error: device is offline"])(
@@ -2948,7 +2969,7 @@ describe("CtrlProxyManager", function () {
         new FakeTimer(),
         undefined,
         calculator,
-      ) as unknown as { getExpectedChecksum(): Promise<string> };
+      );
       expect(
         await Promise.all([manager.getExpectedChecksum(), manager.getExpectedChecksum()]),
       ).toEqual(["first", "first"]);
@@ -4679,12 +4700,17 @@ describe("CtrlProxyManager", function () {
         ),
       );
       const stale = await makeAgedDir("auto-mobile-prefetch-z-stale", 2 * HOUR_MS);
-      const readdirSpy = spyOn(fs, "readdir").mockResolvedValue(
-        [...freshDirs, stale].map((dir) => ({
-          name: path.basename(dir),
-          isDirectory: () => true,
-        })) as unknown as Dirent[],
+      const names = new Set([...freshDirs, stale].map((dir) => path.basename(dir)));
+      const entries = (await fs.readdir(scratchRoot, { withFileTypes: true })).filter((entry) =>
+        names.has(entry.name),
       );
+      const directoryReader: {
+        readdir: (
+          target: string,
+          options: { withFileTypes: true },
+        ) => Promise<import("node:fs").Dirent[]>;
+      } = fs;
+      const readdirSpy = spyOn(directoryReader, "readdir").mockResolvedValue(entries);
 
       try {
         await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
@@ -4701,14 +4727,15 @@ describe("CtrlProxyManager", function () {
     test("stops inspection when the stale-prefetch deadline expires", async function () {
       const first = await makeAgedDir("auto-mobile-prefetch-first", 2 * HOUR_MS);
       const second = await makeAgedDir("auto-mobile-prefetch-second", 2 * HOUR_MS);
-      const originalStat = fs.stat;
+      const statReader: { stat: (target: string) => Promise<import("node:fs").Stats> } = fs;
+      const originalStat = statReader.stat;
       let statCount = 0;
-      const statSpy = spyOn(fs, "stat").mockImplementation(async (target, options) => {
+      const statSpy = spyOn(statReader, "stat").mockImplementation(async (target) => {
         statCount++;
         if (statCount === 1) {
           sweepTimer.advanceTime(STALE_PREFETCH_SWEEP_DEADLINE_MS);
         }
-        return originalStat(target, options);
+        return originalStat(target);
       });
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 

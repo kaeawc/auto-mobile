@@ -11,7 +11,7 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
 import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
@@ -179,7 +179,7 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
     const devicePool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    Object.assign(devicePool, { deviceManager });
+    devicePool.testHooks.deviceManager = deviceManager;
     await devicePool.initializeWithDevices([DEVICE]);
   });
 

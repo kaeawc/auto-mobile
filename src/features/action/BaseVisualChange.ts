@@ -1,7 +1,66 @@
+import { resolveObservationStartTime, resolvePackageName } from "./visualChangeObservationContext";
+import { getActionClockSkewCache, type ActionClockSkewProvider } from "./ActionClockSkewCache";
+import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { ActionableError, BootedDevice, GfxMetrics, ObserveResult } from "../../models";
+import type { BaseActionResult } from "../../models/BaseActionResult";
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
+import type { TapEffect } from "../../models/TapOnElementResult";
+import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../utils/constants";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { hierarchyChanged, hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
+import { logger } from "../../utils/logger";
+import { NoOpPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  beginPostActionCaptureAction,
+  deferTerminalScreenshot,
+} from "../../utils/PostActionCaptureContext";
+import { serverConfig } from "../../utils/ServerConfig";
+import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import { throwIfAborted } from "../../utils/toolUtils";
+import {
+  resolveNavigationGraphForDevice,
+  type NavigationGraphResolver,
+} from "../navigation/deviceNavigationGraph";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import {
+  resolveScreenshotMode,
+  shouldSkipActionObservationScreenshot,
+} from "../observe/automaticScreenshotPolicy";
+import { AwaitIdle as RealAwaitIdle } from "../observe/AwaitIdle";
+import {
+  completeWindowResolutionRead,
+  pendingWindowResolutionGeneration,
+} from "../observe/cache/ObserveCacheRegistry";
+import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../observe/DeviceHierarchyCapture";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../observe/DeviceWindowCacheInvalidator";
+import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
+import type { AwaitIdle, UiStabilityState } from "../observe/interfaces/AwaitIdle";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../observe/interfaces/ObserveScreen";
+import type { Window } from "../observe/interfaces/Window";
+import { IOSCtrlProxyClient } from "../observe/ios";
+import { isAdoptableCapture } from "../observe/isAdoptableCapture";
+import { hasWrongWindowEvidence } from "../observe/observationFreshness";
+import { RealObserveScreen } from "../observe/ObserveScreen";
+import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
+import { PredictionActionContext, PredictionAnalyzer } from "../observe/PredictionAnalyzer";
+import { RealSettleObserve } from "../observe/SettleObserve";
+import { staleDisplayError } from "../observe/StaleDisplayError";
+import { Window as RealWindow } from "../observe/Window";
+import { HomeForegroundVerifier, type HomeForegroundVerifyOptions } from "./HomeForegroundVerifier";
+import { compareActiveWindow, deriveInteractionEffect } from "./interactionEffect";
+import { MissingViewHierarchyError } from "./MissingViewHierarchyError";
 import {
   applySuccessVerdict,
   asObservedResult,
@@ -10,181 +69,38 @@ import {
   observationNeedsRetry,
   warnStillStale,
 } from "./observedInteractionStages";
-import { MissingViewHierarchyError } from "./MissingViewHierarchyError";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { AndroidCtrlProxyClient } from "../observe/android";
-import { IOSCtrlProxyClient } from "../observe/ios";
-import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
-import { RealSettleObserve } from "../observe/SettleObserve";
-import type { TapEffect } from "../../models/TapOnElementResult";
-import { AwaitIdle as RealAwaitIdle } from "../observe/AwaitIdle";
-import type { AwaitIdle, UiStabilityState } from "../observe/interfaces/AwaitIdle";
 import type {
   ObservedActionResult,
   ObservedChangeOptions,
   ObservedEnvelope,
 } from "./observedInteractionTypes";
-export type { ObservedActionResult, ObservedChangeOptions, ObservedEnvelope };
-import { RealObserveScreen } from "../observe/ObserveScreen";
-import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../observe/DeviceHierarchyCapture";
-import { hasWrongWindowEvidence } from "../observe/observationFreshness";
-import {
-  pendingWindowResolutionGeneration,
-  completeWindowResolutionRead,
-} from "../observe/cache/ObserveCacheRegistry";
-import {
-  DefaultDeviceWindowCacheInvalidator,
-  type DeviceWindowCacheInvalidator,
-} from "../observe/DeviceWindowCacheInvalidator";
-import {
-  staleDisplayError,
-  StaleDisplayError,
-  type StaleDisplayDetails,
-} from "../observe/StaleDisplayError";
-import type { BaseActionResult } from "../../models/BaseActionResult";
-import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
-import type {
-  ObserveScreen,
-  ObserveScreenExecuteOptions,
-} from "../observe/interfaces/ObserveScreen";
-import { DispatchedObservationError } from "../../models/DispatchedObservationError";
-import { isAdoptableCapture } from "../observe/isAdoptableCapture";
-import type { Window } from "../observe/interfaces/Window";
-import { Window as RealWindow } from "../observe/Window";
-import { logger } from "../../utils/logger";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../utils/constants";
-import { ActionableError, BootedDevice, GfxMetrics, ObserveResult } from "../../models";
-import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
-import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import { hierarchyChanged, hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
-import { throwIfAborted } from "../../utils/toolUtils";
-import {
-  beginPostActionCaptureAction,
-  deferTerminalScreenshot,
-} from "../../utils/PostActionCaptureContext";
-import {
-  resolveNavigationGraphForDevice,
-  type NavigationGraphResolver,
-} from "../navigation/deviceNavigationGraph";
-import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
-import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { sequenceBackoff } from "../../utils/Backoff";
-import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
-import { defaultDaemonContext, type DaemonContext } from "../../daemon/daemonContext";
-import {
-  resolveScreenshotMode,
-  shouldSkipActionObservationScreenshot,
-} from "../observe/automaticScreenshotPolicy";
-import { serverConfig } from "../../utils/ServerConfig";
-import { HomeForegroundVerifier, type HomeForegroundVerifyOptions } from "./HomeForegroundVerifier";
-import { compareActiveWindow, deriveInteractionEffect } from "./interactionEffect";
 import { buildDeviceLockWarning, buildPredictionActionContext } from "./postActionAnnotations";
+import { PostActionObservationReader } from "./PostActionObservationReader";
 import { withForwardDeliveredNote } from "./swipeon/boomerangReturnLeg";
-
-export interface ProgressCallback {
-  (progress: number, total?: number, message?: string): Promise<void>;
-}
-
-/**
- * Backoff delays (ms) between `takeObservation`'s post-action retries below.
- * Exported so callers that must budget the WORST CASE of this retry loop
- * (e.g. the daemon's `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` in
- * `src/daemon/mcpRequestTimeout.ts`) derive it from the real constant instead
- * of guessing at a duplicated magic number (issue #6248 review, P2).
- */
-export const FINAL_OBSERVATION_RETRY_BACKOFF_MS: readonly number[] = [50, 100, 200, 400];
-
-const COORDINATE_ACTIONS = new Set([
-  "tapAt",
-  "swipeAt",
-  "tapOn",
-  "tapAny",
-  "swipeOn",
-  "dragAndDrop",
-  "pinchOn",
-  "multiTouch",
-]);
-
-export type RenderedDisplayRevisionReader = (deviceId: string) => number | undefined;
-
-export interface DisplayFence {
-  assertCurrent(): void;
-}
-
-/** Internal dispatch options; never part of a tool's input schema. */
-export interface DisplayFenceOption {
-  readonly displayFence?: DisplayFence;
-}
-
-const NO_OP_DISPLAY_FENCE: DisplayFence = Object.freeze({ assertCurrent: () => {} });
-
-/** Intermediate action reads resolve targets and effects; terminal evidence is captured once. */
-export const INTERMEDIATE_OBSERVATION_OPTIONS = {
-  skipScreenshot: true,
-  skipAccessibilityAudit: true,
-} satisfies ObserveScreenExecuteOptions;
-
-export function resolveDisplayFence(options?: DisplayFenceOption): DisplayFence {
-  return options?.displayFence ?? NO_OP_DISPLAY_FENCE;
-}
-
-export interface DisplayFenceDependencies {
-  /** Collaborator overrides; default to the real device-backed implementations. */
-  observeScreen?: ObserveScreen;
-  awaitIdle?: AwaitIdle;
-  window?: Window;
-  predictionAnalyzer?: Pick<PredictionAnalyzer, "recordOutcomeForAction">;
-  displayTransitions?: DisplayTransitionReader;
-  renderedDisplayRevision?: RenderedDisplayRevisionReader;
-  renderedDisplayGeneration?: RenderedDisplayRevisionReader;
-}
-
-export function sessionRenderedDisplayGeneration(
-  deviceId: string,
-  daemon: DaemonContext = defaultDaemonContext,
-): number | undefined {
-  const sessions = daemon.renderedDisplaySessions();
-  if (!sessions) {
-    return undefined;
-  }
-  const sessionId = sessions.getSessionForDevice(deviceId);
-  return sessionId ? sessions.getLastRenderedDisplayGeneration(sessionId) : undefined;
-}
-
-function sessionRenderedDisplayRevision(
-  deviceId: string,
-  daemon: DaemonContext = defaultDaemonContext,
-): number | undefined {
-  const sessions = daemon.renderedDisplaySessions();
-  if (!sessions) {
-    return undefined;
-  }
-  const sessionId = sessions.getSessionForDevice(deviceId);
-  return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : undefined;
-}
-
-/**
- * Max retry attempts `takeObservation` performs after its initial observation
- * (5 observation attempts total). Exported for the same reason as
- * `FINAL_OBSERVATION_RETRY_BACKOFF_MS` above.
- */
-export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
-
-/** Mutable display-fence state shared by the fence, pre-read and run stages. */
-interface CallerFenceState {
-  displayRevision: number;
-  fence: DisplayFence;
-  observedGeneration: number;
-  reresolvesTarget: boolean;
-  refreshForDisplayChange: boolean;
-}
-
-interface PostActionCapture {
-  observation: ObserveResult;
-  readFailed: boolean;
-  staleDisplay?: StaleDisplayDetails;
-}
+import {
+  CallerFenceState,
+  COORDINATE_ACTIONS,
+  DisplayFence,
+  DisplayFenceDependencies,
+  INTERMEDIATE_OBSERVATION_OPTIONS,
+  PostActionCapture,
+  RenderedDisplayRevisionReader,
+  sessionRenderedDisplayGeneration,
+  sessionRenderedDisplayRevision,
+} from "./visualChangeDisplayFence";
+export {
+  type DisplayFence,
+  type DisplayFenceDependencies,
+  type DisplayFenceOption,
+  FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
+  FINAL_OBSERVATION_RETRY_BACKOFF_MS,
+  INTERMEDIATE_OBSERVATION_OPTIONS,
+  type ProgressCallback,
+  type RenderedDisplayRevisionReader,
+  resolveDisplayFence,
+  sessionRenderedDisplayGeneration,
+} from "./visualChangeDisplayFence";
+export type { ObservedActionResult, ObservedChangeOptions, ObservedEnvelope };
 
 export class BaseVisualChange {
   /** Missing freshness remains compatible unless an internal caller requires verification. */
@@ -195,6 +111,8 @@ export class BaseVisualChange {
   }
 
   windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
+
+  actionClockSkewCache: ActionClockSkewProvider;
 
   /** Selects the navigation graph this device records on; a seam for tests (#10197). */
   navigationGraphResolver: NavigationGraphResolver = resolveNavigationGraphForDevice;
@@ -238,6 +156,7 @@ export class BaseVisualChange {
     renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
     displayFence: DisplayFenceDependencies = {},
   ) {
+    this.actionClockSkewCache = getActionClockSkewCache(timer, displayFence.actionClockSkewCache);
     this.device = device;
     const { adbFactory, adb } = BaseVisualChange.resolveAdb(device, adbFactoryOrExecutor);
     this.adbFactory = adbFactory;
@@ -380,12 +299,8 @@ export class BaseVisualChange {
     }
     this.invalidateCtrlProxyCacheForDisplay(options);
 
-    const observationStartTime = this.resolveObservationStartTime(
-      options,
-      actionStartTime,
-      clockSkewMs,
-    );
-    const packageName = await this.resolvePackageName(options, previousObserveResult);
+    const observationStartTime = resolveObservationStartTime(options, actionStartTime, clockSkewMs);
+    const packageName = await resolvePackageName(this.window, options, previousObserveResult);
     const gfxMetrics = await this.awaitUiStability(options, packageName, timeoutMs, perf);
 
     const observed = await this.takeObservation(blockResult, previousObserveResult, {
@@ -646,20 +561,21 @@ export class BaseVisualChange {
   private async readActionClock(
     perf: PerformanceTracker,
   ): Promise<{ actionStartTime: number; clockSkewMs: number }> {
-    const actionStartTime = await perf.track("getActionStartTime", async () => {
-      if (this.device.platform !== "android") {
-        return this.timer.now();
+    return perf.track("getActionStartTime", async () => {
+      let clockSkewMs = 0;
+      if (
+        this.device.platform === "android" &&
+        typeof this.adb.getDeviceTimestampMs === "function"
+      ) {
+        clockSkewMs =
+          (await this.actionClockSkewCache.getSkewMs(this.device.deviceId, () =>
+            typeof this.adb.getDeviceTimestampMsWithSource === "function"
+              ? this.adb.getDeviceTimestampMsWithSource()
+              : this.adb.getDeviceTimestampMs(),
+          )) ?? 0;
       }
-      if (typeof this.adb.getDeviceTimestampMs === "function") {
-        return this.adb.getDeviceTimestampMs();
-      }
-      return this.timer.now();
+      return { actionStartTime: this.timer.now() + clockSkewMs, clockSkewMs };
     });
-    // Host-device clock skew, measured once with the action-start read. Zero on
-    // iOS and whenever the device clock was unavailable (host-time fallback).
-    // Taken after the read so any round trip makes the converted floor earlier,
-    // never later, than the true post-input device time.
-    return { actionStartTime, clockSkewMs: actionStartTime - this.timer.now() };
   }
 
   /** Run stage: dispatch the block against the pre-read, fenced against display changes. */
@@ -717,51 +633,6 @@ export class BaseVisualChange {
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     }
     throwIfAborted(options.signal);
-  }
-
-  private resolveObservationStartTime(
-    options: ObservedChangeOptions,
-    actionStartTime: number,
-    clockSkewMs: number,
-  ): number {
-    const hostTimestamp = options.observationHostTimestampProvider?.();
-    const override =
-      options.observationTimestampProvider?.() ??
-      (typeof hostTimestamp === "number" ? hostTimestamp + clockSkewMs : undefined);
-    if (typeof override !== "number" || Number.isNaN(override)) {
-      return actionStartTime;
-    }
-    if (override >= actionStartTime) {
-      logger.debug(`[BaseVisualChange] Using observation timestamp override: ${override}`);
-      return override;
-    }
-    logger.debug(
-      `[BaseVisualChange] Ignoring observation timestamp override (${override}) older than action start (${actionStartTime})`,
-    );
-    return actionStartTime;
-  }
-
-  /** Package name for UI stability waiting: options, then the pre-read hierarchy, then cache. */
-  private async resolvePackageName(
-    options: ObservedChangeOptions,
-    previous: ObserveResult | null,
-  ): Promise<string | undefined> {
-    if (options.packageName) {
-      return options.packageName;
-    }
-    const fromHierarchy = previous?.viewHierarchy?.packageName;
-    if (fromHierarchy) {
-      logger.info(`[BaseVisualChange] Using packageName from view hierarchy: ${fromHierarchy}`);
-      return fromHierarchy;
-    }
-    if (options.display !== undefined) {
-      return undefined;
-    }
-    const cachedPackageName = (await this.window.getCachedActiveWindow())?.appId;
-    if (cachedPackageName) {
-      logger.info(`[BaseVisualChange] Using cached packageName: ${cachedPackageName}`);
-    }
-    return cachedPackageName || undefined;
   }
 
   /** Android-only gfxinfo stability wait; null when skipped or unavailable. */
@@ -896,85 +767,18 @@ export class BaseVisualChange {
   ): TapEffect | undefined {
     return deriveInteractionEffect(previousObservation, currentObservation);
   }
-
-  private async capturePostActionObservation(
+  private capturePostActionObservation(
     observeScreen: ObserveScreen,
     options: ObserveScreenExecuteOptions,
     shouldRetry: (observation: ObserveResult) => boolean,
     blockResult: { success?: boolean; skipped?: unknown; wasAlreadyFocused?: boolean },
   ): Promise<PostActionCapture> {
-    const perf = options.perf ?? new NoOpPerformanceTracker();
-    const retryBackoff = sequenceBackoff(FINAL_OBSERVATION_RETRY_BACKOFF_MS);
-    let latestObservation: ObserveResult | undefined;
-    let trustworthyObservation: ObserveResult | undefined;
-    const read = async () => {
-      const observation = await observeScreen.execute(options);
-      if (options.display !== undefined) {
-        throwIfAborted(options.signal);
-      }
-      if (
-        options.display !== undefined &&
-        isAdoptableCapture(trustworthyObservation ?? observation, observation, true)
-      ) {
-        trustworthyObservation = observation;
-      }
-      return observation;
-    };
-    try {
-      perf.serial("finalObserve");
-      latestObservation = await read();
-      perf.end();
-      for (
-        let attempt = 0;
-        attempt < FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS && shouldRetry(latestObservation);
-        attempt++
-      ) {
-        const delayMs = retryBackoff.delayForAttempt(attempt + 1);
-        logger.info(
-          `[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS})`,
-        );
-        await this.timer.sleep(delayMs);
-        perf.serial(`finalObserve_retry_${attempt + 1}`);
-        latestObservation = await read();
-        perf.end();
-      }
-    } catch (error) {
-      return this.recoverPostActionObservation(
-        error,
-        trustworthyObservation ?? latestObservation,
-        options,
-        blockResult,
-      );
-    }
-    return { observation: latestObservation, readFailed: false };
-  }
-
-  private recoverPostActionObservation(
-    error: unknown,
-    observation: ObserveResult | undefined,
-    options: ObserveScreenExecuteOptions,
-    blockResult: { success?: boolean; skipped?: unknown; wasAlreadyFocused?: boolean },
-  ): PostActionCapture {
-    if (options.display === undefined) {
-      throw error;
-    }
-    throwIfAborted(options.signal);
-    if (error instanceof Error && error.name === "AbortError") {
-      throw error;
-    }
-    if (observation && isAdoptableCapture(observation, observation, true)) {
-      return this.notePostActionReadFailure(
-        observation,
-        "observation retry",
-        errorMessage(error),
-        error,
-      );
-    }
-    // A refused or skipped block never delivered a gesture.
-    if (blockResult.success === false || blockResult.skipped || blockResult.wasAlreadyFocused) {
-      throw error;
-    }
-    throw new DispatchedObservationError(error);
+    return new PostActionObservationReader(this.timer).capturePostActionObservation(
+      observeScreen,
+      options,
+      shouldRetry,
+      blockResult,
+    );
   }
 
   private notePostActionReadFailure(
@@ -983,21 +787,12 @@ export class BaseVisualChange {
     reason: string,
     error?: unknown,
   ): PostActionCapture {
-    const warning = `Post-action ${phase} failed: ${reason}; retaining the earlier observation`;
-    logger.warn(`[BaseVisualChange] ${warning}`, error);
-    return {
-      observation: {
-        ...observation,
-        settled: false,
-        freshness: {
-          ...observation.freshness,
-          isFresh: observation.freshness?.isFresh ?? true,
-          warning: [observation.freshness?.warning, warning].filter(Boolean).join("; "),
-        },
-      },
-      readFailed: true,
-      ...(error instanceof StaleDisplayError ? { staleDisplay: error.details } : {}),
-    };
+    return new PostActionObservationReader(this.timer).notePostActionReadFailure(
+      observation,
+      phase,
+      reason,
+      error,
+    );
   }
 
   protected rethrowObservationAbort(error: unknown, signal?: AbortSignal, enabled = true): void {

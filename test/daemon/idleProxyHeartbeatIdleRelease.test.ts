@@ -26,7 +26,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

@@ -1,16 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
   BindingJournal,
-  BindingJournalRedriveLoop,
   BINDING_JOURNAL_DISCOVERY_BUDGET_MS,
   BINDING_JOURNAL_CLAIM_BUDGET_MS,
   BINDING_JOURNAL_MATCH_BUDGET_MS,
   BINDING_JOURNAL_DELETE_GRACE_MS,
   BINDING_JOURNAL_STEP_BUDGET_MS,
-  BINDING_JOURNAL_STOP_BUDGET_MS,
   BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
   type BindingJournalPassResult,
 } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import {
+  BindingJournalRedriveLoop,
+  BINDING_JOURNAL_STOP_BUDGET_MS,
+} from "../../../../src/daemon/sessionBroker/registry/BindingJournalRedriveLoop";
 import {
   BindingReconciler,
   DefaultManagedSpecResolver,
@@ -61,6 +63,7 @@ async function harness() {
   if (scope.kind !== "ready") {
     throw new Error("scope not ready");
   }
+  const { scopeKey } = scope.scope;
   const deps = {
     registry,
     inventory,
@@ -79,7 +82,7 @@ async function harness() {
     phase: "deleting" | "created" = "deleting",
     present = false,
   ) {
-    const key = { scopeKey: scope.scope.scopeKey, bindingIndex };
+    const key = { scopeKey, bindingIndex };
     const id = `device-${bindingIndex}`;
     await registry.initBinding(key, { role: "app", platform, requestedSpec: SPEC });
     const bound = await registry.commitBinding(

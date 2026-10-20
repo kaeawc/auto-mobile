@@ -5,7 +5,7 @@ import { registerAccessibilityTools } from "../../src/server/accessibilityTools"
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { TalkBackToggle } from "../../src/features/accessibility/TalkBackToggle";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
-import { accessibilityDetector } from "../../src/features/accessibility/AccessibilityDetector";
+import { accessibilityDetector } from "../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../src/features/accessibility/IosVoiceOverDetector";
 import { AndroidTapStrategy } from "../../src/features/action/strategies/AndroidTapStrategy";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";

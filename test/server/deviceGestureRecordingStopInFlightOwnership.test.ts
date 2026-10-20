@@ -7,13 +7,13 @@ import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import type {
   AbandonablePendingDeviceCleanup,
   SessionManager,

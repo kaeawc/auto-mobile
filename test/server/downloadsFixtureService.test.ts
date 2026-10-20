@@ -1,13 +1,9 @@
+import type { StageSharedStorageResult } from "../../src/server/sharedStorageContract";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
-import {
-  createDownloadsFixtureService,
-  StageSessionDownloadsRefusal,
-} from "../../src/server/downloadsFixtureService";
-import {
-  createSharedStorageServiceForTesting,
-  type StageSharedStorageResult,
-} from "../../src/server/sharedStorageService";
+import { createDownloadsFixtureService } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
+import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";

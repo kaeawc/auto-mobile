@@ -76,3 +76,24 @@ export function screenScaleMetadataSpread(
 ): ScreenScaleMetadata | Record<string, never> {
   return readScreenScaleMetadata(source) ?? {};
 }
+
+/** Untyped runner boundary; the stable-schema API retains its numeric contract. */
+export function readScreenScaleMetadataInput(source: unknown): ScreenScaleMetadata | null {
+  if (
+    source === null ||
+    typeof source !== "object" ||
+    !("nativeScale" in source) ||
+    !("pixelWidth" in source) ||
+    !("pixelHeight" in source) ||
+    typeof source.nativeScale !== "number" ||
+    typeof source.pixelWidth !== "number" ||
+    typeof source.pixelHeight !== "number"
+  ) {
+    return null;
+  }
+  return readScreenScaleMetadata({
+    nativeScale: source.nativeScale,
+    pixelWidth: source.pixelWidth,
+    pixelHeight: source.pixelHeight,
+  });
+}

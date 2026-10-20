@@ -1,44 +1,25 @@
-import { typeScriptFiles, relativePosix } from "./astGuard";
+import { typeScriptFiles, relativePosix, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+
 import path from "node:path";
 import { countDaemonStateGetInstanceCalls } from "./daemonStateGetInstanceCalls";
 
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const SRC_DIR = path.join(REPO_ROOT, "src");
-const BASELINE_FILE = path.join(import.meta.dir, "daemon-state-get-instance-baseline.txt");
 // Parsing every src file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
-const UPDATE_COMMAND =
-  "UPDATE_DAEMON_STATE_BASELINE=1 bun test test/lint/daemonStateGetInstanceRatchet.test.ts";
 
 type Counts = Record<string, number>;
 
 /**
  * Files allowed to call DaemonState.getInstance() because they ARE the process-wide
  * composition seam: every other src file receives its daemon state as a dependency.
- * Exempt files are not counted against the baseline, which therefore stays empty.
+ * Any other src file that calls it is a violation.
  */
 const EXEMPT_FILES: Readonly<Record<string, string>> = {
   "src/daemon/daemonContext.ts":
     "Daemon composition root: the single place that resolves the process-wide DaemonState singleton and hands it to collaborators.",
 };
-
-function readBaseline(): Counts {
-  const counts: Counts = {};
-  for (const line of readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean)) {
-    const [file, count] = line.split("\t");
-    counts[file] = Number(count);
-  }
-  return counts;
-}
-
-function formatBaseline(counts: Counts): string {
-  return Object.keys(counts)
-    .sort()
-    .map((file) => `${file}\t${counts[file]}\n`)
-    .join("");
-}
 
 describe("countDaemonStateGetInstanceCalls", () => {
   test.each([
@@ -82,14 +63,13 @@ describe("countDaemonStateGetInstanceCalls", () => {
   });
 });
 
-describe("DaemonState.getInstance() call sites in src/ never grow (#11806)", () => {
+describe("DaemonState.getInstance() has no call sites in src/ outside the exemptions (#11806)", () => {
   const found: Counts = {};
   const exemptFound: Counts = {};
-  let baseline: Counts = {};
 
   beforeAll(() => {
     for (const file of typeScriptFiles(SRC_DIR)) {
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       if (!source.includes("DaemonState")) {
         continue;
       }
@@ -99,38 +79,14 @@ describe("DaemonState.getInstance() call sites in src/ never grow (#11806)", () 
         (relative in EXEMPT_FILES ? exemptFound : found)[relative] = count;
       }
     }
-    const update = process.env.UPDATE_DAEMON_STATE_BASELINE;
-    if (update) {
-      baseline = readBaseline();
-      const grew = Object.keys(found).filter((file) => found[file] > (baseline[file] ?? 0));
-      if (update !== "grow" && grew.length > 0) {
-        throw new Error(`Refusing to grow the baseline for: ${grew.join(", ")}`);
-      }
-      writeFileSync(BASELINE_FILE, formatBaseline(found));
-    }
-    baseline = readBaseline();
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
-  test("no file has more DaemonState.getInstance() calls than its baseline", () => {
-    const grown = Object.keys(found)
-      .filter((file) => found[file] > (baseline[file] ?? 0))
-      .map((file) => `${file}: ${baseline[file] ?? 0} -> ${found[file]}`);
+  test("no non-exempt file calls DaemonState.getInstance()", () => {
+    const offenders = Object.keys(found).map((file) => `${file}: ${found[file]}`);
     expect(
-      grown,
+      offenders,
       "Pass the daemon state (or the narrow service you need) in as a dependency instead of reaching for DaemonState.getInstance().",
     ).toEqual([]);
-  });
-
-  test("the baseline records every shrink, so it can only go down", () => {
-    const stale = Object.keys(baseline)
-      .filter((file) => (found[file] ?? 0) < baseline[file])
-      .map((file) => `${file}: ${baseline[file]} -> ${found[file] ?? 0}`);
-    expect(stale, `Run: ${UPDATE_COMMAND}  and commit the smaller baseline.`).toEqual([]);
-  });
-
-  test("the baseline file is sorted by path", () => {
-    const files = Object.keys(baseline);
-    expect(files).toEqual([...files].sort());
   });
 
   test("every exemption is still needed and says why", () => {
@@ -143,9 +99,5 @@ describe("DaemonState.getInstance() call sites in src/ never grow (#11806)", () 
       .filter(([, reason]) => reason.trim().length === 0)
       .map(([file]) => file);
     expect(unexplained).toEqual([]);
-  });
-
-  test("the baseline is empty: exemptions are the only allowed call sites", () => {
-    expect(baseline).toEqual({});
   });
 });

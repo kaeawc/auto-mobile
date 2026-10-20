@@ -165,3 +165,46 @@ describe("iOS boot capacity gate", () => {
     await expect(admission).rejects.toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
   });
 });
+
+test("replacement reserves one slot before deletion and binds without another fleet sample", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source, { AUTOMOBILE_IOS_SIM_MAX_BOOTED: "2" });
+  source.immediate = [sim(A, "Booted"), sim(B, "Booted")];
+  const reservation = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 60_000 });
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  source.immediate = [sim(B, "Booted")];
+  reservation.markReplacedDeviceGone();
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  expect((await gate.admitBoot(undefined, { bootUdid: "COMPETITOR" })).decision.outcome).toBe(
+    "refuse",
+  );
+  const admitted = await reservation.run(async () => {
+    await gate.assertCapacityAvailable();
+    // No post-delete count: even failed discovery cannot take away the admitted slot.
+    source.immediate = undefined;
+    return await gate.admitBoot(undefined, { bootUdid: "NEW" });
+  });
+  expect(source.pending).toHaveLength(0);
+  reservation.release();
+  source.immediate = [sim(B, "Booted")];
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  source.immediate.push(sim("NEW", "Booted"));
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  admitted.releaseAdmission?.();
+  admitted.releaseAdmission?.();
+  await expect(reservation.run(async () => {})).rejects.toThrow("consumed");
+});
+
+test("unused iOS replacement reservations release idempotently", async () => {
+  const source = new ScriptedSource();
+  const { gate } = build(source);
+  source.immediate = [sim(A, "Booted")];
+  const held = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 60_000 });
+  source.immediate = [];
+  held.release();
+  held.release();
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 0 });
+  const next = await gate.admitBoot(undefined, { bootUdid: B });
+  expect(next.decision.outcome).toBe("allow");
+  next.releaseAdmission?.();
+});

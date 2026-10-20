@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { DeviceLostError, deviceLostErrorFromAbortSignal } from "../../src/models/DeviceLostError";
@@ -61,11 +62,11 @@ async function checkDeviceLoss(
         }
         throw loss;
       }
-      return {
+      return buildObserveResult({
         updatedAt: index,
         screenSize: { width: 200, height: 200 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      };
+      });
     });
   }
 

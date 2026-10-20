@@ -6,7 +6,7 @@ import org.gradle.kotlin.dsl.getByType
 
 // Shared Android application defaults for control-proxy and playground/app, replacing the
 // duplicated per-module DSL. Namespace, applicationId, versionCode, versionName, minification,
-// Compose, lint, packaging and test options stay in each module (versionName is rewritten
+// Compose, lint disables, packaging and test options stay in each module (versionName is rewritten
 // in place by scripts/versioning/bump-versions.sh, so its literal must stay in the module).
 pluginManager.apply("automobile.kotlin-common")
 
@@ -33,6 +33,28 @@ extensions.configure<ApplicationExtension> {
     getByName("release") {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
+  }
+
+  lint {
+    // AGP creates even empty missing baselines and aborts. Only attach a missing
+    // path during explicit generation; clean modules keep no baseline file.
+    baseline =
+      file("lint-baseline.xml").takeIf {
+        it.isFile || System.getProperty("lint.baselines.continue") == "true"
+      }
+    abortOnError = true
+    warningsAsErrors = true
+    checkDependencies = false
+    // These checks compare against what is published upstream today (newer Gradle/AGP/library
+    // versions, current target API), so their findings change over time and can never be
+    // baselined stably. Dependabot owns version freshness.
+    disable +=
+      setOf(
+        "AndroidGradlePluginVersion",
+        "GradleDependency",
+        "NewerVersionAvailable",
+        "OldTargetApi",
+      )
   }
 
   compileOptions {

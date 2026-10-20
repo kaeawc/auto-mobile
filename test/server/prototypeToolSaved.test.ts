@@ -20,13 +20,18 @@ import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCache
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { pinDialogTree } from "../helpers/pinDialogTree";
+import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
+import type { ViewHierarchyResult } from "../../src/models";
+import { toolStructured } from "../helpers/toolResponse";
+import { createExecResult } from "../../src/utils/execResult";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const android: BootedDevice = { deviceId: "saved-android", platform: "android", name: "Fake" };
 const ios: BootedDevice = { deviceId: "saved-ios", platform: "ios", name: "Fake" };
 const spec = {
   id: "demo",
-  window: { placement: { type: "fullscreen" as const } },
+  window: { placement: { type: "fullscreen" as const }, opacity: 100 },
   root: { type: "text" as const, text: "Hello" },
 };
 const assets = [{ id: "logo", path: "/img/logo.png" }];
@@ -44,7 +49,9 @@ describe("prototype saved actions", () => {
   let restore: () => void;
   let dispose: () => void;
   let connected: boolean;
+  let dialog: ViewHierarchyResult;
   function setup() {
+    dialog = pinDialogTree(["Cancel", "Add to home screen"]);
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     proxy = new FakeCtrlProxy(timer);
@@ -61,6 +68,7 @@ describe("prototype saved actions", () => {
       store: new InMemoryPrototypeStatusStore(timer),
       timer,
       clock: timer,
+      anchorHierarchyCaptureFactory: () => new FakeHierarchyCapture(() => dialog, "android", timer),
       assetFileReader: reader,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
       lifecycle: {
@@ -87,14 +95,14 @@ describe("prototype saved actions", () => {
     dispose();
     restore();
   });
-  async function call(input: unknown, device = android, signal?: AbortSignal) {
+  async function call(input: Record<string, unknown>, device = android, signal?: AbortSignal) {
     const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       input,
       undefined,
       signal,
     );
-    return prototypeOutputSchema.parse(result.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(result));
   }
   const save = (extra: Record<string, unknown> = {}) => call({ action: "save", spec, ...extra });
 
@@ -116,9 +124,23 @@ describe("prototype saved actions", () => {
     expect(output.warning).not.toContain("autoConfirm");
     expect(proxy.pinRequests).toEqual([{ id: "demo", icon: "logo" }]);
   });
-  test("autoConfirm adds the not-implemented reminder", async () => {
+  test("autoConfirm taps the dialog and reports pinned once listSaved confirms", async () => {
     proxy.setPinResult({ success: true, pin: { id: "demo", status: "requested" } });
-    expect((await save({ pin: true, autoConfirm: true })).warning).toContain("#12266");
+    proxy.setListSavedResult({
+      success: true,
+      savedPrototypes: [{ id: "demo", label: "demo", slug: "demo", savedAt: 1, pinned: true }],
+    });
+    const output = await save({ pin: true, autoConfirm: true });
+    expect(output).toMatchObject({ success: true, saved, pinned: "pinned" });
+    expect(adb.getExecutedCommands()).toContain("shell input tap 250 130");
+  });
+  test("autoConfirm stays pending with a reason when the dialog is unrecognized", async () => {
+    dialog = pinDialogTree(["Cancel", "Place"]);
+    proxy.setPinResult({ success: true, pin: { id: "demo", status: "requested" } });
+    const output = await save({ pin: true, autoConfirm: true });
+    expect(output.pinned).toBe("pending");
+    expect(output.warning).toContain("confirmation_unrecognized");
+    expect(adb.getExecutedCommands().filter((c) => c.includes("input tap"))).toEqual([]);
   });
   test("already pinned reports pinned", async () => {
     proxy.setPinResult({ success: true, pin: { id: "demo", status: "already_pinned" } });
@@ -301,7 +323,7 @@ describe("prototype saved actions", () => {
       expect(proxy.listCalls).toBe(0);
     },
   );
-  test.each(SAVED_PROTOTYPE_ERROR_CODES)("store error %s is actionable", async (errorCode) => {
+  test.each([...SAVED_PROTOTYPE_ERROR_CODES])("store error %s is actionable", async (errorCode) => {
     proxy.setSaveResult({ success: false, errorCode, error: "device detail" });
     const message = savedPrototypeErrorMessages[errorCode];
     expect(message.length).toBeGreaterThan(0);
@@ -312,12 +334,11 @@ describe("prototype saved actions", () => {
   });
   test("unrecognised failure preserves device text without a code", async () => {
     // A future wire code is intentionally not part of the typed protocol yet.
-    proxy.setSaveResult(
-      Object.assign(
-        { success: false, error: "future device detail" },
-        { errorCode: "future_code" },
-      ),
-    );
+    proxy.setSaveResult({
+      success: false,
+      error: "future device detail",
+      errorCode: "future_code",
+    });
     expect(await save()).toEqual({ success: false, error: "future device detail" });
   });
   test.each(["save", "listSaved", "deleteSaved"] as const)(
@@ -382,7 +403,7 @@ describe("prototype saved actions", () => {
   });
   test("removeIcon clears the active work profile's shortcuts, not user 0's", async () => {
     proxy.setListSavedResult({ success: true, savedPrototypes: [] });
-    adb.setCommandResponse(CURRENT_USER, { stdout: "10\n", stderr: "" });
+    adb.setCommandResponse(CURRENT_USER, createExecResult("10\n", ""));
     const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
     expect(output.warning).toContain("Cleared");
     expect(adb.getExecutedCommands()).toEqual([CURRENT_USER, clearFor(10)]);
@@ -440,7 +461,7 @@ describe("prototype saved actions", () => {
       expect(proxy.listCalls).toBe(0);
     },
   );
-  test.each(SAVED_PROTOTYPE_ERROR_CODES)("store error %s is actionable", async (errorCode) => {
+  test.each([...SAVED_PROTOTYPE_ERROR_CODES])("store error %s is actionable", async (errorCode) => {
     proxy.setSaveResult({ success: false, errorCode, error: "device detail" });
     const message = savedPrototypeErrorMessages[errorCode];
     expect(message.length).toBeGreaterThan(0);
@@ -451,12 +472,11 @@ describe("prototype saved actions", () => {
   });
   test("unrecognised failure preserves device text without a code", async () => {
     // A future wire code is intentionally not part of the typed protocol yet.
-    proxy.setSaveResult(
-      Object.assign(
-        { success: false, error: "future device detail" },
-        { errorCode: "future_code" },
-      ),
-    );
+    proxy.setSaveResult({
+      success: false,
+      error: "future device detail",
+      errorCode: "future_code",
+    });
     expect(await save()).toEqual({ success: false, error: "future device detail" });
   });
   test.each(["save", "listSaved", "deleteSaved"] as const)(
@@ -535,12 +555,16 @@ describe("prototype saved actions", () => {
   });
   test("schema parses new and existing inputs unchanged", () => {
     for (const input of [
-      { action: "save", spec },
-      { action: "listSaved" },
-      { action: "deleteSaved", id: "demo" },
-      { action: "show", spec },
-      { action: "patch", id: "demo", ops: [{ op: "replace", path: "/data/x", value: 1 }] },
-      { action: "dismiss", id: "demo" },
+      { action: "save" as const, spec },
+      { action: "listSaved" as const },
+      { action: "deleteSaved" as const, id: "demo" },
+      { action: "show" as const, spec },
+      {
+        action: "patch" as const,
+        id: "demo",
+        ops: [{ op: "replace" as const, path: "/data/x", value: 1 }],
+      },
+      { action: "dismiss" as const, id: "demo" },
     ]) {
       expect(prototypeSchema.parse(input)).toEqual(input);
     }

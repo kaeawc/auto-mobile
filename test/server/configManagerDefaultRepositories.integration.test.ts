@@ -12,15 +12,15 @@ import {
   clearSessionAppearanceConfig,
   getAppearanceConfig,
   updateAppearanceConfig,
-} from "../../src/server/appearanceManager";
+} from "../../src/daemon/appearanceManager";
 import {
   getDeviceSnapshotConfig,
   resetDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import {
   getVideoRecordingConfig,
   resetVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { createTestDatabase } from "../db/testDbHelper";
 
 describe("config manager default repositories", () => {

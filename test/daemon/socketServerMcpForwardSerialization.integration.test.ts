@@ -126,6 +126,7 @@ function createFakeDaemonState(
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => sessionDevices.has(sessionId),
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
         return assignedDevice

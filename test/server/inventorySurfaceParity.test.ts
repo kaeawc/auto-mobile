@@ -1,3 +1,5 @@
+import { z } from "zod/v4";
+import { toolJson } from "../helpers/toolResponse";
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import {
@@ -9,7 +11,7 @@ import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/device
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -19,6 +21,7 @@ import {
   setDeviceManager,
 } from "../../src/server/bootedDeviceResources";
 import {
+  listDevicesOutputSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
@@ -45,6 +48,16 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
+
+const inventoryToolResponseSchema = listDevicesOutputSchema.extend({
+  discovery: z
+    .object({
+      complete: z.boolean(),
+      notApplicableSources: z.array(z.string()).optional(),
+      failedSources: z.array(z.string()).optional(),
+    })
+    .passthrough(),
+});
 
 // Inventory contract: every inventory surface describes the same device the same way. The
 // listDevices tool and the booted-devices resource are built from different code paths, so this
@@ -311,7 +324,7 @@ describe("listDevices tool and booted resource describe a device identically", (
     manager.setBootedDevices("android", discovered);
     if (scenario.adbOffline) {
       (manager as PlatformDeviceManager).getAndroidListedDeviceStates = async (ids) =>
-        new Map(ids.map((id) => [id, "offline"]));
+        new Map(Array.from(ids, (id) => [id, "offline"]));
     }
     DaemonState.getInstance().initialize(sessions, pool);
     setDeviceToolsDependencies({
@@ -322,15 +335,15 @@ describe("listDevices tool and booted resource describe a device identically", (
 
     const resource = await getBootedDevicesForPlatforms(["android"], timer);
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = inventoryToolResponseSchema.parse(toolJson(response));
 
     const fromResource = describeEntry(resource.devices, scenario.focus ?? android.deviceId);
-    const fromTool = describeEntry(payload.devices as Entry[], scenario.focus ?? android.deviceId);
+    const fromTool = describeEntry(payload.devices, scenario.focus ?? android.deviceId);
 
     // One status authority: every row either surface publishes carries the pool's own bucket.
     const surfaces = {
       resource: resource.devices,
-      tool: payload.devices as Entry[],
+      tool: payload.devices,
     };
     for (const [surface, rows] of Object.entries(surfaces)) {
       for (const row of rows) {
@@ -492,10 +505,7 @@ async function readSurfaces(
   const response = await ToolRegistry.getTool("listDevices")!.handler({
     platform: scenario.platform,
   });
-  const tool = JSON.parse(response.content?.[0]?.text ?? "{}") as {
-    devices: Entry[];
-    discovery?: { complete?: boolean };
-  };
+  const tool = inventoryToolResponseSchema.parse(toolJson(response));
   const state: DaemonStateAccess = {
     isInitialized: () => true,
     getSessionManager: () => sessions as never,
@@ -870,8 +880,8 @@ describe("every inventory surface gives one answer per discovery-source outcome 
 
     const resource = await getBootedDevicesForPlatforms(["android", "ios"], timer);
     const resourceText = JSON.stringify(resource);
-    const listed = JSON.parse(
-      (await ToolRegistry.getTool("listDevices")!.handler({})).content?.[0]?.text ?? "{}",
+    const listed = inventoryToolResponseSchema.parse(
+      toolJson(await ToolRegistry.getTool("listDevices")!.handler({})),
     );
     const codeOf = (error: unknown) => (error as { code?: string }).code ?? "untyped";
     const daemonState = DaemonState.getInstance();
@@ -884,11 +894,7 @@ describe("every inventory surface gives one answer per discovery-source outcome 
         getDeviceSessionRegistry: () => ({ list: () => [] }),
       },
     );
-    const ideLookup = (
-      UnixSocketServer.prototype as unknown as {
-        listBootedDevicesForIdeAction(p: "android" | "ios", serial: string): Promise<unknown>;
-      }
-    ).listBootedDevicesForIdeAction;
+    const ideServer = createHarnessServer("unused", daemonState, new FakeTimer());
     const select = createSetActiveDeviceHandler({
       resumeCtrlProxy: async () => {},
       transportWait: {
@@ -938,8 +944,8 @@ describe("every inventory surface gives one answer per discovery-source outcome 
       ideRefusesAbsentSerialOf: (
         await Promise.all(
           ALL_SOURCES.map((source) =>
-            ideLookup
-              .call({ daemonState }, source === "android" ? "android" : "ios", ABSENT[source])
+            ideServer
+              .lookupBootedDevicesForIde(source === "android" ? "android" : "ios", ABSENT[source])
               .then(
                 () => [],
                 (error: unknown) => [`${source}:${codeOf(error)}`],

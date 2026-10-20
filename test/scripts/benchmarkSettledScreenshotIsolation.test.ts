@@ -107,7 +107,8 @@ class FakeStopChild implements BenchmarkStopChild {
 function stopHarness() {
   const timer = new FakeTimer();
   const child = new FakeStopChild();
-  const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
+  const launches: Array<{ command: string; args: string[]; env: BenchmarkLaunchOptions["env"] }> =
+    [];
   const spawn: BenchmarkStopSpawner = (command, args, options) => {
     launches.push({ command, args, env: options.env });
     return child;

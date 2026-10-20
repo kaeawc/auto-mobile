@@ -73,6 +73,7 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
   test("clears window state, closes and evicts CtrlProxy, and marks installed apps stale", async () => {
     let windowInvalidations = 0;
     const windowCacheInvalidator: DeviceWindowCacheInvalidator = {
+      retireAppProcess: () => {},
       invalidate: () => {
         windowInvalidations += 1;
       },
@@ -222,14 +223,7 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
     const installedApps = new FakeInstalledAppsRepository();
     const barrier = new FakeDbWriteBarrier();
     const calls: string[] = [];
-    const createListener = createInstalledAppsDeviceIncarnationListener as unknown as (
-      repository: FakeInstalledAppsRepository,
-      coordinator: PerDeviceInstalledAppsCacheWriteCoordinator,
-      barrier: FakeDbWriteBarrier,
-      invalidateCache: (deviceId: string) => void,
-      notifyResourcesUpdated: (deviceId: string) => Promise<void>,
-    ) => DeviceIncarnationListener;
-    const listener = createListener(
+    const listener = createInstalledAppsDeviceIncarnationListener(
       installedApps,
       new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
       barrier,

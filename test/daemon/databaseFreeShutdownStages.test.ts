@@ -28,7 +28,7 @@ import { IosSimulatorCaptureHelperPool } from "../../src/features/screen-stream/
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../src/models";
-import { resetVideoRecordingManagerDependencies } from "../../src/server/videoRecordingManager";
+import { resetVideoRecordingManagerDependencies } from "../../src/daemon/videoRecordingManager";
 import * as shutdownCleanupModule from "../../src/shutdownCleanup";
 import {
   DAEMON_SHUTDOWN_STAGES,
@@ -217,7 +217,7 @@ class FakeSimulatorHelper extends EventEmitter {
     event: E,
     listener: IosScreenCaptureHelperEvents[E],
   ): this {
-    return super.on(event, listener as (...args: never[]) => void);
+    return super.on(event, listener);
   }
 }
 

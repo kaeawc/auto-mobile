@@ -1,12 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   currentTaskContext,
   holdTaskDeviceLeases,
   runAsTask,
   toJsonRpcError,
 } from "../../../src/server/tasks/runAsTask";
-import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
-import { McpError } from "../../../src/server/mcpError";
+import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
+import { McpError } from "../../../src/daemon/mcpError";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 
 const OK = { content: [{ type: "text" as const, text: "ok" }] };
@@ -120,6 +121,129 @@ describe("runAsTask (#4668)", () => {
     );
     const taskId = taskIdOf(handle);
     await manager.cancel("k", taskId);
+    expect((await settled(manager, taskId)).status).toBe("cancelled");
+  });
+
+  test("detach cancels polling promptly but preserves the work signal, context and lease until completion", async () => {
+    const manager = new FakeTaskManager();
+    const gate = Promise.withResolvers<void>();
+    const ended = Promise.withResolvers<void>();
+    const released: string[] = [];
+    let signal: AbortSignal | undefined;
+    let contextSignal: AbortSignal | undefined;
+    const handle = await runAsTask(
+      {
+        declared: true,
+        ownerKey: "k",
+        taskManager: manager,
+        toolName: "videoRecording",
+        onCancel: "detach",
+        keepalive: {
+          hold: () => () => {
+            released.push("lease");
+            ended.resolve();
+          },
+        },
+      },
+      async (run) => {
+        signal = run.signal;
+        contextSignal = currentTaskContext()?.signal;
+        holdTaskDeviceLeases(["device"]);
+        await gate.promise;
+        return OK;
+      },
+    );
+    const taskId = taskIdOf(handle);
+    try {
+      await manager.cancel("k", taskId);
+      const cancelled = await manager.get("k", taskId);
+      expect(cancelled.status).toBe("cancelled");
+      expect(cancelled.statusMessage).toContain("continues");
+      expect(signal).toBeDefined();
+      expect(signal?.aborted).toBe(false);
+      expect(contextSignal).toBe(signal);
+      expect(released).toEqual([]);
+    } finally {
+      gate.resolve();
+      await ended.promise;
+    }
+    const final = await manager.get("k", taskId);
+    expect(final.status).toBe("cancelled");
+    expect(final.result).toBeNull();
+    expect(released).toEqual(["lease"]);
+  });
+
+  test.each(["throw", "isError"])(
+    "detach logs a post-cancel %s and leaves the task cancelled",
+    async (failure) => {
+      const manager = new FakeTaskManager();
+      const gate = Promise.withResolvers<void>();
+      const ended = Promise.withResolvers<void>();
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const handle = await runAsTask(
+          {
+            declared: true,
+            ownerKey: "k",
+            taskManager: manager,
+            toolName: "videoRecording",
+            onCancel: "detach",
+            keepalive: { hold: () => () => ended.resolve() },
+          },
+          async () => {
+            holdTaskDeviceLeases(["device"]);
+            await gate.promise;
+            if (failure === "throw") {
+              throw new Error("finalization failed");
+            }
+            return { ...OK, isError: true };
+          },
+        );
+        const taskId = taskIdOf(handle);
+        await manager.cancel("k", taskId);
+        expect((await manager.get("k", taskId)).status).toBe("cancelled");
+        gate.resolve();
+        await ended.promise;
+        expect((await manager.get("k", taskId)).status).toBe("cancelled");
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining("after cancellation"),
+          expect.anything(),
+        );
+      } finally {
+        gate.resolve();
+        await ended.promise;
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test("abort policy aborts the work signal but waits for the work to unwind", async () => {
+    const manager = new FakeTaskManager();
+    const gate = Promise.withResolvers<void>();
+    let signal: AbortSignal | undefined;
+    const handle = await runAsTask(
+      {
+        declared: true,
+        ownerKey: "k",
+        taskManager: manager,
+        toolName: "installApp",
+        onCancel: "abort",
+      },
+      async (run) => {
+        signal = run.signal;
+        await gate.promise;
+        run.signal?.throwIfAborted();
+        return OK;
+      },
+    );
+    const taskId = taskIdOf(handle);
+    try {
+      await manager.cancel("k", taskId);
+      expect(signal?.aborted).toBe(true);
+      expect((await manager.get("k", taskId)).status).toBe("working");
+    } finally {
+      gate.resolve();
+    }
     expect((await settled(manager, taskId)).status).toBe("cancelled");
   });
 

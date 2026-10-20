@@ -1,11 +1,12 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import path from "node:path";
 
 const SOURCE_DIR = path.join(import.meta.dir, "..", "..", "src");
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const file = path.join(directory, entry.name);
     return entry.isDirectory()
       ? sourceFiles(file)
@@ -41,7 +42,7 @@ describe("legacy AutoMobile path matcher", () => {
 describe("shared AutoMobile directory path literals", () => {
   test("does not use the legacy .automobile path component", () => {
     const offenses = sourceFiles(SOURCE_DIR).flatMap((file) => {
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       return findOffenseLines(source).map((line) => `${path.relative(SOURCE_DIR, file)}:${line}`);
     });
 

@@ -16,7 +16,7 @@ import {
 } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/daemon/executionTracker";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import type { PlatformDeviceManager } from "../../src/utils/interfaces/DeviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -143,7 +143,13 @@ describe("nested sessionless calls keep the outer control execution's session ke
     restoreEndSpy = () => endSpy.mockRestore();
     const pool = daemon.getDevicePool();
     await pool.initializeWithDevices([HELD, WATCHED]);
-    session = seeded ? await pool.autolockDevice(HELD.deviceId, "android", OWNER) : SESSION;
+    const autolocked = seeded
+      ? await pool.autolockDevice(HELD.deviceId, "android", OWNER)
+      : SESSION;
+    if (!autolocked) {
+      throw new Error("autolockDevice did not return a session");
+    }
+    session = autolocked;
     if (!seeded) {
       await pool.bindOrReuseDeviceSession({
         sessionId: session,

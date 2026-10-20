@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
@@ -8,11 +7,11 @@ import {
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
-  FakeChildProcess,
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
@@ -201,7 +200,7 @@ describe("DevicePool", () => {
             isRunning: true,
             source: "local",
           },
-          childProcess: new FakeChildProcess() as unknown as ChildProcess,
+          childProcess: new FakeChildProcess(),
           allowSessionRebind: false,
           mcpSessionId: "cli-connection-2",
           oneShotCli: true,

@@ -1,15 +1,12 @@
 import { ProtocolError } from "@modelcontextprotocol/server";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../../models/deviceSessionRecovery";
 import { typedRefusalFields } from "../../models/typedRefusalFields";
-import {
-  recoveryIdentityLoss,
-  recoveryIdentityLossDetails,
-} from "../../server/deviceSessionResult";
+import { recoveryIdentityLoss, recoveryIdentityLossDetails } from "../deviceSessionResult";
 import {
   isSessionNotActiveWireError,
   isToolUnavailableWireError,
   unknownToolWireName,
-} from "../../server/toolUnavailableError";
+} from "../toolUnavailableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   McpOverloadError,

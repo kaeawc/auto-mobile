@@ -215,14 +215,16 @@ describe("navigateTo edge fallback (#10031)", () => {
 
   test("a transition with no recorded action but a shallower target is replayed as Back", async () => {
     await go("Home");
-    await manager.recordBackStack({ depth: 1, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth: 1 });
     await go("Settings");
-    await manager.recordBackStack({ depth: 2, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth: 2 });
     await go("Home");
     await go("Settings");
     backDestination = "Home";
     // The back-stack optimizer declines, so the recorded edge itself is replayed.
     const optimizer: PathOptimizer = {
+      areInSameTask: async () => false,
+      getNavigationRecommendation: async () => ({ method: "unknown", reason: "test" }),
       shouldUseBackButton: async () => ({ shouldUseBack: false, backPresses: 0, reason: "test" }),
     };
 

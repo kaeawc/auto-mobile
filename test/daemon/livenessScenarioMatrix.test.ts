@@ -7,13 +7,14 @@ import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { typedFrameSchema } from "../helpers/wireMessageSchemas";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
@@ -973,7 +974,8 @@ describe("host sleep longer than the idle window (#10661)", () => {
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(["cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
+      const idleExpiry: Array<string | undefined> = ["cleanup-expired"];
+      expect(idleExpiry).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }
@@ -1459,7 +1461,7 @@ class ObservationStreamForScenario extends DeviceDataStreamSocketServer {
     super("/fake/path/matrix.sock", timer, { authorize: () => {} });
   }
 
-  start(): void {
+  override async start(): Promise<void> {
     this.server = new FakeListeningNetServer();
     this.onServerStarted();
   }
@@ -1479,12 +1481,12 @@ describe("a viewer stream follows its observer registration (#11076, #11084)", (
   const DESKTOP_BEAT_MS = 2_000;
   // The stream's keepalive pings are not what is asserted on.
   const errorFrames = (socket: FakeSocket) =>
-    socket.getWrittenMessages().filter((message) => message.type === "error");
+    socket.getWrittenMessages(typedFrameSchema).filter((message) => message.type === "error");
 
   test("an observer that heartbeats keeps its observation stream; one that stops has it ended with session_ended", async () => {
     scenario = await LivenessScenario.start();
     const stream = new ObservationStreamForScenario(scenario.timer);
-    stream.start();
+    await stream.start();
     try {
       const registered = await scenario.daemonMethod("daemon/registerSession", {
         sessionId: OBSERVER,
@@ -1699,6 +1701,9 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       listResources: async () => ({ resources: [] }),
       readResource: async () => ({ contents: [] }),
       listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      request: async () => {
+        throw new Error("this scenario never issues a raw MCP request");
+      },
       close: async () => {},
     });
     await server.start();

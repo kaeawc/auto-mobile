@@ -1,4 +1,5 @@
-import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { readToolResponse } from "../helpers/toolResponse";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { RealBootGatesOverFakeFleet } from "../helpers/realBootGatesOverFakeFleet";
@@ -160,7 +161,7 @@ describe("a failed start does not stop the device it booted once another session
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each(table.map((row) => [row] as const))(
         name,
         async (row: T) => {
           await arrange();
@@ -291,7 +292,7 @@ describe("a failed start does not stop the device it booted once another session
           name: avd.name,
           __mcpSessionId: "client-a",
         });
-        expect(started.isError).not.toBe(true);
+        expect(readToolResponse(started).isError).not.toBe(true);
         const sessionId = pool.getDevice(AVD_SERIAL)?.sessionId;
         expect(sessionId).toBeString();
         held = sessionId!;
@@ -317,10 +318,13 @@ describe("a failed start does not stop the device it booted once another session
         expect(pool.getDevice(AVD_SERIAL)?.sessionId).toBe(held);
         throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
       };
-      const handoff = spyOn(
-        DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
-        "cancelOldDeviceWorkForSystemUiAnr",
-      ).mockRejectedValue(new Error("handoff failed"));
+      let handoffCalls = 0;
+      const restoreHandoff = pool.testHooks.cancelOldDeviceWorkForSystemUiAnr.intercept(
+        () => async () => {
+          handoffCalls++;
+          throw new Error("handoff failed");
+        },
+      );
 
       try {
         // startDevice strips sessionUuid arguments; admitted caller identity is ambient.
@@ -330,7 +334,7 @@ describe("a failed start does not stop the device it booted once another session
         await drain();
 
         expect(failure).toBeInstanceOf(Error);
-        expect(handoff).toHaveBeenCalled();
+        expect(handoffCalls).toBeGreaterThan(0);
         expect(replacement.killed).toBe(!runningBefore);
         expect(await gates.capacity("android")).toEqual({
           booted: runningBefore ? 1 : 0,
@@ -339,7 +343,7 @@ describe("a failed start does not stop the device it booted once another session
         expect(sessions.getSession(held)).toBeNull();
         expect(pool.getDevice(AVD_SERIAL)).toBeNull();
       } finally {
-        handoff.mockRestore();
+        restoreHandoff();
       }
     },
   );

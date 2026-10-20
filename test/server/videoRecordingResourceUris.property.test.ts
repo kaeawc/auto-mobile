@@ -3,7 +3,7 @@ import fc from "fast-check";
 import {
   buildVideoArchiveItemUri,
   VIDEO_RESOURCE_URIS,
-} from "../../src/server/videoRecordingResourceUris";
+} from "../../src/daemon/videoRecordingResourceUris";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;

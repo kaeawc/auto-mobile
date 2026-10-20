@@ -61,9 +61,9 @@ final class FakeProxyTimer: ProxyTimer {
     }
 
     func schedule(after milliseconds: Int64, callback: @escaping @Sendable () -> Void) {
-        state.withLock { s in
-            let targetTime = s.currentTime + milliseconds
-            s.pendingCallbacks.append((time: targetTime, callback: callback))
+        state.withLock { value in
+            let targetTime = value.currentTime + milliseconds
+            value.pendingCallbacks.append((time: targetTime, callback: callback))
         }
         if case .instant = mode {
             advance(by: milliseconds)
@@ -76,12 +76,12 @@ final class FakeProxyTimer: ProxyTimer {
         let (toExecute, waiters): (
             [(time: Int64, callback: @Sendable () -> Void)],
             [CheckedContinuation<Void, Never>]
-        ) = state.withLock { s in
-            s.currentTime += milliseconds
-            let due = s.pendingCallbacks.filter { $0.time <= s.currentTime }
-            s.pendingCallbacks.removeAll { $0.time <= s.currentTime }
-            let waiters = s.pendingWaiters.filter { $0.time <= s.currentTime }.map(\.continuation)
-            s.pendingWaiters.removeAll { $0.time <= s.currentTime }
+        ) = state.withLock { value in
+            value.currentTime += milliseconds
+            let due = value.pendingCallbacks.filter { $0.time <= value.currentTime }
+            value.pendingCallbacks.removeAll { $0.time <= value.currentTime }
+            let waiters = value.pendingWaiters.filter { $0.time <= value.currentTime }.map(\.continuation)
+            value.pendingWaiters.removeAll { $0.time <= value.currentTime }
             return (due, waiters)
         }
 
@@ -100,11 +100,11 @@ final class FakeProxyTimer: ProxyTimer {
 
     /// Reset time to zero, clear pending callbacks, and resume any pending waiters.
     func reset() {
-        let waiters: [CheckedContinuation<Void, Never>] = state.withLock { s in
-            s.currentTime = 0
-            s.pendingCallbacks.removeAll()
-            let waiters = s.pendingWaiters.map(\.continuation)
-            s.pendingWaiters.removeAll()
+        let waiters: [CheckedContinuation<Void, Never>] = state.withLock { value in
+            value.currentTime = 0
+            value.pendingCallbacks.removeAll()
+            let waiters = value.pendingWaiters.map(\.continuation)
+            value.pendingWaiters.removeAll()
             return waiters
         }
         for waiter in waiters {

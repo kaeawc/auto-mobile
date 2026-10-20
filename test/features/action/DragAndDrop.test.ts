@@ -1,3 +1,5 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -32,24 +34,26 @@ describe("DragAndDrop", () => {
 
   const createHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
-      node: [
-        {
-          $: {
-            "resource-id": "source-id",
-            text: "Source",
-            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-            class: "android.widget.TextView",
-          },
-        },
-        {
-          $: {
-            "resource-id": "target-id",
-            text: "Target",
-            bounds: { left: 200, top: 200, right: 300, bottom: 300 },
-            class: "android.widget.TextView",
-          },
-        },
-      ],
+      node: createFlatNodeForTest({
+        node: [
+          createFlatNodeForTest({
+            $: {
+              "resource-id": "source-id",
+              text: "Source",
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              class: "android.widget.TextView",
+            },
+          }),
+          createFlatNodeForTest({
+            $: {
+              "resource-id": "target-id",
+              text: "Target",
+              bounds: { left: 200, top: 200, right: 300, bottom: 300 },
+              class: "android.widget.TextView",
+            },
+          }),
+        ],
+      }),
     },
     packageName: "com.test.app",
     updatedAt: Date.now(),
@@ -69,7 +73,7 @@ describe("DragAndDrop", () => {
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeWindow = new FakeWindow();
     fakeA11yService = new FakeCtrlProxy();
-    fakeA11yService.setHierarchyData(createHierarchy());
+    fakeA11yService.setHierarchyData({ updatedAt: 0, packageName: "com.test.app", hierarchy: {} });
     fakeA11yService.setViewHierarchyResult(createHierarchy());
     fakeAdb = new FakeAdbExecutor();
     fakeTimer = new FakeTimer();
@@ -83,9 +87,9 @@ describe("DragAndDrop", () => {
       layoutSeqSum: 123,
     });
 
-    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true,
-    });
+    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+      FakeCtrlProxyManager.withAvailability(true),
+    );
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     dragAndDrop = new DragAndDrop(device, fakeAdb, fakeTimer, {
@@ -132,20 +136,32 @@ describe("DragAndDrop", () => {
   test("text drag endpoints use matched label centers inside clickable rows", () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: [
-          {
-            "resource-id": "source-row",
-            clickable: true,
-            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-            node: [{ text: "Source", bounds: { left: 20, top: 40, right: 40, bottom: 60 } }],
-          },
-          {
-            "resource-id": "target-row",
-            clickable: true,
-            bounds: { left: 200, top: 200, right: 300, bottom: 300 },
-            node: [{ text: "Target", bounds: { left: 220, top: 240, right: 240, bottom: 260 } }],
-          },
-        ],
+        node: createFlatNodeForTest({
+          node: [
+            createFlatNodeForTest({
+              "resource-id": "source-row",
+              clickable: true,
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              node: [
+                createFlatNodeForTest({
+                  text: "Source",
+                  bounds: { left: 20, top: 40, right: 40, bottom: 60 },
+                }),
+              ],
+            }),
+            createFlatNodeForTest({
+              "resource-id": "target-row",
+              clickable: true,
+              bounds: { left: 200, top: 200, right: 300, bottom: 300 },
+              node: [
+                createFlatNodeForTest({
+                  text: "Target",
+                  bounds: { left: 220, top: 240, right: 240, bottom: 260 },
+                }),
+              ],
+            }),
+          ],
+        }),
       },
     };
     expect(

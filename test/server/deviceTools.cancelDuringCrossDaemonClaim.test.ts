@@ -1,6 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
@@ -26,6 +24,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 isolateToolRegistry();
@@ -64,13 +63,8 @@ const ANDROID_SPEC = {
 };
 
 /** The boot's process handle: `kill` is what shuts the cold-booted device down. */
-class RecordingBootHandle extends EventEmitter {
-  readonly pid = 4242;
-  exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
-  killed = false;
-
-  kill(): boolean {
+class RecordingBootHandle extends FakeChildProcess {
+  override kill(): boolean {
     this.killed = true;
     this.exitCode = 0;
     queueMicrotask(() => this.emit("exit", 0, null));
@@ -141,8 +135,8 @@ describe.each([
       devices.setDeviceImages("android", [avd]);
       devices.setDeviceImages("ios", [simulator]);
       bootHandle = new RecordingBootHandle();
-      devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
-      devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+      devices.setMockChildProcess(avd.name, bootHandle);
+      devices.setMockChildProcess(simulator.name, bootHandle);
       ownership = new GatedClaimOwnership();
       const idGenerator = new CountingIdGenerator("cancel-claim");
       const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: autolock };
@@ -205,9 +199,9 @@ describe.each([
 
     function arrangedEach<T>(table: readonly T[]) {
       return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-        test.each(table)(
+        test.each(table.map((row) => ({ row })))(
           name,
-          async (row: T) => {
+          async ({ row }) => {
             await arrangeHarness();
             await fn(row);
           },
@@ -216,11 +210,15 @@ describe.each([
       };
     }
 
-    function arrangedEachRow<T extends readonly [unknown, ...unknown[]]>(table: readonly T[]) {
-      return (name: string, fn: (...row: T) => void | Promise<void>, timeout?: number): void => {
+    function arrangedEachRow(table: Array<[string, Record<string, unknown>, string]>) {
+      return (
+        name: string,
+        fn: (...row: [string, Record<string, unknown>, string]) => void | Promise<void>,
+        timeout?: number,
+      ): void => {
         test.each(table)(
           name,
-          async (...row: T) => {
+          async (...row: [string, Record<string, unknown>, string]) => {
             await arrangeHarness();
             await fn(...row);
           },
@@ -338,7 +336,7 @@ describe.each([
       ["getAndroid", { avdName: avd.name }, AVD_SERIAL],
       ["startDevice", { platform: "ios", deviceId: SIM_UDID }, SIM_UDID],
       ["startDevice", { platform: "android", name: avd.name }, AVD_SERIAL],
-    ] as const)(
+    ])(
       "%s %j: the cancelled cold boot leaves no session bound and no claim published",
       async (tool, args, deviceId) => {
         const cancelled = await cancelledAtClaim(tool, args);

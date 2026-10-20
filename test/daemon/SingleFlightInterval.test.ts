@@ -109,3 +109,32 @@ describe("SingleFlightInterval", () => {
     expect(errors).toEqual([failure]);
   });
 });
+
+test("SingleFlightInterval admits scheduled work separately from explicit epochs", async () => {
+  const timer = new FakeTimer();
+  let watching = false;
+  let starts = 0;
+  const interval = new SingleFlightInterval(
+    timer,
+    5_000,
+    async () => {
+      starts++;
+    },
+    {
+      shouldRun: async () => watching,
+    },
+  );
+  interval.start();
+  timer.advanceTime(5_000);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(starts).toBe(0);
+  await interval.run();
+  expect(starts).toBe(1);
+  watching = true;
+  timer.advanceTime(5_000);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(starts).toBe(2);
+  await interval.stop();
+});

@@ -8,6 +8,7 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 import dev.jasonpearson.automobile.desktop.core.AutoMobileContent
+import dev.jasonpearson.automobile.desktop.core.AutoMobileContentOptions
 import dev.jasonpearson.automobile.desktop.core.platform.NotificationHandler
 import dev.jasonpearson.automobile.ide.settings.AutoMobileSettings
 import dev.jasonpearson.automobile.ide.telemetry.SourceFileFinder
@@ -30,12 +31,14 @@ class AutoMobileToolWindowFactory : ToolWindowFactory, DumbAware {
       )
     val panel = JewelComposePanel {
       AutoMobileContent(
-        hostVisible = visible.value,
-        settingsProvider = AutoMobileSettings.getInstance(),
-        notificationHandler = IntellijNotificationHandler,
-        onOpenSource = { fileName, lineNumber, className ->
-          SourceFileFinder.findAndOpen(project, fileName, lineNumber, className)
-        },
+        AutoMobileContentOptions(
+          hostVisible = visible.value,
+          settingsProvider = AutoMobileSettings.getInstance(),
+          notificationHandler = IntellijNotificationHandler,
+          onOpenSource = { fileName, lineNumber, className ->
+            SourceFileFinder.findAndOpen(project, fileName, lineNumber, className)
+          },
+        ),
       )
     }
     val content = toolWindow.contentManager.factory.createContent(panel, "", false)

@@ -1,3 +1,4 @@
+import { DatabaseClosedForShutdownError } from "./DatabaseClosedForShutdownError";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   Kysely,
@@ -736,12 +737,6 @@ export async function awaitPromiseBounded(
     throw error;
   }
 }
-
-/**
- * A query, transaction or migration wait that reached the database after graceful shutdown had
- * closed it. The work is refused: nothing is written and the database is not reopened.
- */
-export class DatabaseClosedForShutdownError extends ActionableError {}
 
 /** Refusals logged in full (with the caller's stack) before only the count keeps growing. */
 const SHUTDOWN_CLOSE_REFUSAL_LOG_LIMIT = 5;

@@ -47,11 +47,14 @@ class DevicePickerUiTest {
   ) = setContent {
     MaterialTheme {
       DevicePicker(
-        state,
-        onAction = onAction,
-        onClose = onClose,
-        canClose = canClose,
-        thumbnail = { _, _ -> },
+        options =
+          DevicePickerOptions(
+            state = state,
+            onAction = onAction,
+            onClose = onClose,
+            canClose = canClose,
+            thumbnail = { _, _ -> },
+          ),
       )
     }
   }
@@ -206,11 +209,14 @@ class DevicePickerUiTest {
     setContent {
       MaterialTheme {
         DevicePicker(
-          DevicePickerUiState.Error("Couldn't load devices"),
-          onAction = { action = it },
-          onClose = {},
-          onRecoverDaemon = { recovered = true },
-          thumbnail = { _, _ -> },
+          options =
+            DevicePickerOptions(
+              state = DevicePickerUiState.Error("Couldn't load devices"),
+              onAction = { action = it },
+              onClose = {},
+              onRecoverDaemon = { recovered = true },
+              thumbnail = { _, _ -> },
+            ),
         )
       }
     }

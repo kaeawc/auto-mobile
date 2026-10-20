@@ -48,7 +48,7 @@ class LayoutInspectorState(
 
   // Coroutine scope for debouncing hierarchy updates
   private val debounceScope = CoroutineScope(debounceContext)
-  private var debounceJob: Job? = null
+  internal var debounceJob: Job? = null
 
   // Monotonic frame generation (issue #3347). Bumps whenever the rendered frame's device identity
   // is
@@ -65,16 +65,16 @@ class LayoutInspectorState(
   val frameGeneration: Long
     get() = generation
 
-  private fun advanceGeneration() {
+  internal fun advanceGeneration() {
     generation++
   }
 
   // Connection state
   var connectionStatus by mutableStateOf(ConnectionStatus.Disconnected)
-    private set
+    internal set
 
   var hierarchyUnavailableReason by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   /** Record an error-shaped hierarchy frame; ordinary malformed frames remain parser warnings. */
   fun recordHierarchyUnavailable(data: JsonElement): Boolean {
@@ -90,24 +90,24 @@ class LayoutInspectorState(
   }
 
   var streamingMode by mutableStateOf(StreamingMode.Paused)
-    private set
+    internal set
 
   // Screenshot state
   var screenshotData by mutableStateOf<ByteArray?>(null)
-    private set
+    internal set
 
   var screenWidth by mutableStateOf(1080)
-    private set
+    internal set
 
   var screenHeight by mutableStateOf(2340)
-    private set
+    internal set
 
   /** Display rotation: 0=portrait, 1=landscape 90deg, 2=reverse portrait, 3=reverse landscape */
   var rotation by mutableStateOf(0)
-    private set
+    internal set
 
   var lastScreenshotTimestamp by mutableStateOf(0L)
-    private set
+    internal set
 
   // Device id the currently rendered screenshot came from (issue #3347). Frames are filtered to the
   // active device before they reach [updateScreenshot], so this records which device the on-screen
@@ -116,11 +116,11 @@ class LayoutInspectorState(
   // newly
   // selected device against a stale mirror of the previous one. Null until the first live frame.
   var renderedDeviceId by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   /** Device rotation reported when the currently rendered screenshot was captured. */
   var renderedScreenshotRotation by mutableStateOf<Int?>(null)
-    private set
+    internal set
 
   // Device id the currently applied hierarchy came from (issue #3347). Distinct from
   // [renderedDeviceId] because clicks are mapped using the hierarchy root bounds, and the hierarchy
@@ -129,7 +129,7 @@ class LayoutInspectorState(
   // control requires BOTH ids to match the selection so a click is never mapped with one device's
   // dimensions and sent to another. Null until the first hierarchy is applied.
   var renderedHierarchyDeviceId by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   // Provenance of the applied screenshot / hierarchy (issue #3348). These are the inputs
   // DeviceControlPolicy assembles an atomic DeviceFrameSnapshot from: which update it is
@@ -138,10 +138,10 @@ class LayoutInspectorState(
   // stamped here, by us, never taken from a daemon or device message). Compose state so a
   // composition that evaluates control availability recomposes when a source updates.
   var screenshotFacts by mutableStateOf<ScreenshotFrameFacts?>(null)
-    private set
+    internal set
 
   var hierarchyFacts by mutableStateOf<HierarchyFrameFacts?>(null)
-    private set
+    internal set
 
   // Monotonic across every applied source update, so a snapshot built from them can be ordered
   // against an earlier one — which is how the post-input refresh policy recognizes the first
@@ -156,19 +156,19 @@ class LayoutInspectorState(
   // Screenshot capture metadata (from the observation stream's screenshot_update message). Absent
   // (null/false) when the daemon predates this metadata or a field wasn't reported.
   var screenshotFallback by mutableStateOf(false)
-    private set
+    internal set
 
   var screenshotFallbackReason by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   var screenshotFormat by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   var screenshotCaptureSource by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   // Hierarchy state — stores the full parsed hierarchy with prebuilt indexes
-  private var currentParsedHierarchy by mutableStateOf<ParsedHierarchy?>(null)
+  internal var currentParsedHierarchy by mutableStateOf<ParsedHierarchy?>(null)
 
   /** The root of the current UI hierarchy tree. */
   val hierarchy: UIElementInfo?
@@ -185,81 +185,26 @@ class LayoutInspectorState(
   // Changed elements tracking - IDs of elements that changed in the last update
   // Used to trigger flash animations in the tree view
   var changedElementIds by mutableStateOf<Set<String>>(emptySet())
-    private set
+    internal set
 
   // Selection state
   var selectedElementId by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   var hoveredElementId by mutableStateOf<String?>(null)
-    private set
+    internal set
 
   // Tap target compliance highlighting
   var showTapTargetIssues by mutableStateOf(false)
-    private set
+    internal set
 
   // Cached selected element — O(1) map lookup instead of DFS per recomposition
   var selectedElement by mutableStateOf<UIElementInfo?>(null)
-    private set
+    internal set
 
   // Initialize with mock data for Phase 1
   init {
     loadMockData()
-  }
-
-  /** Load mock data for development/testing. */
-  fun loadMockData() {
-    val root = LayoutInspectorMockData.mockHierarchy
-    currentParsedHierarchy = buildParsedHierarchy(root)
-    connectionStatus = ConnectionStatus.Connected
-    streamingMode = StreamingMode.Paused
-  }
-
-  /** Set the selected element by ID. */
-  fun selectElement(elementId: String?) {
-    selectedElementId = elementId
-    selectedElement = elementId?.let { currentElementMap[it] }
-  }
-
-  /** Set the hovered element by ID. */
-  fun hoverElement(elementId: String?) {
-    hoveredElementId = elementId
-  }
-
-  /** Toggle tap target compliance highlighting. */
-  fun toggleTapTargetIssues() {
-    showTapTargetIssues = !showTapTargetIssues
-  }
-
-  /** Clear selection. */
-  fun clearSelection() {
-    selectedElementId = null
-    selectedElement = null
-  }
-
-  /** Toggle streaming mode (live/paused). */
-  fun toggleStreaming() {
-    streamingMode =
-      when (streamingMode) {
-        StreamingMode.Live -> StreamingMode.Paused
-        StreamingMode.Paused -> StreamingMode.Live
-      }
-  }
-
-  /** Update streaming mode. */
-  fun updateStreamingMode(mode: StreamingMode) {
-    streamingMode = mode
-  }
-
-  /**
-   * Refresh the hierarchy from the device. Phase 1: Reloads mock data Phase 2: Will request fresh
-   * data via WebSocket
-   */
-  fun refreshHierarchy() {
-    // Phase 1: Just reload mock data
-    val root = LayoutInspectorMockData.mockHierarchy
-    currentParsedHierarchy = buildParsedHierarchy(root)
-    lastScreenshotTimestamp = System.currentTimeMillis()
   }
 
   /**
@@ -277,45 +222,37 @@ class LayoutInspectorState(
     width: Int,
     height: Int,
     timestamp: Long,
-    fallback: Boolean = false,
-    fallbackReason: String? = null,
-    format: String? = null,
-    captureSource: String? = null,
-    deviceId: String? = null,
-    generation: Long? = null,
-    captureSequence: Long? = null,
-    frameContext: String? = null,
-    coordinateSpace: CoordinateSpace? = null,
-    nativeScale: Double? = null,
-    rotation: Int? = null,
+    options: ScreenshotUpdateOptions = ScreenshotUpdateOptions(),
   ) {
-    if (generation != null && generation != this.generation) return
-    screenshotData = data
-    screenWidth = width
-    screenHeight = height
-    lastScreenshotTimestamp = timestamp
-    screenshotFallback = fallback
-    screenshotFallbackReason = fallbackReason
-    screenshotFormat = format
-    screenshotCaptureSource = captureSource
-    renderedDeviceId = deviceId
-    renderedScreenshotRotation = rotation
-    screenshotFacts =
-      ScreenshotFrameFacts(
-        deviceId = deviceId,
-        sequence = nextSourceSequence(),
-        captureSequence = captureSequence,
-        frameContext = frameContext,
-        receivedAtMs = nowMs(),
-        width = width,
-        height = height,
-        // Pair the pixels into the facts, so a snapshot built from them owns the frame it
-        // describes and a retained snapshot can render its own bytes (issue #3348).
-        data = data,
-        coordinateSpace = coordinateSpace,
-        nativeScale = nativeScale,
-        rotation = rotation,
-      )
+    return with(options) {
+      if (generation != null && generation != this@LayoutInspectorState.generation) return
+      screenshotData = data
+      screenWidth = width
+      screenHeight = height
+      lastScreenshotTimestamp = timestamp
+      screenshotFallback = fallback
+      screenshotFallbackReason = fallbackReason
+      screenshotFormat = format
+      screenshotCaptureSource = captureSource
+      renderedDeviceId = deviceId
+      renderedScreenshotRotation = rotation
+      screenshotFacts =
+        ScreenshotFrameFacts(
+          deviceId = deviceId,
+          sequence = nextSourceSequence(),
+          captureSequence = captureSequence,
+          frameContext = frameContext,
+          receivedAtMs = nowMs(),
+          width = width,
+          height = height,
+          // Pair the pixels into the facts, so a snapshot built from them owns the frame it
+          // describes and a retained snapshot can render its own bytes (issue #3348).
+          data = data,
+          coordinateSpace = coordinateSpace,
+          nativeScale = nativeScale,
+          rotation = rotation,
+        )
+    }
   }
 
   /**
@@ -326,29 +263,30 @@ class LayoutInspectorState(
   fun updateHierarchy(
     newHierarchy: UIElementInfo,
     newRotation: Int = 0,
-    deviceId: String? = null,
-    captureSequence: Long? = null,
-    frameContext: String? = null,
-    coordinateSpace: CoordinateSpace? = null,
-    nativeScale: Double? = null,
-    captureRotation: Int? = null,
+    options: HierarchyUpdateOptions = HierarchyUpdateOptions(),
   ) {
-    // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
-    // immediate
-    // one (or restore stale hierarchy identity/bounds).
-    debounceJob?.cancel()
-    val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
-    val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
-    applyHierarchyUpdateImmediate(
-      parsed,
-      changedIds,
-      deviceId,
-      captureSequence,
-      frameContext,
-      coordinateSpace,
-      nativeScale,
-      captureRotation,
-    )
+    return with(options) {
+
+      // Cancel any queued debounced update so a stale, later-firing job can't overwrite this
+      // immediate
+      // one (or restore stale hierarchy identity/bounds).
+      debounceJob?.cancel()
+      val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
+      val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
+      applyHierarchyUpdateImmediate(
+        parsed = parsed,
+        changedIds = changedIds,
+        options =
+          HierarchyUpdateOptions(
+            deviceId = deviceId,
+            captureSequence = captureSequence,
+            frameContext = frameContext,
+            coordinateSpace = coordinateSpace,
+            nativeScale = nativeScale,
+            captureRotation = captureRotation,
+          ),
+      )
+    }
   }
 
   /**
@@ -362,30 +300,30 @@ class LayoutInspectorState(
   fun applyHierarchyUpdate(
     parsed: ParsedHierarchy,
     changedIds: Set<String>,
-    deviceId: String? = null,
     generation: Long? = null,
-    captureSequence: Long? = null,
-    frameContext: String? = null,
-    coordinateSpace: CoordinateSpace? = null,
-    nativeScale: Double? = null,
-    captureRotation: Int? = null,
+    options: HierarchyUpdateOptions = HierarchyUpdateOptions(),
   ) {
-    debounceJob?.cancel()
-    debounceJob = debounceScope.launch {
-      delay(HIERARCHY_DEBOUNCE_MS)
-      // Drop a debounced job whose generation was superseded while it waited (device change,
-      // invalidation, or disconnect) so it can't restore stale hierarchy identity/bounds.
-      if (generation != null && generation != this@LayoutInspectorState.generation) return@launch
-      applyHierarchyUpdateImmediate(
-        parsed,
-        changedIds,
-        deviceId,
-        captureSequence,
-        frameContext,
-        coordinateSpace,
-        nativeScale,
-        captureRotation,
-      )
+    return with(options) {
+      debounceJob?.cancel()
+      debounceJob = debounceScope.launch {
+        delay(HIERARCHY_DEBOUNCE_MS)
+        // Drop a debounced job whose generation was superseded while it waited (device change,
+        // invalidation, or disconnect) so it can't restore stale hierarchy identity/bounds.
+        if (generation != null && generation != this@LayoutInspectorState.generation) return@launch
+        applyHierarchyUpdateImmediate(
+          parsed = parsed,
+          changedIds = changedIds,
+          options =
+            HierarchyUpdateOptions(
+              deviceId = deviceId,
+              captureSequence = captureSequence,
+              frameContext = frameContext,
+              coordinateSpace = coordinateSpace,
+              nativeScale = nativeScale,
+              captureRotation = captureRotation,
+            ),
+        )
+      }
     }
   }
 
@@ -397,52 +335,44 @@ class LayoutInspectorState(
   fun applyHierarchyUpdateImmediate(
     parsed: ParsedHierarchy,
     changedIds: Set<String>,
-    deviceId: String? = null,
-    captureSequence: Long? = null,
-    frameContext: String? = null,
-    coordinateSpace: CoordinateSpace? = null,
-    nativeScale: Double? = null,
-    captureRotation: Int? = null,
+    options: HierarchyUpdateOptions = HierarchyUpdateOptions(),
   ) {
-    hierarchyUnavailableReason = null
-    changedElementIds = changedIds
-    currentParsedHierarchy = parsed
-    rotation = parsed.rotation
-    renderedHierarchyDeviceId = deviceId
-    hierarchyFacts =
-      HierarchyFrameFacts(
-        deviceId = deviceId,
-        sequence = nextSourceSequence(),
-        captureSequence = captureSequence,
-        frameContext = frameContext,
-        receivedAtMs = nowMs(),
-        hierarchy = parsed,
-        // The root commonly reports (0,0,0,0) on Android (accessibility service); 0 tells the
-        // policy to fall back to the observation stream's reported screen size, exactly as the
-        // renderer does.
-        rootWidth = parsed.root.bounds.width.takeIf { it > 0 } ?: 0,
-        rootHeight = parsed.root.bounds.height.takeIf { it > 0 } ?: 0,
-        coordinateSpace = coordinateSpace,
-        nativeScale = nativeScale,
-        rotation = captureRotation,
-      )
+    return with(options) {
+      hierarchyUnavailableReason = null
+      changedElementIds = changedIds
+      currentParsedHierarchy = parsed
+      rotation = parsed.rotation
+      renderedHierarchyDeviceId = deviceId
+      hierarchyFacts =
+        HierarchyFrameFacts(
+          deviceId = deviceId,
+          sequence = nextSourceSequence(),
+          captureSequence = captureSequence,
+          frameContext = frameContext,
+          receivedAtMs = nowMs(),
+          hierarchy = parsed,
+          // The root commonly reports (0,0,0,0) on Android (accessibility service); 0 tells the
+          // policy to fall back to the observation stream's reported screen size, exactly as the
+          // renderer does.
+          rootWidth = parsed.root.bounds.width.takeIf { it > 0 } ?: 0,
+          rootHeight = parsed.root.bounds.height.takeIf { it > 0 } ?: 0,
+          coordinateSpace = coordinateSpace,
+          nativeScale = nativeScale,
+          rotation = captureRotation,
+        )
 
-    // Clear selection if the selected element no longer exists — O(1) map check
-    val currentSelectedId = selectedElementId
-    if (currentSelectedId != null) {
-      if (!parsed.elementMap.containsKey(currentSelectedId)) {
-        selectedElementId = null
-        selectedElement = null
-      } else {
-        // Update cached reference in case the element object changed
-        selectedElement = parsed.elementMap[currentSelectedId]
+      // Clear selection if the selected element no longer exists — O(1) map check
+      val currentSelectedId = selectedElementId
+      if (currentSelectedId != null) {
+        if (!parsed.elementMap.containsKey(currentSelectedId)) {
+          selectedElementId = null
+          selectedElement = null
+        } else {
+          // Update cached reference in case the element object changed
+          selectedElement = parsed.elementMap[currentSelectedId]
+        }
       }
     }
-  }
-
-  /** Clear the changed elements set. Called after flash animation completes. */
-  fun clearChangedElements() {
-    changedElementIds = emptySet()
   }
 
   /**
@@ -470,103 +400,10 @@ class LayoutInspectorState(
     hierarchyFacts = null
   }
 
-  /**
-   * Compare two element maps to find IDs that are new or have changed properties. Pure function —
-   * safe to call off the main thread.
-   */
-  fun computeChangedElements(
-    oldElementMap: Map<String, UIElementInfo>,
-    newElementMap: Map<String, UIElementInfo>,
-  ): Set<String> {
-    if (oldElementMap.isEmpty()) return emptySet()
-    val changedIds = mutableSetOf<String>()
-    for ((id, newElement) in newElementMap) {
-      val oldElement = oldElementMap[id]
-      if (oldElement == null) {
-        changedIds.add(id)
-      } else if (hasElementChanged(oldElement, newElement)) {
-        changedIds.add(id)
-      }
-    }
-    return changedIds
-  }
-
-  /** Check if an element's visible properties have changed. */
-  private fun hasElementChanged(old: UIElementInfo, new: UIElementInfo): Boolean {
-    return old.text != new.text ||
-      old.contentDescription != new.contentDescription ||
-      old.bounds != new.bounds ||
-      old.isClickable != new.isClickable ||
-      old.isEnabled != new.isEnabled ||
-      old.isFocused != new.isFocused ||
-      old.isSelected != new.isSelected ||
-      old.isScrollable != new.isScrollable ||
-      old.isCheckable != new.isCheckable ||
-      old.isChecked != new.isChecked ||
-      old.children.size != new.children.size
-  }
-
-  /**
-   * Connect to device. Phase 1: Simulates connection Phase 2: Will establish WebSocket connection
-   */
-  fun connect() {
-    connectionStatus = ConnectionStatus.Connecting
-    // Simulate connection delay then connect
-    connectionStatus = ConnectionStatus.Connected
-    loadMockData()
-  }
-
-  /** Update connection status externally (e.g., from stream connection state). */
-  fun updateConnectionStatus(status: ConnectionStatus) {
-    connectionStatus = status
-  }
-
-  /** Disconnect from device. Clears all device-specific stale data. */
-  fun disconnect() {
-    debounceJob?.cancel()
-    // Advance the generation so any in-flight decode/debounced job from before the disconnect is
-    // dropped instead of repopulating stale state.
-    advanceGeneration()
-    connectionStatus = ConnectionStatus.Disconnected
-    hierarchyUnavailableReason = null
-    streamingMode = StreamingMode.Paused
-    screenshotData = null
-    screenshotFallback = false
-    screenshotFallbackReason = null
-    screenshotFormat = null
-    screenshotCaptureSource = null
-    renderedDeviceId = null
-    renderedScreenshotRotation = null
-    renderedHierarchyDeviceId = null
-    screenshotFacts = null
-    hierarchyFacts = null
-    currentParsedHierarchy = null
-    rotation = 0
-    selectedElementId = null
-    selectedElement = null
-    hoveredElementId = null
-    changedElementIds = emptySet()
-  }
-
   // ========================================
   // Phase 2: WebSocket methods (stubs for now)
   // ========================================
 
-  /** Start screenshot streaming. Phase 2: Will send subscribe_screenshots message via WebSocket. */
-  fun startScreenshotStream(intervalMs: Int = 100, quality: Int = 70) {
-    streamingMode = StreamingMode.Live
-    // Phase 2: Send WebSocket message
-    // { "type": "subscribe_screenshots", "intervalMs": intervalMs, "quality": quality }
-  }
-
-  /**
-   * Stop screenshot streaming. Phase 2: Will send unsubscribe_screenshots message via WebSocket.
-   */
-  fun stopScreenshotStream() {
-    streamingMode = StreamingMode.Paused
-    // Phase 2: Send WebSocket message
-    // { "type": "unsubscribe_screenshots" }
-  }
 }
 
 /**
@@ -592,3 +429,26 @@ fun buildParsedHierarchy(root: UIElementInfo): ParsedHierarchy {
 fun rememberLayoutInspectorState(): LayoutInspectorState {
   return remember { LayoutInspectorState() }
 }
+
+data class ScreenshotUpdateOptions(
+  val fallback: Boolean = false,
+  val fallbackReason: String? = null,
+  val format: String? = null,
+  val captureSource: String? = null,
+  val deviceId: String? = null,
+  val generation: Long? = null,
+  val captureSequence: Long? = null,
+  val frameContext: String? = null,
+  val coordinateSpace: CoordinateSpace? = null,
+  val nativeScale: Double? = null,
+  val rotation: Int? = null,
+)
+
+data class HierarchyUpdateOptions(
+  val deviceId: String? = null,
+  val captureSequence: Long? = null,
+  val frameContext: String? = null,
+  val coordinateSpace: CoordinateSpace? = null,
+  val nativeScale: Double? = null,
+  val captureRotation: Int? = null,
+)

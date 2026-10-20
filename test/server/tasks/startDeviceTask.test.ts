@@ -17,9 +17,9 @@ import { SessionToolBindingStore } from "../../../src/server/sessionToolBindingS
 import {
   HeartbeatTaskLeaseKeepalive,
   type TaskLeaseHoldRequest,
-} from "../../../src/server/tasks/taskLeaseKeepalive";
-import { TASK_ELIGIBLE_TOOLS } from "../../../src/server/tasks/toolCallTasks";
-import { resetVideoRecordingManagerDependencies } from "../../../src/server/videoRecordingManager";
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
+import { TASK_ELIGIBILITY } from "../../../src/server/tasks/toolCallTasks";
+import { resetVideoRecordingManagerDependencies } from "../../../src/daemon/videoRecordingManager";
 import { DefaultDeviceMatcher } from "../../../src/utils/deviceMatcher";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -298,8 +298,8 @@ describe("startDevice as an MCP task (#4668)", () => {
   });
 
   arranged("startDevice is an eligible tool", () => {
-    expect(TASK_ELIGIBLE_TOOLS.has("startDevice")).toBe(true);
-    expect(TASK_ELIGIBLE_TOOLS.has("installApp")).toBe(true);
+    expect(TASK_ELIGIBILITY({ name: "startDevice", args: {} })).toEqual({ onCancel: "abort" });
+    expect(TASK_ELIGIBILITY({ name: "installApp", args: {} })).toEqual({ onCancel: "abort" });
   });
 
   arranged(

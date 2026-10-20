@@ -16,7 +16,7 @@ import {
   createBootAdmissionGates,
   describeBootCapacity,
 } from "../../../src/features/bootAdmission/sharedBootAdmissionGates";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import { testOverrides } from "../../../src/utils/testOverrides";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -453,4 +453,23 @@ describe("shared boot admission gates", () => {
     expect(await describeBootCapacity(["ios"], { android, ios }, new FakeTimer())).toBeUndefined();
     expect(await describeBootCapacity(["android"], {}, new FakeTimer())).toBeUndefined();
   });
+});
+
+// Replacement entries reuse the old device's occupied slot until their new identity exists.
+test("replacement ledger entry counts once across disappearance, bind and idempotent release", () => {
+  const ledger = new BootAdmissionLedger(new FakeTimer());
+  const held = ledger.admit("OLD", true);
+  expect(ledger.inFlightView(new Set(["OLD"]))).toMatchObject({
+    count: 0,
+    listedWithoutProcess: 0,
+  });
+  expect(ledger.inFlightCount(new Set())).toBe(1);
+  held.bind("NEW");
+  held.bind("NEW");
+  expect(ledger.inFlightCount(new Set())).toBe(1);
+  expect(ledger.inFlightCount(new Set(["NEW"]))).toBe(0);
+  held.release();
+  held.release();
+  held.bind("IGNORED");
+  expect(ledger.inFlightCount(new Set())).toBe(0);
 });

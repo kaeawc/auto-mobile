@@ -70,7 +70,7 @@ describe("foreign CtrlProxy forward evidence", () => {
     const second = new FakeAdbExecutor();
     second.setCommandResponse("forward --list", createExecResult("second tcp:52001 tcp:8765", ""));
     const evidence = new DefaultForeignCtrlProxyForwardEvidence({
-      adbFactory: { create: (device) => (device.deviceId === "first" ? first : second) },
+      adbFactory: { create: (device) => (device?.deviceId === "first" ? first : second) },
       clientProbe: { findClientPids: async () => [4242] },
       ownership: () => ({ ownsForward: () => false }),
       isProcessRunning: () => true,

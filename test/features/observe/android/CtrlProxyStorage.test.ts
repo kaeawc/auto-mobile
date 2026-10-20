@@ -146,7 +146,7 @@ describe("CtrlProxyStorage (Android)", function () {
       const pending = client.discoverKeystore("com.example");
       await waitForSentMessages(socket, count + 1);
       const request = findSentMessage(socket!, "discover_keystore");
-      const state = {
+      const state: Awaited<ReturnType<AndroidCtrlProxyClient["discoverKeystore"]>> = {
         schemaVersion: 1,
         capability: "storage.keystore",
         outcome: "disabled",
@@ -198,7 +198,10 @@ describe("CtrlProxyStorage (Android)", function () {
     }
   });
 
-  const sdkSnapshot = {
+  const sdkSnapshot: Extract<
+    Awaited<ReturnType<AndroidCtrlProxyClient["getSdkCapabilities"]>>,
+    { status: "available" }
+  >["snapshot"] = {
     schemaVersion: 1,
     capabilities: [
       { id: "network.control", state: "SUPPORTED" },
@@ -466,7 +469,7 @@ describe("CtrlProxyStorage (Android)", function () {
   });
 
   describe("unsubscribeStorage", function () {
-    // CtrlProxyMessageHandlerTest.kt's `unsubscribe_storage with only subscriptionId resolves
+    // CtrlProxyMessageHandlerStorageTest.kt's `unsubscribe_storage with only subscriptionId resolves
     // packageName and fileName` uses the same JSON shape; changing either side must change both.
     const subscriptionId = "com.example:settings.xml";
 

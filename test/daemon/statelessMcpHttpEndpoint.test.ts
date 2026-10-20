@@ -9,7 +9,7 @@ import {
   readInBandMcpSessionId,
   type StatelessMcpRequestScope,
 } from "../../src/daemon/statelessMcpHttpEndpoint";
-import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
+import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 import type { ExecutionCancellationReason } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";

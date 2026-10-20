@@ -8,9 +8,9 @@ import {
   defaultRecordingSessionCleanupDeps,
   type RecordingAcquisitionDeps,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import { NetworkState } from "../../src/utils/NetworkState";
-import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/daemon/networkStateSessionCleanup";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";

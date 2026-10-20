@@ -4,7 +4,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import type { CtrlProxyVoiceOverResult } from "../../../src/features/observe/ios/types";
 
 /**
- * Minimal fake IOSCtrlProxy for VoiceOver detection tests
+ * Minimal fake IosCtrlProxy for VoiceOver detection tests
  */
 class FakeCtrlProxyService {
   voiceOverEnabled = false;

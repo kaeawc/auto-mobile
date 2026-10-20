@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from "node:http";
 import { createMcpServer, type McpServerOptions } from "../server";
-import { daemonTaskLeaseKeepalive } from "../server/tasks/daemonTaskManager";
+import { daemonTaskLeaseKeepalive } from "./tasks/daemonTaskManager";
 import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
@@ -109,3 +109,6 @@ export function createStatelessMcpServer(
     taskLeaseKeepalive: daemonTaskLeaseKeepalive(),
   });
 }
+
+/** The resource-list freshness hook shared by the MCP handler and control discovery cache. */
+export { refreshMcpResourceList } from "../server";

@@ -1,3 +1,4 @@
+import { wireCapture } from "../../../helpers/wireCapture";
 /**
  * Interaction tests across the audit's three recent changes: the per-observation
  * contrast screenshot (#10037), the dp large-text rule (#10039), the violation
@@ -48,7 +49,13 @@ beforeAll(async () => {
   // Three copies are needed to exceed the cap only when contrast is included.
   gboardHierarchy.density = 1600;
   const nodes = gboardHierarchy.hierarchy.node ?? [];
-  gboardHierarchy.hierarchy.node = Array.from({ length: 3 }, () => structuredClone(nodes)).flat();
+  gboardHierarchy = wireCapture({
+    ...gboardHierarchy,
+    hierarchy: {
+      ...gboardHierarchy.hierarchy,
+      node: Array.from({ length: 3 }, () => structuredClone(nodes)).flat(),
+    },
+  });
   imageBackend = new FakeImageBackend();
   imageBackend.setRawPixelsResult({
     width: 1080,

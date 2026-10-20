@@ -14,7 +14,7 @@ import {
 import { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
-import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import type { DisplayFenceDependencies } from "../BaseVisualChange";
 import type { RenderedObservationReader } from "../TargetDisplayAction";

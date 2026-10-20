@@ -63,46 +63,7 @@ fun VideoCard(video: VideoData, onClick: () -> Unit) {
     shape = RoundedCornerShape(12.dp),
   ) {
     Column {
-      Box {
-        AsyncImage(
-          model = video.thumbnailUrl,
-          contentDescription = video.title,
-          modifier =
-            Modifier.fillMaxWidth()
-              .aspectRatio(16f / 9f)
-              .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
-          contentScale = ContentScale.Crop,
-        )
-
-        // Play button overlay
-        Box(
-          modifier = Modifier.fillMaxSize().padding(8.dp),
-          contentAlignment = Alignment.BottomEnd,
-        ) {
-          AutoMobileContentCard(
-            colors =
-              CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-              ),
-            shape = RoundedCornerShape(4.dp),
-          ) {
-            Text(
-              text = video.duration,
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-              fontSize = 12.sp,
-              color = MaterialTheme.colorScheme.onSurface,
-            )
-          }
-        }
-
-        // Play icon centered
-        Icon(
-          imageVector = Icons.Filled.PlayArrow,
-          contentDescription = "Play",
-          modifier = Modifier.align(Alignment.Center).size(48.dp),
-          tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-        )
-      }
+      VideoThumbnail(video)
 
       Column(modifier = Modifier.padding(12.dp)) {
         Text(
@@ -185,5 +146,49 @@ fun PreviewVideoCardList() {
     ) {
       items(VideoData.entries) { video -> VideoCard(video = video, onClick = {}) }
     }
+  }
+}
+
+@Composable
+private fun VideoThumbnail(video: VideoData) {
+  Box {
+    AsyncImage(
+      model = video.thumbnailUrl,
+      contentDescription = video.title,
+      modifier =
+        Modifier.fillMaxWidth()
+          .aspectRatio(16f / 9f)
+          .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
+      contentScale = ContentScale.Crop,
+    )
+
+    // Play button overlay
+    Box(
+      modifier = Modifier.fillMaxSize().padding(8.dp),
+      contentAlignment = Alignment.BottomEnd,
+    ) {
+      AutoMobileContentCard(
+        colors =
+          CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+          ),
+        shape = RoundedCornerShape(4.dp),
+      ) {
+        Text(
+          text = video.duration,
+          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+          fontSize = 12.sp,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+      }
+    }
+
+    // Play icon centered
+    Icon(
+      imageVector = Icons.Filled.PlayArrow,
+      contentDescription = "Play",
+      modifier = Modifier.align(Alignment.Center).size(48.dp),
+      tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+    )
   }
 }

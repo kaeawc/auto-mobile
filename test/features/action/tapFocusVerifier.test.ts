@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { describe, expect, test } from "bun:test";
 import { FocusVerifier } from "../../../src/features/action/tapFocusVerifier";
 import type { BootedDevice } from "../../../src/models";
@@ -27,7 +28,9 @@ describe("FocusVerifier", () => {
 
   test("an unresolvable selector scope means not confirmed rather than an error", () => {
     let finds = 0;
-    const observation: Partial<ObserveResult> = { viewHierarchy: { hierarchy: { node: [] } } };
+    const observation: Partial<ObserveResult> = {
+      viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ node: [] }) } },
+    };
     expect(
       verifier(() => (finds += 1)).verify(
         options,

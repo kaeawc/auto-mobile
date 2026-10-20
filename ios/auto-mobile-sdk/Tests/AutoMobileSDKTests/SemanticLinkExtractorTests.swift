@@ -31,14 +31,14 @@ final class SemanticLinkExtractorTests: XCTestCase {
         // Mirrors the Playground demo: "Terms of Service" appears twice in one
         // owner paragraph and must be disambiguable by occurrence 0 vs 1.
         let text = "Read the Terms of Service, contact Support, or review the Terms of Service again."
-        let ns = text as NSString
-        let first = ns.range(of: "Terms of Service")
-        let support = ns.range(of: "Support")
+        let nsText = text as NSString
+        let first = nsText.range(of: "Terms of Service")
+        let support = nsText.range(of: "Support")
         let secondSearchStart = first.location + first.length
-        let second = ns.range(
+        let second = nsText.range(
             of: "Terms of Service",
             options: [],
-            range: NSRange(location: secondSearchStart, length: ns.length - secondSearchStart)
+            range: NSRange(location: secondSearchStart, length: nsText.length - secondSearchStart)
         )
         let links = SemanticLinkExtractor.links(from: linked(text, ranges: [
             (first, "https://x/terms-first"),
@@ -55,9 +55,9 @@ final class SemanticLinkExtractorTests: XCTestCase {
 
     func testMixedCaseDuplicateLinkTextGetsDistinctOccurrences() {
         let text = "Read the Terms of Service, then the terms of service."
-        let ns = text as NSString
-        let first = ns.range(of: "Terms of Service")
-        let second = ns.range(of: "terms of service")
+        let nsText = text as NSString
+        let first = nsText.range(of: "Terms of Service")
+        let second = nsText.range(of: "terms of service")
         let links = SemanticLinkExtractor.links(from: linked(text, ranges: [
             (first, "https://x/terms-first"),
             (second, "https://x/terms-second"),
@@ -69,9 +69,9 @@ final class SemanticLinkExtractorTests: XCTestCase {
 
     func testUnicodeCaseInsensitiveDuplicateLinkTextGetsDistinctOccurrences() {
         let text = "Read Σ, then ς."
-        let ns = text as NSString
-        let first = ns.range(of: "Σ")
-        let second = ns.range(of: "ς")
+        let nsText = text as NSString
+        let first = nsText.range(of: "Σ")
+        let second = nsText.range(of: "ς")
         let links = SemanticLinkExtractor.links(from: linked(text, ranges: [
             (first, "https://x/sigma-first"),
             (second, "https://x/sigma-second"),

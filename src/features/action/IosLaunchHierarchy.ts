@@ -1,7 +1,7 @@
 import { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { Timer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
@@ -13,7 +13,7 @@ interface IosLaunchHierarchyDependencies {
 export class IosLaunchHierarchy {
   constructor(private readonly deps: IosLaunchHierarchyDependencies) {}
   private requestIosHierarchyForPackage(
-    xcTestClient: IOSCtrlProxy,
+    xcTestClient: IosCtrlProxy,
     expectedPackageName: string,
     timeoutMs: number,
   ): Promise<string> {

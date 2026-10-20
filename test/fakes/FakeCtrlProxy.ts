@@ -1,3 +1,7 @@
+import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { TwoFingerSwipeRequest } from "../../src/features/observe/android/types";
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { AndroidActivateAccessibilityLinkRequest } from "../../src/features/observe/android/AndroidActionDispatcher";
 import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
@@ -111,18 +115,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   getGestureRequestLog(): Array<Record<string, unknown> & { type: string }> {
     return this.gestureRequestLog.map((request) => ({ ...request }));
   }
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration = 10,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    _frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const { x, y, duration = 10, onDispatch, signal, displayId, beforeSend } = request;
+
     beforeSend?.();
     this.checkFailure("tap");
     this.tapHistory.push({
@@ -404,6 +399,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private performanceTiming: AndroidPerfTiming[] | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
+  private waitForConnectionResult: boolean | undefined;
+  private lastConnectionFailure: { forwardingLeaseConflict: boolean; message?: string } | undefined;
 
   // Failure modes
   private failureMap: Map<string, Error> = new Map();
@@ -956,19 +953,20 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult> {
+  async requestPinch(request: PinchRequest): Promise<A11yPinchResult> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
+
     await this.applyDelay("pinch");
     beforeSend?.();
     this.checkFailure("pinch");
@@ -1194,14 +1192,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    _perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
+    const { selector, timeoutMs = 5000, signal, onDispatch } = request;
+
     signal?.throwIfAborted();
     await this.applyDelay("requestActivateAccessibilityLink");
     this.checkFailure("requestActivateAccessibilityLink");
@@ -1219,18 +1213,19 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    offset: number = 100,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    const {
+      x1,
+      y1,
+      x2,
+      y2,
+      duration = 300,
+      offset = 100,
+      timeoutMs = 5000,
+      displayId,
+      beforeSend,
+    } = request;
+
     await this.applyDelay("requestTwoFingerSwipe");
     beforeSend?.();
     this.checkFailure("requestTwoFingerSwipe");
@@ -1420,10 +1415,28 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     throw new Error("FakeCtrlProxy.getSupportedCommands is not scripted");
   }
 
-  waitForConnection(
+  /** Result {@link waitForConnection} reports; defaults to the {@link setConnected} state. */
+  setWaitForConnectionResult(connected: boolean): void {
+    this.waitForConnectionResult = connected;
+  }
+
+  async waitForConnection(
     ..._args: Parameters<AndroidCtrlProxy["waitForConnection"]>
   ): ReturnType<AndroidCtrlProxy["waitForConnection"]> {
-    throw new Error("FakeCtrlProxy.waitForConnection is not scripted");
+    return this.waitForConnectionResult ?? this.isConnectedState;
+  }
+
+  /** Record the most recent connect failure a real client would report. */
+  setLastConnectionFailure(failure: { forwardingLeaseConflict: boolean; message?: string }): void {
+    this.lastConnectionFailure = failure;
+  }
+
+  isLastConnectionFailureForwardingLeaseConflict(): boolean {
+    return this.lastConnectionFailure?.forwardingLeaseConflict ?? false;
+  }
+
+  getLastConnectionFailureMessage(): string | undefined {
+    return this.lastConnectionFailure?.message;
   }
 
   async verifyServiceReady(): Promise<boolean> {

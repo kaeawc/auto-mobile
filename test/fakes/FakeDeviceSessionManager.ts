@@ -2,14 +2,31 @@ import {
   type ConnectedPlatformScan,
   DeviceReadyOptions,
   DeviceSessionManager,
-} from "../../src/devices/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceSessionManager";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
 
 /**
  * Fake implementation of DeviceSessionManager for testing
  * Allows configuring connected devices, verification behavior, and asserting method calls
  */
-export class FakeDeviceSessionManager implements DeviceSessionManager {
+export class FakeDeviceSessionManager implements Pick<
+  DeviceSessionManager,
+  | "getCurrentDevice"
+  | "getCurrentPlatform"
+  | "setCurrentDevice"
+  | "getExplicitDevicePin"
+  | "setExplicitDevicePin"
+  | "clearExplicitDevicePin"
+  | "ensureDeviceReady"
+  | "detectConnectedPlatforms"
+  | "detectConnectedPlatformsWithStatus"
+  | "verifyDevice"
+  | "verifyAndroidDevice"
+  | "verifyIosDevice"
+  | "findOrStartDevice"
+  | "findOrStartAndroidDevice"
+  | "findOrStartIosDevice"
+> {
   private currentDevice: BootedDevice | undefined;
   private currentPlatform: Platform | undefined;
   private explicitDevicePin: BootedDevice | undefined;

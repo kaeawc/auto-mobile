@@ -42,6 +42,10 @@ import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { logger } from "../../src/utils/logger";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import type { ObserveResult } from "../../src/models";
+import { buildObserveResult } from "../helpers/observeFixture";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import type {
   OnNavigationGraphRequestedCallback,
@@ -55,6 +59,13 @@ import {
   spyOnIosExistingInstance,
 } from "../helpers/iosCtrlProxyClientSpies";
 import { observeFrameSchema, typedFrameSchema } from "../helpers/wireMessageSchemas";
+
+// An Android client that never reaches its device, so no stream attaches to it.
+class UnconnectableCtrlProxy extends FakeCtrlProxy {
+  override async ensureConnected(): Promise<boolean> {
+    return false;
+  }
+}
 
 class StaticScreenStreamServer extends DeviceDataStreamSocketServer {
   requestObservation(socket: FakeSocket): Promise<void> {
@@ -368,12 +379,11 @@ describe("Daemon stream wiring", () => {
       name: "pool removal followed by serial re-add",
       apply: async (daemon, pool) => {
         await pool.removeDevice("emulator-5554");
-        const stream = daemon.testHooks.deviceDataStreamServer();
-        expect(
-          (
-            stream as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
-          ).liveFrameGenerations.has("emulator-5554"),
-        ).toBe(false);
+        const stream = daemon.testHooks.deviceDataStreamServer()!;
+        // A removed device no longer has its own generation: it reads like a never-tracked one.
+        expect(stream.getLiveFrameGeneration("emulator-5554")).toBe(
+          stream.getLiveFrameGeneration("never-tracked-device"),
+        );
         await pool.addDevice({ deviceId: "emulator-5554", name: "Pixel", platform: "android" });
       },
     },
@@ -476,13 +486,7 @@ describe("Daemon stream wiring", () => {
             createFakeDaemonState(),
             timer,
           );
-          const input = inputServer as unknown as {
-            requireCurrentFrameContext(
-              deviceId: string,
-              frameContext: string,
-              action: string,
-            ): void;
-          };
+          const input = inputServer.testHooks;
           installDeviceDataStreamSocketServerForTesting(stream);
           const coordinator = new DefaultObservationInitialFrameCoordinator(
             timer,
@@ -552,12 +556,12 @@ describe("Daemon stream wiring", () => {
           observation.resolve([
             {
               deviceId: "emulator-5554",
-              observation: {
+              observation: buildObserveResult({
                 updatedAt: "2026-10-01T00:00:00Z",
                 screenSize: { width: 1, height: 1 },
                 systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
                 viewHierarchy: { ...hierarchy, frameContext: "static-context" },
-              },
+              }),
             },
           ]);
           await explicit;
@@ -646,7 +650,7 @@ describe("Daemon stream wiring", () => {
     const connected: string[] = [];
     const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
       connected.push(device.deviceId);
-      return { ensureConnected: async () => false };
+      return new UnconnectableCtrlProxy();
     });
     const sync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
       undefined,
@@ -816,9 +820,9 @@ describe("Daemon stream wiring", () => {
     delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     delete process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
     delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
-    const androidClient = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
-      ensureConnected: async () => false,
-    }));
+    const androidClient = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+      () => new UnconnectableCtrlProxy(),
+    );
     const iosClient = spyOnIosClientFactory(() => ({ ensureConnected: async () => false }));
     const androidExisting = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(
       null,
@@ -1386,13 +1390,24 @@ describe("Daemon stream wiring", () => {
       );
       internals.sessionManager.getSessionForDevice = (deviceId) =>
         deviceId === "emulator-5556" ? "other-session" : "caller-session";
-      const originalGetExistingInstance = AndroidCtrlProxyClient.getExistingInstance;
       const touched: string[] = [];
-      AndroidCtrlProxyClient.getExistingInstance = ((deviceId: string) => ({
-        subscribeStorage: async () => {
+      const watched = ["emulator-5554", "emulator-5556"].map((deviceId) => {
+        AndroidCtrlProxyClient.getInstance(
+          { deviceId, name: deviceId, platform: "android" },
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+        );
+        return spyOn(
+          AndroidCtrlProxyClient.getExistingInstance(deviceId)!,
+          "subscribeStorage",
+        ).mockImplementation(async (packageName, fileName) => {
           touched.push(deviceId);
-        },
-      })) as typeof AndroidCtrlProxyClient.getExistingInstance;
+          return {
+            packageName,
+            fileName,
+            subscriptionId: `${deviceId}:${packageName}:${fileName}`,
+          };
+        });
+      });
 
       try {
         await internals.applyStorageSubscriptionRequest({
@@ -1404,7 +1419,11 @@ describe("Daemon stream wiring", () => {
         });
         expect(touched).toEqual(["emulator-5554", "emulator-5556"]);
       } finally {
-        AndroidCtrlProxyClient.getExistingInstance = originalGetExistingInstance;
+        for (const spy of watched) {
+          spy.mockRestore();
+        }
+        AndroidCtrlProxyClient.removeInstance("emulator-5554");
+        AndroidCtrlProxyClient.removeInstance("emulator-5556");
         daemon.getSessionManager().stopCleanupTimer();
       }
     });
@@ -1453,12 +1472,12 @@ describe("Daemon stream wiring", () => {
       const stream = new FakeDeviceDataStreamServer();
       internals.overrideRoutingTargets(() => targets(stream));
       const paths: string[] = [];
-      const observation: ObserveResult = {
+      const observation: ObserveResult = buildObserveResult({
         observationId: "observed",
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      };
+      });
       const deviceRead = spyOn(RealObserveScreen.prototype, "executeDeviceRead").mockImplementation(
         async () => {
           paths.push("device-read");

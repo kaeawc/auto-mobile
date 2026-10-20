@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LargeClass:PrototypeRuntimeTest.kt:PrototypeRuntimeTest</ID>
+    <ID>LongMethod:PrototypeGestureTest.kt:PrototypeGestureTest$@Test fun `repeat binding carries all three lists through every gesture node variant`</ID>
+    <ID>LongMethod:PrototypeMaterialComponentsTest.kt:PrototypeMaterialComponentsTest$@Test fun `each new node maps its role label and bound state`</ID>
+    <ID>LongMethod:PrototypeRepeatTest.kt:PrototypeRepeatTest$@Test fun `repeat binds every check message and preserves check operands`</ID>
+  </CurrentIssues>
+</SmellBaseline>

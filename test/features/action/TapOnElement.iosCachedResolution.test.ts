@@ -3,7 +3,7 @@ import { iosHierarchyAcquisition } from "../../../src/features/observe/ios/types
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { freshTapHierarchy } from "../../../src/features/action/freshTapHierarchy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import { TapAnyElement as RealTapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
 import type {
   XCTestHierarchy,
@@ -89,8 +89,8 @@ function harness(tool: "tapOn" | "tapAny", freshLeft: number | null = 10) {
   tap.observeScreen = observe;
   tap.awaitIdle = new FakeAwaitIdle();
   tap.window = new FakeWindow();
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   if (tap instanceof TapOnElement) {
     tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
       observation: current,
@@ -152,7 +152,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         const result = await h.run();
         expect(result.success).toBe(true);
         expect(result.element?.bounds).toEqual({ left: 210, top: 200, right: 290, bottom: 260 });
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([250, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
         expect(h.sync).toHaveBeenCalledTimes(1);
         expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
       } finally {
@@ -164,7 +164,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       try {
         const controller = new AbortController();
         expect((await h.run(100, undefined, controller.signal)).success).toBe(true);
-        expect(h.dispatch.mock.calls[0]?.[6]).toBe(controller.signal);
+        expect(h.dispatch.mock.calls[0]?.[0].signal).toBe(controller.signal);
       } finally {
         h.restore();
       }
@@ -181,7 +181,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           15000,
           { forceCapture: true },
         ]);
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([50, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 50, y: 230 });
       } finally {
         h.restore();
       }
@@ -189,10 +189,11 @@ for (const tool of ["tapOn", "tapAny"] as const) {
     test("forced refresh preserves the sync acquisition marker", async () => {
       const h = harness(tool);
       try {
-        h.sync.mockResolvedValue({
+        const syncResult = {
           hierarchy: raw(10),
-          [iosHierarchyAcquisition]: "device",
-        });
+          [iosHierarchyAcquisition]: "device" as const,
+        };
+        h.sync.mockResolvedValue(syncResult);
         const markers: unknown[] = [];
         if (h.tap instanceof TapOnElement) {
           const refresh = h.tap.refreshViewHierarchy.bind(h.tap);
@@ -239,7 +240,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         expect(h.sync).toHaveBeenCalledTimes(2);
         expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
         expect(h.sync.mock.calls[1]).toHaveLength(4);
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([250, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
       } finally {
         h.restore();
       }
@@ -289,7 +290,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           [2500, { forceCapture: true }],
         ]);
         expect(h.timer.getSleepHistory()).toContain(500);
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([250, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
       } finally {
         h.restore();
       }
@@ -344,3 +345,22 @@ test("Android fresh-tap failure text stays byte-identical", async () => {
       "Unable to retrieve a fresh tap hierarchy: hierarchy unavailable from the accessibility service while TalkBack is on. Observe again and check that the accessibility service is running.",
   });
 });
+
+/** Exposes the inherited protected bookkeeping seams to this test harness. */
+class TapAnyElement extends RealTapAnyElement {
+  override get testHooks() {
+    return {
+      ...super.testHooks,
+      setTerminalScreenshotCapture: (
+        capture: (observation: ObserveResult | undefined) => Promise<void>,
+      ) => {
+        this.captureTerminalObservationScreenshot = capture;
+      },
+      setDeferredPredictionRecorder: (
+        record: (result: unknown, observation: ObserveResult) => Promise<void>,
+      ) => {
+        this.recordDeferredPredictionOutcome = record;
+      },
+    };
+  }
+}

@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import androidHome from "../../fixtures/observe/android-home.json";
@@ -81,7 +82,15 @@ describe("gesture request sequences", () => {
           error: "refused",
         };
       };
-      proxy.requestTwoFingerSwipe = async (x1, y1, x2, y2, duration, offset, timeout) => {
+      proxy.requestTwoFingerSwipe = async ({
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        offset,
+        timeoutMs: timeout,
+      }) => {
         calls.push(`two:${x1}:${y1}:${x2}:${y2}:${duration}:${offset}:${timeout}`);
         return { success: true, totalTimeMs: 1 };
       };
@@ -147,13 +156,17 @@ describe("gesture request sequences", () => {
       const drag = new DragAndDrop({ ...device, platform }, new FakeAdbClient(), timer, {
         visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
       });
-      drag.observedInteraction = async (action) => {
+      drag.observedInteraction = async (action, options) => {
         calls.push("observe-before");
-        const result = await action(observation, {
-          assertCurrent: () => {
-            calls.push("fence");
-          },
-        });
+        const result = await runBlockWith(observation)(
+          (observed) =>
+            action(observed, {
+              assertCurrent: () => {
+                calls.push("fence");
+              },
+            }),
+          options,
+        );
         calls.push("observe-after");
         return result;
       };
@@ -218,9 +231,9 @@ describe("gesture request sequences", () => {
         },
       });
       const controller = new AbortController();
-      tap.observedInteraction = async (action) => {
+      tap.observedInteraction = async (action, options) => {
         calls.push("observe");
-        return action(recordObservationRead(observation));
+        return runBlockWith(() => recordObservationRead(observation))(action, options);
       };
       let refreshCount = 0;
       tap.testHooks.setRefreshViewHierarchy(async (_refresh, timeout, screen, signal) => {
@@ -302,9 +315,9 @@ describe("gesture request sequences", () => {
         calls.push("container");
         return containerFound;
       };
-      tap.observedInteraction = async (action) => {
+      tap.observedInteraction = async (action, options) => {
         calls.push("observe");
-        return action(recordObservationRead(observation));
+        return runBlockWith(() => recordObservationRead(observation))(action, options);
       };
       const result = await tap.execute({
         action: "tap",
@@ -322,9 +335,9 @@ describe("gesture request sequences", () => {
   test("tapAny skips selection when the observation has no hierarchy", async () => {
     const calls: string[] = [];
     const tap = new TapAnyElement(device, new FakeAdbClient(), { timer: clock(calls) });
-    tap.observedInteraction = async (action) => {
+    tap.observedInteraction = async (action, options) => {
       calls.push("observe");
-      return action({ ...observation, viewHierarchy: undefined });
+      return runBlockWith({ ...observation, viewHierarchy: undefined })(action, options);
     };
     tap["findClickableElement"] = () => {
       calls.push("select");
@@ -443,7 +456,7 @@ describe("gesture request sequences", () => {
       observedInteraction: async (action) => action(observation),
     });
     const run = scroll.findTargetElement(
-      { container: { text: "Selected" } },
+      { container: { text: "Selected" }, direction: "up" },
       hierarchy,
       0,
       controller.signal,

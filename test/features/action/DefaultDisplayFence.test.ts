@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
@@ -361,7 +362,7 @@ describe("default-display dispatch fences", () => {
             if (site === "a11y-exception") {
               throw new Error("not sent");
             }
-            return { success: false, error: "not sent" };
+            return { totalTimeMs: 0, success: false, error: "not sent" };
           });
         }
         const action = h.attach(
@@ -480,7 +481,7 @@ describe("TalkBack waits retain the action fence", () => {
           });
           watch(driver, "requestAction").mockImplementation(async () => {
             await h.bump();
-            return { success: false, action: "long_click" };
+            return { totalTimeMs: 0, success: false, action: "long_click" };
           });
         }
         if (site === "precise-activation") {
@@ -750,7 +751,7 @@ describe("default-display recovery dispatches", () => {
     watch(AndroidCtrlProxyClient.prototype, "supportsNodeActionSelectors").mockResolvedValue(true);
     watch(AndroidCtrlProxyClient.prototype, "requestNodeAction").mockImplementation(async () => {
       await h.bump();
-      return { success: false, action: "click" };
+      return { totalTimeMs: 0, success: false, action: "click" };
     });
     const result = await h
       .attach(
@@ -852,7 +853,7 @@ describe("default-display recovery dispatches", () => {
         if (site === "semantic-fallback") {
           await h.bump();
         }
-        return { success: false, action: "scroll_forward" };
+        return { totalTimeMs: 0, success: false, action: "scroll_forward" };
       });
       watch(AndroidCtrlProxyClient.prototype, "requestTwoFingerSwipe").mockImplementation(
         h.android.requestTwoFingerSwipe.bind(h.android),
@@ -980,7 +981,7 @@ describe("display fence options preserve public call shapes", () => {
       watch(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(dispatch);
       watch(h.adb, "executeCommand").mockImplementation(async () => {
         events.push("dispatch");
-        return { stdout: "", stderr: "", toString: () => "", valueOf: () => "" };
+        return createExecResult("", "");
       });
       const driver = new FakeTalkBackNavigationDriver();
       watch(driver, "requestTapCoordinates").mockImplementation(dispatch);
@@ -1012,24 +1013,16 @@ describe("display fence options preserve public call shapes", () => {
                     70,
                     50,
                     element,
-                    undefined,
-                    undefined,
-                    false,
+                    { isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
                 ? () => tap.executeAndroidTap("tap", 50, 70, 50, element)
                 : () =>
-                    tap.executeAndroidTap(
-                      "tap",
-                      50,
-                      70,
-                      50,
-                      element,
-                      undefined,
-                      { action: "tap", ...options },
-                      false,
-                    );
+                    tap.executeAndroidTap("tap", 50, 70, 50, element, {
+                      options: { action: "tap", ...options },
+                      isTalkBackEnabled: false,
+                    });
           break;
         case "retry": {
           const args: Parameters<TapOnElement["retryTapIfNoChange"]> = [
@@ -1038,14 +1031,15 @@ describe("display fence options preserve public call shapes", () => {
             "tap",
             50,
             element,
-            { action: "tap", ...options },
-            false,
-            h.screen.screenSize,
+            {
+              options: { action: "tap", ...options },
+              isTalkBackEnabled: false,
+              screenSize: h.screen.screenSize,
+            },
           ];
           invoke =
             shape === "extra"
-              ? () =>
-                  Reflect.apply(tap.retryTapIfNoChange, tap, [...args, undefined, undefined, []])
+              ? () => Reflect.apply(tap.retryTapIfNoChange, tap, [...args, []])
               : () => tap.retryTapIfNoChange(...args);
           break;
         }

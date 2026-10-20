@@ -22,7 +22,7 @@ import {
 import {
   OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS,
   buildObservationScreenshotUri,
-} from "../../src/server/observationResourceUris";
+} from "../../src/daemon/observationResourceUris";
 import {
   ResourceRegistry,
   type ResourceContent,

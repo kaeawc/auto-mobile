@@ -13,10 +13,40 @@ class ErrorFrameJsonTest {
     val json = Json
     val frames =
       listOf(
-        "swipe_result" to swipeResultFrame("request", false, error, 10L, 5L, null),
-        "drag_result" to dragResultFrame("request", false, error, 10L, 5L, null),
+        "swipe_result" to
+          swipeResultFrame(
+            GestureFrameResult(
+              requestId = "request",
+              success = false,
+              error = error,
+              totalTimeMs = 10L,
+              gestureTimeMs = 5L,
+            ),
+            null,
+          ),
+        "drag_result" to
+          dragResultFrame(
+            GestureFrameResult(
+              requestId = "request",
+              success = false,
+              error = error,
+              totalTimeMs = 10L,
+              gestureTimeMs = 5L,
+            ),
+            null,
+          ),
         "tap_coordinates_result" to tapCoordinatesResultFrame("request", false, error, 10L, null),
-        "pinch_result" to pinchResultFrame("request", false, error, 10L, 5L, null),
+        "pinch_result" to
+          pinchResultFrame(
+            GestureFrameResult(
+              requestId = "request",
+              success = false,
+              error = error,
+              totalTimeMs = 10L,
+              gestureTimeMs = 5L,
+            ),
+            null,
+          ),
         "screenshot_error" to screenshotErrorFrame("request", error),
         "current_focus_result" to currentFocusErrorFrame("request", error, 10L),
         "traversal_order_result" to traversalOrderErrorFrame("request", error, 10L),

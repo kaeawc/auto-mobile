@@ -1,5 +1,7 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { PROTOTYPE_SPEC_CAPABILITY_GATES } from "../../src/features/prototype/prototypeCapabilityGates";
 import type { BootedDevice } from "../../src/models";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
@@ -181,9 +183,9 @@ function setup() {
     adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
   });
 }
-async function call(device: BootedDevice, input: unknown) {
+async function call(device: BootedDevice, input: Record<string, unknown>) {
   const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-  return prototypeOutputSchema.parse(result.structuredContent);
+  return prototypeOutputSchema.parse(readToolResponse(result).structuredContent);
 }
 const show = (device: BootedDevice, spec: unknown) => call(device, { action: "show", spec });
 const patch = (device: BootedDevice, ops: unknown, extra = {}) =>
@@ -301,11 +303,18 @@ test.each(["android", "ios"] as const)(
     }
   },
 );
+let capabilitySource: string;
+beforeAll(() => {
+  const server = new URL("../../src/server/", import.meta.url);
+  const files = [
+    "prototypeTools.ts",
+    ...new Bun.Glob("prototypeTools/**/*.ts").scanSync({ cwd: fileURLToPath(server) }),
+  ];
+  expect(files.length).toBeGreaterThan(1);
+  capabilitySource = files.map((file) => readFileSync(new URL(file, server), "utf8")).join("\n");
+});
 test("prototypeTools routes spec feature detection through the registry", () => {
-  const source = readFileSync(
-    new URL("../../src/server/prototypeTools.ts", import.meta.url),
-    "utf8",
-  );
+  const source = capabilitySource;
   expect(source.includes("prototypeThemeModeFields")).toBe(false);
   expect(source.includes("prototypeDataModelFields")).toBe(false);
 });

@@ -1,5 +1,5 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import { Server } from "@modelcontextprotocol/server";
+import { Server, type ServerContext } from "@modelcontextprotocol/server";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
@@ -52,7 +52,7 @@ import {
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -75,6 +75,15 @@ const appTools = createAppToolsHarness();
  * A sessionless read-only call that would land on a held device now runs through the read-only
  * device path: resolved from the booted list, with no readiness, no recording and no audit.
  */
+type IngressHandler = (
+  request: { method: string; params: { name: string; arguments: Record<string, unknown> } },
+  ctx: ServerContext,
+) => Promise<unknown>;
+
+function isIngressHandler(value: unknown): value is IngressHandler {
+  return typeof value === "function";
+}
+
 describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   const held: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
   const free: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
@@ -212,7 +221,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await setUpDevicePath();
@@ -615,7 +624,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     let session: NonNullable<ReturnType<SessionManager["peekSession"]>>;
     let cancellations: string[];
     let recovering: boolean;
-    let ingressHandler: Parameters<Server["setRequestHandler"]>[1];
+    let ingressHandler: IngressHandler;
     let finishControl: (() => void) | undefined;
     let pendingControl: Promise<unknown> | undefined;
     let previousFeatureFlags: FeatureFlagService | null;
@@ -763,9 +772,14 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       const registration = spyOn(Server.prototype, "setRequestHandler");
       try {
         await fixture.setup();
-        ingressHandler = registration.mock.calls.findLast(
+        // The spy types the last (3-arg schema) overload; the 2-arg form registers the handler itself.
+        const registered = registration.mock.calls.findLast(
           ([schema]) => schema === "tools/call",
         )![1];
+        if (!isIngressHandler(registered)) {
+          throw new Error("tools/call handler was not registered");
+        }
+        ingressHandler = registered;
       } finally {
         registration.mockRestore();
       }
@@ -918,14 +932,22 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
         const listeners = new Set<EventListenerOrEventListenerObject>();
         const add = client.signal.addEventListener.bind(client.signal);
         const remove = client.signal.removeEventListener.bind(client.signal);
-        client.signal.addEventListener = (type, listener, options) => {
+        client.signal.addEventListener = (
+          type: string,
+          listener: EventListenerOrEventListenerObject,
+          options?: boolean | AddEventListenerOptions,
+        ) => {
           if (type === "abort" && listener) {
             expect(options).toEqual({ once: true });
             listeners.add(listener);
           }
           add(type, listener, options);
         };
-        client.signal.removeEventListener = (type, listener, options) => {
+        client.signal.removeEventListener = (
+          type: string,
+          listener: EventListenerOrEventListenerObject,
+          options?: boolean | EventListenerOptions,
+        ) => {
           if (type === "abort" && listener) {
             expect(listeners.delete(listener)).toBe(true);
           }

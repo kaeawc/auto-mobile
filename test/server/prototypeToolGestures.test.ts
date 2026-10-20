@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_GESTURES_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { BootedDevice } from "../../src/models";
@@ -94,10 +95,10 @@ describe("prototype gestures host", () => {
   async function call(device: BootedDevice, spec: unknown) {
     return callWith(device, { action: "show", spec });
   }
-  async function callWith(device: BootedDevice, input: unknown) {
+  async function callWith(device: BootedDevice, input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(readToolResponse(response).structuredContent);
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
 

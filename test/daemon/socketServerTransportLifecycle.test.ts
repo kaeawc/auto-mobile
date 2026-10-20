@@ -2,7 +2,7 @@ import {
   createHarnessServer,
   type UnixSocketServerHarness,
 } from "./helpers/UnixSocketServerHarness";
-import { ResourceUpdatedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { Socket } from "node:net";
 import * as net from "node:net";
@@ -20,7 +20,7 @@ import {
   getToolCallRecordingStatus,
   resetToolCallRecordingState,
   startToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import { daemonNotificationFrameSchema } from "../helpers/wireMessageSchemas";
 
 class RpcSocket extends FakeSocket {

@@ -4,7 +4,7 @@ import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerDeviceTools } from "../../src/server/deviceTools";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";

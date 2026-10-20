@@ -67,7 +67,7 @@ const GESTURE_NODE_TYPES = ["box", "row", "column", "text", "image", "icon", "ca
 const GESTURE_NODE_FIELDS = ["onLongPress", "onDoubleTap"];
 
 function spec(root: Record<string, unknown>, state: Record<string, unknown> = {}) {
-  return { id: "panel", window: { placement: { type: "fullscreen" } }, state, root };
+  return { id: "panel", window: { placement: { type: "fullscreen" }, opacity: 1 }, state, root };
 }
 
 describe("prototype node contract parity", () => {
@@ -178,11 +178,17 @@ describe("prototype node contract parity", () => {
       ...spec({ type: "text", text: "x" }),
       theme: { colors },
     });
-    for (const colors of [{ primary: "#B3261E" }, { seed: "#6750A4", surface: "#FFFFFF" }]) {
+    for (const colors of Array.of<Record<string, string>>(
+      { primary: "#B3261E" },
+      { seed: "#6750A4", surface: "#FFFFFF" },
+    )) {
       expect(validatePrototypeSpec(themed(colors))).toMatchObject({ success: true });
       expect(prototypeSpecSchema.safeParse(themed(colors)).success).toBe(true);
     }
-    for (const colors of [{ primary: "onSurface" }, { brand: "#6750A4" }]) {
+    for (const colors of Array.of<Record<string, string>>(
+      { primary: "onSurface" },
+      { brand: "#6750A4" },
+    )) {
       expect(validatePrototypeSpec(themed(colors))).toMatchObject({ success: false });
       expect(prototypeSpecSchema.safeParse(themed(colors)).success).toBe(false);
     }
@@ -195,7 +201,7 @@ test("spec, repeat, and condition field sets stay in step with the data contract
   );
   const valid = {
     id: "orders",
-    window: { placement: { type: "fullscreen" } },
+    window: { placement: { type: "fullscreen" }, opacity: 1 },
     data: { orders: [{ id: 7 }] },
     root: {
       type: "column",

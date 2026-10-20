@@ -26,7 +26,7 @@ import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
 } from "../../src/features/prototype/prototypeAssets";
-import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/server/observationResourceUris";
+import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/daemon/observationResourceUris";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,

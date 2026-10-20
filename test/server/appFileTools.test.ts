@@ -1,11 +1,11 @@
+import type { PutAppFileBatchResult, PutAppFileResult } from "../../src/server/appFileContract";
+import type { PutAppFileRequest, LegacyPutAppFileRequest } from "../../src/server/appFileService";
+import { schemaProperty } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { registerAppFileTools } from "../../src/server/appFileTools";
-import {
-  createAppFileServiceForTesting,
-  nodeAppFileFileSystem,
-  type AppFileService,
-} from "../../src/server/appFileService";
+import { createAppFileServiceForTesting } from "../../src/server/appFileService";
+import { nodeAppFileFileSystem } from "../../src/server/appFileSupport";
 import type {
   StageSharedStorageRequest,
   SharedStorageService,
@@ -32,11 +32,13 @@ describe("App file tools", () => {
       (tool) => tool.name === "putAppFile",
     );
     expect(toolDefinition).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.target).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.files).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.appId).toBeUndefined();
-    expect(toolDefinition!.inputSchema.properties.container).toBeUndefined();
-    expect(toolDefinition!.inputSchema.properties.destinationPath).toBeUndefined();
+    expect(schemaProperty(toolDefinition!.inputSchema.properties, "target")).toBeDefined();
+    expect(schemaProperty(toolDefinition!.inputSchema.properties, "files")).toBeDefined();
+    expect(schemaProperty(toolDefinition!.inputSchema.properties, "appId")).toBeUndefined();
+    expect(schemaProperty(toolDefinition!.inputSchema.properties, "container")).toBeUndefined();
+    expect(
+      schemaProperty(toolDefinition!.inputSchema.properties, "destinationPath"),
+    ).toBeUndefined();
 
     const validate = compileAjv2020(toolDefinition!.inputSchema);
     const target = { domain: "app_containers", appId: "com.example.app", container: "documents" };
@@ -163,11 +165,21 @@ describe("App file tools", () => {
 
   test("registers a pending user_files write before it settles", async () => {
     const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
-    const pending = Promise.withResolvers<Awaited<ReturnType<AppFileService["putFile"]>>>();
+    const pending = Promise.withResolvers<PutAppFileBatchResult>();
+    function putFile(request: PutAppFileRequest): Promise<PutAppFileBatchResult>;
+    function putFile(request: LegacyPutAppFileRequest): Promise<PutAppFileResult>;
+    function putFile(
+      request: PutAppFileRequest | LegacyPutAppFileRequest,
+    ): Promise<PutAppFileBatchResult | PutAppFileResult> {
+      if (!("files" in request)) {
+        throw new Error("unused legacy putFile");
+      }
+      return pending.promise;
+    }
     const registrations: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
     registerAppFileTools({
       appFileService: () => ({
-        putFile: (() => pending.promise) as AppFileService["putFile"],
+        putFile,
         listFiles: async () => {
           throw new Error("unused");
         },

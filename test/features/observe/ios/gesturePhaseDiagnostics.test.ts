@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
 import type {
   SwipeGestureRequest,
   TalkBackSwipeRunner,
@@ -63,7 +64,7 @@ function swipeOnWithThrowingRunner(): SwipeOn {
     voiceOverExecutor: new ThrowingSwipeRunner(),
     accessibilityDetector: new FakeAccessibilityDetector(),
   });
-  action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
+  action.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
   return action;
 }
 
@@ -199,6 +200,7 @@ describe("iOS gesture phase diagnostics", () => {
         message.requestId ?? "phase-swipe",
         "swipe",
         5000,
+        () => ({ success: false, error: "Swipe timed out" }),
       );
       void hooks.deliverMessage(JSON.stringify(message));
       expect(await pending).toMatchObject({ success: false, perfTiming: message.perfTiming });

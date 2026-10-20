@@ -6,6 +6,7 @@ import {
   COMMAND_SETTLEMENT_GRACE_MS,
   SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS,
   SIMCTL_COMMAND_TIMEOUT_MS,
+  type SimCtlCatalog,
   AppleDevice,
   AppleDeviceRuntime,
   AppleDeviceType,
@@ -23,8 +24,8 @@ import {
   SimulatorBootLease,
 } from "./SimCtlSupport";
 import { simCtlSharedState } from "./SimCtlSharedState";
-export { DEFAULT_SIMCTL_BOOT_OPTIONS } from "./SimCtlSupport";
 export type {
+  SimCtlCatalog,
   AppleDevice,
   AppleDeviceRuntime,
   AppleDeviceType,
@@ -61,7 +62,7 @@ import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";
 import { DefaultSimulatorAppPresenter, type SimulatorAppPresenter } from "./SimulatorAppPresenter";
 import { SimctlCommandTimeoutError } from "./SimctlCommandTimeoutError";
 import {
-  SimCtlSimulatorDeviceTypeProfiles,
+  simulatorProfiles,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
 import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDisplays";
@@ -247,7 +248,7 @@ export class SimCtlClient implements SimCtl {
     this.platform = platform;
     this.spawnProcess = spawnProcess;
     this.fileSystem = fileSystem;
-    this.deviceTypeProfiles = deviceTypeProfiles ?? new SimCtlSimulatorDeviceTypeProfiles(this);
+    this.deviceTypeProfiles = deviceTypeProfiles ?? simulatorProfiles(this, this.plist, timer);
     this.simulatorAppPresenter = this.resolveSimulatorAppPresenter(simulatorAppPresenter);
     this.idGenerator = this.resolveIdGenerator(idGenerator);
     this.bootOptions = {
@@ -309,12 +310,7 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
   ): Promise<ExecResult> {
     const hostArgs = splitCommandArgs(command);
-    return this.executeCommandArgv(
-      hostArgs,
-      timeoutMs ?? ((signal ?? getAbortSignal()) ? undefined : SIMCTL_COMMAND_TIMEOUT_MS),
-      command,
-      signal,
-    );
+    return this.executeCommandArgv(hostArgs, timeoutMs, command, signal);
   }
 
   async executeCommandArgs(
@@ -322,12 +318,7 @@ export class SimCtlClient implements SimCtl {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<ExecResult> {
-    return this.executeCommandArgv(
-      args,
-      timeoutMs ?? ((signal ?? getAbortSignal()) ? undefined : SIMCTL_COMMAND_TIMEOUT_MS),
-      args.join(" "),
-      signal,
-    );
+    return this.executeCommandArgv(args, timeoutMs, args.join(" "), signal);
   }
 
   async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
@@ -342,7 +333,7 @@ export class SimCtlClient implements SimCtl {
 
   private executeCommandArgv(
     args: string[],
-    timeoutMs?: number,
+    timeoutMs = SIMCTL_COMMAND_TIMEOUT_MS,
     displayCommand?: string,
     explicitSignal?: AbortSignal,
     waitForTimedOutCommandSettlement = false,
@@ -416,6 +407,7 @@ export class SimCtlClient implements SimCtl {
         const result = await raceWithDeadline(runPromise, {
           timer: this.timer,
           timeoutMs,
+          signal: callerSignal,
           label: "simctl command",
           timeoutError: () =>
             (timeoutError = new SimctlCommandTimeoutError(
@@ -690,6 +682,10 @@ export class SimCtlClient implements SimCtl {
     return this.simCtlInventory.getDeviceTypes(signal);
   }
 
+  getCatalogChecked(signal?: AbortSignal): Promise<SimCtlCatalog> {
+    return this.simCtlInventory.getCatalogChecked(signal);
+  }
+
   getDeviceTypesChecked(signal?: AbortSignal): Promise<AppleDeviceType[]> {
     return this.simCtlInventory.getDeviceTypesChecked(signal);
   }
@@ -836,7 +832,7 @@ export class SimCtlClient implements SimCtl {
       const launchArgs = ["launch", targetDevice, bundleId, ...(options?.launchArguments ?? [])];
       const result = await this.executeCommandArgv(
         launchArgs,
-        undefined,
+        DEFAULT_DEVICE_READY_TIMEOUT_MS,
         `launch ${targetDevice} ${bundleId} [app arguments redacted]`,
         undefined,
         false,
@@ -890,11 +886,15 @@ export class SimCtlClient implements SimCtl {
   async installApp(
     appPath: string,
     deviceId?: string,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; signal?: AbortSignal },
   ): Promise<void> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Installing app ${appPath} on iOS simulator ${targetDevice}`);
-    await this.executeCommandArgs(["install", targetDevice, appPath], options?.timeoutMs);
+    await this.executeCommandArgs(
+      ["install", targetDevice, appPath],
+      options?.timeoutMs,
+      options?.signal,
+    );
   }
 
   async uninstallApp(

@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { PrototypeHiddenError } from "../../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../../src/features/prototype/prototypeSuspended";
 import { describe, expect, test } from "bun:test";
@@ -83,15 +84,18 @@ describe("scopeHierarchyToLayer (#9305)", () => {
       ),
       ...extra.map((window) => ({ ...prototype, ...window })),
     ];
-    hierarchy.hierarchy = {
-      ...hierarchy.hierarchy,
-      node: [
-        ...windowRoots(hierarchy).filter(
-          (window) => window.windowId === APP_WINDOW_ID || window.windowId === PROTOTYPE_WINDOW_ID,
-        ),
-        ...extra.map((window) => ({ ...root, windowId: window.id })),
-      ],
-    };
+    hierarchy.hierarchy = wireCapture({
+      hierarchy: {
+        ...hierarchy.hierarchy,
+        node: [
+          ...windowRoots(hierarchy).filter(
+            (window) =>
+              window.windowId === APP_WINDOW_ID || window.windowId === PROTOTYPE_WINDOW_ID,
+          ),
+          ...extra.map((window) => ({ ...root, windowId: window.id })),
+        ],
+      },
+    }).hierarchy;
     const prototypeLayer = scopeHierarchyToLayer(hierarchy, "prototype");
     expect(rootWindowIds(prototypeLayer)).toEqual([PROTOTYPE_WINDOW_ID, 9001, 9002]);
     expect(prototypeLayer.windows!.map((window) => window.prototypeId)).toEqual(["a", "b", "c"]);

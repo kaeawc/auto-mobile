@@ -3,10 +3,10 @@ import fc from "fast-check";
 import {
   readToolEnvelopePayload,
   writeToolEnvelopePayload,
-} from "../../src/server/toolEnvelopePayload";
+} from "../../src/daemon/toolEnvelopePayload";
 import { getStructuredPayload, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { narrowInternalToolEnvelope } from "../../src/utils/internalToolPayloads";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 
 // Property-based coverage for the tool-envelope payload seam. The module promises
 // that the two (really three) representations a tool envelope carries for the same

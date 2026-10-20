@@ -15,21 +15,18 @@ import {
   buildIdentityFromStatus,
   type BuildIdentity,
 } from "../buildIdentity";
-import { compareStrictNumericVersions } from "../../server/deviceMatcher";
+import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { releaseVersion } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
 import { startupOptionDeficits, mergeDaemonOptions } from "./startupOptions";
 import {
   DaemonVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonAssetVersionMismatchError,
-  daemonInternalErrors,
   type VersionMismatchReason,
-  type BuildMismatchReason,
-} from "./daemonErrors";
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
-
+} from "./DaemonVersionMismatchError";
+import { DaemonBuildMismatchError, type BuildMismatchReason } from "./DaemonBuildMismatchError";
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
 export async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();

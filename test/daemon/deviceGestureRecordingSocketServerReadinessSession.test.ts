@@ -5,7 +5,7 @@ import {
   type DeviceGestureRecordingDeviceResolution,
 } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import {
   ActionableError,
   type AppearanceConfig,

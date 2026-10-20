@@ -10,6 +10,7 @@ import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/m
 import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { discoverySourceOutcome } from "../../src/utils/discoverySource";
@@ -971,7 +972,7 @@ describe("MultiPlatformDeviceManager", () => {
         },
         startSimulator: async () => {
           launched = true;
-          return null;
+          return new FakeChildProcess();
         },
       });
       const manager = new MultiPlatformDeviceManager(
@@ -1002,7 +1003,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => [booted],
         startSimulator: async () => {
           launched = true;
-          return null;
+          return new FakeChildProcess();
         },
       });
       const manager = new MultiPlatformDeviceManager(
@@ -1423,13 +1424,13 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("listDeviceImages(android) keeps configured AVDs when overlay mapping fails", async () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
-    const malformedBootedDevice = {
+    const malformedBootedDevice: BootedDevice = {
       name: "Pixel_8",
       platform: "android",
       get deviceId(): string {
         throw new Error("malformed booted device");
       },
-    } as unknown as BootedDevice;
+    };
     const fakeEmulator = createFakeAndroidEmulator({
       listAvds: async () => [image],
       getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [malformedBootedDevice],
@@ -1568,7 +1569,7 @@ describe("MultiPlatformDeviceManager", () => {
     const fakeSimctl = fakeDeviceManagerSimctl({
       isAvailable: async () => true,
       listSimulatorImages: async (
-        _sessionId?: string,
+        _timeoutMs?: number,
         options?: { bypassCache?: boolean; signal?: AbortSignal },
       ): Promise<DeviceInfo[]> => {
         iosOptions = options;

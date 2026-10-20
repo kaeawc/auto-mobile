@@ -302,7 +302,10 @@ class WorkspaceViewModelTest {
   @Test
   fun `a Rotate failing for another reason restores the orientation and reports nothing`() =
     testScope.runTest {
-      val exec = FakeEmulatorControlExecutor().apply { error = RuntimeException("boom") }
+      val exec =
+        FakeEmulatorControlExecutor().apply {
+          error = dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException("boom")
+        }
       val vm = WorkspaceViewModel(this, exec)
       vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
       val effects = mutableListOf<WorkspaceEffect>()
@@ -334,7 +337,10 @@ class WorkspaceViewModelTest {
   @Test
   fun `RunControl swallows an executor failure without crashing the workspace`() =
     testScope.runTest {
-      val exec = FakeEmulatorControlExecutor().apply { error = RuntimeException("boom") }
+      val exec =
+        FakeEmulatorControlExecutor().apply {
+          error = dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException("boom")
+        }
       val vm = WorkspaceViewModel(this, exec)
       vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
       vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Unlock))

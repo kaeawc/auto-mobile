@@ -10,14 +10,14 @@ import {
   getDeviceGestureRecordingStatus,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { noActiveDeviceSessionPayload } from "../../src/server/proxyServer";
+import { noActiveDeviceSessionPayload } from "../../src/daemon/deviceSessionResult";
 
 class TestableServer extends DeviceGestureRecordingSocketServer {
   invoke(request: DeviceGestureRecordingCommand) {

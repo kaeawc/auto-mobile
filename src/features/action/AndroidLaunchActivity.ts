@@ -1,3 +1,4 @@
+import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
@@ -71,6 +72,7 @@ export class AndroidLaunchActivity {
         activities.push(...(await this.runActivityFallback(packageName, perf, signal)));
       }
     } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
       logger.warn(`[LaunchApp] Failed to extract launcher activities for ${packageName}:`, error);
     }
@@ -101,6 +103,7 @@ export class AndroidLaunchActivity {
         }
       }
     } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
       logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
     }
@@ -140,6 +143,7 @@ export class AndroidLaunchActivity {
       }
       return activities;
     } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
       logger.warn(`[LaunchApp] Approach ${index + 1} failed:`, error);
     }
@@ -166,6 +170,7 @@ export class AndroidLaunchActivity {
       }
       return activities;
     } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
       logger.warn(`[LaunchApp] Fallback approach failed:`, error);
     }
@@ -194,6 +199,7 @@ export class AndroidLaunchActivity {
       const component = `${componentPackage}/${componentActivity}`;
       return resolveComponentActivity(component, packageName) ? component : undefined;
     } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
       // Older Android versions may lack this resolver; the bare intent remains the fallback.
       logger.debug(`[LaunchApp] Launcher component resolution unavailable: ${errorMessage(error)}`);
@@ -227,6 +233,7 @@ export class AndroidLaunchActivity {
         amReportedError: amStartReportedFailure(result.stdout, result.stderr),
       };
     } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
       logger.warn(
         `[LaunchApp] Intent launch failed: ${errorMessage(error)}, falling back to monkey`,
@@ -261,6 +268,7 @@ export class AndroidLaunchActivity {
       logger.info(`[LaunchApp] Monkey launch completed successfully`);
       return { success: true };
     } catch (error) {
+      rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
       logger.warn(
         `[LaunchApp] Monkey launch failed: ${errorMessage(error)}, falling back to activity discovery`,
@@ -363,6 +371,7 @@ export class AndroidLaunchActivity {
               logger.info(`[LaunchApp] Successfully launched with pattern: ${pattern}`);
               return { success: true, pattern };
             } catch (error) {
+              rethrowDeviceTransportUnavailable(error);
               this.assertLaunchNotAborted(signal);
               logger.info(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
             }
@@ -407,6 +416,7 @@ export class AndroidLaunchActivity {
           }
           logger.info(`[LaunchApp] Launcher intent completed successfully`);
         } catch (error) {
+          rethrowDeviceTransportUnavailable(error);
           this.assertLaunchNotAborted(signal);
           logger.error(`[LaunchApp] Launcher intent failed: ${error}`);
           throw new ActionableError("No launcher activity found and launcher intent failed");

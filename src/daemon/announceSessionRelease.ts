@@ -1,5 +1,5 @@
 import type { SessionReleaseSnapshot } from "./sessionManager";
-import type { SessionReleaseExtras } from "../server/sessionReleaseBroadcast";
+import type { SessionReleaseExtras } from "./sessionReleaseBroadcast";
 
 /** Shutdown bookkeeping for release announcements; null outside shutdown. */
 export interface ShutdownReleaseAnnouncements {

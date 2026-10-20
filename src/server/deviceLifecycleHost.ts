@@ -6,7 +6,7 @@ import {
 } from "./appResources";
 import { notifyBootedDeviceResourcesUpdated } from "./bootedDeviceResources";
 import { notifyDeviceImageResourcesUpdated } from "./deviceImageResources";
-import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
+import { listActiveVideoRecordings, stopVideoRecording } from "../daemon/videoRecordingManager";
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
 
 /** Wires the server's resource and video-recording operations into the lifecycle tools. */

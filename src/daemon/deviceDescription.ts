@@ -190,39 +190,17 @@ interface BootedDescriptionOptions {
   poolBucket?: PoolStatusBucket | null;
 }
 
-// oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
-function describeBooted({
-  device,
-  admittedImage,
-  admittedImageAuthoritative,
-  pooled,
-  session,
-  deviceSessionUuid,
-  serviceStatus,
-  locked = null,
-  orientation,
-  configured,
-  adbOfflineState,
-  simulatorState,
-  heldBy,
-  reserved,
-  unhealthy,
-  poolBucket,
-}: BootedDescriptionOptions): DeviceDescription {
+function describeBooted(options: BootedDescriptionOptions): DeviceDescription {
+  const { device, admittedImage, admittedImageAuthoritative, pooled, configured } = options;
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
   // though the selected configured image proves this is a virtual device.
   // Keep the configured-image fact ahead of the transport-id heuristic.
-  const isVirtual =
-    admittedImage?.platform === device.platform ||
-    (device.platform === "android"
-      ? device.deviceId.startsWith("emulator-")
-      : device.deviceId.includes("-") && device.deviceId.length > 30);
+  const isVirtual = isBootedVirtual(device, admittedImage);
   const stableId =
     device.platform === "android" && isVirtual
       ? (pooled?.avdName ?? admittedImage?.name ?? device.name)
       : device.deviceId;
-  const ownership = session ? (session.ownership ?? "owned") : null;
   const staticFacts = staticFactsFrom(merged);
   return {
     name: device.name,
@@ -236,69 +214,35 @@ function describeBooted({
     capabilityInventory: capabilityInventory(merged, isVirtual),
     image: imageLinkWithConfiguredFallback(admittedImage, configured),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
-    runtime: {
-      deviceId: device.deviceId,
-      connectionId: pooled ? `${device.deviceId}#${pooled.incarnation}` : device.deviceId,
-      deviceSessionUuid: deviceSessionUuid ?? null,
-      lifecycle: {
-        state: simulatorState
-          ? simulatorState === "Booting"
-            ? "booting"
-            : "shutting-down"
-          : "booted",
-        known: true,
-      },
-      readiness: {
-        state:
-          adbOfflineState || simulatorState
-            ? "not_ready"
-            : readinessFromServiceStatus(serviceStatus),
-      },
-      poolStatus:
-        poolBucket !== undefined
-          ? poolBucket
-          : poolStatus(pooled, Boolean(heldBy ?? reserved) || unhealthy === true),
-      ...(heldBy ? { heldBy } : {}),
-      session: session
-        ? {
-            sessionUuid: session.sessionId,
-            ownership,
-          }
-        : null,
-      serviceStatus: serviceStatus ?? null,
-      locked,
-      orientation: orientation ?? null,
-      ...(adbOfflineState ? { connection: { state: "offline", adbState: adbOfflineState } } : {}),
-      ...(simulatorState ? { simulatorState } : {}),
-    },
+    runtime: describeBootedRuntime(options),
   };
 }
 
-// oxlint-disable-next-line complexity -- each optional runtime fact follows documented precedence.
 function mergeRuntimeFacts(
   device: BootedDevice,
   admittedImage: ImageLike | undefined,
   admittedImageAuthoritative: boolean,
 ): DeviceInfo {
+  const image: Partial<ImageLike> = admittedImage ?? {};
   const preferred = <T>(deviceValue: T | undefined, imageValue: T | undefined): T | undefined =>
     admittedImageAuthoritative ? (imageValue ?? deviceValue) : (deviceValue ?? imageValue);
   return {
     ...admittedImage,
     ...device,
     // Pool/discovery/provisioning image facts are authoritative; configured inventory fills gaps.
-    apiLevel: preferred(device.apiLevel, admittedImage?.apiLevel),
-    osVersion: preferred(device.osVersion, admittedImage?.osVersion),
-    screenWidth: preferred(device.screenWidth, admittedImage?.screenWidth),
-    screenHeight: preferred(device.screenHeight, admittedImage?.screenHeight),
-    screenDensity: preferred(device.screenDensity, admittedImage?.screenDensity),
-    displays: preferred(device.displays, admittedImage?.displays),
-    formFactor: preferred(device.formFactor, admittedImage?.formFactor),
-    runtimeId: preferred(device.runtimeId, admittedImage?.runtimeId),
-    runtime: preferred(device.runtime, admittedImage?.runtime),
-    deviceType: preferred(device.deviceType, admittedImage?.deviceType),
-    model: preferred(device.model, admittedImage?.model),
-    architecture: preferred(device.architecture, admittedImage?.architecture),
-    capabilityInventory: preferred(device.capabilityInventory, admittedImage?.capabilityInventory),
+    apiLevel: preferred(device.apiLevel, image.apiLevel),
+    osVersion: preferred(device.osVersion, image.osVersion),
+    screenWidth: preferred(device.screenWidth, image.screenWidth),
+    screenHeight: preferred(device.screenHeight, image.screenHeight),
+    screenDensity: preferred(device.screenDensity, image.screenDensity),
+    displays: preferred(device.displays, image.displays),
+    formFactor: preferred(device.formFactor, image.formFactor),
+    runtimeId: preferred(device.runtimeId, image.runtimeId),
+    runtime: preferred(device.runtime, image.runtime),
+    deviceType: preferred(device.deviceType, image.deviceType),
+    model: preferred(device.model, image.model),
+    architecture: preferred(device.architecture, image.architecture),
+    capabilityInventory: preferred(device.capabilityInventory, image.capabilityInventory),
     isRunning: true,
   };
 }
@@ -564,3 +508,79 @@ export const deviceDescriptionSchema = z
 export const listDevicesEntrySchema = deviceDescriptionSchema;
 export const provisionedDeviceSchema = deviceDescriptionSchema;
 export const configuredImageSchema = deviceDescriptionSchema;
+
+function isBootedVirtual(device: BootedDevice, admittedImage: ImageLike | undefined): boolean {
+  const isVirtual =
+    admittedImage?.platform === device.platform ||
+    (device.platform === "android"
+      ? device.deviceId.startsWith("emulator-")
+      : device.deviceId.includes("-") && device.deviceId.length > 30);
+  return isVirtual;
+}
+
+function describeBootedRuntime(options: BootedDescriptionOptions): DeviceDescription["runtime"] {
+  const {
+    device,
+    pooled,
+    session,
+    deviceSessionUuid,
+    serviceStatus,
+    locked = null,
+    orientation,
+    adbOfflineState,
+    simulatorState,
+    heldBy,
+  } = options;
+  const ownership = session ? (session.ownership ?? "owned") : null;
+  return {
+    deviceId: device.deviceId,
+    connectionId: pooled ? `${device.deviceId}#${pooled.incarnation}` : device.deviceId,
+    deviceSessionUuid: deviceSessionUuid ?? null,
+    ...bootedRuntimeStatus(options),
+    ...(heldBy ? { heldBy } : {}),
+    session: session
+      ? {
+          sessionUuid: session.sessionId,
+          ownership,
+        }
+      : null,
+    serviceStatus: serviceStatus ?? null,
+    locked,
+    orientation: orientation ?? null,
+    ...(adbOfflineState ? { connection: { state: "offline", adbState: adbOfflineState } } : {}),
+    ...(simulatorState ? { simulatorState } : {}),
+  };
+}
+
+function bootedRuntimeStatus({
+  simulatorState,
+  adbOfflineState,
+  serviceStatus,
+  poolBucket,
+  pooled,
+  heldBy,
+  reserved,
+  unhealthy,
+}: BootedDescriptionOptions): Pick<
+  DeviceDescription["runtime"],
+  "lifecycle" | "readiness" | "poolStatus"
+> {
+  return {
+    lifecycle: {
+      state: simulatorState
+        ? simulatorState === "Booting"
+          ? "booting"
+          : "shutting-down"
+        : "booted",
+      known: true,
+    },
+    readiness: {
+      state:
+        adbOfflineState || simulatorState ? "not_ready" : readinessFromServiceStatus(serviceStatus),
+    },
+    poolStatus:
+      poolBucket !== undefined
+        ? poolBucket
+        : poolStatus(pooled, Boolean(heldBy ?? reserved) || unhealthy === true),
+  };
+}

@@ -44,14 +44,12 @@ export async function tapFrameBoundImeKey(
     return { success: false, error: "The IME key observation has no frame context." };
   }
   // The runner rejects a stale context before dispatch. Never retry or fall back to ADB.
-  return client.requestTapCoordinates(
-    point.x,
-    point.y,
-    10,
-    undefined,
-    undefined,
-    point.frameContext,
-  );
+  return client.requestTapCoordinates({
+    x: point.x,
+    y: point.y,
+    duration: 10,
+    frameContext: point.frameContext,
+  });
 }
 
 type SessionImeCatalog = Pick<

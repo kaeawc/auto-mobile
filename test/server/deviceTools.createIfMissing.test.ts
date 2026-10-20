@@ -30,7 +30,7 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
@@ -158,7 +158,7 @@ describe("startDevice --create-if-missing wiring", () => {
     expect(fakeProvisioner.requests[0].platform).toBe("ios");
     expect(fakeGate.calls).toEqual([true]);
     expect(result.name).toBe("AutoMobile-iPhone-17-abcd1234");
-    expect(result.runtime.deviceId).toBe("CREATED-UDID");
+    expect(result.runtime).toMatchObject({ deviceId: "CREATED-UDID" });
     expect(result.acquisition).toBe("cold-boot");
     expect(
       fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("startDevice:")),
@@ -340,9 +340,7 @@ describe("startDevice --create-if-missing wiring", () => {
       });
       await useFakeTeardown("android");
       // Observe the pool's readiness reservation at the moment the AVD is deleted.
-      const pool = DaemonState.getInstance().getDevicePool() as unknown as {
-        isReservedForReadiness(deviceId: string): boolean;
-      };
+      const pool = DaemonState.getInstance().getDevicePool();
       const reservedDuringRollback: boolean[] = [];
       const reservedIds: string[] = [];
       const reserve = DaemonState.getInstance().getDevicePool().reserveDeviceForReadiness;

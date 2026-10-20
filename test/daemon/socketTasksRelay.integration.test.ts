@@ -1,3 +1,4 @@
+import { taskEligibleByName } from "../../src/server/tasks/toolCallTasks";
 import {
   afterAll,
   afterEach,
@@ -37,12 +38,12 @@ import type {
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
-import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";
+import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import {
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
   type TaskManager,
-} from "../../src/server/tasks/TaskManager";
+} from "../../src/daemon/tasks/TaskManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -65,7 +66,7 @@ const CAPTURE = "__tasks_relay_capture__";
 /** The device-binding tool the proxy binds a session from: a fake boot behind a gate. */
 const START_DEVICE = "startDevice";
 const BOOTED_SESSION = "tasks-relay-booted-session";
-const ELIGIBLE = new Set([ECHO, WAIT, START_DEVICE]);
+const ELIGIBLE = taskEligibleByName(new Set([ECHO, WAIT, START_DEVICE]));
 const DECLARED_META = {
   "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS_EXTENSION_ID]: {} } },
 };

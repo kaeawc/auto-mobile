@@ -15,6 +15,8 @@ import {
 import { compareVersions } from "../../src/server/deviceMatcher";
 import { testOverrides } from "../../src/utils/testOverrides";
 import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { FakeGitMetadataReader } from "../fakes/FakeFileSystem";
 
 const versionModulePath = "../../src/utils/mcpVersion.ts";
 
@@ -22,13 +24,15 @@ describe("getMcpServerVersion laziness", () => {
   test("import is lazy and the first getter call probes one command group then caches", async () => {
     const original = testOverrides.gitMetadataClient;
     const commands: string[][] = [];
+    const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+    const fs = new FakeGitMetadataReader({
+      [join(root, ".git")]: null,
+      [join(root, ".git/HEAD")]: "abcdef1234567890123456789012345678901234",
+    });
     testOverrides.gitMetadataClient = new DefaultGitMetadataClient((_command, args) => {
       commands.push([...args]);
-      if (args[1] === "--show-toplevel") {
-        return fileURLToPath(new URL("../../", import.meta.url));
-      }
-      return args[1] === "--short=12" ? "abcdef123456" : "";
-    });
+      return "";
+    }, fs);
     try {
       const version: typeof import("../../src/utils/mcpVersion") = await import(
         `${versionModulePath}?lazy-cache`
@@ -36,13 +40,9 @@ describe("getMcpServerVersion laziness", () => {
       expect(commands).toEqual([]);
       const first = version.getMcpServerVersion();
       expect(first).toMatch(/^\d+\.\d+\.\d+\+gabcdef123456$/);
-      expect(commands).toEqual([
-        ["rev-parse", "--show-toplevel"],
-        ["rev-parse", "--short=12", "HEAD"],
-        ["status", "--porcelain", "--untracked-files=no"],
-      ]);
+      expect(commands).toEqual([["status", "--porcelain", "--untracked-files=no"]]);
       expect(version.getMcpServerVersion()).toBe(first);
-      expect(commands).toHaveLength(3);
+      expect(commands).toHaveLength(1);
     } finally {
       testOverrides.gitMetadataClient = original;
     }
@@ -164,18 +164,14 @@ describe("formatMcpServerVersion + the daemon version gate", () => {
 });
 
 describe("readGitVersion", () => {
-  // Fake git runner: maps each git invocation (keyed by first arg) to canned
-  // stdout. Keeps these tests pure — no spawn, no real repo. `readName` is
-  // injected too so the ownership check needs no filesystem.
+  // Fake git runner and metadata reader keep these tests free of real fs/git.
+  // `readName` also makes the ownership check independent of the filesystem.
   const OWN = "@kaeawc/auto-mobile";
   const fakeRun =
     (responses: Record<string, string | null>) =>
     (_cwd: string, args: string[]): string | null => {
-      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
-        return responses.toplevel ?? null;
-      }
-      if (args[0] === "rev-parse" && args[1] === "--short=12") {
-        return responses.sha ?? null;
+      if (args[0] === "rev-parse") {
+        return responses.sha?.padEnd(40, "0") ?? null;
       }
       if (args[0] === "status") {
         return responses.status ?? null;
@@ -187,7 +183,16 @@ describe("readGitVersion", () => {
     };
   const fakeClient = (responses: Record<string, string | null>) => {
     const run = fakeRun(responses);
-    return new DefaultGitMetadataClient((_command, args, { cwd }) => run(cwd, [...args]));
+    const fs = new FakeGitMetadataReader(
+      responses.toplevel
+        ? {
+            [join(responses.toplevel, ".git")]: null,
+            [join(responses.toplevel, ".git/HEAD")]:
+              responses.sha?.padEnd(40, "0") ?? "unresolvable",
+          }
+        : {},
+    );
+    return new DefaultGitMetadataClient((_command, args, { cwd }) => run(cwd, [...args]), fs);
   };
   const ownsRepo = () => OWN;
 
@@ -196,7 +201,7 @@ describe("readGitVersion", () => {
     const client = new DefaultGitMetadataClient(() => {
       called = true;
       return null;
-    });
+    }, new FakeGitMetadataReader());
     expect(
       readGitVersion("/host/node_modules/@kaeawc/auto-mobile/dist", client, ownsRepo),
     ).toBeNull();
@@ -208,7 +213,7 @@ describe("readGitVersion", () => {
   });
 
   test("returns null when the enclosing repo is a different project (vendored release install)", () => {
-    // git rev-parse walks upward; a copy nested in a host repo must not be
+    // Repository discovery walks upward; a copy nested in a host repo must not be
     // stamped with the host's commit.
     const client = fakeClient({ toplevel: "/host/repo", sha: "deadbeefcafe" });
     expect(

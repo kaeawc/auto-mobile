@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
 import type {
   CallToolResult,
   ListToolsResult,
@@ -7,7 +8,7 @@ import type {
   ServerContext,
 } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
-import { McpError } from "./mcpError";
+import { McpError } from "../daemon/mcpError";
 import { logger } from "../utils/logger";
 import {
   DaemonBoundSessionExpiredError,
@@ -18,7 +19,6 @@ import {
   DaemonRestartDeferredError,
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
-import { DaemonShuttingDownError } from "../daemon/client";
 import { daemonRestartDeferredPayload } from "../daemon/daemonRestartAdmission";
 import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
@@ -35,10 +35,10 @@ import {
 } from "../daemon/deviceControlTransportFailure";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
+  noActiveDeviceSessionPayload,
   readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
-  terminalSessionRefusalFields,
-} from "./deviceSessionResult";
+} from "../daemon/deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
 import { ToolRegistry } from "./toolRegistry";
@@ -48,8 +48,12 @@ import {
   type McpToolCallResult,
   type ToolCall,
 } from "./toolCallDispatch";
-import { shapeToolCallError } from "./shapeToolCallError";
-import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
+import { shapeToolCallError } from "../daemon/shapeToolCallError";
+import {
+  DAEMON_STALLED_CODE,
+  livenessHandoverPayload,
+  type LivenessHandover,
+} from "../daemon/proxyLivenessRecovery";
 import { SESSION_EXPERIMENTAL_CAPABILITY } from "../devices/sessionConfig";
 import type { SessionBrokerResult } from "../devices/sessionBrokerResult";
 import { idleReleaseField } from "../daemon/releaseReasons";
@@ -60,8 +64,8 @@ import {
   isCreateTaskResult,
   missingTasksCapabilityError,
   requestDeclaresTasks,
-} from "./tasks/mcpTasksExtension";
-import { toRelayedProtocolError, isRelayedJsonRpcError } from "./tasks/taskRelay";
+} from "../daemon/tasks/mcpTasksExtension";
+import { toRelayedProtocolError, isRelayedJsonRpcError } from "../daemon/tasks/taskRelay";
 import { ENV } from "../config/env";
 
 const LIVE_ACCEPTANCE_ENV = ENV.ACCEPTANCE_LIVE.name;
@@ -151,6 +155,10 @@ function localBrokerSessionEndedResult(
   error: unknown,
   session: SessionBrokerResult | undefined,
 ): CallToolResult | undefined {
+  if (error instanceof DaemonSessionStalledError && error.handover.code === DAEMON_STALLED_CODE) {
+    // StallProbe can resume this session; preserve the retryable handover instead of relaunching.
+    return undefined;
+  }
   return error instanceof DaemonBoundSessionExpiredError && session
     ? brokerSessionEndedToolResult(session, error)
     : undefined;
@@ -210,18 +218,6 @@ function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): Call
 function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
   const payload = boundSessionOwnershipLostPayload(error);
   return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
-}
-
-export function noActiveDeviceSessionPayload(error: { message: string; reason: string }) {
-  return {
-    error: {
-      code: "no_active_device_session",
-      message: error.message,
-      reason: error.reason,
-      ...idleReleaseField(error.reason),
-      ...terminalSessionRefusalFields(),
-    },
-  };
 }
 
 function noActiveDeviceSessionMessage(error: DaemonConnectionSessionReleasedError): string {

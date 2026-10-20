@@ -3,6 +3,7 @@ import type { RotateOptions } from "../../src/features/action/Rotate";
 import { TapAnyElement } from "../../src/features/action/TapAnyElement";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { readToolResponse, toolIsError, toolStructured, toolText } from "../helpers/toolResponse";
 import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
 import { afterEach, describe, expect, spyOn } from "bun:test";
 import {
@@ -24,6 +25,7 @@ import type {
 import type {
   BootedDevice,
   DragAndDropResult,
+  ObserveResult,
   PressButtonResult,
   RotateResult,
   SelectAllTextResult,
@@ -118,7 +120,7 @@ type ToolResponse = { isError?: true; content: Array<{ type: string; text: strin
 const parsePayload = (response: ToolResponse): { message: string; success: boolean } =>
   JSON.parse(response.content[0].text) as { message: string; success: boolean };
 
-const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
 
 describe("tapAnyHandler (registered handler wiring)", () => {
   const args: TapAnyArgs = { action: "tap", platform: "android" };
@@ -159,20 +161,21 @@ describe("tapAnyHandler (registered handler wiring)", () => {
     const action = new TapAnyElement(device, adb, { timer });
     interactionDeps.tapAnyElementFactory = () => action;
 
+    const internalArgs = {
+      action: "longPress" as const,
+      duration: 20000,
+      __mcpRequestDeadlineMs: timer.now() + 5000,
+    };
     const response = await tapAnyHandler(
       device,
-      {
-        action: "longPress",
-        duration: 20000,
-        __mcpRequestDeadlineMs: timer.now() + 5000,
-      },
+      internalArgs,
       undefined,
       undefined,
       interactionDeps,
     );
     const error =
       "Failed to tap clickable element: longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started. Increase the request timeout or use a shorter duration.";
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(parsePayload(response).message).toBe(error);
     expect(parsePayload(response).success).toBe(false);
     expect(response.structuredContent).toMatchObject({ success: false, message: error, error });
@@ -267,7 +270,7 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
       undefined,
       interactionDeps,
     );
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(parsePayload(response)).toMatchObject({ error, containerFailure });
     expect(parsePayload(response).message).toBe(`Failed to drag element to target: ${error}`);
   });
@@ -459,11 +462,13 @@ describe("rotateHandler (registered handler wiring)", () => {
   });
 
   test("returns structured content for a successful orientation no-op", async () => {
-    const observation = {
+    const observation: ObserveResult = {
       updatedAt: 1,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: { hierarchy: {} },
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      observationId: "obs-1",
     };
     const result = fakeResult({
       success: true,
@@ -484,9 +489,9 @@ describe("rotateHandler (registered handler wiring)", () => {
       interactionDeps,
     );
 
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(result);
-    expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
+    expect(readToolResponse(response).isError).toBeUndefined();
+    expect<unknown>(toolStructured(response)).toEqual(result);
+    expect(JSON.parse(toolText(response))).toEqual(toolStructured(response));
   });
 
   test("forwards lockOrientation to the rotate implementation", async () => {
@@ -533,9 +538,9 @@ describe("setPostureHandler structured result", () => {
       interactionDeps,
     );
     const message = "status" in result ? result.message : "Set device posture to opened";
-    expect(response.structuredContent).toEqual({ message, ...result });
-    expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
-    expect(response.isError).toBeUndefined();
+    expect(toolStructured(response)).toEqual({ message, ...result });
+    expect(JSON.parse(toolText(response))).toEqual(toolStructured(response));
+    expect(readToolResponse(response).isError).toBeUndefined();
   });
 
   test("operational failures still throw actionable errors", async () => {
@@ -567,12 +572,14 @@ describe("keyboard failure envelopes", () => {
         };
         interactionDeps.keyboardFactory = () => ({ execute: async () => result });
         const response = await handler("keyboard")(device, { action });
-        expect(response.structuredContent).toEqual(result);
-        expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
+        expect(toolStructured(response)).toEqual(result);
+        expect(readToolResponse(response).content).toEqual([
+          { type: "text", text: JSON.stringify(result) },
+        ]);
         if (success) {
           expect(response).not.toHaveProperty("isError");
         } else {
-          expect(response.isError).toBe(true);
+          expect(toolIsError(response)).toBe(true);
         }
       },
     );
@@ -585,8 +592,10 @@ describe("keyboard failure envelopes", () => {
     };
     interactionDeps.keyboardFactory = () => ({ execute: async () => result });
     const response = await handler("keyboard")(device, { action: "detect" });
-    expect(response.structuredContent).toEqual(result);
-    expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
+    expect(toolStructured(response)).toEqual(result);
+    expect(readToolResponse(response).content).toEqual([
+      { type: "text", text: JSON.stringify(result) },
+    ]);
     expect(response).not.toHaveProperty("isError");
   });
   test.each(["open", "close"] as const)(
@@ -599,9 +608,11 @@ describe("keyboard failure envelopes", () => {
       };
       interactionDeps.keyboardFactory = () => ({ execute: async () => result });
       const response = await handler("keyboard")(device, { action });
-      expect(response.structuredContent).toEqual(result);
-      expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
-      expect(response.isError).toBe(true);
+      expect(toolStructured(response)).toEqual(result);
+      expect(readToolResponse(response).content).toEqual([
+        { type: "text", text: JSON.stringify(result) },
+      ]);
+      expect(toolIsError(response)).toBe(true);
     },
   );
   test.each([false, true])("shake success=%s preserves its text envelope", async (success) => {
@@ -655,8 +666,9 @@ describe("keyboard failure envelopes", () => {
     const execute = spyOn(HomeScreen.prototype, "execute").mockResolvedValue(result);
     try {
       const response = await handler("homeScreen")(device, {});
+      const { message, ...rest } = result;
       expect(response).toEqual({
-        content: [{ type: "text", text: JSON.stringify({ message: result.message, ...result }) }],
+        content: [{ type: "text", text: JSON.stringify({ message, ...rest }) }],
       });
       expect(response).not.toHaveProperty("isError");
     } finally {

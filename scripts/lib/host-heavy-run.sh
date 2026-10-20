@@ -99,3 +99,11 @@ host_heavy_oxlint_type_aware() {
   local threads="$1"
   bunx oxlint --type-aware --format json ${threads:+--threads "$threads"} 2> /dev/null
 }
+
+# The fast oxlint stage of scripts/lint.sh (Rust, one thread per core by default). The cap is the
+# last argument; every other argument is oxlint's own.
+host_heavy_oxlint() {
+  local threads="${*: -1}"
+  local -a args=("${@:1:$#-1}")
+  oxlint ${threads:+--threads "$threads"} ${args[@]+"${args[@]}"}
+}

@@ -919,6 +919,7 @@ test/features/observe/AndroidCtrlProxyClientSendCommand.test.ts
 test/features/observe/AndroidCtrlProxyClientSettingsSendCommand.test.ts
 test/features/observe/AndroidCtrlProxyRequestSettlement.test.ts
 test/features/observe/AndroidMultiDisplayActivity.test.ts
+test/features/observe/AwaitIdle.quietTree.test.ts
 test/features/observe/AwaitIdle.test.ts
 test/features/observe/ConditionPredicates.test.ts
 test/features/observe/ConditionResolver.test.ts

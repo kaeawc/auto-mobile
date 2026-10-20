@@ -607,12 +607,23 @@ launch_unit_shard() {
   local shard="$1" attempt="$2" index
   shard_files=()
   shard_number="$shard"
-  for ((index = shard; index < ${#test_files[@]}; index += worker_count)); do
+  for ((index = shard - shard_start; index < ${#test_files[@]}; index += worker_count)); do
     shard_files+=("${test_files[$index]}")
   done
   report_name="shard-${shard}.xml"
   if [[ "$shard_mode" == changed ]]; then
     shard_number=$((shard + 1))
+  fi
+
+  if [[ "$shard_mode" == coverage ]]; then
+    coverage_chunks=(bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
+      "$coverage_chunk_files" "" "$shard"
+      ${coverage_prefix[@]+"${coverage_prefix[@]}"} --)
+    if [[ "${TEST_TS_PRINT_CMD:-}" == 1 ]]; then
+      printf '%q ' ${coverage_chunks[@]+"${coverage_chunks[@]}"} ${shard_files[@]+"${shard_files[@]}"}
+      printf '\n'
+      return 0
+    fi
   fi
 
   if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
@@ -628,7 +639,7 @@ launch_unit_shard() {
   AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt" \
   AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}" \
   AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$shard_root/shard-${shard}.pgid" \
-  AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+  AUTOMOBILE_FORCE_PORTABLE_TIMEOUT="${shard_portable_timeout}" \
     run_unit_shard_attempt > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
   pids[shard]=$!
   cleanup_pids+=("$!")
@@ -636,18 +647,31 @@ launch_unit_shard() {
 
 # Runs in the background shell launched above; reads the launcher's dynamic locals.
 run_unit_shard_attempt() {
+  local shard_pgid_file="${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}"
+  if [[ "$shard_mode" == coverage ]]; then
+    export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${shard}/${worker_count}"
+  fi
   shard_started="$(date +%s)"
   timing_log="$shard_root/timing-shard-${shard}.ndjson"
-  local calibration_file="${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}/calibration-${shard_mode}-shard-${shard}.tsv"
-  local calibration_label="${shard_mode} shard ${shard} attempt ${attempt}"
-  shard_args=("${BUN_UNIT_TEST_COMMAND[@]}")
+  # Coverage is the unit lane too; keep the existing calibration file/label
+  # contract so the contention lookup reads this exact attempt's probes.
+  local calibration_mode="$shard_mode"
+  if [[ "$shard_mode" == coverage ]]; then calibration_mode=unit; fi
+  local calibration_file="${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}/calibration-${calibration_mode}-shard-${shard}.tsv"
+  local calibration_label="${calibration_mode} shard ${shard} attempt ${attempt}"
+  shard_args=(${BUN_UNIT_TEST_COMMAND[@]+"${BUN_UNIT_TEST_COMMAND[@]}"})
   if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
     shard_args+=(
       --reporter junit
       --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/$report_name"
     )
   fi
-  configure_unit_shard_groups "$shard"
+  if [[ "$shard_mode" == coverage ]]; then
+    export AUTOMOBILE_CHUNK_COVERAGE_ROOT="$shard_root"
+    shard_args=(${coverage_chunks[@]+"${coverage_chunks[@]}"})
+  else
+    configure_unit_shard_groups "$shard"
+  fi
   local shard_budget="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}"
   if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
     # One child owns the sequential loop: the watchdog bounds ALL chunks,
@@ -675,7 +699,10 @@ run_unit_shard_attempt() {
       "$shard_budget"
     shard_status=0
     set +e
-    run_with_timeout "$shard_budget" \
+    # Bash 3.2 can leak a nested temporary export to children despite the
+    # watchdog's unset. Clear the inherited binding before passing it anew.
+    unset AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE
+    AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$shard_pgid_file" run_with_timeout "$shard_budget" \
       ${shard_args[@]+"${shard_args[@]}"} \
       ${shard_files[@]+"${shard_files[@]}"}
     shard_status=$?
@@ -700,7 +727,7 @@ run_unit_shard_attempt() {
 # calibration preserves the existing retry policy; never borrow another probe.
 unit_shard_is_contended() {
   local shard="$1"
-  if [[ "$shard_mode" != unit ]]; then
+  if [[ "$shard_mode" == changed ]]; then
     return 1
   fi
   # The retry predicate and final diagnostic immediately share this result;
@@ -746,7 +773,7 @@ report_unit_timeout_summary() {
 
 report_starved_unit_lane() {
   local shard message slowdown="n/a"
-  for ((shard = 0; shard < worker_count; shard += 1)); do
+  for ((shard = shard_start; shard < shard_end; shard += 1)); do
     if [[ "${shard_statuses[$shard]}" -ne 124 || "${shard_attempts[$shard]}" -ne 2 || "${shard_first_statuses[$shard]:-0}" -ne 124 ]]; then
       return 0
     fi
@@ -781,7 +808,7 @@ report_contended_unit_shard() {
 # Succeeds when a reaped first attempt should be retried (see the arithmetic above).
 unit_shard_should_retry() {
   local shard="$1" status="$2" elapsed
-  if [[ "$shard_mode" != unit || "$unit_shard_retries" -eq 0 || -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+  if [[ "$shard_mode" == changed || "$unit_shard_retries" -eq 0 || ( "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ) ]]; then
     return 1
   fi
   if [[ "$status" -ne 124 ]] && ! [[ "$status" -ge 129 && "$status" -le 192 ]]; then
@@ -832,6 +859,12 @@ retry_unit_shard() {
   if [[ -f "$shard_root/timing-shard-${shard}.ndjson" ]]; then
     mv "$shard_root/timing-shard-${shard}.ndjson" "$shard_root/timing-shard-${shard}.attempt-1.ndjson"
   fi
+  if [[ "$shard_mode" == coverage ]]; then
+    mkdir -p "$shard_root/attempt-1"
+    for file in "$shard_root/shard-${shard}-chunk-"* "$shard_root/shard-${shard}.chunks"; do
+      [[ ! -e "$file" ]] || mv "$file" "$shard_root/attempt-1/"
+    done
+  fi
   rm -f "$shard_root/shard-${shard}.wall"
   # A killed attempt can leave partial reports: the shard's own report and any
   # per-chunk reports (shard-N-iso-K.xml). Match exact names, never shard-N*,
@@ -868,14 +901,28 @@ finish_unit_shard() {
     if [[ "$RUN_STATUS" -eq 0 ]]; then
       report_contended_unit_shard "$shard" "$suffix"
     fi
+    if [[ "$shard_mode" == coverage ]]; then
+      printf 'Coverage test run exceeded its %ss wall-clock budget (shard %d/%d).\n' \
+        "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$shard" "$worker_count" >&2
+    fi
     printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget%s\n' "$shard_mode" "$number" "$suffix" >&2
     rc=124
   elif [[ "$status" -ne 0 ]]; then
     # Name every failing shard, even beside a timeout, so a real test failure
     # is never hidden behind another shard's infra exit; 124 keeps precedence.
-    printf 'FAIL: %s shard %d exited with status %d%s\n' "$shard_mode" "$number" "$status" "$suffix" >&2
+    if [[ "$shard_mode" == coverage ]]; then
+      printf 'FAIL: coverage shard %d/%d exited with status %d%s\n' "$number" "$worker_count" "$status" "$suffix" >&2
+    else
+      printf 'FAIL: %s shard %d exited with status %d%s\n' "$shard_mode" "$number" "$status" "$suffix" >&2
+    fi
     if [[ "$rc" -ne 124 ]]; then
-      rc=1
+      if [[ "$shard_mode" == coverage && "$status" -ge 129 && "$status" -le 192 ]]; then
+        # Preserve a terminal infra exit for run-ts-coverage.sh: clean chunk
+        # logs plus WriteFailed must never waive an exhausted signal retry.
+        rc="$status"
+      elif [[ "$rc" -lt 129 || "$rc" -gt 192 ]]; then
+        rc=1
+      fi
     fi
   elif [[ "$status" -eq 0 && -n "$suffix" ]]; then
     printf 'test-ts: %s shard %d passed on its retry\n' "$shard_mode" "$number" >&2
@@ -991,6 +1038,13 @@ run_unit_shards() {
   # suite can run this lane hermetically (per-test dir) instead of serially.
   local shard_root="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-${shard_mode}-shards"
   local file index shard shard_number worker_count rc shard_status report_name
+  local shard_start=0 shard_end
+  local coverage_chunks=()
+  local shard_portable_timeout=1
+  if [[ "$shard_mode" == coverage ]]; then
+    shard_start=1
+    shard_root="$coverage_root/shards"
+  fi
   local lane_start lane_elapsed physical_cores lane_cap="" attempts_note
   local shard_wall_record
   local test_files=()
@@ -1033,13 +1087,18 @@ run_unit_shards() {
   # shellcheck source=scripts/ios/run_with_timeout.sh
   source "$ROOT/scripts/ios/run_with_timeout.sh"
 
-  rm -rf "$shard_root"
-  mkdir -p "$shard_root"
+  if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
+    rm -rf "$shard_root"
+    mkdir -p "$shard_root"
+  fi
   if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
     rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
     mkdir -p "$AUTOMOBILE_UNIT_JUNIT_DIR"
   fi
   if [[ "$shard_mode" == changed ]]; then
+    # Print-only runs skip the scratch reset above but still need somewhere to
+    # hold the resolved list.
+    mkdir -p "$shard_root"
     unit_selection_file="$shard_root/selected-unit.txt"
     # Resolve once before sharding. The selector unions a parse-only Bun graph
     # with affectedTests' reference/always-run extras; uncertain edges select
@@ -1049,21 +1108,25 @@ run_unit_shards() {
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$select_timeout" TEST_TS_PRINT_CMD=0 \
       run_test_command bun "$ROOT/scripts/lib/changedUnitTests.ts" "$changed_ref" > "$unit_selection_file"
   fi
-  while IFS= read -r file; do
-    shared_files+=("$file")
-  done < <(shared_process_unit_files)
-  shared_total="${#shared_files[@]}"
-  # Both lists keep discovery order, so one merge walk separates them. Shared
-  # files go first so round-robin spreads both groups evenly across shards.
-  index=0
-  while IFS= read -r file; do
-    if [[ "$index" -lt "$shared_total" && "$file" == "${shared_files[$index]}" ]]; then
-      index=$((index + 1))
-    else
-      isolated_files+=("$file")
-    fi
-  done < <(discover_unit_test_files)
-  test_files=(${shared_files[@]+"${shared_files[@]}"} ${isolated_files[@]+"${isolated_files[@]}"})
+  if [[ "$shard_mode" == coverage ]]; then
+    test_files=(${coverage_files[@]+"${coverage_files[@]}"})
+  else
+    while IFS= read -r file; do
+      shared_files+=("$file")
+    done < <(shared_process_unit_files)
+    shared_total="${#shared_files[@]}"
+    # Both lists keep discovery order, so one merge walk separates them. Shared
+    # files go first so round-robin spreads both groups evenly across shards.
+    index=0
+    while IFS= read -r file; do
+      if [[ "$index" -lt "$shared_total" && "$file" == "${shared_files[$index]}" ]]; then
+        index=$((index + 1))
+      else
+        isolated_files+=("$file")
+      fi
+    done < <(discover_unit_test_files)
+    test_files=(${shared_files[@]+"${shared_files[@]}"} ${isolated_files[@]+"${isolated_files[@]}"})
+  fi
 
   if [[ "${#test_files[@]}" -eq 0 ]]; then
     if [[ "$shard_mode" == changed ]]; then echo 'No changed unit tests'; return 0; fi
@@ -1075,8 +1138,16 @@ run_unit_shards() {
       "$shared_total" "${#isolated_files[@]}" >&2
   fi
 
-  cap_unit_workers "$unit_workers"
-  worker_count="$capped_workers"
+  if [[ "$shard_mode" == coverage ]]; then
+    # The shard count is explicit configuration (AUTOMOBILE_COVERAGE_SHARDS) and
+    # shapes the partition, so it is never reduced; acquire the available host
+    # slots to account for coverage like any other unit lane.
+    if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then cap_unit_workers "$coverage_shards"; fi
+    worker_count="$coverage_shards"
+  else
+    cap_unit_workers "$unit_workers"
+    worker_count="$capped_workers"
+  fi
   if [[ "$worker_count" -gt "${#test_files[@]}" ]]; then
     worker_count="${#test_files[@]}"
   fi
@@ -1089,6 +1160,8 @@ run_unit_shards() {
     validate_positive_integer "AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS" "$lane_cap"
   fi
 
+  shard_end=$((shard_start + worker_count))
+
   if [[ "${TEST_TS_PRINT_CMD:-}" == "1" && "$shard_mode" == "unit" ]]; then
     printf \
       'bun test --isolate --no-orphans --path-ignore-patterns %q --path-ignore-patterns %q --shards=%s\n' \
@@ -1098,7 +1171,7 @@ run_unit_shards() {
     return 0
   fi
 
-  for ((shard = 0; shard < worker_count; shard += 1)); do
+  for ((shard = shard_start; shard < shard_end; shard += 1)); do
     cleanup_pgid_prefixes+=("$shard_root/shard-${shard}.pgid")
     shard_attempts[shard]=1
     shard_starts[shard]="$(date +%s)"
@@ -1117,7 +1190,7 @@ run_unit_shards() {
   # `kill -0`; Bash reaps exited children on SIGCHLD and `wait PID` still
   # returns the remembered status. The interval adds at most one poll of
   # latency per reap, well inside UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS.
-  for ((shard = 0; shard < worker_count; shard += 1)); do
+  for ((shard = shard_start; shard < shard_end; shard += 1)); do
     pending_shards+=("$shard")
   done
   while [[ "${#pending_shards[@]}" -gt 0 ]]; do
@@ -1132,7 +1205,7 @@ run_unit_shards() {
       shard_status=0
       wait "${pids[$index]}" || shard_status=$?
       forget_cleanup_pid "${pids[$index]}"
-      if [[ "$shard_mode" == unit && "$shard_status" -eq 124 ]]; then
+      if [[ "$shard_mode" != changed && "$shard_status" -eq 124 ]]; then
         run_capture_status unit_shard_is_contended "$index"
         report_unit_timeout_summary "$index"
       fi
@@ -1154,15 +1227,15 @@ run_unit_shards() {
     fi
   done
 
-  if [[ "$shard_mode" == "unit" ]]; then
+  if [[ "$shard_mode" != changed ]]; then
     lane_elapsed=$(($(date +%s) - lane_start))
-    for ((shard = 0; shard < worker_count; shard += 1)); do
+    for ((shard = shard_start; shard < shard_end; shard += 1)); do
       attempts_note=""
       if [[ "${shard_attempts[$shard]}" -gt 1 ]]; then
         attempts_note=" attempts=${shard_attempts[$shard]}"
       fi
       printf 'test-ts: unit shard %d/%d wall=%ss status=%s%s\n' \
-        "$((shard + 1))" "$worker_count" \
+        "$((shard - shard_start + 1))" "$worker_count" \
         "${shard_elapsed_seconds[$shard]}" "${shard_statuses[$shard]}" "$attempts_note" >&2
     done
     printf 'test-ts: unit shards total wall=%ss status=%s retried=%s\n' \
@@ -1170,12 +1243,12 @@ run_unit_shards() {
     report_starved_unit_lane
   fi
 
-  for ((shard = 0; shard < worker_count; shard += 1)); do
+  for ((shard = shard_start; shard < shard_end; shard += 1)); do
     if [[ -f "$shard_root/shard-${shard}.attempt-1.log" ]]; then
-      printf '\n==> TypeScript %s shard %d/%d (attempt 1 of 2, retried)\n' "$shard_mode" "$((shard + 1))" "$worker_count"
+      printf '\n==> TypeScript %s shard %d/%d (attempt 1 of 2, retried)\n' "$shard_mode" "$((shard - shard_start + 1))" "$worker_count"
       command cat "$shard_root/shard-${shard}.attempt-1.log"
     fi
-    printf '\n==> TypeScript %s shard %d/%d\n' "$shard_mode" "$((shard + 1))" "$worker_count"
+    printf '\n==> TypeScript %s shard %d/%d\n' "$shard_mode" "$((shard - shard_start + 1))" "$worker_count"
     command cat "$shard_root/shard-${shard}.log"
   done
   cleanup_pids=()
@@ -1581,70 +1654,11 @@ case "$mode" in
       rm -rf "$coverage_root"
       mkdir -p "$coverage_root/shards"
     fi
-    coverage_pids=()
-    for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
-      cleanup_pgid_prefixes+=("${coverage_root}/shards/shard-${coverage_shard}.pgid")
-    done
-    for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
-      # Round-robin over the sorted list: every file runs in exactly one shard
-      # and each shard sees a similar mix of directories.
-      shard_files=()
-      for ((index = coverage_shard - 1; index < ${#coverage_files[@]}; index += coverage_shards)); do
-        shard_files+=("${coverage_files[$index]}")
-      done
-      coverage_chunks=(
-        bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
-        "$coverage_chunk_files" "" "$coverage_shard"
-        ${coverage_prefix[@]+"${coverage_prefix[@]}"} -- ${shard_files[@]+"${shard_files[@]}"}
-      )
-      if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
-        printf '%q ' "${coverage_chunks[@]}"
-        printf '\n'
-        continue
-      fi
-      (
-        unset AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE
-        local_pgid_prefix="${coverage_root}/shards/shard-${coverage_shard}.pgid"
-        export AUTOMOBILE_CHUNK_COVERAGE_ROOT="${coverage_root}/shards"
-        if [[ "$runner_os" != "Windows" ]]; then
-          export AUTOMOBILE_TEST_TIMING_LOG="${coverage_root}/shards/timing-shard-${coverage_shard}.ndjson"
-          export AUTOMOBILE_WATCHDOG_TIMING_LOG="$AUTOMOBILE_TEST_TIMING_LOG"
-          export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${coverage_shard}/${coverage_shards}"
-        fi
-        if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
-          # shellcheck source=scripts/ios/run_with_timeout.sh
-          source "$ROOT/scripts/ios/run_with_timeout.sh"
-          AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$local_pgid_prefix" \
-            run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "${coverage_chunks[@]}"
-        else
-          "${coverage_chunks[@]}"
-        fi
-      ) > "${coverage_root}/shards/shard-${coverage_shard}.log" 2>&1 3>&- &
-      coverage_pids+=("$!")
-      cleanup_pids+=("$!")
-    done
-    if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
-      exit 0
-    fi
-    coverage_status=0
-    for ((coverage_index = 0; coverage_index < ${#coverage_pids[@]}; coverage_index += 1)); do
-      shard_status=0
-      wait "${coverage_pids[$coverage_index]}" || shard_status=$?
-      forget_cleanup_pid "${coverage_pids[$coverage_index]}"
-      if [[ "$shard_status" -eq 124 ]]; then
-        echo "Coverage test run exceeded its ${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS}s wall-clock budget (shard $((coverage_index + 1))/${coverage_shards})." >&2
-        coverage_status=124
-      elif [[ "$shard_status" -ne 0 ]]; then
-        echo "FAIL: coverage shard $((coverage_index + 1))/${coverage_shards} exited with status ${shard_status}" >&2
-        if [[ "$coverage_status" -ne 124 ]]; then coverage_status=1; fi
-      fi
-    done
-    cleanup_pids=()
-    for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
-      printf '\n==> TypeScript coverage shard %d/%d\n' "$coverage_shard" "$coverage_shards"
-      command cat "${coverage_root}/shards/shard-${coverage_shard}.log"
-    done
-    if [[ "$coverage_status" -ne 0 ]]; then exit "$coverage_status"; fi
+    # Coverage uses the unit shard supervisor too: the same 720s attempts,
+    # 1560s lane cap, infra-only retry, probes, summary and contention dispatch.
+    run_capture_status run_unit_shards coverage
+    if [[ "$RUN_STATUS" -ne 0 ]]; then exit "$RUN_STATUS"; fi
+    if [[ "${TEST_TS_PRINT_CMD:-}" == 1 ]]; then exit 0; fi
     coverage_lcov_files=()
     coverage_junit_files=()
     for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do

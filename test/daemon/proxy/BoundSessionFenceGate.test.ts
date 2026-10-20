@@ -9,6 +9,10 @@ import {
 } from "../../../src/daemon/proxy/daemonErrors";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
 import { ReleaseEpochLedger } from "../../../src/daemon/proxy/ReleaseEpochLedger";
+import { fakeBindLock, unreachableMcpDispatcher } from "../../helpers/createTestUnixSocketServer";
+import { UnixSocketServerHarness } from "../helpers/UnixSocketServerHarness";
+import { createFakeDaemonState, createFakeSession } from "../helpers/inputSocketHarness";
+import { DAEMON_BOUND_SESSION_PARAM } from "../../../src/daemon/constants";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 function harness() {
@@ -56,7 +60,7 @@ function harness() {
     sessionUuidFromArgs: (args) =>
       typeof args.sessionUuid === "string" ? args.sessionUuid.trim() || undefined : undefined,
   };
-  return { gate: new BoundSessionFenceGate(port), state, owned, ledger, surfaced };
+  return { gate: new BoundSessionFenceGate(port), state, owned, ledger, surfaced, port };
 }
 
 describe("BoundSessionFenceGate", () => {
@@ -114,4 +118,57 @@ describe("BoundSessionFenceGate", () => {
       reason: "idle_timeout",
     });
   });
+});
+
+describe("bound proxy inventory routing", () => {
+  test.each(["listDeviceImages", "listDevices"])(
+    "%s bypasses a busy autolocked device",
+    async (name) => {
+      const { gate, port, state } = harness();
+      state.boundSessionUuid = "held";
+      state.boundSessionUuidAt = 0;
+      port.isDeviceInventoryTool = (tool) => tool === "listDevices" || tool === "listDeviceImages";
+      port.toolTargetsDevice = () => false;
+      const sessions = new Map([["held", createFakeSession("held", "SIM-1", "ios")]]);
+      const s = new UnixSocketServerHarness(
+        "unused",
+        createFakeDaemonState(sessions, new Map([["sock", "held"]])),
+        new FakeTimer(),
+        undefined,
+        { mcpDispatcher: unreachableMcpDispatcher },
+        undefined,
+        { bindLock: fakeBindLock },
+      );
+      s.bindClient("sock", {
+        clientKey: "bound",
+        executionKey: "device:SIM-1",
+        sessionUuid: "held",
+        requiresLiveDaemonSession: true,
+      });
+      const held = Promise.withResolvers<void>();
+      const busy = s.runKeyedForward("device:SIM-1", () => held.promise);
+      try {
+        const args = gate.prepareToolRoutingArgs(name, { platform: "ios" }, false).forwardedArgs;
+        expect(args).not.toHaveProperty("sessionUuid");
+        expect(args).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
+        const route = await s.forwardRouteFor(
+          {
+            id: "listing",
+            type: "mcp_request",
+            method: "tools/call",
+            params: { name, arguments: args },
+          },
+          "sock",
+        );
+        expect(s.hasForwardTail("device:SIM-1")).toBe(true);
+        expect(route.executionKey).toBe("host:inventory");
+        const observe = gate.prepareToolRoutingArgs("observe", {}, false).forwardedArgs;
+        expect(observe.sessionUuid).toBe("held");
+        expect(observe[DAEMON_BOUND_SESSION_PARAM]).toBe("held");
+      } finally {
+        held.resolve();
+        await busy;
+      }
+    },
+  );
 });

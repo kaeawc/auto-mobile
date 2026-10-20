@@ -27,6 +27,7 @@ if [[ "$1" == */scripts/lib/changedUnitTests.ts ]]; then
   exit "${STUB_SELECTION_STATUS:-0}"
 fi
 if [[ "$1" == */scripts/lib/runner-calibration.ts && "$2" == probe ]]; then
+  printf '%s\n' "$4" >> "$STUB_CALLS.probes"
   printf '%s\t75\t25\n' "$4" >> "$3"
   exit 0
 fi

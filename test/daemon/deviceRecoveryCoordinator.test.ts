@@ -463,4 +463,29 @@ describe("DeviceRecoveryCoordinator", () => {
     await retry;
     expect(recovered).toEqual(["first"]);
   });
+
+  test("deferred recovery skips only the plan device, rechecking after each await", async () => {
+    const { coordinator, port, records, timer } = harness();
+    const device = { id: "emulator-5554" } as PooledDevice;
+    const recovered: string[] = [];
+    const protectedIds = new Set(["plan"]);
+    port.recoverSessionBoundAndroidDeviceAfterAdbServerReset = async (id) => {
+      recovered.push(id);
+      protectedIds.add("switched");
+      return false;
+    };
+    for (const deviceId of ["plan", "ordinary", "switched"]) {
+      const record = coordinator.startAndroidRecoveryRecord(
+        deviceId,
+        { deviceId, expectedDevice: device },
+        ["loss"],
+      );
+      record.state = "deferred";
+      record.deferredUntil = timer.now();
+    }
+    await coordinator.retryDueDeferredSessionRecoveries((id) => !protectedIds.has(id));
+    expect(recovered).toEqual(["ordinary"]);
+    expect(records.get("plan")?.state).toBe("deferred");
+    expect(records.get("switched")?.state).toBe("deferred");
+  });
 });

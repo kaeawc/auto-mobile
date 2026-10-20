@@ -1,7 +1,7 @@
 import { ActionableError } from "../../models";
 import { type Timer } from "../../utils/SystemTimer";
 import type { CaptureTarget, IosScreenCaptureReadinessPhase } from "../screen-stream";
-import type { IosFrameCaptureHelper } from "./IosH264Source";
+import type { IosFrameCaptureHelper } from "./IosH264SourceConfig";
 import { NoFirstFrameError } from "./NoFirstFrameError";
 import { ScreenRecordingPermissionHintError } from "./ScreenRecordingPermissionHintError";
 

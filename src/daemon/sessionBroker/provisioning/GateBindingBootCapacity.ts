@@ -1,3 +1,4 @@
+import { DEFAULT_SAMPLE_TIMEOUT_MS } from "../../../devices/bootAdmission/BootAdmissionGate";
 import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
 import type { BindingBootReservation, BindingBootReservationOptions } from "./reconcilerContracts";
 import {
@@ -20,12 +21,23 @@ export type BindingBootCapacityAssertion = (
   signal: AbortSignal | undefined,
 ) => Promise<void>;
 
-const BOOT_CAPACITY_CHECK_TIMEOUT_MS = 5_000;
+/** Slack so the gate's own sample deadline, not this wrapper, is what ends a slow sample. */
+const BOOT_CAPACITY_CHECK_GRACE_MS = 2_000;
+
+/**
+ * The gate lets its fresh fleet sample (`simctl list`, `ps`, `sysctl`) take DEFAULT_SAMPLE_TIMEOUT_MS
+ * on a loaded host. An outer deadline shorter than that reported a count the gate would have
+ * answered as unknown (#13801). This deadline is a backstop behind each gate's own sample
+ * deadline; the gate also bounds its sample's commands, so a run it abandons ends too.
+ */
+export const BOOT_CAPACITY_CHECK_TIMEOUT_MS =
+  DEFAULT_SAMPLE_TIMEOUT_MS + BOOT_CAPACITY_CHECK_GRACE_MS;
 
 /**
  * The process-wide boot admission gates as the reconciler's capacity probe: a read-only
  * check for fresh creates and a held ledger admission before replacement deletes a device.
- * Bounded, because the simulator fleet sample has no deadline of its own.
+ * A backstop: each gate bounds its own sample at DEFAULT_SAMPLE_TIMEOUT_MS, and this deadline only
+ * fires if the gate overruns that.
  */
 export class GateBindingBootCapacity implements BindingBootCapacity {
   constructor(

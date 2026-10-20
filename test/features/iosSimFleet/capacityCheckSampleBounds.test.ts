@@ -6,7 +6,10 @@ import {
 import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
 import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGate";
 import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
-import type { FleetHostSource } from "../../../src/features/iosSimFleet/FleetHostSource";
+import type {
+  FleetHostSource,
+  FleetReadOptions,
+} from "../../../src/features/iosSimFleet/FleetHostSource";
 import type {
   HostSnapshot,
   SimulatorInventoryEntry,
@@ -36,10 +39,14 @@ const SNAPSHOT: HostSnapshot = {
 class ScriptedSource implements FleetHostSource {
   readonly pending: Array<(entries: SimulatorInventoryEntry[]) => void> = [];
   immediate: SimulatorInventoryEntry[] | undefined;
-  async readHostSnapshot(): Promise<HostSnapshot> {
+  readonly inventoryOptions: Array<FleetReadOptions | undefined> = [];
+  readonly snapshotOptions: Array<FleetReadOptions | undefined> = [];
+  async readHostSnapshot(options?: FleetReadOptions): Promise<HostSnapshot> {
+    this.snapshotOptions.push(options);
     return SNAPSHOT;
   }
-  readInventory(): Promise<SimulatorInventoryEntry[]> {
+  readInventory(options?: FleetReadOptions): Promise<SimulatorInventoryEntry[]> {
+    this.inventoryOptions.push(options);
     if (this.immediate) {
       return Promise.resolve(this.immediate);
     }
@@ -107,6 +114,17 @@ const DISCOVERY_INCOMPLETE = { code: "discovery_incomplete", retryable: true, pl
  * count (`discovery_incomplete`), never "capacity available".
  */
 describe("iOS read-only capacity reads take a bounded, cancellable sample", () => {
+  test("the fresh sample's commands carry the sample budget so an abandoned run ends too (#13801)", async () => {
+    const source = new ScriptedSource();
+    source.immediate = [sim(A, "Shutdown")];
+    const { gate } = build(source);
+
+    await gate.assertCapacityAvailable();
+
+    expect(source.inventoryOptions).toEqual([{ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS }]);
+    expect(source.snapshotOptions[0]?.timeoutMs).toBe(DEFAULT_SAMPLE_TIMEOUT_MS);
+  });
+
   test("a hung simctl listing ends the check with discovery_incomplete at the sample deadline", async () => {
     const source = new ScriptedSource();
     const { gate, timer, ledger } = build(source);

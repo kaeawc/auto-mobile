@@ -121,12 +121,22 @@ bun test <file>        # Run specific test file (no cache)
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
 Use `scripts/prepush.sh` (`--list` to preview, `--all`, `--changed`, or `--base`) to select per-lane gates from changed paths; per-lane scripts remain usable standalone and each records its own attestation, while the dispatcher does not.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
-loop; `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, explicit cap fallbacks, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); formatting, typecheck, and lint intentionally remain full repository
-gates. It also runs the tool-free TypeScript subset of CI Fast Validation
+loop; early selection via `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); a unit cap fallback replaces the changed lane with the full unit lane and skips unit extras, while integration caps use the full safe lane. Formatting, typecheck, and lint intentionally remain full repository
+gates. Typecheck and lint stay strictly serial and separate because oxlint 1.88's experimental `--type-check` and tsgolint diagnostics do not replace the fail-closed typecheck parser, TS2688/`@types/bun` guard, or separate src/test tsconfig projects. It also runs the tool-free TypeScript subset of CI Fast Validation
 (`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
-lychee pass when `lychee` is installed), the `test/lint/` suites (including the
-Windows path-separator assertion guard), and, on Linux or with `--timing`, the
-100 ms unit budget. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
+lychee pass when `lychee` is installed), repository lint tests, and, on Linux or with `--timing`, the
+100 ms unit budget. The timing gate measures the unit lane's JUnit reports when
+source or runtime inputs changed; changed test files alone are still re-run
+individually. Changed mode without reports uses the timing validator's own
+affected-test selection. The separate repository lint gate runs only
+`test/lint/*.integration.test.ts` in full mode (unit files already run in the unit
+lane); `--changed` runs the whole `test/lint/` directory only when branch,
+worktree, or untracked paths touch `src/`, `test/`, `scripts/`, `oxlint-plugins/`,
+`android/`, `ios/`, `docs/`, `skills/`, `schemas/`, `.claude/`, `.github/`, or root
+`.oxlintrc.json`, `package.json`, `bun.lock`, `bunfig.toml`, `turbo.json`, or
+`tsconfig*.json`. After that directory runs, affected unit and integration extras
+omit `test/lint/` files already covered. Always-run unit extras still run when
+that gate skips. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
 matrix lanes are not covered: use `scripts/prepush-shell.sh` and the platform
 gates, and expect CI to be the only Windows run. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 `eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and

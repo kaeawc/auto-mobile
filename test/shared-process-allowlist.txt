@@ -196,6 +196,7 @@ test/daemon/deviceTable.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-offlineRecovery.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-sourceUnavailable.test.ts
 test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
@@ -270,7 +271,6 @@ test/daemon/ownerLeaseAwaitsReap.test.ts
 test/daemon/ownershipLookupReleasesNothing.test.ts
 test/daemon/passiveWorkPolicy.test.ts
 test/daemon/perSourceIosLiveness.test.ts
-test/daemon/performancePushSocketServer.test.ts
 test/daemon/performancePushSocketServerCharacterization.test.ts
 test/daemon/performanceStreamSocketServerCharacterization.test.ts
 test/daemon/planLabelRegistry.test.ts
@@ -582,6 +582,7 @@ test/fakes/FakeIOSCtrlProxy.test.ts
 test/fakes/FakeImageBackend.test.ts
 test/fakes/FakeIosVoiceOverDetector.test.ts
 test/fakes/FakeNavigationGraphManager.test.ts
+test/fakes/FakePrototypeAgentClient.test.ts
 test/fakes/FakeSystemConfigurationAdapter.test.ts
 test/fakes/FakeTimer.test.ts
 test/fakes/adbStdout.test.ts
@@ -1039,7 +1040,9 @@ test/features/performance/PerfWindowBuffer.test.ts
 test/features/performance/PerformanceAudit.refreshRate.test.ts
 test/features/performance/PerformanceAudit.ttff.test.ts
 test/features/performance/PerformanceAudit.window.test.ts
+test/features/performance/PerformanceDemandProbe.test.ts
 test/features/performance/PerformanceMonitor.cost.test.ts
+test/features/performance/PerformanceMonitor.demand.test.ts
 test/features/performance/SdkFrameMetricsStore.test.ts
 test/features/preferences/AndroidPreferencesXmlFile.test.ts
 test/features/preferences/AndroidSharedPreferencesMutationCoordinator.test.ts
@@ -1968,6 +1971,7 @@ test/utils/ios-cmdline-tools/simctl-client.runtimeResolution.test.ts
 test/utils/ios-cmdline-tools/simctl-client.uninstallBound.test.ts
 test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
 test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
+test/utils/ios-cmdline-tools/simctlCommandBounds.test.ts
 test/utils/ios-cmdline-tools/simctlRuntimes.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
 test/utils/ios-cmdline-tools/simulatorLaunchHandle.test.ts

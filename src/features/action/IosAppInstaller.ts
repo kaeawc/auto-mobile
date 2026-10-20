@@ -317,7 +317,7 @@ export class IosAppInstaller {
     signal?: AbortSignal,
   ): Promise<boolean> {
     try {
-      await backend.installApp(appPath);
+      await backend.installApp(appPath, { signal });
       return false;
     } catch (error) {
       const text = extractInstallErrorText(error);

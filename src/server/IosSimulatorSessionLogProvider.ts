@@ -173,7 +173,8 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, controller.signal])
       : controller.signal;
-    const run = simctl.executeCommandArgs(args, undefined, signal);
+    // Arm the collection deadline before simctl so its typed timeout wins equal deadlines.
+    const run = () => simctl.executeCommandArgs(args, this.unifiedLogTimeoutMs, signal);
     let timeoutError: SessionLogTimeoutError | undefined;
     return (
       await raceWithDeadline(run, {

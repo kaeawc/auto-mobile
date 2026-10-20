@@ -1,9 +1,13 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { configureObservationStreamCallbacks } from "../../src/daemon/daemonObservationStreamCallbacks";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
 import type { StorageSubscriptionRequest } from "../../src/daemon/daemonStreamRouting";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const unused = (): never => {
   throw new Error("dependency not expected to be read by this test");

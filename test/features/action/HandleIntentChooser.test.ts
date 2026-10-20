@@ -1,6 +1,6 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
-import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn, afterEach, mock } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
 import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionToolHandlers";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -14,6 +14,10 @@ import { FakeDeepLinkManager } from "../../fakes/FakeDeepLinkManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("HandleIntentChooser", () => {
   let handleIntentChooser: HandleIntentChooser;

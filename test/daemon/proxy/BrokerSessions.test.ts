@@ -4,6 +4,8 @@ import type { DaemonClientLike } from "../../../src/daemon/client";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResult";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../../src/daemon/sessionReleasedDuringCall";
+import { daemonResponseError } from "../../../src/daemon/clientResponseDecoding";
+import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -84,8 +86,14 @@ function rig(answer: (call: Call) => unknown = () => ready) {
     },
   };
   const brokerSessions = new BrokerSessions({ timer, livenessOwnerToken: "owner-1", port });
-  return { brokerSessions, calls, events, state, state2, client };
+  return { brokerSessions, calls, events, state, state2, client, timer };
 }
+
+const handoffPending = {
+  code: "session_restart_handoff_pending",
+  retryable: true,
+  retryAfterMs: 120,
+};
 
 describe("BrokerSessions", () => {
   test("acquire binds, establishes ownership and exposes the held binding", async () => {
@@ -114,6 +122,194 @@ describe("BrokerSessions", () => {
     expect(brokerSessions.sessions.size).toBe(0);
     expect(events).toContain("forget:session-1");
     expect(calls.some(({ method }) => method === "daemon/releaseBrokerSession")).toBe(true);
+  });
+
+  for (const thrown of [false, true]) {
+    test(`prepared release retries a ${thrown ? "decoded error" : "result"} handoff pending before forgetting`, async () => {
+      let attempts = 0;
+      const { brokerSessions, events, state2, timer } = rig(({ method, params }) => {
+        if (method !== "daemon/releaseBrokerSession") {
+          return ready;
+        }
+        expect(params).toEqual({ sessionId: "session-1", livenessOwnerToken: "owner-1" });
+        expect(brokerSessions.sessions.has("session-1")).toBe(true);
+        expect(events).not.toContain("forget:session-1");
+        if (++attempts === 1) {
+          if (thrown) {
+            throw daemonResponseError({
+              id: "release-1",
+              type: "mcp_response",
+              success: false,
+              ...handoffPending,
+            });
+          }
+          return handoffPending;
+        }
+        return { sessionUuid: "session-1", outcome: "released" };
+      });
+      state2.establishError = new Error("claim refused");
+
+      const result = await brokerSessions.acquire(config);
+
+      expect(attempts).toBe(2);
+      expect(timer.getSleepHistory()).toEqual([120]);
+      expect(result.cleanupPending).toBe(false);
+      expect(brokerSessions.sessions.size).toBe(0);
+      expect(events.filter((event) => event === "forget:session-1")).toHaveLength(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test(`prepared release exhausts one budget for repeated handoff ${thrown ? "errors" : "results"}`, async () => {
+      let attempts = 0;
+      const { brokerSessions, events, state2, timer } = rig(({ method }) => {
+        if (method !== "daemon/releaseBrokerSession") {
+          return ready;
+        }
+        attempts++;
+        expect(brokerSessions.sessions.has("session-1")).toBe(true);
+        expect(events).not.toContain("forget:session-1");
+        if (thrown) {
+          throw daemonResponseError({
+            id: "release-1",
+            type: "mcp_response",
+            success: false,
+            ...handoffPending,
+          });
+        }
+        return handoffPending;
+      });
+      state2.establishError = new Error("claim refused");
+      const started = timer.now();
+
+      const result = await brokerSessions.acquire(config);
+
+      expect(attempts).toBe(58);
+      expect(timer.now() - started).toBe(6_840);
+      expect(timer.getSleepHistory()).toEqual(Array<number>(57).fill(120));
+      expect(result.cleanupPending).toBe(true);
+      expect(brokerSessions.sessions.size).toBe(0);
+      expect(events.filter((event) => event === "forget:session-1")).toHaveLength(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+  }
+
+  for (const refusal of [
+    { ...handoffPending, retryable: false },
+    { code: handoffPending.code },
+    { ...handoffPending, code: "session_owner_mismatch" },
+    { ...handoffPending, code: "session_broker_unavailable" },
+  ]) {
+    for (const thrown of [false, true]) {
+      test(`prepared release never retries ${JSON.stringify(refusal)} (${thrown ? "error" : "result"})`, async () => {
+        const { brokerSessions, state2, calls, events, timer } = rig(({ method }) => {
+          if (method !== "daemon/releaseBrokerSession") {
+            return ready;
+          }
+          if (thrown) {
+            throw daemonResponseError({
+              id: "release-1",
+              type: "mcp_response",
+              success: false,
+              ...refusal,
+            });
+          }
+          return refusal;
+        });
+        state2.establishError = new Error("claim refused");
+
+        const result = await brokerSessions.acquire(config);
+
+        expect(result.cleanupPending).toBe(true);
+        expect(calls.filter(({ method }) => method === "daemon/releaseBrokerSession")).toHaveLength(
+          1,
+        );
+        expect(timer.getSleepHistory()).toEqual([]);
+        expect(brokerSessions.sessions.size).toBe(0);
+        expect(events.filter((event) => event === "forget:session-1")).toHaveLength(1);
+      });
+    }
+  }
+
+  test("prepared release rethrows an unrelated error unchanged and forgets immediately", async () => {
+    const error = new Error("connection lost");
+    const { brokerSessions, events, timer } = rig(() => {
+      throw error;
+    });
+    // Exercise the private acquisition cleanup boundary to verify error identity before its caller logs it.
+    brokerSessions.sessions.set("session-1", "request-1");
+
+    await expect(brokerSessions["releasePrepared"]("session-1")).rejects.toBe(error);
+
+    expect(events).toEqual(["forget:session-1"]);
+    expect(brokerSessions.sessions.size).toBe(0);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  for (const [retryAfterMs, delay] of [
+    [undefined, 250],
+    [NaN, 250],
+    [Infinity, 250],
+    [0, 250],
+    [-1, 250],
+    [1, 50],
+    [5_000, 5_000],
+    [10_000, 5_000],
+  ] as const) {
+    test(`prepared release normalizes retryAfterMs=${String(retryAfterMs)} to ${delay}ms`, async () => {
+      let attempts = 0;
+      const { brokerSessions, state2, timer } = rig(({ method }) => {
+        if (method === "daemon/releaseBrokerSession") {
+          return ++attempts === 1
+            ? { ...handoffPending, retryAfterMs }
+            : { sessionUuid: "session-1", outcome: "released" };
+        }
+        return ready;
+      });
+      state2.establishError = new Error("claim refused");
+
+      expect((await brokerSessions.acquire(config)).cleanupPending).toBe(false);
+
+      expect(attempts).toBe(2);
+      expect(timer.getSleepHistory()).toEqual([delay]);
+    });
+  }
+
+  test("a stalled retry only gets the remaining release budget", async () => {
+    let attempts = 0;
+    const { brokerSessions, state2, events, timer } = rig(({ method }) => {
+      if (method !== "daemon/releaseBrokerSession") {
+        return ready;
+      }
+      return ++attempts === 1 ? handoffPending : new Promise<never>(() => {});
+    });
+    state2.establishError = new Error("claim refused");
+    const started = timer.now();
+
+    expect((await brokerSessions.acquire(config)).cleanupPending).toBe(true);
+
+    expect(attempts).toBe(2);
+    expect(timer.now() - started).toBe(7_000);
+    expect(events.filter((event) => event === "forget:session-1")).toHaveLength(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("acquisition abort still completes bounded release cleanup during a handoff", async () => {
+    const { brokerSessions, state2, events, timer } = rig(({ method }) => {
+      if (method !== "daemon/releaseBrokerSession") {
+        return ready;
+      }
+      brokerSessions.abortAcquisition(new Error("proxy closing"));
+      return handoffPending;
+    });
+    state2.establishError = new Error("claim refused");
+    const started = timer.now();
+
+    expect((await brokerSessions.acquire(config)).cleanupPending).toBe(true);
+
+    expect(timer.now() - started).toBe(6_840);
+    expect(brokerSessions.sessions.size).toBe(0);
+    expect(events.filter((event) => event === "forget:session-1")).toHaveLength(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("rebindConnection re-registers the held receipt on the new socket", async () => {
@@ -188,6 +384,104 @@ describe("BrokerSessions", () => {
 
     expect(events).toContain("forget:session-1");
     expect(brokerSessions.sessions.size).toBe(0);
+  });
+
+  test("releaseAll retries handoff with its reason inside the existing shutdown budget", async () => {
+    let attempts = 0;
+    const { brokerSessions, calls, events, timer } = rig(({ method }) => {
+      if (method === "daemon/releaseBrokerSession") {
+        return ++attempts === 1 ? handoffPending : new Promise<never>(() => {});
+      }
+      return ready;
+    });
+    await brokerSessions.acquire(config);
+    const started = timer.now();
+
+    await brokerSessions.releaseAll("session_owner_exited");
+
+    const releases = calls.filter(({ method }) => method === "daemon/releaseBrokerSession");
+    expect(releases).toHaveLength(2);
+    expect(releases.every(({ params }) => params.reason === "session_owner_exited")).toBe(true);
+    expect(timer.now() - started).toBe(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
+    expect(events.filter((event) => event === "forget:session-1")).toHaveLength(1);
+    expect(brokerSessions.sessions.size).toBe(0);
+  });
+
+  for (const retryAfterMs of [900, 875]) {
+    test(`releaseAll skips a ${retryAfterMs}ms delay without time for a useful retry`, async () => {
+      const { brokerSessions, calls, timer } = rig(({ method }) => {
+        if (method === "daemon/releaseBrokerSession") {
+          timer.advanceTime(600);
+          return { ...handoffPending, retryAfterMs };
+        }
+        return ready;
+      });
+      await brokerSessions.acquire(config);
+      const started = timer.now();
+
+      await brokerSessions.releaseAll();
+
+      expect(timer.now() - started).toBe(600);
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(calls.filter(({ method }) => method === "daemon/releaseBrokerSession")).toHaveLength(
+        1,
+      );
+      expect(brokerSessions.sessions.size).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+  }
+
+  for (const prepared of [false, true]) {
+    test(`${prepared ? "prepared" : "shutdown"} release bounds repeated 5s recovery hints`, async () => {
+      const { brokerSessions, calls, timer } = rig(({ method }) =>
+        method === "daemon/releaseBrokerSession"
+          ? { ...handoffPending, retryAfterMs: 5_000 }
+          : ready,
+      );
+      await brokerSessions.acquire(config);
+      const started = timer.now();
+
+      if (prepared) {
+        await brokerSessions["releasePrepared"]("session-1");
+      } else {
+        await brokerSessions.releaseAll();
+      }
+
+      expect(timer.now() - started).toBe(prepared ? 5_000 : 0);
+      expect(timer.getSleepHistory()).toEqual(prepared ? [5_000] : []);
+      expect(calls.filter(({ method }) => method === "daemon/releaseBrokerSession")).toHaveLength(
+        prepared ? 2 : 1,
+      );
+      expect(brokerSessions.sessions.size).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+  }
+
+  test("late-hold cleanup prevents reconnect from rebinding during its retry wait", async () => {
+    let attempts = 0;
+    const { brokerSessions, calls, client, timer } = rig(({ method }) => {
+      if (method !== "daemon/releaseBrokerSession") {
+        return ready;
+      }
+      if (++attempts === 1) {
+        timer.setTimeout(() => {
+          expect(brokerSessions.heldBinding()).toBeUndefined();
+          expect(brokerSessions.sessions.get("session-1")).toBe("request-1");
+          void brokerSessions.rebindConnection(client);
+        }, 60);
+        return handoffPending;
+      }
+      return { sessionUuid: "session-1", outcome: "released" };
+    });
+    await brokerSessions.acquire(config);
+
+    await brokerSessions["releasePrepared"]("session-1");
+
+    expect(attempts).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([120]);
+    expect(calls.some(({ method }) => method === "daemon/registerSession")).toBe(false);
+    expect(brokerSessions.sessions.size).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("clear drops every hold without calling the daemon", async () => {

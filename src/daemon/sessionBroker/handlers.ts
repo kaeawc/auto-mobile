@@ -2,6 +2,7 @@ import {
   SessionRequestOwnerMismatchError,
   SESSION_BROKER_RETRY_AFTER_MS,
 } from "./SessionRequestOwnerMismatchError";
+import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { z } from "zod";
 import { SessionExportIdentityMismatchError } from "./store";
 import { parseSessionConfig } from "../../devices/sessionConfig";
@@ -143,8 +144,16 @@ async function handleSessionExport(
 }
 
 function brokerRejection(error: unknown): DaemonMethodResult {
-  if (error instanceof SessionRequestOwnerMismatchError) {
-    logger.warn(`Session broker rejected request ownership: ${errorMessage(error)}`);
+  if (
+    error instanceof SessionRequestOwnerMismatchError ||
+    error instanceof SessionBrokerStoppingError
+  ) {
+    const message = `Session broker rejected request: ${errorMessage(error)}`;
+    if (error.retryable) {
+      logger.debug(message);
+    } else {
+      logger.warn(message);
+    }
     return {
       success: false,
       code: error.code,

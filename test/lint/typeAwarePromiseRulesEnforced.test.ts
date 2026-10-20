@@ -1,9 +1,10 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "../..");
-const read = (rel: string): string => readFileSync(path.join(root, rel), "utf8");
+const read = (rel: string): string => readGuardFile(path.join(root, rel));
 
 const PROMISE_RULES = ["no-floating-promises", "no-misused-promises"] as const;
 

@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 
 /**
@@ -101,7 +102,7 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       return [];
     }
     const out: string[] = [];
-    for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(absDir)) {
       const abs = join(absDir, entry.name);
       if (entry.isDirectory()) {
         out.push(...walk(abs, ext, excludes));
@@ -118,7 +119,7 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
     for (const scope of SCOPES) {
       const files = scope.dirs.flatMap((d) => walk(join(ROOT, d), scope.ext, scope.excludes));
       for (const abs of files) {
-        const source = readFileSync(abs, "utf8");
+        const source = readGuardFile(abs);
         const rel = relative(ROOT, abs);
         for (const pair of scope.pairs) {
           if (pair.register.test(source) && !pair.teardown.test(source)) {

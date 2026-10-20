@@ -1,8 +1,12 @@
-import { typeScriptFiles, relativePosix } from "./astGuard";
+import { typeScriptFiles, relativePosix, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { scanRecordHeartbeatCalls } from "./recordHeartbeatCallers";
+import {
+  scanRecordHeartbeatCalls,
+  scanNamedCalls,
+  scanNamedCallOwners,
+} from "./recordHeartbeatCallers";
 
 const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
@@ -70,6 +74,11 @@ describe("scanRecordHeartbeatCalls", () => {
         "\nmanager.recordHeartbeat(id);\n\nrecordHeartbeat(id);",
       ),
     ).toEqual([{ line: 2 }, { line: 4 }]);
+    for (const name of ["foo\nbar", 'foo"bar', "foo/bar", "foo\\bar"]) {
+      const source = `manager[${JSON.stringify(name).replaceAll("/", "\\/")}]();`;
+      expect(scanNamedCalls("fixture.ts", source, name)).toEqual([{ line: 1 }]);
+      expect(scanNamedCallOwners("fixture.ts", source, name)).toEqual(["<module>"]);
+    }
   });
 
   test("ignores definitions, spies, mentions and longer names", () => {
@@ -104,7 +113,7 @@ describe("tests do not call recordHeartbeat directly", () => {
   beforeAll(() => {
     callSites = typeScriptFiles(TEST_DIR).flatMap((file) => {
       const relative = relativePosix(REPO_ROOT, file);
-      return scanRecordHeartbeatCalls(relative, readFileSync(file, "utf8")).map((finding) => ({
+      return scanRecordHeartbeatCalls(relative, readGuardFile(file)).map((finding) => ({
         file: relative,
         line: finding.line,
       }));

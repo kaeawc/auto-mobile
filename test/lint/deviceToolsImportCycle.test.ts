@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { parseSync } from "oxc-parser";
 
@@ -73,7 +74,7 @@ interface ImportNode {
 }
 
 function runtimeImports(file: string): string[] {
-  const { body } = parseSync(file, readFileSync(file, "utf8")).program;
+  const { body } = parseSync(file, readGuardFile(file)).program;
   const targets: string[] = [];
   for (const node of body as ImportNode[]) {
     const isImport = node.type === "ImportDeclaration" && node.importKind !== "type";
@@ -197,10 +198,13 @@ export function withoutEdges(
 describe("deviceTools import cycle guard (issue #11827)", () => {
   let nodes: string[];
   let edges: Map<string, string[]>;
+  let cycleResult: { cycle: string[] | undefined };
   // Crawling the reachable graph parses many files, so it runs in the hook, not a 100 ms test.
   beforeAll(() => {
     nodes = nodeFiles();
     edges = reachableGraph(nodes, runtimeImports);
+    const remaining = withoutEdges(edges, KNOWN_CYCLE_EDGES.map(abs));
+    cycleResult = { cycle: findCycleThrough(nodes, remaining) };
   }, 60_000);
 
   const abs = (edge: readonly [string, string]): [string, string] => [
@@ -209,8 +213,7 @@ describe("deviceTools import cycle guard (issue #11827)", () => {
   ];
 
   test("no new runtime import cycle through the device or interaction tool modules", () => {
-    const remaining = withoutEdges(edges, KNOWN_CYCLE_EDGES.map(abs));
-    const cycle = findCycleThrough(nodes, remaining);
+    const { cycle } = cycleResult;
     expect(cycle?.map((f) => relative(ROOT, f))).toBeUndefined();
   });
 

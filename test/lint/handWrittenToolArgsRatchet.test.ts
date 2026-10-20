@@ -1,7 +1,7 @@
 import { beforeAll, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
+import { parseGuardSource, relativePosix, typeScriptFiles, readGuardFile } from "./astGuard";
 
 /**
  * Hand-written `interface *Args` types in `src/server` drift from the zod wire schema (#6154).
@@ -28,7 +28,7 @@ const ARGS_NAME = /^[A-Za-z]+Args$/;
 
 /** Top-level `interface *Args` declarations, exported or not, found by parsing the file. */
 function argsInterfaceCount(file: string): number {
-  const source = readFileSync(file, "utf8");
+  const source = readGuardFile(file);
   // Cheap prefilter: parsing is only needed for files that could declare such an interface.
   if (!/interface [A-Za-z]+Args/.test(source)) {
     return 0;

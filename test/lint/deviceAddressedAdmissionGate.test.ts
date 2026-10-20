@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative, sep } from "node:path";
 import ts from "typescript";
 import { blankComments } from "./blankComments";
@@ -48,7 +49,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   function walkSrc(dir: string = join(ROOT, "src"), files: string[] = []): string[] {
     // withFileTypes, not a statSync per entry: one syscall for the whole
     // directory instead of one per file across ~1000 files in src/.
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(dir)) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         walkSrc(full, files);
@@ -203,7 +204,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     if (cached !== undefined) {
       return cached;
     }
-    const text = readFileSync(join(ROOT, file), "utf8");
+    const text = readGuardFile(join(ROOT, file));
     const blanked = blankComments(text);
     const source = ts.createSourceFile(
       file,
@@ -240,20 +241,20 @@ describe("device-addressed admission gate (issue #6863)", () => {
     }
     namedFunctions("src/daemon/readiness/DeviceReadiness.ts");
     poolSource = ["src/daemon/devicePoolParts/discovery.ts", "src/daemon/devicePoolParts/status.ts"]
-      .map((file) => blankComments(readFileSync(join(ROOT, file), "utf8")))
+      .map((file) => blankComments(readGuardFile(join(ROOT, file))))
       .join("\n");
     resolverSource = blankComments(
-      readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
+      readGuardFile(join(ROOT, "src/daemon/deviceSessionResolver.ts")),
     );
     factorySource = blankComments(
-      readFileSync(join(ROOT, "src/utils/android-cmdline-tools/AdbClientFactory.ts"), "utf8"),
+      readGuardFile(join(ROOT, "src/utils/android-cmdline-tools/AdbClientFactory.ts")),
     );
     ctrlProxyClientSource = blankComments(
-      readFileSync(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts"), "utf8"),
+      readGuardFile(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts")),
     );
     unadmittedFactoryUsers = walkSrc()
       .filter((file) => {
-        const source = readFileSync(file, "utf8");
+        const source = readGuardFile(file);
         return (
           source.includes("unadmittedAdbClientFactory") ||
           source.includes("androidTransportIdentityAdbFactory")

@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { relativePosix, typeScriptFiles } from "./astGuard";
+import { relativePosix, typeScriptFiles, readGuardFile } from "./astGuard";
 import { scanNamedCallOwners, scanNamedCalls } from "./recordHeartbeatCallers";
 
 const source = ts.createSourceFile(
   "sessionManager.ts",
-  readFileSync(new URL("../../src/daemon/sessionManager.ts", import.meta.url), "utf8"),
+  readGuardFile(new URL("../../src/daemon/sessionManager.ts", import.meta.url)),
   ts.ScriptTarget.Latest,
   true,
 );
@@ -23,7 +23,7 @@ const methods = manager.members.filter(ts.isMethodDeclaration);
 function collaboratorMethods(file: string, name: string): ts.MethodDeclaration[] {
   const collaborator = ts.createSourceFile(
     file,
-    readFileSync(new URL(`../../src/daemon/sessionManager/${file}`, import.meta.url), "utf8"),
+    readGuardFile(new URL(`../../src/daemon/sessionManager/${file}`, import.meta.url)),
     ts.ScriptTarget.Latest,
     true,
   );
@@ -134,7 +134,7 @@ test("in-class getSession calls stay within the retained expiry reader inventory
 test("the liveness controller's port getSession calls stay within the retained expiry reader inventory", () => {
   const controllerSource = ts.createSourceFile(
     "sessionLivenessLease.ts",
-    readFileSync(new URL("../../src/daemon/sessionLivenessLease.ts", import.meta.url), "utf8"),
+    readGuardFile(new URL("../../src/daemon/sessionLivenessLease.ts", import.meta.url)),
     ts.ScriptTarget.Latest,
     true,
   );
@@ -348,7 +348,7 @@ describe("src/server expiring getSession readers", () => {
   beforeAll(() => {
     actual = {};
     for (const file of typeScriptFiles(SERVER_DIR)) {
-      const text = readFileSync(file, "utf8");
+      const text = readGuardFile(file);
       if (!text.includes("getSession")) {
         continue;
       }
@@ -374,7 +374,7 @@ describe("src/daemon expiring getSession readers", () => {
       if (relative === "sessionManager.ts" || relative === "sessionLivenessLease.ts") {
         continue;
       }
-      const text = readFileSync(file, "utf8");
+      const text = readGuardFile(file);
       if (!text.includes("getSession")) {
         continue;
       }
@@ -396,7 +396,7 @@ describe("src/features expiring getSession readers", () => {
   beforeAll(() => {
     actual = {};
     for (const file of typeScriptFiles(FEATURES_DIR)) {
-      const text = readFileSync(file, "utf8");
+      const text = readGuardFile(file);
       if (!text.includes("getSession")) {
         continue;
       }

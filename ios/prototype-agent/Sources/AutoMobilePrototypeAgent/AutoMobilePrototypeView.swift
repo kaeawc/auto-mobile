@@ -1,7 +1,8 @@
+import CryptoKit
 import SwiftUI
 
 /// Presents a complete prototype inside the embedding app, without an AutoMobile server.
-/// Configuration changes replace the presentation; callback changes retain its current state.
+/// Spec, asset, or storage changes replace the presentation; callback and network changes retain its state.
 @MainActor
 public struct AutoMobilePrototypeView: View {
     private let renderer: PrototypeEmbeddedRenderer
@@ -9,22 +10,22 @@ public struct AutoMobilePrototypeView: View {
 
     /// Decodes and validates the complete spec before rendering. Invalid or unsupported specs
     /// display a visible diagnostic and call `onLoadError` once when that presentation mounts.
-    /// Assets use the spec's ids; storage persists only the spec's listed keys. A dismiss action
-    /// clears the prototype and calls `onDismiss`; the app decides whether to remove this view.
+    /// Assets use the spec's ids; storage defaults to `.none`. Opt in to persistence for the spec's listed keys.
+    /// A dismiss action clears the prototype and calls `onDismiss`; the app decides whether to remove this view.
     public init(
         spec: Data,
         assets: PrototypeAssets = .none,
-        storage: PrototypeStorageOption = .fileBacked,
+        storage: PrototypeStorageOption = .none,
         network: PrototypeNetworkConfiguration = .default,
-        onEvent: @escaping (PrototypeEvent) -> Void = { _ in },
-        onDismiss: @escaping (PrototypeDismissReason) -> Void = { _ in },
-        onLoadError: @escaping (PrototypeLoadError) -> Void = { _ in }
+        onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in },
+        onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in },
+        onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in }
     ) {
         renderer = PrototypeEmbeddedRenderer(
             spec: spec, assets: assets, storage: storage, network: network,
             onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError
         )
-        identity = PrototypeEmbeddedIdentity(spec: spec, assets: assets, storage: storage, network: network.identifier)
+        identity = PrototypeEmbeddedIdentity(spec: spec, assets: assets, storage: storage)
     }
 
     /// The embedded renderer or a diagnostic covering the entire presentation.
@@ -34,10 +35,17 @@ public struct AutoMobilePrototypeView: View {
 }
 
 private struct PrototypeEmbeddedIdentity: Hashable {
-    let spec: Data
-    let assets: PrototypeAssets
+    let spec: SHA256.Digest
+    let images: [String: SHA256.Digest]
+    let fonts: [String: SHA256.Digest]
     let storage: PrototypeStorageOption
-    let network: ObjectIdentifier
+
+    init(spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption) {
+        self.spec = SHA256.hash(data: spec)
+        images = assets.images.mapValues { SHA256.hash(data: $0) }
+        fonts = assets.fonts.mapValues { SHA256.hash(data: $0) }
+        self.storage = storage
+    }
 }
 
 @MainActor
@@ -46,9 +54,9 @@ private struct PrototypeEmbeddedRenderer: UIViewControllerRepresentable {
     let assets: PrototypeAssets
     let storage: PrototypeStorageOption
     let network: PrototypeNetworkConfiguration
-    let onEvent: (PrototypeEvent) -> Void
-    let onDismiss: (PrototypeDismissReason) -> Void
-    let onLoadError: (PrototypeLoadError) -> Void
+    let onEvent: @MainActor (PrototypeEvent) -> Void
+    let onDismiss: @MainActor (PrototypeDismissReason) -> Void
+    let onLoadError: @MainActor (PrototypeLoadError) -> Void
 
     func makeUIViewController(context _: Context) -> PrototypeEmbeddedController {
         PrototypeEmbeddedController(
@@ -58,6 +66,7 @@ private struct PrototypeEmbeddedRenderer: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: PrototypeEmbeddedController, context _: Context) {
+        controller.updateNetwork(network)
         controller.updateCallbacks(onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError)
         controller.syncAppearance()
     }

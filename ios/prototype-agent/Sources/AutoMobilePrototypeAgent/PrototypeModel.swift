@@ -109,6 +109,7 @@ final class PrototypeModel {
     @ObservationIgnored var hitRects = PrototypeHitRects()
 
     @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
+    @ObservationIgnored var onEmbeddedEvent: (@MainActor (PrototypeEvent) -> Void)?
     /// Runs the `request` actions the session starts and cancels (#12529).
     @ObservationIgnored var requestDriver: PrototypeRequestDriver?
     @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
@@ -363,7 +364,7 @@ final class PrototypeModel {
         onEndEditing?()
     }
 
-    func dismiss(reason: PrototypeDismissReason) {
+    func dismiss(reason: PrototypeSessionDismissReason) {
         apply(activity: false) { $0.dismiss(reason: reason) }
     }
 
@@ -398,7 +399,9 @@ final class PrototypeModel {
         }
         syncSnackbarTimeouts()
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        for event in events {
+        for var event in events {
+            event.wireTimestamp = timestamp
+            onEmbeddedEvent?(event)
             onEvent?(event.wireObject(timestamp: timestamp))
         }
         if wasShown, !session.isShown {

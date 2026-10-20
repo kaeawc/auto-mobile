@@ -72,14 +72,125 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
             XCTAssertEqual(handlerCalls.count, testCase.expectedRoute == "handler" ? 1 : 0, testCase.name)
             let requestEvent = try XCTUnwrap(events.first { $0.name == PrototypeRequestEvent.name })
             let mapped = try PrototypeEvent(wire: requestEvent.wireObject(timestamp: 123))
-            XCTAssertEqual(mapped.type, .request)
+            XCTAssertEqual(mapped.kind, .request)
             let payload = try JSONDecoder().decode([String: JSONValue].self, from: mapped.payloadJSON)
             XCTAssertEqual(payload["outcome"], .string("success"))
             XCTAssertEqual(payload["via"], .string(testCase.via ?? "host"))
             XCTAssertEqual(payload["status"], .number(200))
-            XCTAssertTrue(events.contains { $0.type == .dataWrite })
+            XCTAssertTrue(events.contains { $0.kind == .dataWrite })
             XCTAssertEqual(session.state["status"], .string("success"))
         }
+    }
+
+    func testUpdatingConfigurationForwardsSubsequentRequestsWithoutReplacingDriver() async throws {
+        for via in ["host", "device"] {
+            let oldDevice = Client()
+            let oldHandler = Client()
+            let newDevice = Client()
+            let newHandler = Client()
+            let original = PrototypeNetworkConfiguration(
+                deviceClient: { try await oldDevice.perform($0) },
+                hostHandler: { try await oldHandler.perform($0) }
+            )
+            let replacement = PrototypeNetworkConfiguration(
+                deviceClient: { try await newDevice.perform($0) },
+                hostHandler: { try await newHandler.perform($0) }
+            )
+            let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
+            {"id":"forwarding","window":{"placement":{"type":"fullscreen"}},"state":{"count":0},
+             "root":{"type":"button","label":"Go","onTap":[{"type":"request",
+             "url":"https://example.test/feed","via":"\(via)"}]}}
+            """.utf8))
+            let clock = ManualRequestClock()
+            let driver = original.driver(clock: clock)
+            var session = PrototypeSession()
+            session.show(spec)
+            _ = session.change(key: "count", value: .number(7))
+            var completions = 0
+            driver.onComplete = { id, response in
+                completions += 1
+                _ = session.completeRequest(id, response)
+            }
+            // Swap before the scheduled client task executes: the started call still uses its original client.
+            _ = session.run(spec.root.onTap ?? [])
+            driver.perform(session.takeRequestCommands())
+            replacement.apply(to: driver)
+            await driver.settled()
+            let oldDeviceCalls = await oldDevice.calls
+            let oldHandlerCalls = await oldHandler.calls
+            XCTAssertEqual(oldDeviceCalls.count, via == "device" ? 1 : 0)
+            XCTAssertEqual(oldHandlerCalls.count, via == "host" ? 1 : 0)
+
+            _ = session.run(spec.root.onTap ?? [])
+            driver.perform(session.takeRequestCommands())
+            await driver.settled()
+            let newDeviceCalls = await newDevice.calls
+            let newHandlerCalls = await newHandler.calls
+            XCTAssertEqual(newDeviceCalls.count, via == "device" ? 1 : 0)
+            XCTAssertEqual(newHandlerCalls.count, via == "host" ? 1 : 0)
+
+            // Removing the host handler restores the device fallback on the same driver.
+            PrototypeNetworkConfiguration(deviceClient: { try await newDevice.perform($0) }).apply(to: driver)
+            _ = session.run(spec.root.onTap ?? [])
+            driver.perform(session.takeRequestCommands())
+            await driver.settled()
+            let fallbackCalls = await newDevice.calls
+            let retainedHandlerCalls = await newHandler.calls
+            XCTAssertEqual(fallbackCalls.count, via == "device" ? 2 : 1)
+            XCTAssertEqual(retainedHandlerCalls.count, via == "host" ? 1 : 0)
+            XCTAssertEqual(completions, 3)
+            XCTAssertEqual(session.state["count"], .number(7))
+            XCTAssertTrue(session.isShown)
+            XCTAssertEqual(driver.runningCount, 0)
+            XCTAssertTrue(clock.handles.isEmpty)
+        }
+    }
+
+    func testAuthoredEmitNamedChangeDoesNotBecomeAStateChange() async throws {
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
+        {"id":"change-emit","window":{"placement":{"type":"fullscreen"}},"state":{"query":"initial"},
+         "root":{"type":"button","label":"Emit","onTap":[{"type":"emit","name":"change",
+         "payload":{"key":"query","value":"changed"}}]}}
+        """.utf8))
+        var session = PrototypeSession()
+        session.show(spec)
+        let authored = try XCTUnwrap(session.run(spec.root.onTap ?? []).first)
+        let changed = try XCTUnwrap(session.change(key: "query", value: .string("changed")).first)
+        // Identical wire names and payload shapes cannot identify the source of a change.
+        XCTAssertEqual(authored.wireKind, changed.wireKind)
+        XCTAssertEqual(authored.name, changed.name)
+        XCTAssertEqual(authored.payloadJSON, changed.payloadJSON)
+        XCTAssertEqual(authored.kind, .emitted)
+        XCTAssertEqual(changed.kind, .change)
+        XCTAssertEqual(try PrototypeEvent(wire: authored.wireObject(timestamp: 1)).kind, .emitted)
+        // The typed event can cross actor boundaries without JSON conversion.
+        let transferred = await Task.detached { changed }.value
+        XCTAssertEqual(transferred, changed)
+    }
+
+    func testOnlyEmbeddedDismissReasonsAreExposed() throws {
+        let spec = try PrototypeEmbeddedSpec.load(data: fixture("prototype-spec/valid/text-field-actions.json")).spec
+        for reason in [PrototypeSessionDismissReason.user, .agent, .disconnect, .ttl] {
+            var session = PrototypeSession()
+            session.show(spec)
+            let event = try XCTUnwrap(session.dismiss(reason: reason).first)
+            XCTAssertEqual(event.kind, .dismissed)
+            XCTAssertEqual(event.dismissReason, reason == .user ? .user : nil)
+            let wire = try JSONDecoder().decode([String: JSONValue].self, from: event.wireJSON)
+            XCTAssertEqual(wire["payload"]?.objectFields?["reason"], .string(reason.rawValue))
+        }
+    }
+
+    func testTypedEventWireJSONRetainsModelTimestamp() throws {
+        let spec = try PrototypeEmbeddedSpec.load(data: fixture("prototype-spec/valid/text-field-actions.json")).spec
+        var session = PrototypeSession()
+        session.show(spec)
+        var event = try XCTUnwrap(session.dismiss(reason: .user).first)
+        event.wireTimestamp = 123
+        let wire = try JSONDecoder().decode([String: JSONValue].self, from: event.wireJSON)
+        XCTAssertEqual(wire["timestamp"], .number(123))
+        XCTAssertEqual(wire["kind"], .string("dismissed"))
+        XCTAssertEqual(event.kind, .dismissed)
     }
 
     func testMapsRealTapSubmitStateDataWriteAndDismissWireEvents() throws {
@@ -91,8 +202,8 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         session.show(loaded.spec)
         let tap = try XCTUnwrap(field.trailingIcon?.onTap)
         let change = try XCTUnwrap(session.run(tap).first)
-        let mappedChange = try PrototypeEvent(wire: change.wireObject(timestamp: 1))
-        XCTAssertEqual(mappedChange.type, .change)
+        let mappedChange = change
+        XCTAssertEqual(mappedChange.kind, .change)
         XCTAssertEqual(mappedChange.name, "change")
         XCTAssertEqual(
             try JSONDecoder().decode([String: JSONValue].self, from: mappedChange.stateJSON)["query"],
@@ -100,7 +211,7 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         )
         let submit = try XCTUnwrap(session.run(field.onSubmit ?? []).first)
         let mappedSubmit = try PrototypeEvent(wire: submit.wireObject(timestamp: 2))
-        XCTAssertEqual(mappedSubmit.type, .emitted)
+        XCTAssertEqual(mappedSubmit.kind, .emitted)
         XCTAssertEqual(mappedSubmit.name, "search") // Submit does not invent a separate kind.
 
         // Existing shared data-actions fixture supplies the exact action value wrapper.
@@ -109,7 +220,7 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         let add = try XCTUnwrap(spec.root.children?.first?.onTap)
         let write = try XCTUnwrap(session.run(add).first)
         let mappedWrite = try PrototypeEvent(wire: write.wireObject(timestamp: 3))
-        XCTAssertEqual(mappedWrite.type, .dataWrite)
+        XCTAssertEqual(mappedWrite.kind, .dataWrite)
         XCTAssertEqual(mappedWrite.name, "/data/items")
         XCTAssertEqual(
             try JSONDecoder().decode([String: JSONValue].self, from: mappedWrite.payloadJSON)["op"],
@@ -117,7 +228,7 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         )
         let dismiss = try XCTUnwrap(session.dismiss(reason: .user).first)
         let mappedDismiss = try PrototypeEvent(wire: dismiss.wireObject(timestamp: 4))
-        XCTAssertEqual(mappedDismiss.type, .dismissed)
+        XCTAssertEqual(mappedDismiss.kind, .dismissed)
         XCTAssertEqual(mappedDismiss.dismissReason, .user)
     }
 
@@ -130,7 +241,7 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         wire["kind"] = "future_kind"
         wire["futureField"] = ["nested": [1, 2, 3]]
         let mapped = try PrototypeEvent(wire: wire)
-        XCTAssertEqual(mapped.type, .generic("future_kind"))
+        XCTAssertEqual(mapped.kind, .generic("future_kind"))
         XCTAssertNil(mapped.dismissReason)
         XCTAssertEqual(mapped.id, event.id)
         XCTAssertEqual(mapped.sequence, event.sequence)
@@ -161,7 +272,7 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
             _ = session.run(spec.root.onTap ?? [])
             driver.perform(session.takeRequestCommands())
             await driver.settled()
-            let event = try XCTUnwrap(events.first { $0.type == .request })
+            let event = try XCTUnwrap(events.first { $0.kind == .request })
             let mapped = try PrototypeEvent(wire: event.wireObject(timestamp: 1))
             let payload = try JSONDecoder().decode([String: JSONValue].self, from: mapped.payloadJSON)
             XCTAssertEqual(payload["outcome"], .string("error"))
@@ -181,6 +292,12 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         {"id":"storage","window":{"placement":{"type":"fullscreen"}},"state":{"name":"initial"},
          "storage":{"version":1,"keys":["state:name"]},"root":{"type":"textField","stateKey":"name"}}
         """.utf8))
+        // The default `.none` starts a fresh presentation even when the spec declares storage.
+        var transient = PrototypeSession()
+        transient.show(spec)
+        _ = transient.change(key: "name", value: .string("transient"))
+        transient.show(spec)
+        XCTAssertEqual(transient.state["name"], .string("initial"))
         let restored = coordinator.prepare(spec)
         var session = PrototypeSession()
         session.show(restored.spec, restoredState: restored.state)

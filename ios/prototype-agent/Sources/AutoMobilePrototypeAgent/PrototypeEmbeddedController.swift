@@ -47,9 +47,9 @@ private final class PrototypeEmbeddedAssetRegistrar: PrototypeAssetRegistering {
 final class PrototypeEmbeddedController: UIViewController {
     private let model: PrototypeModel
     private let loadError: PrototypeLoadError?
-    private var onEvent: (PrototypeEvent) -> Void
-    private var onDismiss: (PrototypeDismissReason) -> Void
-    private var onLoadError: (PrototypeLoadError) -> Void
+    private var onEvent: @MainActor (PrototypeEvent) -> Void
+    private var onDismiss: @MainActor (PrototypeDismissReason) -> Void
+    private var onLoadError: @MainActor (PrototypeLoadError) -> Void
     private let layers: PrototypeLayersViewController
     private weak var observedScene: UIWindowScene?
     private var appearanceObservation: (any UITraitChangeRegistration)?
@@ -58,9 +58,9 @@ final class PrototypeEmbeddedController: UIViewController {
     init(
         spec: Data, assets: PrototypeAssets, storage: PrototypeStorageOption,
         network: PrototypeNetworkConfiguration,
-        onEvent: @escaping (PrototypeEvent) -> Void,
-        onDismiss: @escaping (PrototypeDismissReason) -> Void,
-        onLoadError: @escaping (PrototypeLoadError) -> Void
+        onEvent: @escaping @MainActor (PrototypeEvent) -> Void,
+        onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void,
+        onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void
     ) {
         self.onEvent = onEvent
         self.onDismiss = onDismiss
@@ -85,15 +85,9 @@ final class PrototypeEmbeddedController: UIViewController {
         let driver = network.driver()
         driver.onComplete = { [weak model] id, response in model?.completeRequest(id, response) }
         model.requestDriver = driver
-        model.onEvent = { [weak self] wire in
-            do {
-                let event = try PrototypeEvent(wire: wire)
-                self?.onEvent(event)
-                if let reason = event.dismissReason { self?.onDismiss(reason) }
-            } catch {
-                // Session events contain only JSON values; a violation is a programming error.
-                assertionFailure("Non-JSON prototype event: \(error)")
-            }
+        model.onEmbeddedEvent = { [weak self] event in
+            self?.onEvent(event)
+            if let reason = event.dismissReason { self?.onDismiss(reason) }
         }
         let registrar = PrototypeEmbeddedAssetRegistrar(model: model)
         for id in assets.images.keys.sorted() {
@@ -108,10 +102,14 @@ final class PrototypeEmbeddedController: UIViewController {
         model.show(loaded.spec, specBytes: loaded.bytes)
     }
 
+    func updateNetwork(_ network: PrototypeNetworkConfiguration) {
+        if let driver = model.requestDriver { network.apply(to: driver) }
+    }
+
     func updateCallbacks(
-        onEvent: @escaping (PrototypeEvent) -> Void,
-        onDismiss: @escaping (PrototypeDismissReason) -> Void,
-        onLoadError: @escaping (PrototypeLoadError) -> Void
+        onEvent: @escaping @MainActor (PrototypeEvent) -> Void,
+        onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void,
+        onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void
     ) {
         self.onEvent = onEvent
         self.onDismiss = onDismiss
@@ -119,7 +117,7 @@ final class PrototypeEmbeddedController: UIViewController {
     }
 
     func stop() {
-        model.onEvent = nil
+        model.onEmbeddedEvent = nil
         model.dismiss(reason: .user) // Cancels in-flight requests without a synthetic host dismissal callback.
         model.flushStorage()
         unregisterAppearanceObservation()
@@ -254,7 +252,7 @@ final class PrototypeEmbeddedController: UIViewController {
         guard flags != appliedAccessibility else { return }
         appliedAccessibility = flags
         layers.apply(flags)
-        UIAccessibility.post(notification: .screenChanged, argument: nil)
+        UIAccessibility.post(notification: .layoutChanged, argument: nil)
     }
 
     @objc

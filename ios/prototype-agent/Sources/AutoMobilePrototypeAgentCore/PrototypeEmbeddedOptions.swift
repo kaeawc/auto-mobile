@@ -21,7 +21,7 @@ public struct PrototypeAssets: Sendable, Hashable {
 
 /// Persistence for keys explicitly listed in a prototype's `storage` block.
 public enum PrototypeStorageOption: Sendable, Hashable {
-    /// Keep values only for this presentation.
+    /// Keep values only for this presentation. This is the embedded view's default.
     case none
     /// Store values in the app's Application Support directory, partitioned by prototype id.
     case fileBacked
@@ -44,10 +44,6 @@ public struct PrototypeNetworkConfiguration: Sendable {
     /// The returned body is bounded by the renderer before it enters prototype data.
     public typealias Client = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
-    private final class Identity: Sendable {}
-    private let identity = Identity()
-    var identifier: ObjectIdentifier { ObjectIdentifier(identity) }
-
     private let device: any PrototypeHttpClient
     private let handler: (any PrototypeHttpClient)?
 
@@ -64,9 +60,17 @@ public struct PrototypeNetworkConfiguration: Sendable {
 
     @MainActor
     func driver(clock: PrototypeClock = SystemPrototypeClock()) -> PrototypeRequestDriver {
-        PrototypeRequestDriver(clock: clock, device: device, hostRoute: handler.map {
-            .handler($0)
-        } ?? .deviceClient)
+        PrototypeRequestDriver(clock: clock, device: device, hostRoute: hostRoute)
+    }
+
+    /// Swaps clients for subsequent requests while in-flight requests retain their original client.
+    @MainActor
+    func apply(to driver: PrototypeRequestDriver) {
+        driver.updateClients(device: device, hostRoute: hostRoute)
+    }
+
+    @MainActor private var hostRoute: PrototypeRequestDriver.HostRoute {
+        handler.map { .handler($0) } ?? .deviceClient
     }
 }
 

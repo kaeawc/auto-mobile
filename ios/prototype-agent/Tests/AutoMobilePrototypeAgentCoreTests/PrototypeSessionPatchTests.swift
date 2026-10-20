@@ -68,7 +68,7 @@ final class PrototypeSessionPatchTests: XCTestCase {
         XCTAssertEqual(session.state["count"], .number(5))
         XCTAssertEqual(session.state["flag"], .bool(false))
         XCTAssertEqual(events.count, 1)
-        XCTAssertEqual(events.first?.kind, "emit")
+        XCTAssertEqual(events.first?.wireKind, "emit")
         XCTAssertEqual(events.first?.name, "change")
         XCTAssertEqual(events.first?.payload, .object(["key": .string("count"), "value": .number(5)]))
     }

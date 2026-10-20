@@ -1,6 +1,7 @@
 import Foundation
 
 /// A failure that prevents the entire embedded screen from being presented.
+/// This enum may gain cases; include a default branch when switching over it.
 public enum PrototypeLoadError: Error, Equatable, Sendable, LocalizedError {
     /// A validation diagnostic with the same JSON path and message as the Viewer file loader.
     case invalidSpec(path: String, message: String)

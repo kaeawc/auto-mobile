@@ -16,7 +16,13 @@ import { createRequestContext } from "../requestContext";
 
 import { errorMessage } from "../../utils/describeUnknownError";
 
-import { DaemonNotification, DaemonRequest, DaemonResponse, SessionContext } from "../types";
+import {
+  DaemonNotification,
+  DaemonRequest,
+  DaemonResponse,
+  REQUEST_BUDGET_NOTIFICATION_METHOD,
+  SessionContext,
+} from "../types";
 import {
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_CANCEL_REQUEST_METHOD,
@@ -246,6 +252,21 @@ export class SocketTransport {
       };
       pending = tracked;
       this.state.pendingSocketRequests.add(tracked);
+      if (
+        !controlFrame &&
+        request.type === "mcp_request" &&
+        request.acceptsRequestBudget === true &&
+        context.totalTimeoutMs > (request.timeoutMs ?? 0)
+      ) {
+        // The client sized its backstop from its own environment (#13797); say how long this
+        // daemon will really wait so the client does not cancel a call still inside that budget.
+        this.callbacks.writeFrame(socket, sessionId, {
+          type: "daemon_notification",
+          method: REQUEST_BUDGET_NOTIFICATION_METHOD,
+          requestId: request.id,
+          timeoutMs: context.totalTimeoutMs,
+        });
+      }
       deviceId = this.state.onFrameTrace ? this.callbacks.frameDeviceId(request) : undefined;
       if (this.state.onFrameTrace) {
         this.callbacks.traceFrame("frame_parsed", request.id, deviceId);

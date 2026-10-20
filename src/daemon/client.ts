@@ -400,6 +400,7 @@ export class DaemonClient {
         inboundClosed: this.inboundClosed,
         handleResponse: this.handleResponse.bind(this),
         extendPendingRequestOnProgress: this.extendPendingRequestOnProgress.bind(this),
+        extendPendingRequestBudget: this.extendPendingRequestBudget.bind(this),
         notificationHandlers: this.notificationHandlers,
         pendingRequests: this.pendingRequests,
         timer: this.timer,
@@ -484,6 +485,36 @@ export class DaemonClient {
       // The existing timer already covers a deadline at or past the ceiling.
       return;
     }
+    this.timer.clearTimeout(pending.timeout);
+    pending.timeout = this.scheduleRequestTimeout(
+      requestId,
+      pending.toolName,
+      remainingMs,
+      pending.reject,
+    );
+  }
+
+  /**
+   * The daemon resolved a larger budget than this request sent (a per-tool floor from its own
+   * environment, #13797). Lengthen this request's backstop to match, measured from when it was
+   * sent. Never shortens, so a stale or smaller value changes nothing.
+   */
+  private extendPendingRequestBudget(requestId: string, timeoutMs: number): void {
+    const pending = this.pendingRequests.get(requestId);
+    if (
+      !pending ||
+      pending.sentAtMs === undefined ||
+      pending.requestTimeoutMs === undefined ||
+      !Number.isFinite(timeoutMs) ||
+      timeoutMs <= pending.requestTimeoutMs
+    ) {
+      return;
+    }
+    const remainingMs = pending.sentAtMs + timeoutMs - this.timer.now();
+    if (remainingMs <= 0) {
+      return;
+    }
+    pending.requestTimeoutMs = timeoutMs;
     this.timer.clearTimeout(pending.timeout);
     pending.timeout = this.scheduleRequestTimeout(
       requestId,
@@ -738,6 +769,7 @@ export class DaemonClient {
       method,
       params,
       ...(progressToken !== undefined ? { progressToken } : {}),
+      acceptsRequestBudget: true,
       ...taskRelayField(tasks),
       ...this.handshakeFields(),
     };
@@ -786,6 +818,7 @@ export class DaemonClient {
         progressToken,
         deadline,
         requestTimeoutMs,
+        sentAtMs: this.timer.now(),
         disconnectCause,
         removeAbortListener: () => removeAbortListener(),
       });

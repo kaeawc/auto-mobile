@@ -27,7 +27,7 @@ export interface AdbOfflineHeldDevice {
 export async function adbOfflineHeldDevices(input: {
   platform: string;
   discovered: readonly BootedDevice[];
-  devicePool: DevicePool | null | undefined;
+  devicePool: Pick<DevicePool, "getAssignedDevices"> | null | undefined;
   deviceManager: Pick<PlatformDeviceManager, "getAndroidListedDeviceStates">;
   /**
    * What a failed probe means. `throw` refuses with `discovery_incomplete`; a callback receives

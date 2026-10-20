@@ -220,7 +220,9 @@ describe("device-addressed admission gate (issue #6863)", () => {
       namedFunctions(file);
     }
     namedFunctions("src/daemon/readiness/DeviceReadiness.ts");
-    poolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
+    poolSource = ["src/daemon/devicePoolParts/discovery.ts", "src/daemon/devicePoolParts/status.ts"]
+      .map((file) => blankComments(readFileSync(join(ROOT, file), "utf8")))
+      .join("\n");
     resolverSource = blankComments(
       readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
     );
@@ -248,7 +250,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     );
     // The session-keyed gate is a CALLER of the device gate, not a second gate.
     const sessionGate = poolSource.slice(
-      poolSource.indexOf("assertSessionReadyForAutomation(sessionId"),
+      poolSource.lastIndexOf("assertSessionReadyForAutomation(sessionId"),
     );
     expect(sessionGate.slice(0, sessionGate.indexOf("\n  }\n"))).toContain(GATE);
   });
@@ -337,7 +339,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     // Their injected factory is consumed only by AndroidTransportAliases;
     // device-addressed feature actions still bind through the gated factory.
     expect(unadmittedFactoryUsers).toEqual([
-      "src/daemon/devicePool.ts",
+      "src/daemon/devicePoolParts/contracts.ts",
       "src/features/deviceLifecycle/deviceLifecycleCore.ts",
       "src/server/bootedDeviceResources.ts",
       "src/server/resourceDeviceResolver.ts",

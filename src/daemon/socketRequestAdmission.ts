@@ -6,6 +6,13 @@ import {
 import type { DaemonRequest } from "./types";
 import type { Timer } from "../utils/SystemTimer";
 
+let socketRequestOrder = 0;
+
+/** Order admissions and inventory flights without depending on clock resolution. */
+export function nextSocketRequestOrder(): number {
+  return ++socketRequestOrder;
+}
+
 interface PendingRequest {
   lane: string | undefined;
   run: () => Promise<void>;
@@ -39,6 +46,12 @@ export class SocketRequestAdmissionQueue {
   private readonly runningLanes = new Set<string>();
   private runningCount = 0;
   private barrierRunning = false;
+  private barrierCompletionOrder = 0;
+
+  /** Inventory admitted after this barrier must use discovery started after it. */
+  get lastBarrierCompletionOrder(): number {
+    return this.barrierCompletionOrder;
+  }
 
   /** Requests admitted to the socket that have not started yet. */
   get pendingCount(): number {
@@ -130,6 +143,7 @@ export class SocketRequestAdmissionQueue {
     void entry.run().finally(() => {
       this.runningCount--;
       if (entry.lane === undefined) {
+        this.barrierCompletionOrder = nextSocketRequestOrder();
         this.barrierRunning = false;
       } else {
         this.runningLanes.delete(entry.lane);

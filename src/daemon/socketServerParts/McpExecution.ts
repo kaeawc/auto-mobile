@@ -207,6 +207,7 @@ export class McpExecution {
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
     // Inventory reads share discovery rather than holding a global serial queue.
+    // Distinct-key flights run discovery in parallel without a concurrency limit (known limitation).
     if (
       request.method === "tools/call" &&
       isHostInventoryCall(request.params?.name, request.params?.arguments)
@@ -293,8 +294,10 @@ export class McpExecution {
    */
   async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
-    const inventory = this.inventoryForward.read(context, (shared) =>
-      this.forwardUncachedMcpRequest(shared),
+    const inventory = this.inventoryForward.read(
+      context,
+      (shared) => this.forwardUncachedMcpRequest(shared),
+      this.state.sessions.get(context.socketSessionId)?.requestQueue.lastBarrierCompletionOrder,
     );
     if (inventory) {
       return await inventory;

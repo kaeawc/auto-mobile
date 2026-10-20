@@ -9,12 +9,21 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
 } from "../constants";
 import { McpTimeoutError } from "../McpTimeoutError";
-import { isHostInventoryCall } from "../socketRequestAdmission";
+import { isHostInventoryCall, nextSocketRequestOrder } from "../socketRequestAdmission";
 import type { McpForwardContext } from "../socketServerParts/socketServerContracts";
+
+interface InventoryFlight {
+  startOrder: number;
+  deadlineMs: number;
+  timeoutMs: number;
+}
+
+type ForwardInventory = (shared: McpForwardContext) => Promise<unknown>;
 
 /** Share inventory work, never a caller's cancellation, deadline, or task handle. */
 export class HostInventoryForward {
-  private readonly flights = new SingleFlight<string, unknown>();
+  private readonly flights = new SingleFlight<number, unknown>();
+  private readonly joinable = new Map<string, InventoryFlight>();
 
   constructor(
     private readonly timer: Timer,
@@ -23,7 +32,8 @@ export class HostInventoryForward {
 
   read(
     context: McpForwardContext,
-    forward: (shared: McpForwardContext) => Promise<unknown>,
+    forward: ForwardInventory,
+    minimumStartOrder = 0,
   ): Promise<unknown> | undefined {
     const { request, route } = context;
     if (
@@ -39,35 +49,88 @@ export class HostInventoryForward {
     // These proxy-owned markers are stripped before dispatch and do not change inventory.
     delete args[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
     delete args[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    // Different sessions with the same selection profile intentionally share work and errors.
     const key = stableStringify({
       name: request.params?.name,
       args,
       toolSelectionProfileUuid: route.toolSelectionProfileUuid ?? route.sessionUuid,
     });
-    return raceWithDeadline(
-      () => this.flights.run(key, () => forward(this.sharedContext(context)), context.signal),
-      {
-        timer: this.timer,
-        signal: context.signal,
-        timeoutMs: context.deadline.value - this.timer.now(),
-        label: `Host inventory ${request.params?.name}`,
-        timeoutError: () =>
-          new McpTimeoutError({
-            toolName: request.params?.name ?? "host inventory",
-            timeoutMs: context.totalTimeoutMs,
-            origin: "UnixSocketServer.handleRequest",
-            detail: "waiting for shared host inventory",
-          }),
+    const remainingMs = context.deadline.value - this.timer.now();
+    if (remainingMs <= 0) {
+      return Promise.reject(this.timeoutError(context));
+    }
+    return raceWithDeadline(() => this.joinFlight(key, context, forward, minimumStartOrder), {
+      timer: this.timer,
+      signal: context.signal,
+      timeoutMs: remainingMs,
+      label: `Host inventory ${request.params?.name}`,
+      timeoutError: () => this.timeoutError(context),
+    });
+  }
+
+  private timeoutError(context: McpForwardContext): McpTimeoutError {
+    return new McpTimeoutError({
+      toolName: context.request.params?.name ?? "host inventory",
+      timeoutMs: context.totalTimeoutMs,
+      origin: "UnixSocketServer.handleRequest",
+      detail: "waiting for shared host inventory",
+    });
+  }
+
+  private joinFlight(
+    key: string,
+    context: McpForwardContext,
+    forward: ForwardInventory,
+    minimumStartOrder: number,
+  ): Promise<unknown> {
+    const flight = this.selectFlight(key, context, minimumStartOrder);
+    return this.flights.run(
+      flight.startOrder,
+      async () => {
+        try {
+          return await forward(this.sharedContext(context, flight));
+        } finally {
+          if (this.joinable.get(key) === flight) {
+            this.joinable.delete(key);
+          }
+        }
       },
+      context.signal,
     );
   }
 
-  private sharedContext(context: McpForwardContext): McpForwardContext {
-    // Inventory owns a bounded ordinary discovery budget, independently of the first waiter.
+  private selectFlight(
+    key: string,
+    context: McpForwardContext,
+    minimumStartOrder: number,
+  ): InventoryFlight {
+    const current = this.joinable.get(key);
+    if (
+      current &&
+      current.startOrder > minimumStartOrder &&
+      current.deadlineMs >= context.deadline.value
+    ) {
+      return current;
+    }
+    // A running transport's timeout is fixed. Start fresh rather than shorten a later waiter's
+    // budget or let a read after its socket's barrier reuse a pre-barrier snapshot.
+    const now = this.timer.now();
+    const timeoutMs = Math.max(
+      DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+      context.totalTimeoutMs,
+      context.deadline.value - now,
+    );
+    const flight = { startOrder: nextSocketRequestOrder(), deadlineMs: now + timeoutMs, timeoutMs };
+    this.joinable.set(key, flight);
+    return flight;
+  }
+
+  private sharedContext(context: McpForwardContext, flight: InventoryFlight): McpForwardContext {
+    // Inventory owns a budget covering its waiters, independently of their cancellation.
     // Progress belongs to each caller; do not relay the first caller's token to joined callers.
     const request = {
       ...context.request,
-      timeoutMs: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+      timeoutMs: flight.timeoutMs,
       progressToken: undefined,
     };
     return {
@@ -76,8 +139,11 @@ export class HostInventoryForward {
       // Socket disconnects cancel executions by session key too, beyond the caller's signal.
       socketSessionId: `host:inventory:${this.idGenerator.next()}`,
       signal: undefined,
-      totalTimeoutMs: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
-      deadline: new ProgressExtendableDeadline(this.timer.now(), DEFAULT_MCP_REQUEST_TIMEOUT_MS),
+      totalTimeoutMs: flight.timeoutMs,
+      deadline: new ProgressExtendableDeadline(
+        flight.deadlineMs - flight.timeoutMs,
+        flight.timeoutMs,
+      ),
     };
   }
 }

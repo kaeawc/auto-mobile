@@ -1,5 +1,5 @@
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock, beforeEach } from "bun:test";
 import type { Element } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -9,6 +9,13 @@ import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigation
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { logger } from "../../../src/utils/logger";
+
+afterEach(() => mock.restore());
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
 
 function createTap(
   options: {
@@ -39,7 +46,7 @@ function createTap(
     }
     return requestTap(request);
   };
-  const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
+  clientSpy.mockReturnValue(service);
   let tap: TapOnElement;
   try {
     tap = new TapOnElement(

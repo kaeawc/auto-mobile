@@ -73,6 +73,9 @@ export interface BindingBudgetEvidence {
 }
 
 export interface BindingsFailure {
+  /** Internal evidence for prepare-path readiness retry; never included in broker receipts. */
+  retainedDevice?: { platform: "android" | "ios"; stableId: string; name: string };
+  provision?: { code: string; retryable: boolean };
   code: string;
   retryable: boolean;
   message: string;

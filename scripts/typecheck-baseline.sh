@@ -27,6 +27,9 @@ TSCONFIG="tsconfig.json"
 PROJECT="src"
 cd "$ROOT"
 
+# shellcheck source=scripts/lib/host-heavy-run.sh
+source "$ROOT/scripts/lib/host-heavy-run.sh"
+
 for arg in "$@"; do
   case "$arg" in
     --project=test)
@@ -58,7 +61,7 @@ run_tsc() {
     if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
       eval "$TYPECHECK_TSC_CMD" 2>&1
     else
-      bunx tsgo --noEmit -p "$TSCONFIG" 2>&1
+      host_heavy_run host_heavy_tsgo "$TSCONFIG" 2>&1
     fi
   )
 }

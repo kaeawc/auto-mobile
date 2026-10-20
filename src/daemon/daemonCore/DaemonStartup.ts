@@ -1,3 +1,4 @@
+import type { SessionBrokerService } from "../sessionBroker/service";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
   DaemonCoreServices,
@@ -180,6 +181,7 @@ export interface DaemonStartupHost extends Pick<
 
 /** Sequences startup over replaceable host steps and initializes devices and persistence. */
 export class DaemonStartup {
+  private sessionBrokerRecovery: Pick<SessionBrokerService, "start"> | undefined;
   /** Exposed through Daemon.testHooks: the in-flight or settled startup provenance warm. */
   androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
   /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
@@ -475,7 +477,7 @@ export class DaemonStartup {
 
       // A session-only provider resolves prior ownership before exposing its socket or warming
       // runners for sessions that recovery will abandon.
-      await this.host.installSessionBroker();
+      this.sessionBrokerRecovery = await this.host.installSessionBroker();
 
       // Rehydrated sessions are now owned here and can safely warm their runners.
       await startupBenchmark.runPhase("iosServices", () => this.host.initializeIosServices());
@@ -638,6 +640,8 @@ export class DaemonStartup {
   }
 
   async startAfterSocketBind(): Promise<void> {
+    // Native broker cleanup must never hold up the control socket becoming reachable.
+    this.sessionBrokerRecovery?.start();
     await this.host.startHost().startServicesAfterSocketBind();
     this.host.startHeartbeatMonitor();
     this.host.startHost().startMaintenanceMonitors();

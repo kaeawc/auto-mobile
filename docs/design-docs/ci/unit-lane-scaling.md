@@ -223,7 +223,7 @@ Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
 and its retry window is judged against the lane cap at its own end time. A
 wall-budget timeout whose own attempt calibration reaches
 `AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
-and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`) qualifies
+and reports `RUNNER-CONTENDED`. A failing unit job (`Node Unit Tests`, `Node TypeScript Build and Test`, `TypeScript Code Coverage`) qualifies
 itself: its last step (`if: failure()`) runs
 `scripts/ci/rerun-contended-runner.sh dispatch` against the job's own step summary,
 and on attempt 1 only dispatches the `workflow_dispatch` Rerun contended runner

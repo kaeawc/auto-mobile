@@ -407,7 +407,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       if (shouldPublishObservation(deviceRead, aggregate)) {
-        attachSnapshotReference(device.deviceId, result);
+        attachSnapshotReference(device.deviceId, result, dependencies.snapshotReferences);
       }
 
       if (shouldAppendRawObserveHierarchy(args, deviceRead)) {

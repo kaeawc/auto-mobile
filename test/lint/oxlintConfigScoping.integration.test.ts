@@ -31,7 +31,7 @@ const SINGLE_FIXTURE_TEST_TIMEOUT_MS = OXLINT_SPAWN_TIMEOUT_MS + 2_000;
 
 interface OxlintSpawnResult {
   exitCode: number | null;
-  signalCode?: string;
+  signalCode?: string | number;
   stdout: Buffer;
   stderr: Buffer;
 }

@@ -1,3 +1,4 @@
+import { AuxiliarySocketHeldError } from "./AuxiliarySocketHeldError";
 import { AuxiliarySocketBindConflict } from "./auxiliarySocketAvailability";
 /** The module wrappers retain failed starts/closes and clear only after close succeeds. */
 export interface SocketServerLifecycle {
@@ -19,7 +20,10 @@ export class SocketServerSingleton<T extends SocketServerLifecycle> {
       } catch (error) {
         // A pre-bind refusal has no listener to retain or close. Consumers already
         // treat a null singleton as unavailable; never expose the incumbent.
-        if (error instanceof AuxiliarySocketBindConflict) {
+        if (
+          error instanceof AuxiliarySocketBindConflict ||
+          error instanceof AuxiliarySocketHeldError
+        ) {
           this.instance = null;
         }
         throw error;

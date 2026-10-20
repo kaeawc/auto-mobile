@@ -18,6 +18,10 @@ setup_test_ts_stubs() {
   echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
   cat > "$STUB_BIN/bun" <<'STUB'
 #!/usr/bin/env bash
+if [[ "$1" == */scripts/lib/runner-calibration.ts && "$2" == probe ]]; then
+  printf '%s\n' "$4" >> "$STUB_CALLS.probes"
+  exit 0
+fi
 if [[ "$1" == --config=* ]]; then shift; fi
 [[ "$1" == test ]] || exit 0
 if [[ -n "${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}" ]]; then exit 99; fi

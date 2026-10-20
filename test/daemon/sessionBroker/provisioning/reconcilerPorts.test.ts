@@ -91,6 +91,7 @@ describe("ToolBindingProvisioner", () => {
         },
         boot: true,
         readiness: "automation",
+        rollbackOnRetryableReadiness: false,
         timeoutMs: 60_000,
       },
     });
@@ -101,6 +102,72 @@ describe("ToolBindingProvisioner", () => {
       readiness: { mode: "automation", status: "automation_ready" },
     });
   });
+
+  test("passes the retained simulator identity from readiness failure evidence", async () => {
+    const { invoke } = recordingInvoker(
+      createToolErrorResponse("timeout", "readiness deadline", {
+        error: { code: "timeout", retryable: true },
+        lifecycle: {
+          state: "created_not_ready",
+          phase: "readiness",
+          device: {
+            platform: "ios",
+            stableId: "UDID-kept",
+            name: "kept",
+            runtimeDeviceId: "UDID-kept",
+          },
+        },
+      }),
+    );
+    await expect(
+      provisionerWith(invoke).provision({
+        platform: "ios",
+        name: "kept",
+        spec: { runtime: IOS_18, deviceType: IPHONE_16 },
+        mode: "create",
+        deadlineMs: 61_000,
+      }),
+    ).rejects.toMatchObject({
+      code: "timeout",
+      retryable: true,
+      diagnostics: { retainedDevice: { platform: "ios", stableId: "UDID-kept", name: "kept" } },
+    });
+  });
+
+  test.each([undefined, "kept", "UDID-kept"])(
+    "retained identity rejects a device name and falls back to runtime UDID %s",
+    async (runtimeDeviceId) => {
+      const { invoke } = recordingInvoker(
+        createToolErrorResponse("timeout", "readiness deadline", {
+          error: { code: "timeout", retryable: true },
+          lifecycle: {
+            state: "created_not_ready",
+            phase: "readiness",
+            device: { platform: "ios", stableId: "kept", name: "kept", runtimeDeviceId },
+          },
+        }),
+      );
+      const error = await provisionerWith(invoke)
+        .provision({
+          platform: "ios",
+          name: "kept",
+          spec: { runtime: IOS_18, deviceType: IPHONE_16 },
+          mode: "create",
+          deadlineMs: 61_000,
+        })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ProvisionDeviceError);
+      if (!(error instanceof ProvisionDeviceError)) {
+        throw new Error("Expected a typed provision failure");
+      }
+      expect(error.diagnostics.retainedDevice).toEqual(
+        runtimeDeviceId === "UDID-kept"
+          ? { platform: "ios", stableId: "UDID-kept", name: "kept" }
+          : undefined,
+      );
+    },
+  );
 
   test("an error response is rethrown as the typed provision failure", async () => {
     const { invoke } = recordingInvoker(
@@ -430,6 +497,40 @@ describe("GateBindingBootCapacity", () => {
       kind: "unknown",
       message: `Timed out after ${BOOT_CAPACITY_CHECK_TIMEOUT_MS}ms checking ios boot capacity.`,
     });
+  });
+
+  test.each([3_000, 60_000])(
+    "bounds and aborts the probe at min(%i, 17 s)",
+    async (remainingMs) => {
+      const timer = new FakeTimer();
+      let probeSignal: AbortSignal | undefined;
+      const capacity = new GateBindingBootCapacity(timer, async (_platform, signal) => {
+        probeSignal = signal;
+        await new Promise<void>(() => {});
+      });
+      const timeoutMs = Math.min(remainingMs, BOOT_CAPACITY_CHECK_TIMEOUT_MS);
+      const check = capacity.check("ios", {
+        timeoutMs: remainingMs,
+        signal: new AbortController().signal,
+      });
+      await timer.advanceTimersByTimeAsync(timeoutMs - 1);
+      expect(probeSignal?.aborted).toBe(false);
+      await timer.advanceTimersByTimeAsync(1);
+      expect(probeSignal?.aborted).toBe(true);
+      expect(await check).toEqual({
+        kind: "unknown",
+        message: `Timed out after ${timeoutMs}ms checking ios boot capacity.`,
+      });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("a short-budget probe finishes at 3 s rather than the 17 s backstop", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const capacity = new GateBindingBootCapacity(timer, () => new Promise<void>(() => {}));
+    expect(await capacity.check("ios", { timeoutMs: 3_000 })).toMatchObject({ kind: "unknown" });
+    expect(timer.now()).toBe(3_000);
   });
 
   test("a defect in the gate propagates instead of becoming a retryable refusal", async () => {

@@ -4704,7 +4704,13 @@ describe("CtrlProxyManager", function () {
       const entries = (await fs.readdir(scratchRoot, { withFileTypes: true })).filter((entry) =>
         names.has(entry.name),
       );
-      const readdirSpy = spyOn(fs, "readdir").mockResolvedValue(entries);
+      const directoryReader: {
+        readdir: (
+          target: string,
+          options: { withFileTypes: true },
+        ) => Promise<import("node:fs").Dirent[]>;
+      } = fs;
+      const readdirSpy = spyOn(directoryReader, "readdir").mockResolvedValue(entries);
 
       try {
         await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
@@ -4721,14 +4727,15 @@ describe("CtrlProxyManager", function () {
     test("stops inspection when the stale-prefetch deadline expires", async function () {
       const first = await makeAgedDir("auto-mobile-prefetch-first", 2 * HOUR_MS);
       const second = await makeAgedDir("auto-mobile-prefetch-second", 2 * HOUR_MS);
-      const originalStat = fs.stat;
+      const statReader: { stat: (target: string) => Promise<import("node:fs").Stats> } = fs;
+      const originalStat = statReader.stat;
       let statCount = 0;
-      const statSpy = spyOn(fs, "stat").mockImplementation(async (target, options) => {
+      const statSpy = spyOn(statReader, "stat").mockImplementation(async (target) => {
         statCount++;
         if (statCount === 1) {
           sweepTimer.advanceTime(STALE_PREFETCH_SWEEP_DEADLINE_MS);
         }
-        return originalStat(target, options);
+        return originalStat(target);
       });
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 

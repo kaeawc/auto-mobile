@@ -34,7 +34,7 @@ describe("SimCtlBootStateProvider", () => {
     ["Booting", "unknown"],
     ["Shutting Down", "unknown"],
     ["", "unknown"],
-  ])("maps simctl state %s to %s", async (state, expected) => {
+  ] as const)("maps simctl state %s to %s", async (state, expected) => {
     const simctl = new FakeSimctl();
     setState(simctl, state);
     const provider = new SimCtlBootStateProvider(simctl);
@@ -94,9 +94,16 @@ describe("SimCtlBootStateProvider", () => {
     const timer = new FakeTimer();
     const calls: Array<{ timeoutMs?: number; bypassCache?: boolean }> = [];
     const devices: DeviceInfo[] = [
-      { deviceId: "sim-1", name: "one", platform: "ios", state: "Booted", deviceType: "nonDuo" },
-      { deviceId: "sim-2", name: "two", platform: "ios", state: "Shutdown" },
-      { deviceId: "sim-3", name: "three", platform: "ios", state: "Booting" },
+      {
+        deviceId: "sim-1",
+        name: "one",
+        platform: "ios",
+        isRunning: true,
+        state: "Booted",
+        deviceType: "nonDuo",
+      },
+      { deviceId: "sim-2", name: "two", platform: "ios", isRunning: false, state: "Shutdown" },
+      { deviceId: "sim-3", name: "three", platform: "ios", isRunning: false, state: "Booting" },
     ];
     const provider = new SimCtlBootStateProvider(
       {

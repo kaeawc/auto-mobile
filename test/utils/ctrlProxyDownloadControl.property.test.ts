@@ -43,7 +43,7 @@ describe("isTruthyEnvValue (property-based)", () => {
   test("rejects undefined and unrelated tokens", () => {
     const notTruthy = fc
       .constantFrom("", "0", "false", "yes", "2", "on", "enabled", " true", "true ")
-      .filter((v) => v !== "1" && v.toLowerCase() !== "true");
+      .filter((v) => v.toLowerCase() !== "true");
     fc.assert(
       fc.property(
         notTruthy,

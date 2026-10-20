@@ -10,31 +10,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PickerModelsTest {
+  private data class BootedSpec(
+    val name: String,
+    val deviceId: String,
+    val isVirtual: Boolean,
+    val locked: Boolean? = null,
+    val architecture: String? = null,
+    val formFactor: String = "unknown",
+  )
 
-  private fun booted(
-    name: String,
-    deviceId: String,
-    isVirtual: Boolean,
-    locked: Boolean? = null,
-    architecture: String? = null,
-    formFactor: String = "unknown",
-  ) =
-    BootedDeviceInfo(
-      name = name,
-      platform = "android",
-      source = "local",
-      isVirtual = isVirtual,
-      architecture = architecture,
-      formFactor = formFactor,
-      identity = DeviceIdentity(deviceId),
-      runtime =
-        DeviceRuntime(
-          deviceId = deviceId,
-          connectionId = deviceId,
-          lifecycle = DeviceLifecycle("booted", true),
-          locked = locked,
-        ),
-    )
+  private fun booted(spec: BootedSpec) =
+    with(spec) {
+      BootedDeviceInfo(
+        name = name,
+        platform = "android",
+        source = "local",
+        isVirtual = isVirtual,
+        architecture = architecture,
+        formFactor = formFactor,
+        identity = DeviceIdentity(deviceId),
+        runtime =
+          DeviceRuntime(
+            deviceId = deviceId,
+            connectionId = deviceId,
+            lifecycle = DeviceLifecycle("booted", true),
+            locked = locked,
+          ),
+      )
+    }
 
   private fun image(name: String, deviceId: String, formFactor: String = "unknown") =
     DeviceImageInfo(
@@ -52,13 +55,15 @@ class PickerModelsTest {
           booted =
             listOf(
               booted(
-                "Pixel phone",
-                "booted-phone",
-                true,
-                architecture = "arm64",
-                formFactor = "phone",
+                BootedSpec(
+                  "Pixel phone",
+                  "booted-phone",
+                  true,
+                  architecture = "arm64",
+                  formFactor = "phone",
+                ),
               ),
-              booted("Unknown device", "booted-unknown", false, formFactor = "unknown"),
+              booted(BootedSpec("Unknown device", "booted-unknown", false, formFactor = "unknown")),
             ),
           images =
             listOf(
@@ -79,7 +84,8 @@ class PickerModelsTest {
   fun `booted picker device seeds lock state from canonical runtime`() {
     val devices =
       buildPickerDevices(
-        booted = listOf(booted("Pixel 8", "emulator-5554", isVirtual = true, locked = true)),
+        booted =
+          listOf(booted(BootedSpec("Pixel 8", "emulator-5554", isVirtual = true, locked = true))),
         images = emptyList(),
       )
 
@@ -90,7 +96,7 @@ class PickerModelsTest {
   fun `serial-less Android booting entry uses its AVD identity and does not leave a shutdown row`() {
     val avdName = "Pixel_9_API_35"
     val booting =
-      booted(avdName, avdName, isVirtual = true)
+      booted(BootedSpec(avdName, avdName, isVirtual = true))
         .copy(
           identity = DeviceIdentity(avdName),
           runtime = DeviceRuntime(deviceId = null, lifecycle = DeviceLifecycle("booting", true)),
@@ -108,7 +114,7 @@ class PickerModelsTest {
       buildPickerDevices(
         booted =
           listOf(
-            booted("Unknown (emulator-5554)", "emulator-5554", true)
+            booted(BootedSpec("Unknown (emulator-5554)", "emulator-5554", true))
               .copy(identity = DeviceIdentity("Unknown (emulator-5554)")),
           ),
         images = listOf(image("Pixel", "avd_a")),
@@ -123,7 +129,7 @@ class PickerModelsTest {
       buildPickerDevices(
         booted =
           listOf(
-            booted("Unknown (emulator-5554)", "emulator-5554", true)
+            booted(BootedSpec("Unknown (emulator-5554)", "emulator-5554", true))
               .copy(
                 identity = DeviceIdentity("avd_b"),
                 runtime =
@@ -146,7 +152,7 @@ class PickerModelsTest {
   fun `a legacy name match never hides a device on a different platform`() {
     val devices =
       buildPickerDevices(
-        booted = listOf(booted("Shared name", "emulator-5554", true)),
+        booted = listOf(booted(BootedSpec("Shared name", "emulator-5554", true))),
         images = listOf(image("Shared name", "ios-udid").copy(platform = "ios")),
       )
     assertEquals(listOf("emulator-5554", "ios-udid"), devices.map { it.id })
@@ -156,7 +162,7 @@ class PickerModelsTest {
   fun `an ambiguous legacy name preserves both distinct source images`() {
     val devices =
       buildPickerDevices(
-        booted = listOf(booted("Pixel 8", "emulator-5554", isVirtual = true)),
+        booted = listOf(booted(BootedSpec("Pixel 8", "emulator-5554", isVirtual = true))),
         images = listOf(image("Pixel 8", "avd_a"), image("Pixel 8", "avd_b")),
       )
     assertTrue(devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted })
@@ -168,7 +174,7 @@ class PickerModelsTest {
   fun `a physical booted device does not hide a same-named shutdown image`() {
     val devices =
       buildPickerDevices(
-        booted = listOf(booted("Pixel 8", "serial-123", isVirtual = false)),
+        booted = listOf(booted(BootedSpec("Pixel 8", "serial-123", isVirtual = false))),
         images = listOf(image("Pixel 8", "avd_x")),
       )
     assertTrue(devices.any { it.id == "serial-123" && it.state == DeviceState.Booted })
@@ -182,7 +188,7 @@ class PickerModelsTest {
     // survive.
     val devices =
       buildPickerDevices(
-        booted = listOf(booted("Pixel 8", "emu-b", isVirtual = true)),
+        booted = listOf(booted(BootedSpec("Pixel 8", "emu-b", isVirtual = true))),
         images = listOf(image("Pixel 8", "avd_a"), image("Pixel 8", "avd_b")),
         sourceImageToRuntimeId = mapOf("avd_b" to "emu-b"),
       )
@@ -196,7 +202,7 @@ class PickerModelsTest {
     // e.g. an iOS simulator whose UDID is stable across boot — dedup by exact identity.
     val devices =
       buildPickerDevices(
-        booted = listOf(booted("iPhone 15", "udid-1", isVirtual = true)),
+        booted = listOf(booted(BootedSpec("iPhone 15", "udid-1", isVirtual = true))),
         images = listOf(image("iPhone 15", "udid-1")),
       )
     assertEquals(listOf("udid-1"), devices.map { it.id })

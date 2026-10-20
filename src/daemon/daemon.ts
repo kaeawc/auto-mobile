@@ -881,6 +881,7 @@ export class Daemon {
       sessionExecutionProbe: (...args) => this.sessions.sessionExecutionProbe(...args),
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),
       republishIdentity: (...args) => this.identity.republishIdentity(...args),
+      recordControlSocketIdentity: () => this.identity.recordControlSocketIdentity(),
       configureDeviceDataStreamServer: (...args) =>
         this.streams.configureDeviceDataStreamServer(...args),
     });

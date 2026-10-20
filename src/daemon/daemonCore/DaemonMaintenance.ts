@@ -91,6 +91,7 @@ export interface DaemonMaintenanceHost {
   sessionExecutionProbe: DaemonSessions["sessionExecutionProbe"];
   cancelAndReleaseSession: DaemonSessions["cancelAndReleaseSession"];
   republishIdentity: DaemonIdentity["republishIdentity"];
+  recordControlSocketIdentity: DaemonIdentity["recordControlSocketIdentity"];
   configureDeviceDataStreamServer: DaemonStreams["configureDeviceDataStreamServer"];
 }
 
@@ -108,6 +109,9 @@ export class DaemonMaintenance {
         httpServer: () => this.host.services.httpIngress().server,
         socketServerListening: () => this.host.lifecycle.socketServer()?.isListening() ?? false,
         observationStreamHealthy: () => this.host.observationStreamHealth().isHealthy(),
+        // The production recovery retries through startAuxiliarySocket, which keeps a live
+        // holder as a warning and clears degradation/records ownership after a successful bind.
+        retryDegradedObservationStream: () => this.host.observationStreamHealth().recover(),
         databaseHealthProbe: () => this.host.services.databaseHealthProbe(),
         onDatabaseFailureChanged: (message) => {
           this.host.setLastDatabaseHealthFailure(message);
@@ -294,6 +298,7 @@ export class DaemonMaintenance {
         );
         try {
           await this.host.lifecycle.socketServer()!.start();
+          this.host.recordControlSocketIdentity();
           logger.info("Socket server restarted successfully");
         } catch (error) {
           logger.error(`Failed to restart socket server: ${error}`);

@@ -180,10 +180,12 @@ private fun CompareSide(
   // reconnects instead of staying in "waiting" until the user closes and reopens compare.
   val stream =
     rememberReconnectingObservationStream(
-      deviceId = column.deviceId,
-      streamFactory = observationStreamFactory,
-      backoffDelay = backoffDelay,
-      socketAvailable = socketAvailable,
+      dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+        deviceId = column.deviceId,
+        streamFactory = observationStreamFactory,
+        backoffDelay = backoffDelay,
+        socketAvailable = socketAvailable,
+      ),
     )
   val activeStream = stream ?: return
   // Fresh token per stream instance (i.e. per mount / device change). A reconnect reuses the same

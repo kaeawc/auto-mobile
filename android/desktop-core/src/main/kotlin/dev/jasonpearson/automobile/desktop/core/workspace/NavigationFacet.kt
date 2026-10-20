@@ -130,10 +130,12 @@ fun NavigationFacet(
 
   val observation =
     rememberReconnectingObservationState(
-      deviceId = column.deviceId,
-      streamFactory = { observationStreamFactory(column.deviceId) },
-      backoffDelay = backoffDelay,
-      socketAvailable = socketAvailable,
+      dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+        deviceId = column.deviceId,
+        streamFactory = { observationStreamFactory(column.deviceId) },
+        backoffDelay = backoffDelay,
+        socketAvailable = socketAvailable,
+      ),
     )
   val stream = observation.stream
 

@@ -22,91 +22,57 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /** Thin horizontal status bar showing failure counts, performance health, and connection status. */
 @Composable
-fun StatusBar(
-  crashCount: Int,
-  anrCount: Int,
-  nonFatalCount: Int,
-  toolFailureCount: Int,
-  currentFps: Float?,
-  currentMemoryMb: Float?,
-  isDaemonConnected: Boolean,
-  isStreamConnected: Boolean,
-  modifier: Modifier = Modifier,
-) {
-  val colors = SharedTheme.globalColors
-  val borderColor = colors.text.normal.copy(alpha = 0.15f)
-
-  Row(
-    modifier =
-      modifier
-        .fillMaxWidth()
-        .height(24.dp)
-        .drawBehind {
-          drawLine(
-            color = borderColor,
-            start = Offset(0f, 0f),
-            end = Offset(size.width, 0f),
-            strokeWidth = 1f,
-          )
-        }
-        .background(colors.panelBackground.darken(0.05f))
-        .padding(horizontal = 8.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Row(
-      horizontalArrangement = Arrangement.spacedBy(4.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      StatusBarBadge(count = crashCount, label = "crash", color = Color(0xFFF44336))
-      StatusBarBadge(count = anrCount, label = "ANR", color = Color(0xFFFF9800))
-      StatusBarBadge(count = nonFatalCount, label = "non-fatal", color = Color(0xFFFFC107))
-      StatusBarBadge(count = toolFailureCount, label = "tool", color = Color(0xFF9E9E9E))
-    }
-
-    Spacer(modifier = Modifier.weight(1f))
+fun StatusBar(options: StatusBarState) {
+  with(options) {
+    val colors = SharedTheme.globalColors
+    val borderColor = colors.text.normal.copy(alpha = 0.15f)
 
     Row(
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      if (currentFps != null) {
-        val fpsColor =
-          when {
-            currentFps >= 55f -> Color(0xFF4CAF50)
-            currentFps >= 30f -> Color(0xFFFFC107)
-            else -> Color(0xFFF44336)
+      modifier =
+        modifier
+          .fillMaxWidth()
+          .height(24.dp)
+          .drawBehind {
+            drawLine(
+              color = borderColor,
+              start = Offset(0f, 0f),
+              end = Offset(size.width, 0f),
+              strokeWidth = 1f,
+            )
           }
-        Text(
-          text = "${currentFps.toInt()} FPS",
-          style = DesktopTypography.label,
-          color = fpsColor,
-          lineHeight = 10.sp,
-        )
-      }
-      if (currentMemoryMb != null) {
-        Text(
-          text = "${formatUiNumber("%.0f", currentMemoryMb)} MB",
-          style = DesktopTypography.label,
-          color = colors.text.normal.copy(alpha = 0.7f),
-          lineHeight = 10.sp,
-        )
-      }
-    }
-
-    Spacer(modifier = Modifier.weight(1f))
-
-    Row(
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+          .background(colors.panelBackground.darken(0.05f))
+          .padding(horizontal = 8.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      ConnectionStatusIndicator(
-        isConnected = isDaemonConnected,
-        label = "Daemon",
-      )
-      ConnectionStatusIndicator(
-        isConnected = isStreamConnected,
-        label = "Stream",
-      )
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        StatusBarBadge(count = crashCount, label = "crash", color = Color(0xFFF44336))
+        StatusBarBadge(count = anrCount, label = "ANR", color = Color(0xFFFF9800))
+        StatusBarBadge(count = nonFatalCount, label = "non-fatal", color = Color(0xFFFFC107))
+        StatusBarBadge(count = toolFailureCount, label = "tool", color = Color(0xFF9E9E9E))
+      }
+
+      Spacer(modifier = Modifier.weight(1f))
+
+      PerformanceStatusMetrics(currentFps, currentMemoryMb)
+
+      Spacer(modifier = Modifier.weight(1f))
+
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        ConnectionStatusIndicator(
+          isConnected = isDaemonConnected,
+          label = "Daemon",
+        )
+        ConnectionStatusIndicator(
+          isConnected = isStreamConnected,
+          label = "Stream",
+        )
+      }
     }
   }
 }
@@ -119,3 +85,35 @@ private fun Color.darken(fraction: Float): Color =
     blue = blue * (1f - fraction),
     alpha = alpha,
   )
+
+@Composable
+private fun PerformanceStatusMetrics(currentFps: Float?, currentMemoryMb: Float?) {
+  val colors = SharedTheme.globalColors
+  Row(
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    if (currentFps != null) {
+      val fpsColor =
+        when {
+          currentFps >= 55f -> Color(0xFF4CAF50)
+          currentFps >= 30f -> Color(0xFFFFC107)
+          else -> Color(0xFFF44336)
+        }
+      Text(
+        text = "${currentFps.toInt()} FPS",
+        style = DesktopTypography.label,
+        color = fpsColor,
+        lineHeight = 10.sp,
+      )
+    }
+    if (currentMemoryMb != null) {
+      Text(
+        text = "${formatUiNumber("%.0f", currentMemoryMb)} MB",
+        style = DesktopTypography.label,
+        color = colors.text.normal.copy(alpha = 0.7f),
+        lineHeight = 10.sp,
+      )
+    }
+  }
+}

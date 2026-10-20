@@ -139,7 +139,9 @@ fun WorkspaceShell(
   // Pane content shown while a column is in Inspect mode: the per-device Layout inspector (view
   // hierarchy + device mirror) replaces the stream. Hoisted like [facetContent] so a test can drive
   // it with a fake; the default is the real [LayoutFacet], so the host needs no extra wiring.
-  inspectContent: @Composable (DeviceColumn) -> Unit = { LayoutFacet(it) },
+  inspectContent: @Composable (DeviceColumn) -> Unit = {
+    LayoutFacet(dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(it))
+  },
   // Body of the pane's stream area while a column is in Input mode. Hoisted like [facetContent] —
   // and defaulting to the inert placeholder for the same reason — so composing the shell in a unit
   // test or preview never opens a relay socket. The host passes the real [DeviceStreamView].

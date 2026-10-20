@@ -189,11 +189,13 @@ internal fun DesktopStreamContent(
     val columnControlClientProvider = workspaceControlClientProvider
     val control =
       rememberWorkspaceDeviceControl(
-        column = column,
-        clientProvider = columnControlClientProvider,
-        enabled = controlActive,
-        sessionUuidProvider = paneSessionUuidProvider,
-        onDeviceHeldElsewhere = reportHeldElsewhere,
+        dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceDeviceControlOptions(
+          column = column,
+          clientProvider = columnControlClientProvider,
+          enabled = controlActive,
+          sessionUuidProvider = paneSessionUuidProvider,
+          onDeviceHeldElsewhere = reportHeldElsewhere,
+        ),
       )
     Box {
       DeviceStreamView(
@@ -329,9 +331,11 @@ internal fun DesktopWorkspaceShell(
         // exactly as the stream pane below.
         inspectContent = { column ->
           LayoutFacet(
-            column,
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-            streamingEnabled = streamingEnabled,
+            dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+              column,
+              sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+              streamingEnabled = streamingEnabled,
+            ),
           )
         },
         // Live device mirror in each pane's stream area, fed by the daemon's video-stream

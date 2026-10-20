@@ -72,11 +72,14 @@ internal suspend fun DeviceControlSession.fallbackAtomicSwipe(
           start = decision.start,
           end = decision.end,
           durationMs = decision.durationMs,
-          client = command.client,
-          platform = command.platform,
-          deviceId = command.snapshot.deviceId,
-          frameContext = command.snapshot.frameContext,
-          onError = onError,
+          target =
+            dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+              client = command.client,
+              platform = command.platform,
+              deviceId = command.snapshot.deviceId,
+              frameContext = command.snapshot.frameContext,
+              onError = onError,
+            ),
         )
       }
       return

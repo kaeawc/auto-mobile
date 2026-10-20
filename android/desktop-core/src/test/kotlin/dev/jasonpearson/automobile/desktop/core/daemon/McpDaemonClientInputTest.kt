@@ -1041,7 +1041,11 @@ internal class McpDaemonClientTypedInputTest : McpDaemonClientInputFixture() {
   @Test
   fun `non socket clients explicitly report unsupported typed input`() {
     val httpResult =
-      McpHttpClient("http://localhost:1/auto-mobile/streamable")
+      McpHttpClient(
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            "http://localhost:1/auto-mobile/streamable",
+          ),
+        )
         .inputTap(
           input =
             TapInput(

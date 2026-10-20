@@ -23,7 +23,12 @@ class McpProtocolNegotiationTest {
   fun setUp() {
     daemon = TestDaemonInstance()
     val port = daemon.start()
-    client = McpHttpClient("http://localhost:$port/auto-mobile/streamable")
+    client =
+      McpHttpClient(
+        dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+          "http://localhost:$port/auto-mobile/streamable",
+        ),
+      )
   }
 
   @After

@@ -39,63 +39,50 @@ fun PerformanceVerticalPanel(
   options: PerformancePanelOptions,
   modifier: Modifier = Modifier,
 ) {
-  val isCollapsed = options.isCollapsed
-  val onToggle = options.onToggle
-  val widthPx = options.widthPx
-  val onWidthChange = options.onWidthChange
-  val currentFps = options.currentFps
-  val currentFrameTimeMs = options.currentFrameTimeMs
-  val currentJankFrames = options.currentJankFrames
-  val currentMemoryMb = options.currentMemoryMb
-  val currentTouchLatencyMs = options.currentTouchLatencyMs
-  val currentRecompositionRate = options.currentRecompositionRate
-  val updateCounter = options.updateCounter
-  val onNavigateToScreen = options.onNavigateToScreen
-  val onNavigateToTest = options.onNavigateToTest
-  val dataSourceMode = options.dataSourceMode
-  val clientProvider = options.clientProvider
-  val observationStreamClient = options.observationStreamClient
-
-  VerticalCollapsibleTab(
-    options =
-      VerticalTabOptions(
-        title = "Performance",
-        isCollapsed = isCollapsed,
-        onToggle = onToggle,
-        widthPx = widthPx,
-        onWidthChange = onWidthChange,
-        resizeHandleOnLeft = true,
-        collapsedContent = {
-          PerformanceSummary(
-            currentFps = currentFps,
-            currentFrameTimeMs = currentFrameTimeMs,
-            currentJankFrames = currentJankFrames,
-            currentMemoryMb = currentMemoryMb,
-            currentTouchLatencyMs = currentTouchLatencyMs,
-            currentRecompositionRate = currentRecompositionRate,
-            updateCounter = updateCounter,
-          )
-        },
-      ),
-  ) {
-    Column(modifier = modifier.fillMaxSize()) {
-      PanelHeader(
-        title = "Performance",
-        onCollapse = onToggle,
-      )
-      PerformanceDashboard(
-        onNavigateToScreen = onNavigateToScreen,
-        onNavigateToTest = onNavigateToTest,
-        dataSourceMode = dataSourceMode,
-        clientProvider = clientProvider,
-        observationStreamClient = observationStreamClient,
-        initialFps = currentFps,
-        initialFrameTimeMs = currentFrameTimeMs,
-        initialJankFrames = currentJankFrames,
-        initialMemoryMb = currentMemoryMb,
-        initialTouchLatencyMs = currentTouchLatencyMs,
-        initialRecompositionRate = currentRecompositionRate,
-      )
+  with(options) {
+    VerticalCollapsibleTab(
+      options =
+        VerticalTabOptions(
+          title = "Performance",
+          isCollapsed = isCollapsed,
+          onToggle = onToggle,
+          widthPx = widthPx,
+          onWidthChange = onWidthChange,
+          resizeHandleOnLeft = true,
+          collapsedContent = {
+            PerformanceSummary(
+              currentFps = currentFps,
+              currentFrameTimeMs = currentFrameTimeMs,
+              currentJankFrames = currentJankFrames,
+              currentMemoryMb = currentMemoryMb,
+              currentTouchLatencyMs = currentTouchLatencyMs,
+              currentRecompositionRate = currentRecompositionRate,
+              updateCounter = updateCounter,
+            )
+          },
+        ),
+    ) {
+      Column(modifier = modifier.fillMaxSize()) {
+        PanelHeader(
+          title = "Performance",
+          onCollapse = onToggle,
+        )
+        PerformanceDashboard(
+          dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboardOptions(
+            onNavigateToScreen = onNavigateToScreen,
+            onNavigateToTest = onNavigateToTest,
+            dataSourceMode = dataSourceMode,
+            clientProvider = clientProvider,
+            observationStreamClient = observationStreamClient,
+            initialFps = currentFps,
+            initialFrameTimeMs = currentFrameTimeMs,
+            initialJankFrames = currentJankFrames,
+            initialMemoryMb = currentMemoryMb,
+            initialTouchLatencyMs = currentTouchLatencyMs,
+            initialRecompositionRate = currentRecompositionRate,
+          ),
+        )
+      }
     }
   }
 }

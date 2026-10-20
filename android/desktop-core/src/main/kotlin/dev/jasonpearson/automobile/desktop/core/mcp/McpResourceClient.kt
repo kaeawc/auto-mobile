@@ -334,7 +334,11 @@ object McpResourceClientFactory {
         val port = process.port ?: readDaemonPort() ?: 3000
         val endpoint = "http://localhost:$port/auto-mobile/streamable"
         logger.debug("[McpResourceClientFactory] Creating McpHttpClient with endpoint: $endpoint")
-        DaemonMcpResourceClient(McpHttpClient(endpoint))
+        DaemonMcpResourceClient(
+          McpHttpClient(
+            dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(endpoint),
+          ),
+        )
       }
       McpConnectionType.Stdio -> {
         // STDIO requires process management, not supported for external connection

@@ -65,12 +65,12 @@ export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
   {
-    planActive,
+    isPlanDevice = () => false,
     platform = "either",
     bypassAndroidDeviceListCache = false,
     heldDevices = [],
   }: {
-    planActive: boolean;
+    isPlanDevice?: (deviceId: string) => boolean;
     heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
@@ -95,9 +95,10 @@ export async function discoverAndReconcile(
   };
   let discovery = await read(options);
   const present = new Set(discovery.devices.map((device) => device.deviceId));
-  const missingDevices = trackedDevices.filter((device) => !present.has(device.id));
+  const missingDevices = trackedDevices.filter(
+    (device) => !isPlanDevice(device.id) && !present.has(device.id),
+  );
   if (
-    !planActive &&
     missingDevices.some(
       (device) =>
         didSourceSucceedForDevice(discovery, device.platform, device.id) &&
@@ -120,10 +121,11 @@ export async function discoverAndReconcile(
       ),
     });
   }
-  // Reconciliation can quarantine identity and cancel in-flight work. During
-  // allocation, discovery supplies only presence evidence for miss counting.
-  if (!planActive) {
-    await devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor", {
+  // Reconciliation can quarantine identity and cancel in-flight work. Only
+  // plan-owned observations stay presence-only during allocation/restarts.
+  const observations = discovery.devices.filter((device) => !isPlanDevice(device.deviceId));
+  if (observations.length > 0 || trackedDevices.some((device) => !isPlanDevice(device.id))) {
+    await devicePool.reconcileDiscoveryObservation(observations, "disconnect-monitor", {
       settleMembership: true,
     });
   }
@@ -370,10 +372,11 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 export function logDisconnectMisses(
   deviceDisconnectMisses: Map<string, number>,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
-  planActive: boolean,
+  planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,
 ): void {
   for (const { deviceId, misses: evaluatedMisses, budgetExhausted } of disconnectResult.missed) {
+    const planActive = planDeviceIds.has(deviceId);
     const misses = planActive
       ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
       : evaluatedMisses;

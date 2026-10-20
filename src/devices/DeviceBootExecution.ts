@@ -414,6 +414,9 @@ function annotateTerminationOutcome(
   handle: ChildProcess | null,
 ): unknown {
   const pid = handle?.pid ?? "unknown";
+  if (wait === "cleanup-unconfirmed") {
+    return withCleanupNote(error, "Cleanup also failed: device shutdown could not be confirmed.");
+  }
   if (wait === "survived") {
     return withCleanupNote(
       error,

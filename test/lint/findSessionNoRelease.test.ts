@@ -259,7 +259,7 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
 // src/features: the one remaining reader consumes the session object and, when it is expired,
 // relies on the lazy release to take the "no session" branch (#12581).
 const RETAINED_FEATURES_EXPIRY_READERS: Readonly<Record<string, number>> = {
-  "deviceLifecycle/deviceLifecycleCore.ts#createSystemUiAnrRebooter": 1,
+  "deviceLifecycle/core/readiness.ts#createSystemUiAnrRebooter": 1,
 };
 
 function scanGetSession(source: string): { line: number }[] {

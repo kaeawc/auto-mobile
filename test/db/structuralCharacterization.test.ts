@@ -119,7 +119,7 @@ describe("structural repository characterization", () => {
     "execution metadata and child records with CI %j",
     async (isCi) => {
       const repo = new TestExecutionRepository(db, timer);
-      const record: TestExecutionRecord = {
+      const record = {
         testClass: "Class",
         testMethod: "method",
         durationMs: 2.6,
@@ -144,7 +144,7 @@ describe("structural repository characterization", () => {
           { stepIndex: 0, action: "tap", status: "completed", durationMs: -1, details: { a: 1 } },
         ],
         screensVisited: [{ screenName: "Home", timestamp: 1_000_000 }],
-      };
+      } satisfies TestExecutionRecord;
       const id = await repo.recordExecution(record);
       const row = await db
         .selectFrom("test_executions")

@@ -1,4 +1,8 @@
 import type {
+  BootSlotReservation,
+  BootReservationOptions,
+} from "../../../devices/bootAdmission/BootSlotReservation";
+import type {
   AndroidDeviceSpecification,
   ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
@@ -63,6 +67,11 @@ export interface BindingInventorySnapshot {
 
 /** Configured (not only booted) devices of one platform: AVDs or simulators. */
 export interface BindingInventory {
+  /** Resolve a running AVD image's adb serial only when replacement needs its freed slot. */
+  runtimeDeviceId?(
+    device: DeviceInfo,
+    options: { signal?: AbortSignal },
+  ): Promise<string | undefined>;
   list(
     platform: BindingPlatform,
     options: { signal?: AbortSignal },
@@ -191,7 +200,15 @@ export type BindingCapacityCheck =
   | { kind: "unknown"; message: string };
 
 /** Immediate boot capacity probe (no waiting). Absent means boots are not gated. */
+export type BindingBootReservation =
+  | { kind: "available"; reservation: BootSlotReservation }
+  | Exclude<BindingCapacityCheck, { kind: "available" }>;
+
 export interface BindingBootCapacity {
+  reserve(
+    platform: BindingPlatform,
+    options: BootReservationOptions,
+  ): Promise<BindingBootReservation>;
   check(
     platform: BindingPlatform,
     options: { signal?: AbortSignal },

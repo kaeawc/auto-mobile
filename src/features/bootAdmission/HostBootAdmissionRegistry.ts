@@ -6,6 +6,8 @@ export interface HostBootAdmissionRecord {
   ownerPid: number;
   ownerGenerationToken?: string;
   deviceId?: string;
+  /** Holds the listed old device's slot until the replacement is spawned. */
+  replacement?: boolean;
   processId?: number;
   processGenerationToken?: string;
   /** Absolute boot-budget deadline, including the period before hand-off. Absent on legacy records. */
@@ -16,7 +18,10 @@ export interface HostBootAdmissionRecord {
 export interface PublishedBootAdmission {
   /** Later hand-off data. No-op after remove(). */
   update(
-    fields: Pick<HostBootAdmissionRecord, "deviceId" | "processId" | "handedOffUntilMs">,
+    fields: Pick<
+      HostBootAdmissionRecord,
+      "deviceId" | "processId" | "handedOffUntilMs" | "replacement"
+    >,
   ): void;
   /** Idempotent. */
   remove(): void;
@@ -32,7 +37,7 @@ export interface HostBootAdmissionRegistry {
   readPeerAdmissions(): HostBootAdmissionRecord[];
   /** Publishes this process's admission. Throws if the shared view is unwritable. */
   publish(
-    fields?: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs">,
+    fields?: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs" | "replacement">,
   ): PublishedBootAdmission;
 }
 

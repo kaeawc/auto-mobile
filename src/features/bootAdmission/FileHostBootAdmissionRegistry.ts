@@ -33,6 +33,7 @@ const recordSchema = z.object({
   ownerPid: z.number().int().positive(),
   ownerGenerationToken: z.string().optional(),
   deviceId: z.string().optional(),
+  replacement: z.boolean().optional(),
   processId: z.number().int().positive().optional(),
   processGenerationToken: z.string().optional(),
   admittedUntilMs: z.number().finite().optional(),
@@ -299,7 +300,7 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
   }
 
   publish(
-    fields: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs"> = {},
+    fields: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs" | "replacement"> = {},
   ): PublishedBootAdmission {
     let record: HostBootAdmissionRecord = {
       id: this.ids.next(),

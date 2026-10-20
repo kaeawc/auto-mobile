@@ -1,4 +1,12 @@
-import { assertBootCapacityAvailable } from "../../../features/bootAdmission/sharedBootAdmissionGates";
+import type {
+  BootSlotReservation,
+  BootReservationOptions,
+} from "../../../devices/bootAdmission/BootSlotReservation";
+import type { BindingBootReservation } from "./reconcilerContracts";
+import {
+  assertBootCapacityAvailable,
+  reserveBootCapacity,
+} from "../../../features/bootAdmission/sharedBootAdmissionGates";
 import { BootCapacityExhaustedError } from "../../../models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../../models/BootedDeviceDiscoveryIncompleteError";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
@@ -18,8 +26,8 @@ export type BindingBootCapacityAssertion = (
 const BOOT_CAPACITY_CHECK_TIMEOUT_MS = 5_000;
 
 /**
- * The process-wide boot admission gates as the reconciler's capacity probe: the same read-only
- * check the provision path runs before creating a device, asked before a replacement deletes one.
+ * The process-wide boot admission gates as the reconciler's capacity probe: a read-only
+ * check for fresh creates and a held ledger admission before replacement deletes a device.
  * Bounded, because the simulator fleet sample has no deadline of its own.
  */
 export class GateBindingBootCapacity implements BindingBootCapacity {
@@ -27,7 +35,50 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
     private readonly timer: Timer,
     private readonly assertAvailable: BindingBootCapacityAssertion = (platform, signal) =>
       assertBootCapacityAvailable(platform, { signal }),
+    private readonly reserveCapacity: typeof reserveBootCapacity = reserveBootCapacity,
   ) {}
+
+  async reserve(
+    platform: BindingPlatform,
+    options: BootReservationOptions,
+  ): Promise<BindingBootReservation> {
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    let acquired = false;
+    let pending: BootSlotReservation | undefined;
+    try {
+      const reservation = await raceWithDeadline(
+        async () => {
+          pending = await this.reserveCapacity(platform, { ...options, signal });
+          if (signal.aborted) {
+            pending.release();
+            signal.throwIfAborted();
+          }
+          return pending;
+        },
+        {
+          timer: this.timer,
+          timeoutMs: Math.min(options.timeoutMs, BOOT_CAPACITY_CHECK_TIMEOUT_MS),
+          signal: options.signal,
+          label: `Reserving ${platform} boot capacity`,
+          onTimeout: () => controller.abort(),
+          timeoutError: () =>
+            new BootCapacityCheckTimeoutError(`Timed out reserving ${platform} boot capacity.`),
+        },
+      );
+      acquired = true;
+      return { kind: "available", reservation };
+    } catch (error) {
+      return this.refusal(platform, error);
+    } finally {
+      if (!acquired) {
+        controller.abort();
+        pending?.release();
+      }
+    }
+  }
 
   async check(
     platform: BindingPlatform,
@@ -46,30 +97,34 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
       });
       return { kind: "available" };
     } catch (error) {
-      if (error instanceof BootCapacityExhaustedError) {
-        const { externalDevices } = error.details;
-        return {
-          kind: "exhausted",
-          limit: error.limit,
-          booted: error.booted,
-          retryAfterMs: error.retryAfterMs,
-          ...(externalDevices && externalDevices.length > 0 ? { externalDevices } : {}),
-        };
-      }
-      if (
-        error instanceof BootedDeviceDiscoveryIncompleteError ||
-        error instanceof BootCapacityCheckTimeoutError
-      ) {
-        // A count that could not be read in time is unknown, never free capacity.
-        logger.warn(
-          `[Bindings] ${platform} boot capacity is unknown: ${errorMessage(error)}`,
-          error,
-        );
-        return { kind: "unknown", message: errorMessage(error) };
-      }
-      // Cancellation, or a defect: neither is a capacity answer, and a defect must not hide as a
-      // retryable refusal.
-      throw error;
+      return this.refusal(platform, error);
     }
+  }
+
+  private refusal(
+    platform: BindingPlatform,
+    error: unknown,
+  ): Exclude<BindingCapacityCheck, { kind: "available" }> {
+    if (error instanceof BootCapacityExhaustedError) {
+      const { externalDevices } = error.details;
+      return {
+        kind: "exhausted",
+        limit: error.limit,
+        booted: error.booted,
+        retryAfterMs: error.retryAfterMs,
+        ...(externalDevices && externalDevices.length > 0 ? { externalDevices } : {}),
+      };
+    }
+    if (
+      error instanceof BootedDeviceDiscoveryIncompleteError ||
+      error instanceof BootCapacityCheckTimeoutError
+    ) {
+      // A count that could not be read in time is unknown, never free capacity.
+      logger.warn(`[Bindings] ${platform} boot capacity is unknown: ${errorMessage(error)}`, error);
+      return { kind: "unknown", message: errorMessage(error) };
+    }
+    // Cancellation, or a defect: neither is a capacity answer, and a defect must not hide as a
+    // retryable refusal.
+    throw error;
   }
 }

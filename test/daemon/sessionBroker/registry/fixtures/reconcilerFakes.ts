@@ -1,3 +1,5 @@
+import type { BindingBootReservation } from "../../../../../src/daemon/sessionBroker/provisioning/reconcilerContracts";
+import type { BootReservationOptions } from "../../../../../src/devices/bootAdmission/BootSlotReservation";
 import {
   deviceStableId,
   type BindingBootCapacity,
@@ -26,6 +28,8 @@ import type { DeviceInfo } from "../../../../../src/models/index";
 
 // Port fakes shared by the reconciler and journal-redrive suites (#11175, #11179).
 export class FakeInventory implements BindingInventory {
+  runtimeDeviceId: NonNullable<BindingInventory["runtimeDeviceId"]> = async (device) =>
+    device.deviceId;
   complete = true;
   devices: DeviceInfo[] = [];
   beforeList:
@@ -186,6 +190,23 @@ export class FakeClaims implements BindingDeviceClaims {
 export class FakeCapacity implements BindingBootCapacity {
   result: BindingCapacityCheck = { kind: "available" };
   checks = 0;
+  async reserve(
+    _platform: BindingPlatform,
+    options: BootReservationOptions,
+  ): Promise<BindingBootReservation> {
+    const result = await this.check();
+    if (
+      result.kind === "unknown" ||
+      (result.kind === "exhausted" &&
+        result.booted - (options.replacingDeviceId ? 1 : 0) >= result.limit)
+    ) {
+      return result;
+    }
+    return {
+      kind: "available",
+      reservation: { run: (operation) => operation(), release: () => {} },
+    };
+  }
   async check(): Promise<BindingCapacityCheck> {
     this.checks += 1;
     return this.result;

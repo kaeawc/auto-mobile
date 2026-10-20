@@ -361,3 +361,46 @@ test("6: unexpected lock infrastructure errors are mapped to discovery_incomplet
   };
   incomplete(await rejected(gates[0].admit(request)));
 });
+
+test("replacement reservation blocks a peer across deletion and transfers one admission", async () => {
+  const { source, gates, host } = setup("2");
+  source.emulatorSerials = ["OLD", "OTHER"];
+  source.emulatorProcessRssBytes = [2 * 1024 ** 3, 2 * 1024 ** 3];
+  const reservation = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 60_000 });
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  expect(await gates[1].describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  expect(host.records.size).toBe(1);
+  exhausted(await rejected(gates[1].admit(request)), 2);
+  source.emulatorSerials = ["OTHER"];
+  source.emulatorProcessRssBytes = [2 * 1024 ** 3];
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  expect(await gates[1].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  exhausted(await rejected(gates[1].admit(request)), 2);
+  const admission = await reservation.run(async () => {
+    await gates[0].assertCapacityAvailable();
+    return await gates[0].admit(request);
+  });
+  reservation.release();
+  expect(host.records.size).toBe(1);
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  admission.handOff("NEW", 500);
+  source.emulatorSerials = ["OTHER", "NEW"];
+  source.emulatorProcessRssBytes = [2 * 1024 ** 3, 2 * 1024 ** 3];
+  source.emulatorProcessPids = [400, 500];
+  expect(await gates[1].describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
+  admission.release();
+  admission.release();
+  expect(host.records.size).toBe(0);
+});
+
+test("releasing an unused replacement reservation removes its peer publication once", async () => {
+  const { source, gates, host } = setup("1");
+  source.emulatorSerials = ["OLD"];
+  const reservation = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 60_000 });
+  reservation.release();
+  reservation.release();
+  expect(host.records.size).toBe(0);
+  source.emulatorSerials = [];
+  (await gates[1].admit(request)).release();
+  await expect(reservation.run(async () => gates[0].admit(request))).rejects.toThrow("released");
+});

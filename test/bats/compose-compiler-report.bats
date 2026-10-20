@@ -15,13 +15,13 @@ STUB
 }
 @test "default compile uses exactly the task rerun and opt-in property" {
   isolated="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$isolated/scripts/android" "$isolated/android/control-proxy/build/compose-compiler-reports"
+  mkdir -p "$isolated/scripts/android" "$isolated/android/prototype-compose/build/compose-compiler-reports"
   cp "$SCRIPT" "$isolated/scripts/android/"
-  cp -R "$FIXTURE/." "$isolated/android/control-proxy/build/compose-compiler-reports/"
+  cp -R "$FIXTURE/." "$isolated/android/prototype-compose/build/compose-compiler-reports/"
   run "$isolated/scripts/android/compose-compiler-report.sh"
   [ "$status" -eq 0 ]
   [ "$(cat "$CALLS.cwd")" = "$isolated/android" ]
-  [ "$(cat "$CALLS")" = $':control-proxy:compileReleaseKotlin\n--rerun\n-Pautomobile.composeCompilerReports=true' ]
+  [ "$(cat "$CALLS")" = $':prototype-compose:compileReleaseKotlin\n--rerun\n-Pautomobile.composeCompilerReports=true' ]
 }
 @test "captured functions have stability columns and package filter" {
   run "$SCRIPT" --reports-dir "$FIXTURE"

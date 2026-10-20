@@ -54,6 +54,7 @@
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: Exception</ID>
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: IllegalStateException</ID>
     <ID>SwallowedException:PrototypeAssetController.kt:PrototypeAssetController$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:RetrofitPrototypeHttpClient.kt:RetrofitPrototypeHttpClient$error: ConnectException</ID>
     <ID>TooGenericExceptionCaught:AndroidPinnedShortcutPlatform.kt:AndroidPinnedShortcutPlatform$error: Exception</ID>
     <ID>TooGenericExceptionCaught:CommandReceivers.kt:CommandReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CorrelatedErrorReporter.kt:CorrelatedErrorReporter$e: Exception</ID>

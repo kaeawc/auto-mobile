@@ -63,7 +63,6 @@
     <ID>LongParameterList:PrototypeStorageSession.kt:PrototypeStorageSession</ID>
     <ID>LongParameterList:PrototypeSwipeRow.kt:@Composable private fun androidx.compose.foundation.layout.BoxScope.PrototypeSwipeButtons</ID>
     <ID>RedundantSuspendModifier:PrototypeTrace.kt:PrototypeTrace$suspend</ID>
-    <ID>SwallowedException:RetrofitPrototypeHttpClient.kt:RetrofitPrototypeHttpClient$error: ConnectException</ID>
     <ID>TooGenericExceptionCaught:PrototypeAppearance.kt:AndroidPrototypeDeviceAppearance$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PrototypeAssetStore.kt:PrototypeAssetStore$error: RuntimeException</ID>
     <ID>TooGenericExceptionCaught:PrototypeFonts.kt:PrototypeFontCache$error: RuntimeException</ID>

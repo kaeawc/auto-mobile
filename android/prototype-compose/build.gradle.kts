@@ -1,8 +1,10 @@
 import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
 import com.vanniktech.maven.publish.JavadocJar
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 plugins {
   id("automobile.android-library")
+  id("automobile.robolectric-sdk-pin")
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.mavenPublish)
@@ -15,6 +17,8 @@ android {
   defaultConfig { testInstrumentationRunner = null }
 
   buildFeatures { compose = true }
+
+  testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
 kotlin {
@@ -39,14 +43,65 @@ dependencies {
   implementation(libs.kotlinx.coroutines)
   implementation(libs.kotlinx.serialization)
 
-  // `request` actions with `via: "device"` (see docs/decisions/prototype-request-retrofit.md).
-  implementation(libs.okhttp)
-  implementation(libs.retrofit)
-
   testImplementation(libs.bundles.unit.test)
+  testImplementation(libs.robolectric)
+  testImplementation(libs.compose.ui.junit)
+  debugImplementation(libs.bundles.compose.ui.debug)
 }
 
 mavenPublishing {
   // Same Central-compliant empty Javadoc jar as the SDK (#4852); the sources jar is real.
   configure(AndroidSingleVariantLibrary(javadocJar = JavadocJar.Empty()))
+}
+
+// Keep the extraction boundary executable: protocol is the only AutoMobile project permitted on
+// the renderer's runtime classpath. Transport implementations belong to the host.
+val rendererDependencies = providers.provider {
+  listOf("debugRuntimeClasspath", "releaseRuntimeClasspath")
+    .flatMap { configuration ->
+      configurations.getByName(configuration).incoming.resolutionResult.allComponents.map {
+        component ->
+        when (val id = component.id) {
+          is ProjectComponentIdentifier -> "project ${id.buildTreePath}"
+          else -> id.displayName
+        }
+      }
+    }
+    .distinct()
+    .sorted()
+}
+
+val verifyRendererDependencies =
+  tasks.register("verifyRendererDependencies") {
+    group = "verification"
+    description = "Verifies the renderer has no host or HTTP transport dependencies."
+    inputs.property("resolvedDependencies", rendererDependencies)
+    doLast {
+      val dependencies = inputs.properties.getValue("resolvedDependencies") as List<*>
+      val forbidden = dependencies.filter { id ->
+        val name = id.toString()
+        (name.startsWith("project ") &&
+          name !in setOf("project :prototype-compose", "project :protocol")) ||
+          name.startsWith("com.squareup.okhttp3:") ||
+          name.startsWith("com.squareup.retrofit2:") ||
+          name.startsWith("io.ktor:")
+      }
+      check(forbidden.isEmpty()) { "Renderer depends on host/transport code: $forbidden" }
+      logger.lifecycle(dependencies.joinToString("\n"))
+    }
+  }
+
+tasks.named("check") { dependsOn(verifyRendererDependencies) }
+
+// Preserve the CtrlProxy performance-report switch for the code now compiled in this module.
+if (providers.gradleProperty("automobile.composeCompilerReports").orNull == "true") {
+  composeCompiler {
+    reportsDestination = layout.buildDirectory.dir("compose-compiler-reports")
+    metricsDestination = layout.buildDirectory.dir("compose-compiler-reports")
+  }
+}
+
+// Renderer tests use the same checked-in contract fixtures as their original CtrlProxy location.
+tasks.withType<Test>().configureEach {
+  inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
 }

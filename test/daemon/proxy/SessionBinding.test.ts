@@ -310,15 +310,15 @@ describe("SessionBinding", () => {
       timer: new FakeTimer(),
       daemonManager: new FakeDaemonManager(),
     });
-    const port = proxy["createSessionBindingPort"]();
+    const port = proxy.getInternalsForTesting().createSessionBindingPort();
     const calls: unknown[][] = [];
-    proxy["holdPreviousBinding"] = (...args) => {
+    proxy.getInternalsForTesting().sessionOwnership.holdPreviousBinding = (...args) => {
       calls.push(args);
     };
     port.holdPreviousBinding("named");
     expect(calls).toEqual([["named"]]);
     expect(port.isHeartbeatKeeperStarted()).toBe(false);
-    proxy["latestBindingKeeper"].started = true;
+    proxy.getInternalsForTesting().latestBindingKeeper.started = true;
     expect(port.isHeartbeatKeeperStarted()).toBe(true);
   });
 });

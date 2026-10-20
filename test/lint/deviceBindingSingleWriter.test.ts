@@ -31,7 +31,11 @@ const DEVICE_RECEIVERS = new Set([
 // releaseSessionAndDevice.ts funnel or DevicePool's own internal calls.
 const RELEASE_DEVICE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Includes the unrelated installed-apps cache write coordinator's releaseDevice call.
-  "src/daemon/devicePool.ts": 7,
+  "src/daemon/devicePoolParts/allocationWiring.ts": 1,
+  "src/daemon/devicePoolParts/recoveryWiring.ts": 1,
+  "src/daemon/devicePoolParts/release.ts": 3,
+  "src/daemon/devicePoolParts/reporting.ts": 1,
+  "src/daemon/devicePoolParts/sessionRecovery.ts": 1,
   // Unrelated APIs sharing the name: prototype agent registry, viewer connections,
   // events, and the installed-apps cache write coordinator. These counts do not
   // permit new DevicePool release callers.
@@ -202,7 +206,18 @@ function scan(file: string, source: string): { writes: string[]; releases: numbe
     CallExpression(node) {
       const callee = unwrapCallee(node.callee);
       if (callee.type === "MemberExpression" && memberName(callee) === "releaseDevice") {
-        releases++;
+        // The facade and its connection port forward the same release, with no new caller.
+        // Only their exact rest-argument delegates are excluded; real calls still consume the inventory.
+        const forwarded =
+          (file === "src/daemon/devicePool.ts" ||
+            file === "src/daemon/devicePoolParts/release.ts") &&
+          node.arguments.length === 1 &&
+          node.arguments[0].type === "SpreadElement" &&
+          node.arguments[0].argument.type === "Identifier" &&
+          node.arguments[0].argument.name === "args";
+        if (!forwarded) {
+          releases++;
+        }
       }
       if (
         callee.type !== "MemberExpression" ||

@@ -397,26 +397,31 @@ internal class SdkEventBuffer(
     if (events.isEmpty()) return
     try {
       onFlush(events)
+    } catch (error: UnsentEventBatchesException) {
+      logger.w("SdkEventBuffer", error) { "Could not flush event batch" }
+      persistFailedFlush(error.batches)
     } catch (error: Exception) {
       logger.w("SdkEventBuffer", error) { "Could not flush event batch" }
-      val unsent =
-        if (error is UnsentEventBatchesException) error.batches else listOf(events to null)
-      // A throwing custom EventPersistence.persist() must NOT escape this task: it
-      // runs inside scheduleAtFixedRate and an uncaught exception would silently
-      // cancel all future periodic flushes (#3605), so guard the persist too.
-      persistInBackground(
-        Runnable {
-          for ((chunk, id) in unsent) {
-            try {
-              persistence?.persist(chunk, id)
-            } catch (error: Exception) {
-              logger.w("SdkEventBuffer", error) { "Could not persist failed flush" }
-              // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
-            }
-          }
-        },
-      )
-      repeat(unsent.sumOf { it.first.size }) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
+      persistFailedFlush(listOf(events to null))
     }
+  }
+
+  private fun persistFailedFlush(unsent: List<Pair<List<SdkEvent>, String?>>) {
+    // A throwing custom EventPersistence.persist() must NOT escape this task: it
+    // runs inside scheduleAtFixedRate and an uncaught exception would silently
+    // cancel all future periodic flushes (#3605), so guard the persist too.
+    persistInBackground(
+      Runnable {
+        for ((chunk, id) in unsent) {
+          try {
+            persistence?.persist(chunk, id)
+          } catch (error: Exception) {
+            logger.w("SdkEventBuffer", error) { "Could not persist failed flush" }
+            // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
+          }
+        }
+      },
+    )
+    repeat(unsent.sumOf { it.first.size }) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
   }
 }

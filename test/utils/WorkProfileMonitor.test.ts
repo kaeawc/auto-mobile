@@ -236,9 +236,11 @@ describe("WorkProfileMonitor", () => {
     timer.advanceTime(5000);
     expect(command.mock.calls[0]?.[1]).toMatchObject({ timeoutMs: 10_000 });
     timer.advanceTime(10_000);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // The rejection settles through several promise hops (spy wrapper, bounded call, single-flight
+    // finally); flush enough turns for the in-flight poll to clear before the next tick.
+    for (let turn = 0; turn < 10; turn++) {
+      await Promise.resolve();
+    }
 
     timer.advanceTime(5000);
     expect(commandCount).toBe(2);

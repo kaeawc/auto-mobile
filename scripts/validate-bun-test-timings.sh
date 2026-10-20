@@ -98,8 +98,11 @@ if [[ -z "${BUN_TEST_TIMING_BASE_REF:-}" && "$run_unit_lane" != 1 ]]; then
 fi
 
 report_path="${report_path:-scratch/bun-test-report.xml}"
-# A trailing slash on a report directory would put recheck scratch inside it.
-while [[ "$report_path" == */ && "$report_path" != / ]]; do report_path="${report_path%/}"; done
+# Keep direct-directory recheck scratch outside its inputs, preserving legacy
+# output paths in BASE_REF and explicit lane modes.
+if [[ -z "${BUN_TEST_TIMING_BASE_REF:-}" && "$run_unit_lane" != 1 && -d "$report_path" ]]; then
+  while [[ "$report_path" == */ && "$report_path" != / ]]; do report_path="${report_path%/}"; done
+fi
 report_dir="${report_path%.xml}.d"
 recheck_dir="${report_path%.xml}.recheck.d"
 max_ms="${BUN_TEST_MAX_MS:-100}"

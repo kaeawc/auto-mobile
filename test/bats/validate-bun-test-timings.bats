@@ -126,7 +126,7 @@ run_validator() {
   mkdir -p "$report_dir"
   write_report "$report_dir/first.xml" first 0.010
   write_report "$report_dir/second.xml" second 0.020
-  run_validator "$report_dir"
+  run_validator "$report_dir/"
   [ "$status" -eq 0 ]
   [ ! -e "$LANE_MARKER" ]
   [ ! -e "$BUN_ARGS_FILE" ]
@@ -212,6 +212,15 @@ run_validator() {
   [ -f "$BATS_TEST_TMPDIR/output.d/shard-0.xml" ]
 }
 
+@test "timing input lane output paths retain their legacy trailing-slash layout" {
+  export ALLOW_LANE=1
+  output_dir="$BATS_TEST_TMPDIR/lane-output"
+  run_validator --run-unit-lane "$output_dir/"
+  [ "$status" -eq 0 ]
+  grep -Fx 'scripts/test-ts.sh unit' "$LANE_MARKER"
+  [ -f "$output_dir/.d/shard-0.xml" ]
+}
+
 @test "timing input BASE_REF keeps precedence over lane opt-ins and existing XML" {
   cat > "$STUB_BIN/git" <<'EOF'
 #!/bin/bash
@@ -226,4 +235,10 @@ EOF
   [[ "$output" == *"No changed unit tests to validate"* ]]
   [ ! -e "$LANE_MARKER" ]
   [ ! -e "$BUN_ARGS_FILE" ]
+  # BASE_REF also keeps the old positional-output layout for trailing slashes.
+  output_dir="$BATS_TEST_TMPDIR/base-output"
+  run_validator "$output_dir/"
+  [ "$status" -eq 0 ]
+  [ -d "$output_dir/.d" ]
+  [ ! -e "$LANE_MARKER" ]
 }

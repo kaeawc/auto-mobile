@@ -91,6 +91,7 @@ describe("ToolBindingProvisioner", () => {
         },
         boot: true,
         readiness: "automation",
+        rollbackOnRetryableReadiness: false,
         timeoutMs: 60_000,
       },
     });
@@ -101,6 +102,72 @@ describe("ToolBindingProvisioner", () => {
       readiness: { mode: "automation", status: "automation_ready" },
     });
   });
+
+  test("passes the retained simulator identity from readiness failure evidence", async () => {
+    const { invoke } = recordingInvoker(
+      createToolErrorResponse("timeout", "readiness deadline", {
+        error: { code: "timeout", retryable: true },
+        lifecycle: {
+          state: "created_not_ready",
+          phase: "readiness",
+          device: {
+            platform: "ios",
+            stableId: "UDID-kept",
+            name: "kept",
+            runtimeDeviceId: "UDID-kept",
+          },
+        },
+      }),
+    );
+    await expect(
+      provisionerWith(invoke).provision({
+        platform: "ios",
+        name: "kept",
+        spec: { runtime: IOS_18, deviceType: IPHONE_16 },
+        mode: "create",
+        deadlineMs: 61_000,
+      }),
+    ).rejects.toMatchObject({
+      code: "timeout",
+      retryable: true,
+      diagnostics: { retainedDevice: { platform: "ios", stableId: "UDID-kept", name: "kept" } },
+    });
+  });
+
+  test.each([undefined, "kept", "UDID-kept"])(
+    "retained identity rejects a device name and falls back to runtime UDID %s",
+    async (runtimeDeviceId) => {
+      const { invoke } = recordingInvoker(
+        createToolErrorResponse("timeout", "readiness deadline", {
+          error: { code: "timeout", retryable: true },
+          lifecycle: {
+            state: "created_not_ready",
+            phase: "readiness",
+            device: { platform: "ios", stableId: "kept", name: "kept", runtimeDeviceId },
+          },
+        }),
+      );
+      const error = await provisionerWith(invoke)
+        .provision({
+          platform: "ios",
+          name: "kept",
+          spec: { runtime: IOS_18, deviceType: IPHONE_16 },
+          mode: "create",
+          deadlineMs: 61_000,
+        })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ProvisionDeviceError);
+      if (!(error instanceof ProvisionDeviceError)) {
+        throw new Error("Expected a typed provision failure");
+      }
+      expect(error.diagnostics.retainedDevice).toEqual(
+        runtimeDeviceId === "UDID-kept"
+          ? { platform: "ios", stableId: "UDID-kept", name: "kept" }
+          : undefined,
+      );
+    },
+  );
 
   test("an error response is rethrown as the typed provision failure", async () => {
     const { invoke } = recordingInvoker(

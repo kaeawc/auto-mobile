@@ -102,6 +102,9 @@ export const socketIdentityStatusSchema = z.object({
     .array(
       z.object({
         code: z.literal("AUXILIARY_SOCKET_UNAVAILABLE"),
+        holderPid: z.number().int().positive().optional(),
+        holderVersion: z.string().optional(),
+        holderVerified: z.boolean().optional(),
         name: z.string(),
         socketPath: z.string().min(1),
       }),

@@ -26,6 +26,7 @@ export interface BindingReconcileFailure {
   nextAction: string;
   /** Underlying provision failure, when the provision path refused. */
   provision?: { code: string; retryable: boolean };
+  retainedDevice?: { platform: "android" | "ios"; stableId: string; name: string };
   capacity?: BindingFailureCapacity;
   budget?: BindingBudgetEvidence;
 }

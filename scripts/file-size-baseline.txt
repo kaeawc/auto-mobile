@@ -2,7 +2,6 @@
 1728	src/daemon/daemonRequestHandlers.ts
 1013	src/daemon/devicePool.ts
 2900	src/daemon/sessionManager.ts
-1693	src/features/observe/output/SkeletonProjection.ts
 1979	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 2185	src/server/videoRecordingManager.ts

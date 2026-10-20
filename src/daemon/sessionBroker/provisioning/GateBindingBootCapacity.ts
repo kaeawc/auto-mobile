@@ -13,6 +13,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { type BindingBootCapacity, type BindingCapacityCheck } from "./reconciler";
 import type { BindingPlatform } from "../registry/bindingRegistry";
 import { BootCapacityCheckTimeoutError } from "./BootCapacityCheckTimeoutError";
+import { BindingDiscoveryIncompleteError } from "./refusal";
 
 /** Read-only "would one more cold boot of `platform` be refused now"; throws when it would. */
 export type BindingBootCapacityAssertion = (
@@ -119,6 +120,7 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
     }
     if (
       error instanceof BootedDeviceDiscoveryIncompleteError ||
+      error instanceof BindingDiscoveryIncompleteError ||
       error instanceof BootCapacityCheckTimeoutError
     ) {
       // A count that could not be read in time is unknown, never free capacity.

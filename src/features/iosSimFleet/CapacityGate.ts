@@ -76,6 +76,8 @@ export interface IosSimulatorOwnershipReader {
   isAutoMobileOwned(udid: string): boolean;
 }
 
+type OwnershipFleetReport = FleetCostReport & { ownershipReadFailed?: boolean };
+
 export interface CapacityGateOptions {
   ownership?: IosSimulatorOwnershipReader;
   env?: NodeJS.ProcessEnv;
@@ -137,8 +139,21 @@ export class IosSimCapacityGate
   }
 
   async evaluateBoot(request: WarmDeviceRequest = {}): Promise<CapacityDecision> {
-    await this.optionsOwnership?.refresh();
     return this.decide(await this.refresh(), request, "substitute");
+  }
+
+  /** Labels are best effort; the reader retains its last good snapshot when refresh fails. */
+  private async refreshOwnership(report: FleetCostReport): Promise<OwnershipFleetReport> {
+    try {
+      await this.optionsOwnership?.refresh();
+      return report;
+    } catch (error) {
+      logger.warn(
+        "[BootAdmission] iOS ownership could not be read; using retained ownership labels",
+        error,
+      );
+      return { ...report, ownershipReadFailed: true };
+    }
   }
 
   /**
@@ -151,7 +166,7 @@ export class IosSimCapacityGate
    * `maxBooted` (#11100).
    */
   private decide(
-    report: FleetCostReport,
+    report: OwnershipFleetReport,
     request: WarmDeviceRequest | undefined,
     warmMatch: "substitute" | "hint",
     bootUdid?: string,
@@ -180,10 +195,16 @@ export class IosSimCapacityGate
       envName: IOS_SIM_MAX_BOOTED_ENV,
       externalDevices: occupied.filter((udid) => !owned.has(udid)),
       heldDevices: occupied.filter((udid) => owned.has(udid)),
+      ownershipUnknown: report.ownershipReadFailed,
     });
     // Owner decision (#11209): host pressure is reported, never a reason to refuse a boot.
     if (refused) {
-      return refused;
+      return report.ownershipReadFailed
+        ? {
+            ...refused,
+            message: `${refused.message} Ownership could not be read; labels use the last good snapshot and current in-memory ownership, so external devices may also be held by AutoMobile.`,
+          }
+        : refused;
     }
     return warm
       ? { outcome: "reuse-warm", udid: warm.udid }
@@ -206,8 +227,7 @@ export class IosSimCapacityGate
       label: CAPACITY_LABEL,
       // Fresh: the listing must start after the ledger window opened (see FleetCostSource).
       sample: async () => {
-        await this.optionsOwnership?.refresh();
-        return this.refresh({ fresh: true });
+        return this.refreshOwnership(await this.refresh({ fresh: true }));
       },
       ledger: this.admittedBoots,
       decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
@@ -224,8 +244,7 @@ export class IosSimCapacityGate
       sampleTimeoutMs: Math.min(options.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
       label: CAPACITY_LABEL,
       sample: async () => {
-        await this.optionsOwnership?.refresh();
-        return this.refresh({ fresh: true });
+        return this.refreshOwnership(await this.refresh({ fresh: true }));
       },
       ledger: this.admittedBoots,
       decide: (report, window) =>
@@ -291,7 +310,7 @@ export class IosSimCapacityGate
     if (this.reservations.hasPending()) {
       return;
     }
-    return this.sampleInWindow(options, (report, window) => {
+    return this.sampleInWindow({ ...options, ownership: true }, (report, window) => {
       assertCapacityGranted({
         decision: this.decide(report, undefined, "hint", undefined, window),
       });
@@ -329,8 +348,8 @@ export class IosSimCapacityGate
    * sustained-pressure streak.
    */
   private async sampleInWindow<T>(
-    options: { signal?: AbortSignal },
-    judge: (report: FleetCostReport, window: LedgerSampleWindow) => T,
+    options: { signal?: AbortSignal; ownership?: boolean },
+    judge: (report: OwnershipFleetReport, window: LedgerSampleWindow) => T,
   ): Promise<T> {
     options.signal?.throwIfAborted();
     const window = this.admittedBoots.beginSample();
@@ -338,8 +357,8 @@ export class IosSimCapacityGate
       // The collector's run is shared with other callers, so losing the race never cancels it.
       const report = await raceWithDeadline(
         async () => {
-          await this.optionsOwnership?.refresh();
-          return this.fleet.collectFresh();
+          const report = await this.fleet.collectFresh();
+          return options.ownership ? this.refreshOwnership(report) : report;
         },
         {
           timer: this.timer,

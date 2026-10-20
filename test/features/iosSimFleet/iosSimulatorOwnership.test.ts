@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createIosSimulatorOwnershipReader } from "../../../src/daemon/iosSimulatorOwnership";
 import { RegistryBindingExclusion } from "../../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
@@ -16,12 +16,17 @@ import { BindingDiscoveryIncompleteError } from "../../../src/daemon/sessionBrok
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeLogger } from "../../fakes/FakeLogger";
 import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
+import { logger } from "../../../src/utils/logger";
 
 class Ownership implements IosSimulatorOwnershipReader {
   readonly held = new Set(["S1", "S2"]);
   refreshes = 0;
+  failure?: Error;
   async refresh(): Promise<void> {
     this.refreshes += 1;
+    if (this.failure) {
+      throw this.failure;
+    }
   }
   isAutoMobileOwned(udid: string): boolean {
     return this.held.has(udid);
@@ -104,11 +109,16 @@ describe("iOS simulator ownership", () => {
     const ownership = new Ownership();
     const { gate, fleet } = setup(2, ownership);
     fleet.report.simulators.pop();
-    expect(await gate.evaluateBoot()).toMatchObject({ heldDevices: ["S1", "S2"] });
-    expect(await gate.evaluateBoot()).not.toHaveProperty("externalDevices");
+    expect((await gate.admitBoot(undefined, {})).decision).toMatchObject({
+      heldDevices: ["S1", "S2"],
+    });
+    expect((await gate.admitBoot(undefined, {})).decision).not.toHaveProperty("externalDevices");
     ownership.held.clear();
-    expect(await gate.evaluateBoot()).toMatchObject({ externalDevices: ["S1", "S2"] });
-    expect(await gate.evaluateBoot()).not.toHaveProperty("heldDevices");
+    expect((await gate.admitBoot(undefined, {})).decision).toMatchObject({
+      externalDevices: ["S1", "S2"],
+    });
+    expect((await gate.admitBoot(undefined, {})).decision).not.toHaveProperty("heldDevices");
+    expect(ownership.refreshes).toBe(4);
   });
 
   test("reservation refreshes ownership before classifying a replacement refusal", async () => {
@@ -129,14 +139,15 @@ describe("iOS simulator ownership", () => {
     expect(ownership.refreshes).toBe(2);
   });
 
-  test("reservation fails closed when ownership cannot be refreshed", async () => {
+  test("reservation still refuses actual capacity when ownership cannot be refreshed", async () => {
     const ownership: IosSimulatorOwnershipReader = {
       refresh: () => Promise.reject(new BindingDiscoveryIncompleteError("unreadable")),
       isAutoMobileOwned: () => false,
     };
-    await expect(setup(3, ownership).gate.reserveBoot({ timeoutMs: 1000 })).rejects.toThrow(
-      "unreadable",
-    );
+    await expect(setup(3, ownership).gate.reserveBoot({ timeoutMs: 1000 })).rejects.toMatchObject({
+      details: { code: "capacity_exhausted", booted: 3, externalDevices: ["S1", "S2", "FOREIGN"] },
+      message: expect.stringContaining("Ownership could not be read"),
+    });
   });
 
   test("without a reader all unadmitted devices retain their external classification", async () => {
@@ -192,12 +203,130 @@ describe("iOS simulator ownership", () => {
     expect((await gate.admitBoot({ runtime: "iOS-18" }, {})).decision.outcome).toBe("refuse");
   });
 
-  test("an ownership refresh failure never labels unknown owners as external", async () => {
+  test("an ownership refresh failure keeps a capacity refusal but qualifies external labels", async () => {
     const ownership: IosSimulatorOwnershipReader = {
       refresh: () => Promise.reject(new BindingDiscoveryIncompleteError("unreadable")),
       isAutoMobileOwned: () => false,
     };
-    await expect(setup(3, ownership).gate.admitBoot(undefined, {})).rejects.toThrow("unreadable");
+    const result = await setup(3, ownership).gate.admitBoot(undefined, {});
+    expect(result.decision).toMatchObject({
+      outcome: "refuse",
+      bootedCount: 3,
+      externalDevices: ["S1", "S2", "FOREIGN"],
+    });
+    expect(result.decision).not.toHaveProperty("heldDevices");
+    expect(result.releaseAdmission).toBeUndefined();
+    if (result.decision.outcome !== "refuse") {
+      throw new Error("expected refusal");
+    }
+    expect(result.decision.message).toContain("Ownership could not be read");
+    expect(result.decision.message).toContain("have unconfirmed AutoMobile ownership");
+    expect(result.decision.message).not.toContain("have no AutoMobile owner");
+  });
+
+  test.each(["admit", "check", "reserve"] as const)(
+    "%s admits below the limit with a failing ownership reader and warns",
+    async (route) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const ownership = new Ownership();
+      ownership.failure = new BindingDiscoveryIncompleteError("unreadable");
+      ownership.held.clear();
+      const { gate } = setup(4, ownership);
+      try {
+        if (route === "admit") {
+          const result = await gate.admitBoot(undefined, {});
+          expect(result.decision.outcome).toBe("allow");
+          expect(result.releaseAdmission).toBeFunction();
+          result.releaseAdmission?.();
+        } else if (route === "check") {
+          await gate.assertCapacityAvailable();
+        } else {
+          const reservation = await gate.reserveBoot({ timeoutMs: 1000 });
+          reservation.release();
+        }
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("ownership could not be read"),
+          ownership.failure,
+        );
+        expect(ownership.refreshes).toBe(1);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("describeCapacity and unused evaluateBoot do not refresh ownership", async () => {
+    const ownership = new Ownership();
+    ownership.failure = new BindingDiscoveryIncompleteError("unreadable");
+    const { gate } = setup(4, ownership);
+    expect(await gate.describeCapacity()).toMatchObject({ limit: 4, booted: 3, inFlight: 0 });
+    expect((await gate.evaluateBoot()).outcome).toBe("allow");
+    expect(ownership.refreshes).toBe(0);
+  });
+
+  test.each(["admit", "check", "reserve"] as const)(
+    "%s reads ownership after the simulator listing completes",
+    async (route) => {
+      let committed = false;
+      let held = false;
+      const ownership: IosSimulatorOwnershipReader = {
+        refresh: async () => {
+          held = committed;
+        },
+        isAutoMobileOwned: (udid) => held && udid === "S1",
+      };
+      const { gate, fleet } = setup(3, ownership);
+      const listing = spyOn(fleet, "collectFresh").mockImplementation(async () => {
+        committed = true;
+        return fleet.report;
+      });
+      try {
+        if (route === "admit") {
+          expect((await gate.admitBoot(undefined, {})).decision).toMatchObject({
+            heldDevices: ["S1"],
+          });
+        } else if (route === "check") {
+          await expect(gate.assertCapacityAvailable()).rejects.toMatchObject({
+            details: { heldDevices: ["S1"] },
+          });
+        } else {
+          await expect(gate.reserveBoot({ timeoutMs: 1000 })).rejects.toMatchObject({
+            details: { heldDevices: ["S1"] },
+          });
+        }
+        expect(listing).toHaveBeenCalledTimes(1);
+      } finally {
+        listing.mockRestore();
+      }
+    },
+  );
+
+  test("a failed read keeps last-good held labels and warm exclusions, with uncertainty until recovery", async () => {
+    const ownership = new Ownership();
+    const { gate } = setup(3, ownership);
+    await expect(gate.assertCapacityAvailable()).rejects.toMatchObject({
+      details: { heldDevices: ["S1", "S2"] },
+    });
+    ownership.failure = new BindingDiscoveryIncompleteError("unreadable");
+    const result = await gate.admitBoot(undefined, {});
+    expect(result.decision).toMatchObject({
+      heldDevices: ["S1", "S2"],
+      externalDevices: ["FOREIGN"],
+      message: expect.stringContaining("Ownership could not be read"),
+    });
+    const warm = setup(4, ownership).gate;
+    const admitted = await warm.admitBoot({ runtime: "iOS-18", excludeUdids: ["FOREIGN"] }, {});
+    expect(admitted.decision.outcome).toBe("allow");
+    admitted.releaseAdmission?.();
+    ownership.failure = undefined;
+    ownership.held.clear();
+    const recovered = await gate.admitBoot(undefined, {});
+    expect(recovered.decision).toMatchObject({ externalDevices: ["S1", "S2", "FOREIGN"] });
+    expect(recovered.decision).not.toHaveProperty("heldDevices");
+    if (recovered.decision.outcome !== "refuse") {
+      throw new Error("expected refusal");
+    }
+    expect(recovered.decision.message).not.toContain("Ownership could not be read");
   });
 
   test("daemon reader is lazy and reads registry snapshot plus live session assignments", async () => {

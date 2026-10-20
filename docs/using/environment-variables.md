@@ -887,7 +887,10 @@ and journals, including after a daemon restart. Each field is an array of string
 and is omitted when empty. Both groups count toward the same limit. A held device
 is not a stray simulator to shut down; release its session or binding first. Warm
 simulator hints exclude live-session and broker-held devices. An unreadable broker
-registry returns `discovery_incomplete` rather than labelling unknown owners external.
+registry only affects labels and hints: boots below the limit still proceed, and
+capacity refusals use retained or in-memory ownership, mark unclassifiable devices
+external and state that ownership could not be read. See
+[device ownership](device-ownership.md) for the reader's coverage and fallback.
 
 Adopting an emulator or simulator that is already running or starting is never
 refused. An admitted boot holds its slot until adb lists the new emulator (or the

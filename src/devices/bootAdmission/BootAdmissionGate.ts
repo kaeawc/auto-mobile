@@ -77,6 +77,8 @@ export function atCapacityDecision(
     envName: string;
     externalDevices?: readonly string[];
     heldDevices?: readonly string[];
+    /** Ownership labels use a retained or empty snapshot after a failed read. */
+    ownershipUnknown?: boolean;
   },
 ): RefusedCapacityDecision | undefined {
   if (bootedCount < limits.maxBooted) {
@@ -88,7 +90,7 @@ export function atCapacityDecision(
     held.length > 0 ? ` ${held.length} of them are held by AutoMobile: ${held.join(", ")}.` : "";
   const externalNote =
     external.length > 0
-      ? ` ${external.length} of them ${describe.heldDevices ? "have no AutoMobile owner" : "were not started by AutoMobile"} but still count toward the limit: ${external.join(", ")}.`
+      ? ` ${external.length} of them ${describe.ownershipUnknown ? "have unconfirmed AutoMobile ownership" : describe.heldDevices ? "have no AutoMobile owner" : "were not started by AutoMobile"} but still count toward the limit: ${external.join(", ")}.`
       : "";
   const optOut = external.length > 0 ? ` or disable the gate with ${BOOT_CAPACITY_GATE_ENV}=0` : "";
   return {

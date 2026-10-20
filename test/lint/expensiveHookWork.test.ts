@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import path from "node:path";
 import { baselineEntries, scanExpensiveHookWork } from "./expensiveHookWork";
 
@@ -9,7 +10,7 @@ const TEST_DIR = path.join(REPO_ROOT, "test");
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 
 function unitTestFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(dir).flatMap((entry) => {
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       return entry.name === "node_modules" || file === path.join(TEST_DIR, "integration")
@@ -41,6 +42,9 @@ describe("scanExpensiveHookWork", () => {
       afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
     `;
     expect(kindsIn(source)).toEqual(["beforeEach:temp-dir", "afterEach:recursive-rm"]);
+    expect(kindsIn(String.raw`beforeEach(() => { mkd\u0074emp("x"); });`)).toEqual([
+      "beforeEach:temp-dir",
+    ]);
   });
 
   test("follows a hook that names a local function and the helpers it calls", () => {
@@ -97,7 +101,7 @@ describe("expensive per-test hook work stays out of unit tests", () => {
 
   beforeAll(() => {
     found = unitTestFiles(TEST_DIR)
-      .map((file) => [relativePosix(file), readFileSync(file, "utf8")] as const)
+      .map((file) => [relativePosix(file), readGuardFile(file)] as const)
       .flatMap(([file, source]) => baselineEntries(file, scanExpensiveHookWork(file, source)))
       .sort();
   }, TREE_SCAN_HOOK_TIMEOUT_MS);

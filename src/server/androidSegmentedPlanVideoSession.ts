@@ -14,7 +14,7 @@ import {
   rollbackVideoRecordingStart as defaultRollbackVideoRecordingStart,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
-} from "./videoRecordingManager";
+} from "../daemon/videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
 import type { ForceStopOptions } from "../features/video";
 import type {

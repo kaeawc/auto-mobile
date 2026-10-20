@@ -408,14 +408,47 @@ interface DoctorCommandOptions {
   exit?: (code: number) => void;
 }
 
-export async function runDoctorCommand(
-  params: Record<string, any>,
-  options: DoctorCommandOptions = {},
-): Promise<CliTerminationRequest | undefined> {
+export function doctorUsage(): string {
+  return `Usage: auto-mobile --cli doctor [options]
+
+Status: status-only and read-only diagnostics.
+
+Options:
+  --android  Filter to Android checks
+  --ios      Filter to iOS checks
+  --json     Machine-readable JSON output
+  --help     Print this help
+
+The universal --session-uuid option is accepted and ignored.`;
+}
+
+function validateDoctorFlags(params: Record<string, unknown>): void {
   if (Object.hasOwn(params, "repair") || Object.hasOwn(params, "timeoutMs")) {
     throw new ActionableError(
       "doctor is status-only; --repair and --timeout-ms were removed. Use --daemon restart to recover the daemon; --daemon diagnose only gathers further diagnostics.",
     );
+  }
+
+  // The CLI forwards an explicit universal session UUID; local diagnosis ignores it.
+  const supportedParams = ["android", "ios", "json", "help", "sessionUuid"];
+  const unknownFlags = Object.keys(params)
+    .filter((key) => !supportedParams.includes(key))
+    .map((key) => `--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`);
+  if (unknownFlags.length > 0) {
+    throw new ActionableError(
+      `Unknown doctor flags: ${unknownFlags.join(", ")}. Supported flags: --android, --ios, --json, --help (the universal --session-uuid option is accepted and ignored).`,
+    );
+  }
+}
+
+export async function runDoctorCommand(
+  params: Record<string, any>,
+  options: DoctorCommandOptions = {},
+): Promise<CliTerminationRequest | undefined> {
+  validateDoctorFlags(params);
+  if (params.help) {
+    (options.writeOutput ?? console.log)(doctorUsage());
+    return undefined;
   }
 
   const doctor = await import("../doctor");

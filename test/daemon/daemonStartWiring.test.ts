@@ -23,7 +23,7 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-import * as videoManager from "../../src/server/videoRecordingManager";
+import * as videoManager from "../../src/daemon/videoRecordingManager";
 import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
 import { DEFAULT_VIDEO_RECORDING_CONFIG, VideoRecorderService } from "../../src/features/video";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";

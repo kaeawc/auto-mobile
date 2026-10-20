@@ -17,7 +17,7 @@ import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResu
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";
-import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
+import { defaultRecordingSessionCleanupDeps } from "../../src/daemon/recordingSessionCleanup";
 import {
   KEEPER_INTERVAL_MS,
   LivenessScenario,

@@ -1,6 +1,6 @@
 import { Daemon } from "../../src/daemon/daemon";
 import type { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
-import type { listActiveVideoRecordings } from "../../src/server/videoRecordingManager";
+import type { listActiveVideoRecordings } from "../../src/daemon/videoRecordingManager";
 import type { AdbTransportRestartLookup } from "../../src/utils/android-cmdline-tools/AdbTransportRestartRegistry";
 
 /** The slice of the device manager the daemon's disconnect monitor probes. */

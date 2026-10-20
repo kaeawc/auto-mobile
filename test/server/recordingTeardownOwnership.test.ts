@@ -3,13 +3,13 @@ import { promises as fsPromises } from "node:fs";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/features/video";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
-import * as recordingCleanup from "../../src/server/recordingSessionCleanup";
+import * as recordingCleanup from "../../src/daemon/recordingSessionCleanup";
 import { sequenceBackoff } from "../../src/utils/Backoff";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import {
   getVideoRecordingMetadata,
   resetVideoRecordingManagerDependencies,
@@ -19,7 +19,7 @@ import {
   markVideoRecordingIncomplete,
   interruptVideoRecording,
   VideoRecordingTeardownUnconfirmedError,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";

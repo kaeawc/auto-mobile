@@ -61,7 +61,7 @@ async function insert(recorder: string | null, ownerSessionUuid?: string) {
 import {
   redriveUnconfirmedCaptureTeardowns,
   type RecordingTeardownRedriveDeps,
-} from "../../src/server/recordingTeardownRedrive";
+} from "../../src/daemon/recordingTeardownRedrive";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 

@@ -1,6 +1,7 @@
+import { readGuardFile } from "./astGuard";
 import ts from "typescript";
-import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
 import { join } from "node:path";
 import {
   findViolationsInSource,
@@ -47,13 +48,17 @@ function stripComments(source: string): string {
 // primed in beforeAll — which the JUnit reporter excludes from per-test time.
 const commentFreeCache = new Map<string, string>();
 const parsedCache = new Map<string, ts.SourceFile>();
+afterAll(() => {
+  parsedCache.clear();
+  commentFreeCache.clear();
+});
 
 function commentFreeSource(relativePath: string): string {
   const cached = commentFreeCache.get(relativePath);
   if (cached !== undefined) {
     return cached;
   }
-  const stripped = stripComments(readFileSync(join(ROOT, relativePath), "utf8"));
+  const stripped = stripComments(readGuardFile(join(ROOT, relativePath)));
   commentFreeCache.set(relativePath, stripped);
   return stripped;
 }
@@ -65,7 +70,7 @@ function parsedSource(relativePath: string): ts.SourceFile {
   }
   const source = ts.createSourceFile(
     relativePath,
-    readFileSync(join(ROOT, relativePath), "utf8"),
+    readGuardFile(join(ROOT, relativePath)),
     ts.ScriptTarget.Latest,
     /* setParentNodes */ true,
   );
@@ -392,19 +397,19 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
   });
 
   test("has a production check with documented exceptions", () => {
-    const source = readFileSync(join(ROOT, CHECK), "utf8");
+    const source = readGuardFile(join(ROOT, CHECK));
     expect(source).toContain("const EXCEPTIONS = new Map<string, string>([");
     expect(source).toContain("IosCtrlProxyProcessClient.ts");
-    expect(readFileSync(join(ROOT, "package.json"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, "package.json"))).toContain(
       "check:ios-ctrl-proxy-process-boundary",
     );
-    expect(readFileSync(join(ROOT, "scripts/all_fast_validate_checks.sh"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, "scripts/all_fast_validate_checks.sh"))).toContain(
       "ios-ctrl-proxy-process-boundary",
     );
-    expect(readFileSync(join(ROOT, "turbo.json"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, "turbo.json"))).toContain(
       '"check:ios-ctrl-proxy-process-boundary"',
     );
-    expect(readFileSync(join(ROOT, ".github/workflows/pull_request.yml"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, ".github/workflows/pull_request.yml"))).toContain(
       "Check iOS CtrlProxy process execution boundary",
     );
   });

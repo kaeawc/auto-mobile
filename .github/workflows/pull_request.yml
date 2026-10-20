@@ -586,7 +586,7 @@ jobs:
             webrtc:
               - 'src/features/webrtc/**'
               - 'src/features/screen-stream/**'
-              - 'src/server/webrtcStreamManager.ts'
+              - 'src/daemon/webrtcStreamManager.ts'
               - 'src/daemon/webrtc*'
               - 'src/daemon/videoStreamSocket*'
               - 'src/daemon/videoStreamFraming.ts'

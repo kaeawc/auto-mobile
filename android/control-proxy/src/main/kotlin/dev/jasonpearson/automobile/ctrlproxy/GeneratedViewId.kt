@@ -19,13 +19,16 @@ internal object GeneratedViewId {
       override fun initialValue(): MessageDigest = MessageDigest.getInstance("SHA-256")
     }
 
+  // Output offsets of the 8-4-4-4-12 group separators.
+  private val DASH_OFFSETS = intArrayOf(8, 13, 18, 23)
+
   fun fromPath(path: String): String {
     // digest(input) resets the thread's digest after computing the hash.
     val bytes = digests.get()!!.digest(path.toByteArray())
     val chars = CharArray(36)
     var offset = 0
     for (index in 0 until 16) {
-      if (offset == 8 || offset == 13 || offset == 18 || offset == 23) {
+      if (offset in DASH_OFFSETS) {
         chars[offset++] = '-'
       }
       appendHexByte(bytes[index], chars, offset)

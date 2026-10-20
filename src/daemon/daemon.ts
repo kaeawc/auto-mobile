@@ -126,7 +126,6 @@ export type {
   DaemonProcessGenerationTokenProvider,
 };
 
-/** Composes authenticated HTTP MCP ingress, control sockets, state and lifecycle services. */
 export class Daemon {
   private readonly httpToken: DaemonHttpTokenLifecycle;
   private pidFileWritten: boolean = false;

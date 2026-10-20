@@ -240,6 +240,13 @@ export interface SimCtl {
     options?: { bypassCache?: boolean; signal?: AbortSignal },
   ): Promise<DeviceInfo[]>;
 
+  /** Fresh raw device row, without enrichment or caching; absent/ambiguous UDIDs return undefined. */
+  readSimulatorTarget(
+    udid: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<AppleDevice | undefined>;
+
   /**
    * Get the list of booted simulator UDIDs
    * @returns Promise with an array of booted devices
@@ -620,4 +627,15 @@ export function simulatorModel(
   profile: SimulatorDeviceTypeProfile | null,
 ): string | undefined {
   return model ?? profile?.modelIdentifier ?? undefined;
+}
+
+/** The single raw row for a UDID across runtimes; absent or ambiguous UDIDs return undefined. */
+export function findUniqueSimulatorRow(
+  listing: SimulatorList,
+  udid: string,
+): AppleDevice | undefined {
+  const rows = Object.entries(listing.devices).flatMap(([runtime, devices]) =>
+    devices.filter((device) => device.udid === udid).map((device) => ({ ...device, runtime })),
+  );
+  return rows.length === 1 ? rows[0] : undefined;
 }

@@ -10,6 +10,8 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Base64
 import androidx.core.app.NotificationCompat
+import androidx.core.graphics.scale
+import androidx.core.net.toUri
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
@@ -225,9 +227,7 @@ object AutoMobileNotifications {
         putExtra(EXTRA_NOTIFICATION_ID, notificationId)
       }
 
-    val flags =
-      PendingIntent.FLAG_UPDATE_CURRENT or
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+    val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
     val pendingIntent =
       PendingIntent.getBroadcast(context, action.actionId.hashCode(), intent, flags)
@@ -285,7 +285,7 @@ object AutoMobileNotifications {
   private fun loadContentBitmap(context: Context, uri: String): Bitmap? {
     return try {
       decodeBitmapFromStream(
-        context.contentResolver.openInputStream(android.net.Uri.parse(uri)),
+        context.contentResolver.openInputStream(uri.toUri()),
       )
     } catch (e: Exception) {
       // Content providers belong to other apps and can fail with arbitrary runtime exceptions.
@@ -347,6 +347,6 @@ object AutoMobileNotifications {
     val ratio = min(maxDim.toFloat() / width, maxDim.toFloat() / height)
     val newWidth = (width * ratio).roundToInt().coerceAtLeast(1)
     val newHeight = (height * ratio).roundToInt().coerceAtLeast(1)
-    return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+    return bitmap.scale(newWidth, newHeight, true)
   }
 }

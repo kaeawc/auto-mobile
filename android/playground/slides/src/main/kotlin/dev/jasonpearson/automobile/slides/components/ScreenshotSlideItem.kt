@@ -33,8 +33,8 @@ import dev.jasonpearson.automobile.slides.model.SlideContent
  */
 @Composable
 fun ScreenshotSlideItem(
-  content: SlideContent.Screenshot = SlideContent.Screenshot(),
   modifier: Modifier = Modifier,
+  content: SlideContent.Screenshot = SlideContent.Screenshot(),
   captionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
   forceTheme: Boolean? = null,
   // For testing - null uses system theme,

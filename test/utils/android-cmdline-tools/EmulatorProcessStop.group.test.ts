@@ -100,6 +100,9 @@ test("own group generation change after TERM stops waiting without escalation", 
 });
 test("generation capture follows group proof and sends TERM before yielding", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   const f = fixture(generation);
   const order: string[] = [];
   f.signaler.resolveOwnGroup = async () => {
@@ -135,6 +138,9 @@ test("generation capture follows group proof and sends TERM before yielding", as
 });
 test("absent group proof skips generation capture and every signal", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   const f = fixture(generation);
   f.signaler.probe = { kind: "absent" };
   expect(await f.stopper.stop(target, { deadlineMs: 30_000 })).toEqual({

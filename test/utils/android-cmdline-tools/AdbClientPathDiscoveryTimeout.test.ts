@@ -57,7 +57,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
         }
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
-          timeoutMs,
+          timeoutMs ?? 0,
         );
       });
 
@@ -150,7 +150,7 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
         }
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
-          timeoutMs,
+          timeoutMs ?? 0,
         );
       });
     };

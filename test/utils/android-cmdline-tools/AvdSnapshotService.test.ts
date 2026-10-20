@@ -10,6 +10,10 @@ import {
   FileAvdConfigReader,
   type AvdDirectoryResolver,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
+import {
+  AndroidEmulatorClient,
+  type AndroidEmulator,
+} from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { AvdSnapshotService } from "../../../src/utils/android-cmdline-tools/AvdSnapshotService";
 import { InMemoryEmulatorConsoleBusyRegistry } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 import {
@@ -326,15 +330,18 @@ describe("AvdSnapshotService (#6490)", () => {
     const sut = new AvdSnapshotService(
       new FakeDirectories({}, {}),
       new FakeAvdDirectories(new Set()),
-      {
-        getBootedDevices: async () => {
+      new (class extends AndroidEmulatorClient implements AndroidEmulator {
+        override async getBootedDevices(): Promise<BootedDevice[]> {
           throw new Error("pre-delete identity confirmation must not discover every emulator");
-        },
-        resolveAvdNameForSerial: async (serial, options) => {
+        }
+        override async resolveAvdNameForSerial(
+          serial: string,
+          options: { signal?: AbortSignal; timeoutMs: number },
+        ) {
           probes.push({ serial, timeoutMs: options.timeoutMs, signal: options.signal });
           return "am-api36";
-        },
-      },
+        }
+      })(),
       adb.factory,
     );
 

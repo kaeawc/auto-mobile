@@ -310,7 +310,7 @@ ensure_dependencies() {
 
   # Source environment changes (PATH, NVM_DIR, ANDROID_HOME)
   if [[ -f "${env_file}" ]]; then
-    # shellcheck disable=SC1090
+    # shellcheck disable=SC1090 # install.sh generates this temporary environment file at runtime.
     source "${env_file}"
     rm -f "${env_file}"
   fi

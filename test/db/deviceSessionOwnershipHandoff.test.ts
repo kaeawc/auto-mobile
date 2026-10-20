@@ -70,9 +70,6 @@ describe("liveness handoff through the real repository without a schema change",
   test.each(["heartbeat"])(
     "released %s row remains unowned across two rehydrations",
     async (policy) => {
-      if (policy === "cli") {
-        manager.adoptCliLivenessPolicy("handoff", 60_000);
-      }
       expect(await manager.releaseLivenessOwnership("handoff", "owner")).toBe("released");
       expect(await repo.getSession("handoff")).toMatchObject({ liveness_owner_token: null });
       for (let restart = 0; restart < 2; restart++) {
@@ -158,9 +155,6 @@ describe("liveness handoff through the real repository without a schema change",
   test.each(["heartbeat"])(
     "a former-owner keeper tick re-adopts a released %s row after restart",
     async (policy) => {
-      if (policy === "cli") {
-        manager.adoptCliLivenessPolicy("handoff", 60_000);
-      }
       expect(await manager.releaseLivenessOwnership("handoff", "owner")).toBe("released");
       await rehydrate();
       expect(manager.getSession("handoff")?.livenessOwnerToken).toBeUndefined();

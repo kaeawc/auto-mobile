@@ -202,7 +202,7 @@ describe("RealEmulatorConsoleClient", () => {
     transport.nextOutput = "Android Console\r\nOK\r\nOK\r\nKO: some reason\r\n";
     const error = await client.gsmCall("5551234567").catch((caught: Error) => caught);
     if (!(error instanceof Error)) {
-      throw new Error("Expected console failure");
+      throw new Error("Expected console command to fail");
     }
     expect(error.message).toContain("some reason");
     expect(error.message).not.toContain("\r");

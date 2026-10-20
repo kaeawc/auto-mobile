@@ -80,7 +80,14 @@ internal class WindowMetricsDisplayInsetsProvider(
     return try {
       val windowInsets = windowInsetsFor(displayId) ?: return unavailableInsets()
       observationInsetsFromWindowInsets(windowInsets, screenDimensions)
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get system insets for display $displayId", e)
+      unavailableInsets()
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get system insets for display $displayId", e)
+      unavailableInsets()
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to get system insets for display $displayId", e)
       unavailableInsets()
     }

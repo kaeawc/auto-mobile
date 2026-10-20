@@ -82,8 +82,12 @@ class LaunchCancellationRethrowTest {
 
     // Four actions and two broadcast helpers; the bodyless sender declaration is skipped.
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertEquals(3, LaunchCancellationScanner.scan(withoutRethrow).violations.size)
+    assertActionsUseFailureHelper(
+      source,
+      "withCaPolicyFailures",
+      "performInstallCaCertificate",
+      "performRemoveCaCertificate",
+    )
   }
 
   @Test
@@ -92,8 +96,13 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertEquals(3, LaunchCancellationScanner.scan(withoutRethrow).violations.size)
+    assertActionsUseFailureHelper(
+      source,
+      "withSettingsFailures",
+      "performSettingsRead",
+      "performSettingsWrite",
+      "performSettingsList",
+    )
   }
 
   @Test
@@ -102,8 +111,53 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertTrue(LaunchCancellationScanner.scan(withoutRethrow).violations.isNotEmpty())
+    assertActionsUseFailureHelper(
+      source,
+      "withPackageFailures",
+      "performInstalledPackages",
+      "performPackageInfo",
+      "performLaunchIntent",
+    )
+  }
+
+  private fun assertActionsUseFailureHelper(
+    source: String,
+    helperName: String,
+    vararg actionNames: String,
+  ) {
+    val code = KotlinSourceScan.maskLiteralsAndComments(source)
+    for (actionName in actionNames) {
+      val declaration = code.indexOf("suspend fun $actionName(")
+      assertTrue("$actionName must remain a scanned suspend action", declaration >= 0)
+      val paramsOpen = code.indexOf('(', declaration)
+      val paramsEnd = KotlinSourceScan.matchParen(code, paramsOpen)
+      val bodyOpen = code.indexOf('{', paramsEnd)
+      val body = code.substring(bodyOpen, KotlinSourceScan.matchBrace(code, bodyOpen))
+      assertEquals(
+        "$actionName must route its platform work through $helperName",
+        1,
+        Regex("\\b$helperName\\s*\\(").findAll(body).count(),
+      )
+    }
+    assertFailureHelperRethrowsCancellation(source, helperName)
+  }
+
+  private fun assertFailureHelperRethrowsCancellation(source: String, helperName: String) {
+    val declaration = source.indexOf("private inline fun <T> $helperName(")
+    check(declaration >= 0) { "$helperName not found" }
+    val expression = source.indexOf("=\n", declaration)
+    check(expression >= 0) { "$helperName expression body not found" }
+    // These final, inline helpers execute in their caller's coroutine. Exercise their actual catch
+    // clauses with the scanner's broad-catch model: IllegalStateException also includes
+    // cancellation.
+    val body = source.substring(expression + 1).replace("IllegalStateException", "Exception")
+    val coroutine = "scope.launch { $body }"
+    assertTrue(LaunchCancellationScanner.scan(coroutine).violations.isEmpty())
+    assertEquals(
+      "removing the helper's cancellation rethrow must expose a swallowing catch",
+      1,
+      LaunchCancellationScanner.scan(coroutine.replace("throw e", "Unit")).violations.size,
+    )
   }
 
   @Test
@@ -1131,18 +1185,23 @@ object LaunchCancellationScanner {
       // Walk back over the contiguous catch chain (only whitespace between clauses) this broad
       // catch
       // belongs to, looking for a rethrowing CancellationException catch bound to the same `try`.
-      var guarded = false
-      var j = idx - 1
-      while (j >= 0 && body.substring(catches[j].blockEnd, catches[j + 1].start).isBlank()) {
-        if (catches[j].simpleType == "CancellationException" && catches[j].rethrows) {
-          guarded = true
-          break
-        }
-        j--
-      }
+      val guarded = hasCancellationGuard(body, catches, idx)
       if (!guarded) offsets.add(c.start)
     }
     return offsets
+  }
+
+  private fun hasCancellationGuard(body: String, catches: List<CatchClause>, idx: Int): Boolean {
+    var guarded = false
+    var j = idx - 1
+    while (j >= 0 && body.substring(catches[j].blockEnd, catches[j + 1].start).isBlank()) {
+      if (catches[j].simpleType == "CancellationException" && catches[j].rethrows) {
+        guarded = true
+        break
+      }
+      j--
+    }
+    return guarded
   }
 
   /**
@@ -1169,32 +1228,43 @@ object LaunchCancellationScanner {
    * still reads as one statement per top-level line.
    */
   private fun blankNestedGroups(s: String): String {
-    val out = StringBuilder(s.length)
-    var brace = 0
-    var paren = 0
-    for (c in s) {
+    val nesting = GroupNesting()
+    return buildString(s.length) {
+      for (c in s) append(nesting.mask(c))
+    }
+  }
+
+  private class GroupNesting {
+    private var brace = 0
+    private var paren = 0
+
+    fun mask(c: Char): Char =
       when {
         c == '{' -> {
-          out.append(if (brace == 0 && paren == 0) '{' else ' ')
+          val visible = brace == 0 && paren == 0
           brace++
+          if (visible) '{' else ' '
         }
         c == '}' -> {
           brace--
-          out.append(if (brace == 0 && paren == 0) '}' else ' ')
+          if (brace == 0 && paren == 0) '}' else ' '
         }
-        brace > 0 -> out.append(' ')
-        c == '(' -> {
-          out.append(if (paren == 0) '(' else ' ')
-          paren++
-        }
-        c == ')' -> {
-          paren--
-          out.append(if (paren == 0) ')' else ' ')
-        }
-        paren > 0 -> out.append(' ')
-        else -> out.append(c)
+        brace > 0 -> ' '
+        else -> maskParentheses(c)
       }
-    }
-    return out.toString()
+
+    private fun maskParentheses(c: Char): Char =
+      when (c) {
+        '(' -> {
+          val visible = paren == 0
+          paren++
+          if (visible) '(' else ' '
+        }
+        ')' -> {
+          paren--
+          if (paren == 0) ')' else ' '
+        }
+        else -> if (paren > 0) ' ' else c
+      }
   }
 }

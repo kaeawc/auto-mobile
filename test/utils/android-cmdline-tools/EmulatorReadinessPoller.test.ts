@@ -1,6 +1,6 @@
-import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice, type ExecResult } from "../../../src/models";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import {
   DefaultEmulatorReadinessPoller,
   resolveEmulatorPollingInterval,

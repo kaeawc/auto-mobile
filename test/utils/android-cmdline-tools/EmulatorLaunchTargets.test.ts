@@ -1,11 +1,11 @@
+import type { HostChildProcess as ChildProcess } from "../../../src/utils/HostCommandExecutor";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
-import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
 import { describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { DefaultEmulatorLaunchTargets } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchTargets";
 import type { EmulatorDeviceIdReservation } from "../../../src/utils/android-cmdline-tools/EmulatorPortReservations";
 
-function child(): HostChildProcess {
+function child(): ChildProcess {
   return new FakeChildProcess();
 }
 
@@ -14,7 +14,7 @@ function booted(name: string, deviceId: string): BootedDevice {
 }
 
 function targets() {
-  const recorded: { child: HostChildProcess; reservation: EmulatorDeviceIdReservation }[] = [];
+  const recorded: { child: ChildProcess; reservation: EmulatorDeviceIdReservation }[] = [];
   const subject = new DefaultEmulatorLaunchTargets(() => ({
     recordReservedEmulatorDeviceId: (process, reservation) => {
       recorded.push({ child: process, reservation });

@@ -22,12 +22,7 @@ internal object ImeGraphemes {
     var start = 0
     while (start < text.length) {
       var end = nextBoundary(breaks, start)
-      while (
-        end < text.length &&
-          (Character.codePointAt(text, end).isExtend() ||
-            Character.codePointBefore(text, end) == ZERO_WIDTH_JOINER ||
-            text.hasOddRegionalIndicatorRunBefore(end))
-      ) {
+      while (end < text.length && text.joinsPreviousGraphemeAt(end)) {
         end = nextBoundary(breaks, end)
       }
       graphemes += text.substring(start, end)
@@ -47,11 +42,11 @@ internal object ImeGraphemes {
     while (start > 0) {
       val firstCodePoint = Character.codePointAt(text, start)
       val previousCodePoint = Character.codePointBefore(text, start)
-      if (
+      val joinsPreviousGrapheme =
         firstCodePoint.isExtend() ||
           previousCodePoint == ZERO_WIDTH_JOINER ||
           (firstCodePoint.isRegionalIndicator() && text.hasOddRegionalIndicatorRunBefore(start))
-      ) {
+      if (joinsPreviousGrapheme) {
         start = previousBoundary(breaks, start)
       } else {
         break
@@ -59,6 +54,11 @@ internal object ImeGraphemes {
     }
     return start
   }
+
+  private fun String.joinsPreviousGraphemeAt(end: Int): Boolean =
+    Character.codePointAt(this, end).isExtend() ||
+      Character.codePointBefore(this, end) == ZERO_WIDTH_JOINER ||
+      hasOddRegionalIndicatorRunBefore(end)
 
   private fun characterBreaks(text: String): BreakIterator =
     BreakIterator.getCharacterInstance(Locale.ROOT).apply { setText(text) }

@@ -89,6 +89,9 @@ describe("checkIosSimulatorFleetCost", () => {
     const result = await checkIosSimulatorFleetCost({
       platform: () => "darwin",
       createFleetSource: () => ({
+        collectFresh: async () => {
+          throw new Error("boom");
+        },
         collect: async () => {
           throw new Error("boom");
         },

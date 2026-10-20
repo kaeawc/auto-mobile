@@ -210,12 +210,11 @@ steps:
   it("matches the live dragAndDrop endpoint and recursive container shapes", () => {
     const live = toolDefinitions.find((tool) => tool.name === "dragAndDrop")?.inputSchema;
     const endpoint = live?.properties?.source?.anyOf?.[0];
-    expect(planSchema.$defs.dragAndDropSelector.properties.container).toEqual({
-      ...endpoint?.properties?.container,
-      $ref: "#/$defs/dragAndDropContainer",
-    });
-    expect(planSchema.$defs.dragAndDropSelector.properties.selectionStrategy).toEqual(
-      endpoint?.properties?.selectionStrategy,
+    expect({ ...endpoint?.properties?.container, $ref: "#/$defs/dragAndDropContainer" }).toEqual(
+      planSchema.$defs.dragAndDropSelector.properties.container,
+    );
+    expect(endpoint?.properties?.selectionStrategy).toEqual(
+      planSchema.$defs.dragAndDropSelector.properties.selectionStrategy,
     );
     const container = JSON.parse(
       JSON.stringify(live?.$defs?.__schema0).replaceAll(

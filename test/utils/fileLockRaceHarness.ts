@@ -445,7 +445,7 @@ export function checkMutation(
     f.fs.failure = failure;
   }
   const operations = f.fs.operations.slice(start);
-  if (sampledMarker && !failedOperations.has(`readText:${pending.value?.path}`)) {
+  if (sampledMarker && !pending.done && !failedOperations.has(`readText:${pending.value.path}`)) {
     actor.restoreOwner = actors.findLast(
       (other) =>
         other.publicationIno === sampledMarker.ino ||

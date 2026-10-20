@@ -25,14 +25,6 @@
     <ID>LargeClass:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest</ID>
     <ID>LargeClass:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest</ID>
     <ID>LargeClass:WebSocketServerTest.kt:WebSocketServerTest</ID>
-    <ID>LongMethod:BroadcastGuardAdoptionTest.kt:BroadcastGuardScanner$fun scan: ScanResult</ID>
-    <ID>LongMethod:CommandAdvertisementTest.kt:CommandAdvertisementTest$@Test fun `complete advertisement contains every sealed request on each supported API`</ID>
-    <ID>LongMethod:ConfigurableTypingPolicyTest.kt:ConfigurableTypingPolicyTest$@Test fun `composing profile composes words and commits whole emoji graphemes`</ID>
-    <ID>LongMethod:CorrelatedErrorDriftGuardTest.kt:CorrelatedErrorDriftScanner$private fun stripComments: String</ID>
-    <ID>LongMethod:HierarchyDebouncerSuppressionTest.kt:HierarchyDebouncerSuppressionTest$private fun TestScope.verifyOverlappingCalls</ID>
-    <ID>LongMethod:KotlinSourceScan.kt:KotlinSourceScan$fun maskLiteralsAndComments: String</ID>
-    <ID>LongMethod:PinchGeometryTest.kt:PinchGeometryTest$@Test fun `golden vectors match iOS parity`</ID>
-    <ID>LongMethod:PinchGeometryTest.kt:PinchGeometryTest$@Test fun `path golden vectors match iOS parity`</ID>
     <ID>LongMethod:PrototypeGestureTest.kt:PrototypeGestureTest$@Test fun `repeat binding carries all three lists through every gesture node variant`</ID>
     <ID>LongMethod:PrototypeMaterialComponentsTest.kt:PrototypeMaterialComponentsTest$@Test fun `each new node maps its role label and bound state`</ID>
     <ID>LongMethod:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest$@Test fun `metadata attributes two then three surfaces and survives middle dismissal`</ID>
@@ -43,17 +35,6 @@
     <ID>LongMethod:PrototypeScrollMeasurementTest.kt:PrototypeScrollMeasurementTest$private fun measure</ID>
     <ID>LongMethod:PrototypeSelectorCompatibilityTest.kt:PrototypeSelectorCompatibilityTest$@Test fun `acceptance selectors preserve tagged visuals text fields and button labels`</ID>
     <ID>LongMethod:PrototypeSemanticsNodeCountTest.kt:PrototypeSemanticsNodeCountTest$@Test fun `decorative visuals disappear and only safe single-text rows collapse`</ID>
-    <ID>LongMethod:QueuedWebSocketMessageHandlerIntegrationTest.kt:QueuedWebSocketMessageHandlerIntegrationTest$@Test fun `detached commit cancellation bypasses slow unrelated command and preserves its result`</ID>
-    <ID>LongMethod:QueuedWebSocketMessageHandlerIntegrationTest.kt:QueuedWebSocketMessageHandlerIntegrationTest$@Test fun `real read loops use stable distinct keys and preserve connection order`</ID>
-    <ID>LongMethod:SetTextAcknowledgementOrderTest.kt:SetTextAcknowledgementOrderTest$@Test fun `refresh replacements are validated before reading text and remembered state has hooks`</ID>
-    <ID>LongMethod:TapGestureCompletionWiringTest.kt:TapGestureCompletionWiringTest$@Test fun `tap settles off main and queues hierarchy before tap result`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `async action failure error response is sent only to originating connection`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `decode error response is sent only to originating connection`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `handler exception error response is sent only to originating connection`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `hierarchy reply clears owner before a duplicate error`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `observerSessionGeneration is stable within a session and advances after it empties`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `raw async response drops later orphaned correlated frames`</ID>
-    <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `typed async response drops later orphaned correlated frames`</ID>
     <ID>LongParameterList:PrototypeScreenshotComparator.kt:PrototypeScreenshotComparator$fun compare: Result</ID>
     <ID>LongParameterList:RetrofitPrototypeHttpClientTest.kt:RetrofitPrototypeHttpClientTest$private fun request</ID>
   </CurrentIssues>

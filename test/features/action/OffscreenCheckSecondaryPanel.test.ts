@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
@@ -169,8 +170,7 @@ async function runTapOn(bounds: Element["bounds"]) {
     viewHierarchy: capture,
   });
   const points: Array<{ x: number; y: number }> = [];
-  tapOn.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tapOn.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tapOn.refreshViewHierarchy = async () => capture;

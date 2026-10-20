@@ -80,7 +80,8 @@ describe("IosCtrlProxyBuilder", function () {
     const cached = path.join(tempDir, "stale.xctestrun");
     builder["cachedXctestrunPath"].set("any", cached);
     const access = spyOn(fs, "access").mockRejectedValue(new Error("removed"));
-    const listing = spyOn(fsPromises, "readdir").mockResolvedValue(["fresh.xctestrun"]);
+    const directoryReader: { readdir: (target: string) => Promise<string[]> } = fsPromises;
+    const listing = spyOn(directoryReader, "readdir").mockResolvedValue(["fresh.xctestrun"]);
     const log = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       expect(await builder.getXctestrunPath()).toBe(

@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import type { Kysely } from "kysely";
 import { isTerminalReleaseReason } from "../../src/daemon/releaseReasons";
 import {
@@ -166,7 +167,7 @@ class MemoryJournal implements TerminalReleaseJournal {
   }
 }
 
-type ReleaseReason = string;
+type ReleaseReason = SessionReleaseReason;
 
 /** One issue of the session id: the session the manager held for it, and what was asked of it. */
 interface Incarnation {
@@ -175,7 +176,7 @@ interface Incarnation {
   /** The release reasons announced for it, in order. */
   notified: string[];
   /** The release reasons asked of it. */
-  requested: Set<ReleaseReason>;
+  requested: Set<string>;
   /** Releases whose persistence failed: their owner issues them again (see `retryFailedReleases`). */
   failedReleases: Set<ReleaseReason>;
   deviceLossCommitted: boolean;

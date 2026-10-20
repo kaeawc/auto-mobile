@@ -19,6 +19,9 @@ test("batch renders product-validated host and Android/iOS request contracts", (
   for (const client of batch.clients) {
     const request = renderClientRequest(client, `batch-${client.name}-1`);
     expect(parseSessionConfig(JSON.parse(JSON.stringify(request)))).toEqual(request);
+    if (client.hardware !== "phone" && client.hardware !== "tablet" && client.hardware !== "duo") {
+      throw new Error("fixture must use a hardware archetype");
+    }
     expect(request.device.hardware).toEqual({ kind: "archetype", archetype: client.hardware });
     expect(request.device.os).toEqual({ kind: "omitted" });
   }
@@ -167,8 +170,8 @@ test("injected identities number attempts independently per client", () => {
 test("catalog classification passes through to the rendered host config", () => {
   const input = brokerBatchInput();
   const host = renderHostConfig(parseBrokerBatch(input));
-  expect(host.androidProfileArchetypes).toEqual(input.androidProfileArchetypes);
-  expect(host.iosClassifications).toEqual(input.iosClassifications);
+  expect(host.androidProfileArchetypes).toEqual({ medium_phone: "phone", medium_tablet: "tablet" });
+  expect(input.iosClassifications).toEqual(host.iosClassifications!);
 });
 
 test("omitted classification keys fall back to product defaults", () => {

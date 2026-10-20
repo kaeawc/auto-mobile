@@ -18,6 +18,7 @@ import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -41,6 +42,15 @@ fun ApplicationScope.AutoMobileSystemTray(
   isWindowVisible: Boolean,
   onToggleWindow: () -> Unit,
   onQuit: () -> Unit,
+) = SystemTrayWithDispatcher(isConnected, isWindowVisible, onToggleWindow, onQuit)
+
+@Composable
+private fun ApplicationScope.SystemTrayWithDispatcher(
+  isConnected: Boolean,
+  isWindowVisible: Boolean,
+  onToggleWindow: () -> Unit,
+  onQuit: () -> Unit,
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
   // Start from the safe fallback and probe the real appearance off the UI thread, so a slow or
   // hung `defaults`/`reg` can never stall first composition (the tray/window still appear). The
@@ -48,7 +58,7 @@ fun ApplicationScope.AutoMobileSystemTray(
   var darkMenuBar by remember { mutableStateOf(DEFAULT_DARK_MENU_BAR) }
   LaunchedEffect(Unit) {
     while (true) {
-      darkMenuBar = withContext(Dispatchers.IO) { detectDarkMenuBar() }
+      darkMenuBar = withContext(ioDispatcher) { detectDarkMenuBar() }
       delay(APPEARANCE_POLL_INTERVAL_MS)
     }
   }

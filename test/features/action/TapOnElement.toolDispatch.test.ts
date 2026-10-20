@@ -110,9 +110,10 @@ async function runTap() {
     effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
     observation: current,
   });
+  const tapOptions = { text: "Continue", action: "tap" as const, skipUiStability: true };
   const result = await runWithToolDispatchReporter(
     () => reports.push(timer.now()),
-    () => tap.execute({ text: "Continue", action: "tap", skipUiStability: true }),
+    () => tap.execute(tapOptions),
   );
   return { result, reports, taps };
 }

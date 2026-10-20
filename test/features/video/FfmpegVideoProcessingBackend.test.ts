@@ -126,10 +126,8 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     mockDevice = {
       platform: "android",
       deviceId: "test-device",
-      deviceType: "emulator",
-      sdkVersion: 33,
-      booted: true,
-    } as BootedDevice;
+      name: "Test Android",
+    } satisfies BootedDevice;
 
     mockConfig = {
       recordingId: "test-recording",
@@ -1617,7 +1615,7 @@ describe("waitForRecordingFileReady - post-exit file finalization", function () 
   ])("pins the complete readiness timeout diagnostic: $observed", async ({ sizes, observed }) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const { probe, calls } = scriptedProbe(sizes);
+    const { probe, calls } = scriptedProbe([...sizes]);
     const filePath = path.join("recordings", "raw.mov");
 
     await expect(

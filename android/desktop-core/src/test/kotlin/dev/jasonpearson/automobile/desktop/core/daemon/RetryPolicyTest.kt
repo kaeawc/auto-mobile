@@ -146,7 +146,7 @@ class RetryPolicyTest {
     assertFailsWith<RuntimeException> {
       retryWithBackoffBlocking(policy) {
         attempts++
-        throw RuntimeException("fail")
+        throw IllegalStateException("fail")
       }
     }
     val elapsed = System.currentTimeMillis() - start

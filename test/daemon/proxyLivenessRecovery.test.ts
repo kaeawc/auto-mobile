@@ -664,9 +664,8 @@ describe("a proxy never stops or restarts the daemon (#10053)", () => {
   });
 
   test("the proxy's recovery methods never reach the daemon manager", () => {
-    const recovery = factsOf("src/daemon/daemonMcpProxy.ts", {
-      between: ["createLivenessRecovery", "heartbeatHeldSession"],
-    });
+    // daemonMcpProxy recovery now lives in this collaborator.
+    const recovery = factsOf("src/daemon/mcpProxy/ProxyLiveness.ts");
 
     expect(recovery.identifierNames.filter((name) => lifecycleIdentifier.test(name))).toEqual([]);
     for (const call of ["restart", "kill"]) {

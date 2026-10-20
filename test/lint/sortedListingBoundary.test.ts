@@ -63,6 +63,7 @@ export function findRawListings(source: string, file = "fixture.ts"): number[] {
         (callee.type === "MemberExpression" &&
           callee.object.type === "Identifier" &&
           callee.object.name === "Bun" &&
+          callee.property.type === "Identifier" &&
           callee.property.name === "Glob")
       ) {
         lines.add(lineOf(node.start));

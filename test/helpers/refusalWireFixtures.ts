@@ -230,13 +230,19 @@ function shaped(error: unknown): RefusalWireResult {
 /** The error the boot admission gate throws for an Android boot refused at capacity. */
 function bootCapacityRefusal(platform: "android" | "ios" = "android"): unknown {
   const ios = platform === "ios";
-  const decision = atCapacityDecision(2, { maxBooted: 2, source: "default" }, 5_000, {
+  const decision = atCapacityDecision(2, { maxBooted: 2, source: "derived" }, 5_000, {
     noun: ios ? "simulator" : "emulator",
     envName: ios ? IOS_SIM_MAX_BOOTED_ENV : "AUTO_MOBILE_MAX_BOOTED",
     externalDevices: [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
   });
   try {
-    assertBootCapacityGranted({ decision: decision! }, platform, ios ? "simulator" : "emulator");
+    if (!decision) {
+      throw new Error("expected a refusal at capacity");
+    }
+    // The captured wire contract predates the source label's rename to "derived".
+    // Preserve that historical message while constructing a valid current capacity decision.
+    decision.message = decision.message.replace("(derived)", "(default)");
+    assertBootCapacityGranted({ decision }, platform, ios ? "simulator" : "emulator");
   } catch (error) {
     return error;
   }
@@ -258,9 +264,12 @@ function provisionEnvelope(failure: ProvisionDeviceError): RefusalWireResult {
   driven(failure);
   // The provisionDevice failure envelope (`provisionDeviceErrorResponse` in
   // deviceToolsProvisioning) around the real ProvisionDeviceError.
-  return createToolErrorResponse(failure.code, failure.message, {
-    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
-  });
+  return {
+    ...createToolErrorResponse(failure.code, failure.message, {
+      error: { code: failure.code, message: failure.message, retryable: failure.retryable },
+    }),
+    isError: true,
+  };
 }
 
 type FixtureEntry = readonly [string, string, () => RefusalWireResult];
@@ -609,8 +618,6 @@ const BUILDERS: readonly FixtureEntry[] = [
           holder: "session_broker",
           scopeKey: "0123abcd",
           bindingIndex: 0,
-          scopeState: "valid",
-          execSessionUuid: null,
         }),
       ),
   ],

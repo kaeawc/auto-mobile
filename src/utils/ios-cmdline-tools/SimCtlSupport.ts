@@ -90,6 +90,12 @@ export interface AppleDeviceType {
   modelIdentifier?: string;
 }
 
+/** One coherent host catalog snapshot for exact simulator specification checks. */
+export interface SimCtlCatalog {
+  runtimes: AppleDeviceRuntime[];
+  deviceTypes: AppleDeviceType[];
+}
+
 export interface SimCtlFileSystem {
   mkdtemp(prefix: string): Promise<string>;
   writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
@@ -351,9 +357,13 @@ export interface SimCtl {
    * @param appPath - Path to the .app bundle
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @param options - `timeoutMs` is the explicit bound for this install (it kills the child). Without
-   *   one, the default command budget applies only when no request signal is in scope.
+   *   one, the default command budget applies. `signal` cancels earlier.
    */
-  installApp(appPath: string, deviceId?: string, options?: { timeoutMs?: number }): Promise<void>;
+  installApp(
+    appPath: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /**
    * Uninstall an app from the simulator

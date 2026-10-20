@@ -1,3 +1,4 @@
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../utils/deviceTimeouts";
 import type { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { InstalledPrototype, PrototypeSimctl } from "./iosPrototypeInstaller";
 export { DefaultInstallerFileSystem } from "./DefaultInstallerFileSystem";
@@ -11,7 +12,7 @@ type SimctlInstallerClient = Pick<
 export class DefaultPrototypeSimctl implements PrototypeSimctl {
   constructor(private readonly client: SimctlInstallerClient) {}
   install(udid: string, appPath: string): Promise<void> {
-    return this.client.installApp(appPath, udid);
+    return this.client.installApp(appPath, udid, { timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS });
   }
   uninstall(udid: string, bundleId: string): Promise<void> {
     return this.client.uninstallApp(bundleId, udid);

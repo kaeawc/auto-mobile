@@ -61,7 +61,7 @@ describe("ObserveScreen perf snapshot", () => {
     timer = new FakeTimer();
     monitor = new PerformanceMonitor(timer, {
       adbClientFactory: new FakeAdbClientFactory(),
-      demandProbe: { hasDemand: () => false },
+      demandProbe: { hasDemand: (_deviceId, _packageName, _platform) => false },
       serverGetter: () => ({ pushPerformanceData: () => {} }),
       perfWindowBuffer: getPerfWindowBuffer(),
       frameMetricsStore: new SdkFrameMetricsStore(),

@@ -141,6 +141,15 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
 
   /** Whether a live subscriber would receive this device/package's samples. */
   hasSubscriberForDevice(deviceId: string, packageName: string): boolean {
+    if (
+      this.suspendedRoutingLog.shouldDropFrame(
+        this.deviceSessionResolver,
+        deviceId,
+        "PerformancePush",
+      )
+    ) {
+      return false;
+    }
     const data = {
       deviceSessionUuid: this.deviceSessionResolver.resolveUuid(deviceId),
       packageName,

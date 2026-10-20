@@ -25,6 +25,7 @@ import { PlatformDeviceManager } from "../../utils/interfaces/DeviceUtils";
 import type { IosPhysicalDeviceLister } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { type AppearanceOnConnectDependencies } from "../applyAppearanceOnConnect";
+import type { BindingExclusion } from "../sessionBroker/provisioning/exclusion";
 import {
   DefaultDeviceClientProvider,
   type ObserveClientFactories,
@@ -236,6 +237,8 @@ export interface ConnectedPlatformScanOptions {
 }
 
 export interface DeviceReadinessOptions {
+  /** Refreshed only for implicit boots; defaults to the host-wide binding registry. */
+  bindingExclusion?: Pick<BindingExclusion, "refresh" | "holderOf">;
   /** Overrides {@link PHYSICAL_IOS_SCAN_BUDGET_MS}. */
   physicalIosScanBudgetMs?: number;
   appearanceOnConnectDependencies?: Partial<AppearanceOnConnectDependencies>;

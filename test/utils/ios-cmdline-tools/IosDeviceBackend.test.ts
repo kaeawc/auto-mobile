@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { join } from "node:path";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { SIMULATOR_UNINSTALL_TIMEOUT_MS } from "../../../src/utils/ios-cmdline-tools/simulatorUninstallBound";
@@ -28,6 +28,10 @@ import {
   type IosDeviceBackend,
   type IosLaunchBackend,
 } from "../../../src/utils/ios-cmdline-tools/IosDeviceBackend";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const simulatorUdid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 const physicalUdid = "00008030-001C2D3E1234567A";
@@ -475,7 +479,7 @@ describe("resolveIosInstallBackend", () => {
     await backend.installApp("/tmp/Test.app");
     expect(await backend.listApps()).toEqual(apps);
     expect(simctl.getMethodCalls("installApp")).toEqual([
-      { appPath: "/tmp/Test.app", deviceId: simulatorUdid },
+      { appPath: "/tmp/Test.app", deviceId: simulatorUdid, options: { timeoutMs: 180_000 } },
     ]);
     expect(simctl.getMethodCalls("listAppsOrThrow")).toEqual([{ deviceId: simulatorUdid }]);
     expect(physicalCalls).toEqual([]);

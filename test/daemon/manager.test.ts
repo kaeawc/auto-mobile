@@ -45,6 +45,7 @@ import type { DaemonLaunchedProcess } from "../../src/daemon/DaemonLauncher";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
+import { RESTART_ADMISSION_TIMEOUT_MS } from "../../src/daemon/manager/DaemonRestartCoordinator";
 import { ActionableError } from "../../src/models";
 import {
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
@@ -433,13 +434,17 @@ describe("DaemonManager restart", () => {
     try {
       await expect(manager.restart({}, expected)).resolves.toBe("joined");
 
-      expect(prepareSpy).toHaveBeenCalledWith("ide/prepareRestart", {
-        pid: incumbentPid,
-        startedAt: 100,
-        version: "0.0.73",
-        buildId: "incumbent-build",
-        entryScript: "/old/dist/src/index.js",
-      });
+      expect(prepareSpy).toHaveBeenCalledWith(
+        "ide/prepareRestart",
+        {
+          pid: incumbentPid,
+          startedAt: 100,
+          version: "0.0.73",
+          buildId: "incumbent-build",
+          entryScript: "/old/dist/src/index.js",
+        },
+        { timeoutMs: RESTART_ADMISSION_TIMEOUT_MS },
+      );
       expect(clientOptions).toEqual({ clientIdentity: null });
       expect(signaler.signals).toEqual([]);
       expect(livePids).toEqual(new Set([unrelatedPid]));

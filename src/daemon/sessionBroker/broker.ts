@@ -1,4 +1,5 @@
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
+import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
@@ -7,6 +8,7 @@ import {
   type SessionDeviceCatalog,
   type SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
+import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import {
@@ -129,7 +131,8 @@ export class SessionBroker {
     exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
     if (this.stopping) {
-      return Promise.reject(new ActionableError("Session broker is stopping"));
+      // Refuse before prepareOnce/failureFor: no terminal receipt prevents a successor retry.
+      return Promise.reject(new SessionBrokerStoppingError());
     }
     const controller = new AbortController();
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -429,7 +432,7 @@ export class SessionBroker {
 
   async abandon(requestId: string, ownerToken: string): Promise<SessionBrokerResult> {
     if (this.stopping) {
-      throw new ActionableError("Session broker is stopping");
+      throw new SessionBrokerStoppingError();
     }
     const abandonment = await this.options.store.abandon(requestId, this.options.owner, ownerToken);
     for (const preparation of this.preparationOwners.values()) {
@@ -618,7 +621,12 @@ export class SessionBroker {
   }
 
   async close(): Promise<void> {
-    await this.markRestartHandoff();
+    try {
+      await this.markRestartHandoff();
+    } catch (error) {
+      // Preparations are already aborted; retry the handoff after joining their native work.
+      logger.warn(`Session broker restart handoff failed: ${errorMessage(error)}`, error);
+    }
     await Promise.allSettled([...this.preparationOwners.keys()]);
     // Retry after joining preparations in case the first snapshot or an inline mark failed;
     // the store makes each mark idempotent.
@@ -645,6 +653,7 @@ export class SessionBroker {
   async markRestartHandoff(): Promise<void> {
     this.stopping = true;
     for (const preparation of this.preparationOwners.values()) {
+      // Already admitted work still fails through failureFor and retains its terminal receipt.
       preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
     const requests = await this.options.store.listRecoverableRequests();
@@ -859,6 +868,15 @@ export class SessionBroker {
       }
       return "idle";
     } catch (error) {
+      // Admission refusal leaves a healthy erased simulator shut down. Keep the durable reset
+      // pending and let recovery retry it; the consumer's release is already durable.
+      if (error instanceof BootCapacityExhaustedError) {
+        logger.warn(
+          `Session ${sessionUuid} clean release awaits boot capacity: ${errorMessage(error)}`,
+        );
+        return "pending";
+      }
+      // A failed or timed-out gate sample is not a capacity refusal and falls through to destruction.
       // Native execution/journal fences still prevent destructive work before the drain joins.
       logger.warn(
         `Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`,

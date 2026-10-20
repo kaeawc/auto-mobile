@@ -277,7 +277,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   ToolRegistry.registerDeviceAware(
     "openLink",
-    "Open URL in browser",
+    'Open URL in browser. A transient Android ADB failure returns device_transport_unavailable (retryable: true, retryAfterMs, deviceId). dispatched is false before dispatch or "unknown" after transport loss (true is reserved for confirmed dispatch). For "unknown", the link may already have opened: observe before reissuing a single-use link.',
     openLinkSchema,
     createOpenLinkHandler(deps),
     { defaultEnabled: false, outputSchema: openLinkResultSchema, ...PLAN_SKELETON },

@@ -16146,7 +16146,7 @@
   },
   {
     "name": "openLink",
-    "description": "Open URL in browser",
+    "description": "Open URL in browser. A transient Android ADB failure returns device_transport_unavailable (retryable: true, retryAfterMs, deviceId). dispatched is false before dispatch or \"unknown\" after transport loss (true is reserved for confirmed dispatch). For \"unknown\", the link may already have opened: observe before reissuing a single-use link.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -28,6 +28,11 @@ import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { ActionCall } from "../../src/features/action/ActionCall";
+import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { toolExecutionError } from "../../src/server/toolExecutionError";
 
 const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = { platform: "android", deviceId: "test", name: "Test" };
@@ -191,6 +196,54 @@ class UnobservedOpenURL extends OpenURL {
     return block(observation);
   }
 }
+
+test("single-use openLink dispatches once and preserves unknown dispatch in the tool error", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const dispatched: string[][] = [];
+  const adb = new AdbClient(
+    device,
+    async (_file: string, args: string[], _maxBuffer?: number) => {
+      dispatched.push(args);
+      // Captured adb wording: https://github.com/kaeawc/auto-mobile/issues/13822.
+      throw new Error("Command failed: adb shell am start", {
+        cause: Object.assign(new Error("Command failed: adb"), {
+          code: 1,
+          stderr: "connection terminated: read failed",
+        }),
+      });
+    },
+    { timer, retryExecutor: new DefaultRetryExecutor(timer) },
+  );
+  interactionDeps.openUrlFactory = () => new UnobservedOpenURL(device, adb, null, null, timer);
+  const url = "myapp://sign-in?token=single-use";
+  const error = await handler("openLink")(device, { url }).then(
+    () => undefined,
+    (failure: unknown) => failure,
+  );
+  expect(error).toBeInstanceOf(AdbDeviceTransportUnavailableError);
+  expect(error).toMatchObject({ dispatched: "unknown", retryable: true });
+  expect(dispatched).toHaveLength(1);
+  expect(dispatched[0].slice(-2)).toEqual([
+    "shell",
+    `am start -a android.intent.action.VIEW -d '${url}'`,
+  ]);
+  expect(timer.getSleepHistory()).toEqual([]);
+  // The registry's contextual boundary must not flatten the typed error.
+  expect(() => toolExecutionError(error, "openLink", device)).toThrow(
+    AdbDeviceTransportUnavailableError,
+  );
+  const result = shapeToolCallError(error, { toolName: "openLink", source: "MCP" });
+  expect(result.isError).toBe(true);
+  expect(JSON.parse(result.content[0].text)).toMatchObject({
+    success: false,
+    code: "device_transport_unavailable",
+    retryable: true,
+    dispatched: "unknown",
+    deviceId: device.deviceId,
+    error: expect.stringContaining("Observe before reissuing"),
+  });
+});
 class UnobservedChooser extends HandleIntentChooser {
   override observedInteraction<R extends ObservedActionResult>(
     block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,

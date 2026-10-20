@@ -46,9 +46,12 @@ class DeviceThumbnailTest {
         "d",
         source,
         sessionUuidProvider = sessionUuidProvider,
-        initialBackoffMs = 1_000L,
-        maxBackoffMs = 15_000L,
-        delayMs = { delays += it },
+        retry =
+          ScreenshotRetry(
+            initialBackoffMs = 1_000L,
+            maxBackoffMs = 15_000L,
+            delayMs = { delays += it },
+          ),
       )
     assertNotNull(shot) // recovered rather than sticking on a single failed attempt
     assertEquals(3, attempts)
@@ -79,7 +82,12 @@ class DeviceThumbnailTest {
         }
       }
     assertFailsWith<StreamSessionRejectedException> {
-      captureScreenshotWithRetry("d", source, { "session" }, delayMs = { error("must not retry") })
+      captureScreenshotWithRetry(
+        "d",
+        source,
+        { "session" },
+        retry = ScreenshotRetry(delayMs = { error("must not retry") }),
+      )
     }
     assertEquals(1, attempts)
   }

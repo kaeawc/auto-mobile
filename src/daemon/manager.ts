@@ -206,6 +206,7 @@ export class DaemonManager implements DaemonManagerLike {
     launchLogFileSystem: { openSync, closeSync },
     launchWorkingDirectory: resolveStableDaemonWorkingDirectory,
     currentBuildId: () => getCurrentBuildIdentity().buildId,
+    nextLaunchNonce: () => defaultIdGenerator.next(),
   };
 
   /**
@@ -250,6 +251,7 @@ export class DaemonManager implements DaemonManagerLike {
     this.portAvailabilityChecker = resolved.portAvailabilityChecker;
     this.retryExecutor = resolved.retryExecutor;
     this.startupLockOwnerToken = resolved.idGenerator.next();
+    this.seams.nextLaunchNonce = () => resolved.idGenerator.next();
     // Construct with the injected timer so FakeTimer controls peer probes (#6103).
     this.peerSocketReachability =
       resolved.peerSocketReachability ?? new DaemonSocketReachability({ timer: resolved.timer });
@@ -675,7 +677,7 @@ export class DaemonManager implements DaemonManagerLike {
     signal?: AbortSignal,
     shouldContinueWaiting: () => boolean = () => true,
     maxProbeDurationMs?: number,
-    launchedProcess?: { pid: number | undefined },
+    launchedProcess?: { pid: number | undefined; launchNonce?: string },
   ): Promise<boolean> {
     return this.collaborators.daemonReadiness.waitForReady(
       timeout,
@@ -730,8 +732,14 @@ export class DaemonManager implements DaemonManagerLike {
     pid: number | undefined,
     timeoutMs: number,
     signal: AbortSignal,
+    launchNonce?: string,
   ): Promise<boolean> {
-    return this.collaborators.daemonReadiness.isLaunchedProcessReady(pid, timeoutMs, signal);
+    return this.collaborators.daemonReadiness.isLaunchedProcessReady(
+      pid,
+      timeoutMs,
+      signal,
+      launchNonce,
+    );
   }
 
   waitForStop(

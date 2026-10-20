@@ -30,7 +30,11 @@ class CleanupFiles implements DaemonCleanupFileSystem {
     startedAt: 1,
     version: "test",
   });
-  persistOwner = () => {};
+  persistedOwner: PidFileData | null = null;
+  persistOwner = (owner: PidFileData | null) => {
+    this.persistedOwner = owner;
+    this.owner = 200;
+  };
   unlinkSync = (path: string) => {
     if (path === "control.sock" && this.failControl) {
       throw new Error("EACCES");
@@ -62,6 +66,14 @@ describe("daemon cleanup handoff", () => {
         files.owner = 200;
       };
       expect(await cleanup(files)).toBe(false);
+      expect(files.exists("owner.pid")).toBe(true);
+      expect(files.owner).toBe(200);
+    });
+
+    test(`persists only the validated owner and protects a subsequent handoff (sync=${synchronous})`, async () => {
+      const files = new CleanupFiles();
+      expect(await cleanup(files)).toBe(false);
+      expect(files.persistedOwner?.pid).toBe(100);
       expect(files.exists("owner.pid")).toBe(true);
       expect(files.owner).toBe(200);
     });

@@ -1,11 +1,12 @@
 import {
+  availableDaemonSockets,
   degradeAuxiliarySocket,
   markAuxiliarySocketAvailable,
 } from "../auxiliarySocketAvailability";
 import type { DaemonCoreServices, DaemonIdentityState } from "./DaemonCoreState";
 import { republishOwnedIdentity } from "../identityRecovery";
 import { logger } from "../../utils/logger";
-import { SOCKET_PATH, DAEMON_LAUNCH_LOG_PATH_ENV } from "../constants";
+import { SOCKET_PATH, DAEMON_LAUNCH_LOG_PATH_ENV, DAEMON_LAUNCH_NONCE_ENV } from "../constants";
 import { PidFileData, type AuxiliaryDaemonSocketName } from "../types";
 import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -50,6 +51,8 @@ export class DaemonIdentity {
   constructor(
     private readonly host: DaemonIdentityHost,
     private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statSync },
+    private readonly platform: NodeJS.Platform = process.platform,
+    private readonly databasePath: () => string = getDatabasePath,
   ) {}
 
   /**
@@ -101,10 +104,11 @@ export class DaemonIdentity {
       .supersededOwnerForEarlyRecord();
     const pidData: PidFileData = {
       pid: process.pid,
+      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
       daemonSessionId: this.host.identity.daemonSessionId(),
       socketPath: SOCKET_PATH,
       port: this.host.identity.port(),
-      dbPath: getDatabasePath(),
+      dbPath: this.databasePath(),
       startedAt: this.host.identity.generationStartedAt(),
       processStartedAt: this.host.identity.processStartedAt(),
       ...processGenerationRecordFields(this.host.identity.processGenerationToken()),
@@ -127,11 +131,12 @@ export class DaemonIdentity {
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
       pid: process.pid,
+      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
       daemonSessionId: this.host.identity.daemonSessionId(),
       socketPath: SOCKET_PATH,
-      sockets: getDaemonSocketPathsByName(),
+      sockets: availableDaemonSockets(getDaemonSocketPathsByName()),
       port: this.host.identity.port(),
-      dbPath: getDatabasePath(),
+      dbPath: this.databasePath(),
       startedAt: this.host.identity.generationStartedAt(),
       processStartedAt: this.host.identity.processStartedAt(),
       ...processGenerationRecordFields(this.host.identity.processGenerationToken()),
@@ -161,7 +166,7 @@ export class DaemonIdentity {
         writeRecord: () => this.writePidFile(),
         isProcessRunning: (pid) => isProcessRunning(pid, { debugLog: logger.debug }),
       },
-      getDaemonSocketPathsByName(),
+      availableDaemonSockets(getDaemonSocketPathsByName()),
     );
   }
 
@@ -203,7 +208,9 @@ export class DaemonIdentity {
       this.boundSocketIdentities.set(socketPath, { dev, ino });
     } catch (error) {
       // An unidentified bound path must never join destructive exit cleanup.
-      logger.warn(`[Daemon] Cannot record ownership of socket ${socketPath}: ${error}`);
+      // Named pipes have no filesystem inode on Windows; this is expected.
+      const log = this.platform === "win32" ? logger.debug : logger.warn;
+      log(`[Daemon] Cannot record ownership of socket ${socketPath}: ${error}`);
     }
   }
 

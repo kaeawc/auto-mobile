@@ -12,14 +12,18 @@ import {
   SocketServerSingleton,
   type SocketServerLifecycle,
 } from "../../src/daemon/socketServerSingleton";
-import { SOCKET_PATH } from "../../src/daemon/constants";
+import { SOCKET_PATH, DAEMON_LAUNCH_NONCE_ENV } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { toDaemonStatus } from "../../src/daemon/clientResponseDecoding";
-import type { AuxiliaryDaemonSocketName } from "../../src/daemon/types";
+import type { AuxiliaryDaemonSocketName, PidFileData } from "../../src/daemon/types";
 
-function identityHarness() {
+function identityHarness(
+  persist: (record: PidFileData) => Promise<void> = async () => {},
+  platform: NodeJS.Platform = process.platform,
+  stat = () => ({ dev: 1, ino: 2 }),
+) {
   const host: DaemonIdentityHost = {
     pidFileWritten: () => true,
     setPidFileWritten: () => {},
@@ -38,9 +42,9 @@ function identityHarness() {
     },
     cleanupDaemonFilesForShutdown: async () => {},
     writeEarlyOwnerRecord: async () => {},
-    persistPidFileData: async () => {},
+    persistPidFileData: persist,
   };
-  return new DaemonIdentity(host, { stat: () => ({ dev: 1, ino: 2 }) });
+  return new DaemonIdentity(host, { stat }, platform, () => ":memory:");
 }
 
 class RefusedStream implements SocketServerLifecycle {
@@ -88,6 +92,9 @@ describe("auxiliary stream degradation", () => {
         method: "ide/status",
         params: {},
       });
+      expect(toDaemonStatus(raw, "/fake/control.sock").reportedSockets).not.toHaveProperty(
+        "observation-stream",
+      );
       expect(toDaemonStatus(raw, "/fake/control.sock").unavailableSockets).toEqual([
         {
           code: "AUXILIARY_SOCKET_UNAVAILABLE",
@@ -141,3 +148,76 @@ describe("auxiliary stream degradation", () => {
     expect(options.socketFileIdentities.get(SOCKET_PATH)).toEqual({ dev: 1, ino: 2 });
   });
 });
+
+test("unknown future socket diagnostics cannot invalidate daemon identity", () => {
+  const warning = {
+    code: "AUXILIARY_SOCKET_UNAVAILABLE",
+    name: "future-stream",
+    socketPath: "/fake/future.sock",
+  };
+  expect(
+    toDaemonStatus(
+      { pid: 400, version: "test", unavailableSockets: [warning] },
+      "/fake/control.sock",
+    ),
+  ).toMatchObject({
+    pid: 400,
+    version: "test",
+    unavailableSockets: [warning],
+  });
+});
+
+test("PID record omits degraded streams and publishes the launch nonce", async () => {
+  const records: PidFileData[] = [];
+  const identity = identityHarness(async (record) => {
+    records.push(record);
+  });
+  const previousNonce = process.env[DAEMON_LAUNCH_NONCE_ENV];
+  process.env[DAEMON_LAUNCH_NONCE_ENV] = "launch-uuid";
+  try {
+    await identity.startAuxiliarySocket("observation-stream", async () => {
+      throw new AuxiliarySocketBindConflict("/fake/stream.sock", "Stream");
+    });
+    await identity.writePidFile();
+    expect(records[0]?.sockets).not.toHaveProperty("observation-stream");
+    expect(records[0]?.sockets).toHaveProperty("control");
+    expect(records[0]?.launchNonce).toBe("launch-uuid");
+    const server = createHarnessServer("/fake/control.sock", undefined, new FakeTimer());
+    const status = await server.dispatchLocalRequest({
+      id: "nonce",
+      type: "daemon_request",
+      method: "ide/status",
+      params: {},
+    });
+    expect(toDaemonStatus(status, "/fake/control.sock").launchNonce).toBe("launch-uuid");
+  } finally {
+    markAuxiliarySocketAvailable("observation-stream");
+    if (previousNonce === undefined) {
+      delete process.env[DAEMON_LAUNCH_NONCE_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_NONCE_ENV] = previousNonce;
+    }
+  }
+});
+
+test.each<NodeJS.Platform>(["win32", "linux"])(
+  "socket stat failure uses the appropriate log level on %s",
+  (platform) => {
+    const identity = identityHarness(undefined, platform, () => {
+      throw new Error("no inode");
+    });
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      identity.recordControlSocketIdentity();
+      expect(platform === "win32" ? debug : warn).toHaveBeenCalledWith(
+        expect.stringContaining("Cannot record ownership"),
+      );
+      expect(platform === "win32" ? warn : debug).not.toHaveBeenCalled();
+      expect(identity.getDaemonFileCleanupOptions().socketPaths).toEqual([]);
+    } finally {
+      debug.mockRestore();
+      warn.mockRestore();
+    }
+  },
+);

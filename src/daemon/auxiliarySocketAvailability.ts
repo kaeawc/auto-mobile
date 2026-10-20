@@ -15,7 +15,7 @@ export class AuxiliarySocketBindConflict extends ActionableError {
 
 export interface AuxiliarySocketWarning {
   code: "AUXILIARY_SOCKET_UNAVAILABLE";
-  name: AuxiliaryDaemonSocketName;
+  name: string;
   socketPath: string;
 }
 
@@ -31,7 +31,8 @@ const optionalStreams = new Set<AuxiliaryDaemonSocketName>([
   "video-stream",
   "webrtc-stream",
 ]);
-const unavailable = new Map<AuxiliaryDaemonSocketName, AuxiliarySocketWarning>();
+type KnownSocketWarning = AuxiliarySocketWarning & { name: AuxiliaryDaemonSocketName };
+const unavailable = new Map<AuxiliaryDaemonSocketName, KnownSocketWarning>();
 
 export function degradeAuxiliarySocket(
   name: AuxiliaryDaemonSocketName,
@@ -40,7 +41,7 @@ export function degradeAuxiliarySocket(
   if (!(error instanceof AuxiliarySocketBindConflict) || !optionalStreams.has(name)) {
     return undefined;
   }
-  const warning: AuxiliarySocketWarning = {
+  const warning: KnownSocketWarning = {
     code: "AUXILIARY_SOCKET_UNAVAILABLE",
     name,
     socketPath: error.socketPath,
@@ -53,6 +54,16 @@ export function markAuxiliarySocketAvailable(name: AuxiliaryDaemonSocketName): v
   unavailable.delete(name);
 }
 
-export function getUnavailableAuxiliarySockets(): AuxiliarySocketWarning[] {
+export function isAuxiliarySocketUnavailable(name: AuxiliaryDaemonSocketName): boolean {
+  return unavailable.has(name);
+}
+
+export function getUnavailableAuxiliarySockets(): KnownSocketWarning[] {
   return [...unavailable.values()];
+}
+
+/** Degraded paths are diagnostics, never advertised endpoints owned by this daemon. */
+export function availableDaemonSockets(sockets: Record<string, string>): Record<string, string> {
+  const degraded = new Set<string>(getUnavailableAuxiliarySockets().map(({ name }) => name));
+  return Object.fromEntries(Object.entries(sockets).filter(([name]) => !degraded.has(name)));
 }

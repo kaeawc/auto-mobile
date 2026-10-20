@@ -1,3 +1,8 @@
+import { DaemonLaunch, type DaemonLaunchHost } from "../../../src/daemon/manager/DaemonLaunch";
+import { DaemonLauncher, type DaemonLaunchRequest } from "../../../src/daemon/DaemonLauncher";
+import { FakeDaemonProcess } from "../../fakes/FakeDaemonProcess";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { DAEMON_LAUNCH_NONCE_ENV } from "../../../src/daemon/constants";
 import { describe, expect, test } from "bun:test";
 import {
   DaemonReadiness,
@@ -66,6 +71,7 @@ function harness() {
   };
   return {
     readiness: new DaemonReadiness(host),
+    host,
     client,
     timer,
     setStatus: (value: DaemonStatus) => {
@@ -144,6 +150,136 @@ describe("launched daemon identity readiness", () => {
     client.response = { pid: 200, startedAt: 20, version: "test" };
     expect(await readiness.isLaunchedProcessReady(200, 1000, new AbortController().signal)).toBe(
       true,
+    );
+  });
+});
+
+describe("package-runner launch identity", () => {
+  test.each([false, true])(
+    "onSpawn hands PID 300 to readiness (package runner: %s)",
+    async (packageRunner) => {
+      const h = harness();
+      const signal = new AbortController().signal;
+      let accepted: boolean | undefined;
+      let finalProbe: boolean | undefined;
+      let childNonce: string | undefined;
+      class CapturingLauncher extends DaemonLauncher {
+        override async launchAndWait(request: DaemonLaunchRequest): Promise<void> {
+          const child = new FakeDaemonProcess();
+          child.pid = 300;
+          request.onSpawn?.(child);
+          childNonce = request.spawnOptions.env?.[DAEMON_LAUNCH_NONCE_ENV];
+          const identity = {
+            pid: packageRunner ? 400 : 300,
+            startedAt: 20,
+            processGenerationToken: "linux:new",
+            launchNonce: childNonce,
+          };
+          h.setStatus({ running: true, ...identity });
+          h.client.response = { version: "test", ...identity };
+          // Repro: the observation-only wait accepts the daemon at PID 400.
+          expect(await h.readiness.waitForReady(1000)).toBe(true);
+          const pending = request.waitForReady(1000, signal);
+          for (let turn = 0; turn < 40; turn++) {
+            await Promise.resolve();
+          }
+          // Bounds the regression where onSpawn's PID is no longer handed off.
+          h.timer.advanceTime(1000);
+          accepted = await pending;
+          finalProbe = await request.isReadyForLaunchedProcess?.(300, 1000, signal);
+        }
+      }
+      const launcher = new CapturingLauncher({
+        timer: h.timer,
+        entryScript: packageRunner ? null : "/fake/index.ts",
+        processExecPath: "/fake/bun",
+        environment: {},
+        version: "1.2.3",
+        executableExists: () => false,
+      });
+      const ids = new FakeIdGenerator(["launch-uuid"]);
+      const host: DaemonLaunchHost = {
+        ...h.host,
+        launcher,
+        fallbackLauncher: launcher,
+        seams: {
+          nextLaunchNonce: () => ids.next(),
+          currentBuildId: () => "test",
+          portFreeProbe: async () => true,
+          exitRecordFileSystem: {
+            readFileSync: () => "",
+            writeFileSync: () => {},
+            rmSync: () => {},
+          },
+          launchLogFileSystem: { openSync: () => 1, closeSync: () => {} },
+          launchWorkingDirectory: () => "/fake",
+        },
+        throwIfRecoveryCancelled: () => {},
+        waitForReady: (...args) => h.readiness.waitForReady(...args),
+        isLaunchedProcessReady: (...args) => h.readiness.isLaunchedProcessReady(...args),
+        createDaemonExitFailure: async () => new Error("unused"),
+        withDaemonOptions: (command) => command,
+        extractionCleaner: { removeExtractionForEntryScript: async () => false },
+        describeError: String,
+        lockFilePath: "fake.lock",
+        launchCommandResolver: undefined,
+        getLockHolderStartupLogPath: async () => null,
+      };
+      const launch = new DaemonLaunch(host);
+      await launch.launchWithExtractionRetry(
+        {
+          options: {},
+          childEnv: { [DAEMON_LAUNCH_NONCE_ENV]: "inherited-stale-nonce" },
+          logSink: "file",
+          capturesLaunchOutput: true,
+          logFd: 1,
+          logPath: "/fake/launch.log",
+        },
+        launch.withDaemonOptions(launcher.resolveCommand(), {}),
+        1000,
+        undefined,
+      );
+      expect(accepted).toBe(true);
+      expect(finalProbe).toBe(true);
+      expect(childNonce).toBe(packageRunner ? "launch-uuid" : undefined);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test.each([
+    { pid: 400, startedAt: 20, processGenerationToken: "linux:new", launchNonce: "other" },
+    { pid: 400, startedAt: 20, processGenerationToken: "linux:old", launchNonce: "launch" },
+    { pid: 400, startedAt: 10, processGenerationToken: "linux:new", launchNonce: "launch" },
+    { pid: 500, startedAt: 20, processGenerationToken: "linux:new", launchNonce: "launch" },
+  ])("rejects a wrapper responder with mismatched identity: %j", async (responder) => {
+    const h = harness();
+    h.setStatus({
+      running: true,
+      pid: 400,
+      startedAt: 20,
+      processGenerationToken: "linux:new",
+      launchNonce: "launch",
+    });
+    h.client.response = { version: "test", ...responder };
+    expect(
+      await h.readiness.isLaunchedProcessReady(300, 1000, new AbortController().signal, "launch"),
+    ).toBe(false);
+  });
+
+  test("an unrelated PID record cannot borrow the launch nonce from the responder", async () => {
+    const h = harness();
+    h.setStatus({ running: true, pid: 400, startedAt: 20, launchNonce: "other" });
+    expect(
+      await h.readiness.isLaunchedProcessReady(300, 1000, new AbortController().signal, "launch"),
+    ).toBe(false);
+    expect(h.client.closed).toBe(0);
+  });
+
+  test("direct launches reject PID 400 when the spawned child was PID 300", async () => {
+    const h = harness();
+    h.setStatus({ running: true, pid: 400, startedAt: 20, processGenerationToken: "linux:new" });
+    expect(await h.readiness.isLaunchedProcessReady(300, 1000, new AbortController().signal)).toBe(
+      false,
     );
   });
 });

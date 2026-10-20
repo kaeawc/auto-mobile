@@ -494,6 +494,7 @@ export type DaemonSocketPaths = Record<DaemonSocketName, string>;
  * Daemon status information
  */
 export interface DaemonStatus {
+  launchNonce?: string;
   unavailableSockets?: AuxiliarySocketWarning[];
   reportedPidFilePath?: string;
   reportedSocketPath?: string;
@@ -513,7 +514,7 @@ export interface DaemonStatus {
   /** Unix socket path */
   socketPath?: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */
-  sockets?: DaemonSocketPaths;
+  sockets?: Partial<DaemonSocketPaths>;
   /** Absolute path to the SQLite file this daemon owns (issue #2795) */
   dbPath?: string;
   /** Timestamp when daemon was started */
@@ -587,6 +588,7 @@ export interface SupersededSocketOwner {
 }
 
 export interface PidFileData {
+  launchNonce?: string;
   /** Process ID */
   pid: number;
   /**
@@ -597,7 +599,7 @@ export interface PidFileData {
   /** Unix socket path */
   socketPath: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */
-  sockets?: DaemonSocketPaths;
+  sockets?: Partial<DaemonSocketPaths>;
   /** HTTP port */
   port: number;
   /**

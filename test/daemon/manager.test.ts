@@ -2568,6 +2568,7 @@ describe("DaemonLauncher command resolution", () => {
     expect(launch).toEqual({
       command: "/tools/bunx",
       args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+      packageRunner: true,
     });
   });
 
@@ -2598,6 +2599,7 @@ describe("DaemonLauncher command resolution", () => {
     expect(launch).toEqual({
       command: "/tools/bunx",
       args: ["-y", "@kaeawc/auto-mobile@0.0.39", "--daemon-mode"],
+      packageRunner: true,
     });
   });
 });

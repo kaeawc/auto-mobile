@@ -288,11 +288,13 @@ export function clearDaemonLaunchLogOwnerTombstoneSync(launchLogPath: string): v
  * completed. The write is replace-atomic so a concurrent sweep sees either the
  * old complete tombstone or the new complete tombstone, never partial JSON.
  */
-function persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath: string): void {
+function persistDaemonLaunchLogOwnerTombstoneSync(record: PidFileData | null): void {
   try {
-    const owner = readDaemonOwnerForRetentionSync(pidFilePath);
+    const owner = record && { pid: record.pid, launchLogPath: record.launchLogPath };
     if (
       !owner ||
+      !Number.isInteger(owner.pid) ||
+      owner.pid <= 0 ||
       typeof owner.launchLogPath !== "string" ||
       !path.isAbsolute(owner.launchLogPath)
     ) {
@@ -462,10 +464,11 @@ function prepareOwnedPidUnlink(
   expectedPid: number | undefined,
   files: DaemonCleanupFileSystem,
 ): boolean {
-  if (!shouldCleanupForExpectedPid(pidFilePath, expectedPid, files.readPid)) {
+  const owner = files.readPid(pidFilePath);
+  if (expectedPid !== undefined && owner?.pid !== expectedPid) {
     return false;
   }
-  files.persistOwner(pidFilePath);
+  files.persistOwner(owner);
   return shouldCleanupForExpectedPid(pidFilePath, expectedPid, files.readPid);
 }
 

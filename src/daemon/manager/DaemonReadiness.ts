@@ -45,13 +45,14 @@ export class DaemonReadiness {
     signal?: AbortSignal,
     shouldContinueWaiting: () => boolean = () => true,
     maxProbeDurationMs?: number,
-    launchedProcess?: { pid: number | undefined },
+    launchedProcess?: { pid: number | undefined; launchNonce?: string },
   ): Promise<boolean> {
     return launchedProcess
       ? this.waitForLaunchedProcessReady(
           launchedProcess.pid,
           timeout,
           signal ?? new AbortController().signal,
+          launchedProcess.launchNonce,
         )
       : this.waitForObservedDaemonReady(timeout, signal, shouldContinueWaiting, maxProbeDurationMs);
   }
@@ -550,13 +551,11 @@ export class DaemonReadiness {
             },
           );
           const responder = toDaemonStatus(response, this.host.socketPath);
-          // Strict for old responders too: a version alone cannot prove who answered.
-          return (
-            responder.pid === expected.pid &&
-            expected.startedAt !== undefined &&
-            responder.startedAt === expected.startedAt &&
-            recordedProcessGenerationToken(responder) === recordedProcessGenerationToken(expected)
-          );
+          const mismatch = readinessIdentityMismatch(expected, responder);
+          if (mismatch) {
+            logger.debug(`Launched daemon readiness identity mismatch: ${mismatch}`);
+          }
+          return mismatch === undefined;
         })(),
         {
           timer: this.host.timer,
@@ -577,20 +576,31 @@ export class DaemonReadiness {
     pid: number | undefined,
     timeoutMs: number,
     signal: AbortSignal,
+    launchNonce?: string,
   ): Promise<boolean> {
-    const deadline = this.host.timer.now() + timeoutMs;
+    const startTime = this.host.timer.now();
+    const deadline = startTime + timeoutMs;
+    let polls = 0;
     while (!signal.aborted && this.host.remainingTime(deadline) > 0) {
+      polls++;
       if (
         await this.isLaunchedProcessReady(
           pid,
           Math.min(1000, this.host.remainingTime(deadline)),
           signal,
+          launchNonce,
         )
       ) {
+        stderrLog(
+          `Launched daemon readiness succeeded after ${this.host.timer.now() - startTime}ms (${polls} polls)`,
+        );
         return true;
       }
       await this.host.sleepUnlessAborted(Math.min(100, this.host.remainingTime(deadline)), signal);
     }
+    stderrLog(
+      `Launched daemon readiness ${signal.aborted ? "abandoned" : "timed out"} after ${this.host.timer.now() - startTime}ms (${polls} polls)`,
+    );
     return false;
   }
 
@@ -598,17 +608,24 @@ export class DaemonReadiness {
     pid: number | undefined,
     timeoutMs: number,
     signal: AbortSignal,
+    launchNonce?: string,
   ): Promise<boolean> {
     if (pid === undefined) {
+      logger.debug("Launched daemon readiness identity mismatch: spawned pid missing");
       return false;
     }
 
     const status = await this.host.lifecycleStatus();
-    return (
-      status.running === true &&
-      status.pid === pid &&
-      (await this.verifyDaemonConnection(timeoutMs, signal, status))
-    );
+    const identityMatches =
+      launchNonce === undefined ? status.pid === pid : status.launchNonce === launchNonce;
+    if (!status.running || !identityMatches) {
+      const mismatch = launchNonce === undefined ? "spawned pid" : "launch nonce";
+      logger.debug(
+        `Launched daemon readiness identity mismatch: ${status.running ? mismatch : "not running"}`,
+      );
+      return false;
+    }
+    return this.verifyDaemonConnection(timeoutMs, signal, status);
   }
 }
 
@@ -662,3 +679,23 @@ const PEER_DAEMON_ISOLATED_NAMESPACE_GRACE_MS = 2000;
  * reacts within one poll without hammering the process table.
  */
 const LIVENESS_WATCHDOG_INTERVAL_MS = 100;
+
+/** Compare the PID record with the answering socket before declaring this launch ready. */
+function readinessIdentityMismatch(
+  expected: DaemonStatus,
+  responder: DaemonStatus,
+): string | undefined {
+  if (responder.pid !== expected.pid) {
+    return "pid";
+  }
+  if (expected.startedAt === undefined || responder.startedAt !== expected.startedAt) {
+    return "startedAt";
+  }
+  if (recordedProcessGenerationToken(responder) !== recordedProcessGenerationToken(expected)) {
+    return "generation token";
+  }
+  if (expected.launchNonce !== undefined && responder.launchNonce !== expected.launchNonce) {
+    return "launch nonce";
+  }
+  return undefined;
+}

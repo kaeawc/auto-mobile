@@ -102,20 +102,7 @@ export const socketIdentityStatusSchema = z.object({
     .array(
       z.object({
         code: z.literal("AUXILIARY_SOCKET_UNAVAILABLE"),
-        name: z.enum([
-          "appearance",
-          "device-snapshot",
-          "failures-push",
-          "failures-stream",
-          "observation-stream",
-          "performance-push",
-          "performance-stream",
-          "telemetry-push",
-          "device-gesture-recording",
-          "video-recording",
-          "video-stream",
-          "webrtc-stream",
-        ]),
+        name: z.string(),
         socketPath: z.string().min(1),
       }),
     )
@@ -123,6 +110,7 @@ export const socketIdentityStatusSchema = z.object({
   reportedPidFilePath: z.string().min(1).optional(),
   reportedSocketPath: z.string().min(1).optional(),
   reportedSockets: z.record(z.string(), z.string().min(1)).optional(),
+  launchNonce: z.string().optional(),
   processStartedAt: z.number().finite().optional(),
   dbPath: z.string().min(1).optional(),
   pid: z.number().int().positive().optional(),

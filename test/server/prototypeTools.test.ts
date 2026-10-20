@@ -1296,3 +1296,7 @@ describe("prototype CLI and advertised schema registration", () => {
     expect(theme?.properties?.colors?.minProperties).toBe(1);
   });
 });
+
+afterEach(() => {
+  mock.restore();
+});

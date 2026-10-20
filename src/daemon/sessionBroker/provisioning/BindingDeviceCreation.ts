@@ -783,6 +783,7 @@ export class BindingDeviceCreation {
               booted: check.booted,
               retryAfterMs: check.retryAfterMs,
               ...externalDevicesField(check.externalDevices),
+              ...(check.heldDevices?.length ? { heldDevices: [...check.heldDevices] } : {}),
             },
           },
         ),

@@ -1,3 +1,4 @@
+import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { AdbDeviceTransportUnavailableError } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PrototypeHiddenError } from "../features/prototype/prototypeHidden";
 import {
@@ -161,6 +162,7 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | SdkCapabilityQueryError
   | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
@@ -179,6 +181,7 @@ function hasSelfDescribedRefusalPayload(
   | BindingDiscoveryIncompleteError
   | BindingOwnershipUnconfirmedError {
   return [
+    SdkCapabilityQueryError,
     AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,

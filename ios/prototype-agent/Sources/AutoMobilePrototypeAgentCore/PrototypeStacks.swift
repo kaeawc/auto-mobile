@@ -1,7 +1,7 @@
 import Foundation
 
 /// Same wire shape as CtrlProxy's PrototypeStackSnapshot; depth is always derived from the path.
-struct PrototypeStackSnapshot: Equatable {
+struct PrototypeStackSnapshot: Equatable, Sendable {
     let path: [String]
     var depth: Int { path.count }
     var wireObject: [String: Any] { ["path": path, "depth": depth] }

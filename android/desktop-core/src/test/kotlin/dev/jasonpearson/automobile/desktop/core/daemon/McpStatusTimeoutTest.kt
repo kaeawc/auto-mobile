@@ -64,6 +64,7 @@ class McpStatusTimeoutTest {
       McpHttpClient(
         dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
           endpoint = "http://localhost/mcp",
+          tokenProvider = DaemonHttpTokenProvider { null },
           retryPolicy = RetryPolicy(maxRetries = 3, initialDelayMs = 1),
           statusRequestTimeoutMs = 120,
           statusDeadlineFactory = { timeoutMs -> StatusRequestDeadline(timeoutMs) { nowNanos } },
@@ -233,6 +234,7 @@ class McpStatusTimeoutTest {
     return McpHttpClient(
       dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
         endpoint = "http://localhost/mcp",
+        tokenProvider = DaemonHttpTokenProvider { null },
         requestSender =
           HttpRequestSender { request ->
             assertTrue(request.headers().firstValue("mcp-session-id").isEmpty)

@@ -12,7 +12,7 @@ final class AsyncHTTPTransportTests: XCTestCase {
     {
         try StreamableHTTPMCPClient(
             endpoint: XCTUnwrap(URL(string: "http://unused/auto-mobile/streamable")), performer: performer,
-            options: .init(scheduler: scheduler)
+            options: .init(scheduler: scheduler, tokenProvider: FakeDaemonHTTPTokenProvider())
         )
     }
 

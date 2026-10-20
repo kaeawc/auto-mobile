@@ -176,11 +176,11 @@ export class PlanExecutionOrchestrator {
 
       const plan = await this.preparePlan();
 
-      // Enable the plan-execution guard BEFORE allocation. Allocation can
-      // auto-boot a simulator, and the device-disconnect monitor must not prune
-      // a just-booted device out from under it (otherwise allocation fails with
-      // "no devices match criteria"). The finally always releases this lease, even
-      // if allocation or video startup throws.
+      // Register before allocation so current session/label assignments are
+      // protected even before adb binds the execution. Unassigned booting devices
+      // use Android startup leases and ordinary discovery/debounce protection;
+      // this lease does not globally defer their cleanup. Always release it,
+      // including allocation or video startup failures.
       const planExecutionLease = this.registerPlanExecution();
 
       let deviceMapping: Record<string, string> | undefined;

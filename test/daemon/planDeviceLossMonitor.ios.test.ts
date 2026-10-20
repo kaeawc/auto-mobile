@@ -33,12 +33,14 @@ function harness() {
   };
   let adbReset = false;
   let offlineFailure = false;
+  let cancellationError: Error | undefined;
   const offlineQueries: string[][] = [];
   const port: PlanDeviceLossPort = {
     timer,
     getDevice: (id) => devices.get(id) ?? null,
     getPlanSessionUuid: (id) => id,
     hasPlanExecution: () => true,
+    getPlanExecutionIds: () => [],
     isStartupLeased: () => false,
     isShutdownReserved: async () => false,
     discover: async () => discovery,
@@ -62,6 +64,9 @@ function harness() {
     },
     cancelPlan: async (id) => {
       cancelled.push(id);
+      if (cancellationError) {
+        throw cancellationError;
+      }
       return 1;
     },
   };
@@ -81,6 +86,9 @@ function harness() {
     set adbReset(value: boolean) {
       adbReset = value;
     },
+    set cancellationError(value: Error) {
+      cancellationError = value;
+    },
     set offlineFailure(value: boolean) {
       offlineFailure = value;
     },
@@ -88,6 +96,15 @@ function harness() {
 }
 
 describe("PlanDeviceLossMonitor simulator evidence", () => {
+  test("an unexpected cancellation failure still finishes the captured incident", async () => {
+    const h = harness();
+    h.cancellationError = new Error("cancellation failed");
+    await h.check();
+    h.timer.setCurrentTime(PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS);
+    await expect(h.check()).rejects.toThrow("cancellation failed");
+    expect(h.finished).toEqual(["incident"]);
+  });
+
   test("iOS absence waits the full window and ignores unavailable adb", async () => {
     const h = harness();
     h.offlineFailure = true;

@@ -352,6 +352,11 @@ export class DaemonDisconnect {
       getPlanSessionUuid: (id) =>
         resolveToolSelectionBaseSessionUuid(id, this.host.services.sessionManager()) ?? id,
       hasPlanExecution: (id, sessionUuid) => this.hasPlanExecution(id, sessionUuid),
+      getPlanExecutionIds: (id, sessionUuid) =>
+        new PlanDeviceActivity(this.host.services.sessionManager()).getPlanExecutionIds(
+          id,
+          sessionUuid,
+        ),
       isStartupLeased: (id) => this.host.services.devicePool().isDeviceLeasedForAndroidStartup(id),
       isShutdownReserved: (id) => this.host.services.devicePool().isShutdownReservationHeld(id),
       discover,
@@ -933,6 +938,22 @@ export class DaemonDisconnect {
     for (const deviceId of disconnectResult.disconnected.filter((id) => !planDeviceIds.has(id))) {
       missingByDevice.set(deviceId, []);
     }
+    await this.cleanupDisconnects(
+      bootedDeviceIds,
+      succeededPlatforms,
+      missingByDevice,
+      activeRecordings,
+      sweep,
+    );
+  }
+
+  private async cleanupDisconnects(
+    bootedDeviceIds: Set<string>,
+    succeededPlatforms: Set<"android" | "ios">,
+    missingByDevice: Map<string, string[]>,
+    activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>,
+    sweep: { adbServerResetCohort: readonly PooledDevice[] },
+  ): Promise<void> {
     const resetCohort = getProcessWideAdbServerResetCohort(
       bootedDeviceIds,
       succeededPlatforms,
@@ -941,11 +962,13 @@ export class DaemonDisconnect {
     );
     // Detachment is atomic for the whole owned Android cohort. Defer if one
     // member has plan work, but an unrelated iOS plan cannot block Android recovery.
-    const detectedAdbServerResetCohort = resetCohort.some((device) =>
-      this.hasPlanExecution(device.id),
-    )
-      ? []
-      : resetCohort;
+    const deferCohort = resetCohort.some((device) => this.hasPlanExecution(device.id));
+    if (deferCohort) {
+      for (const device of resetCohort) {
+        missingByDevice.delete(device.id);
+      }
+    }
+    const detectedAdbServerResetCohort = deferCohort ? [] : resetCohort;
     const adbServerResetDetachment =
       detectedAdbServerResetCohort.length > 0
         ? await this.host.services

@@ -17,7 +17,11 @@ import { createPooledDevice, DaemonDisconnectHarness } from "./helpers/DaemonDis
 
 const previousPlanActive = serverConfig.isPlanExecutionActive();
 const executions: string[] = [];
+const leases: PlanExecutionLease[] = [];
 afterEach(() => {
+  for (const lease of leases.splice(0)) {
+    lease.release();
+  }
   for (const id of executions.splice(0)) {
     executionTracker.endExecution(id);
   }
@@ -29,6 +33,18 @@ function startPlan(deviceId: string, sessionUuid: string) {
   executions.push(execution.id);
   executionTracker.bindDeviceExecution(execution.id, deviceId);
   return execution;
+}
+
+function startLeasedPlan(deviceId: string, sessionUuid: string) {
+  const execution = executionTracker.startExecution("executePlan", undefined, sessionUuid);
+  executions.push(execution.id);
+  const lease = serverConfig.acquirePlanExecutionLease({
+    deviceId,
+    sessionUuid,
+    executionId: execution.id,
+  });
+  leases.push(lease);
+  return { execution, lease };
 }
 
 function harness(platform: "android" | "ios" = "ios") {
@@ -127,6 +143,90 @@ function harness(platform: "android" | "ios" = "ios") {
 }
 
 describe("DaemonDisconnect per-device plan deferral", () => {
+  test("an ADB reset cohort with only one planned device defers every member", async () => {
+    const h = harness("android");
+    for (const device of h.devices.values()) {
+      device.avdName = device.id;
+      device.androidImage = { name: device.id, platform: "android", isRunning: true };
+    }
+    startPlan(h.device.id, "holder");
+    h.manager.bootedDevices = [];
+    h.daemon.forcedDisconnected = new Set([h.device.id]);
+    const detached: string[][] = [];
+    h.daemon.getDevicePool().detachAdbServerResetCohort = async (devices) => {
+      detached.push(devices.map(({ id }) => id));
+      return { devices: [], deferred: false };
+    };
+    try {
+      for (let n = 0; n < DEVICE_DISCONNECT_MISS_THRESHOLD + 1; n++) {
+        await h.tick();
+      }
+      expect(h.daemon.disconnectMisses.get(h.peer.id)).toBeGreaterThanOrEqual(
+        DEVICE_DISCONNECT_MISS_THRESHOLD,
+      );
+      expect(detached).toEqual([]);
+      expect(h.losses).toEqual([]);
+      expect(h.released).toEqual([]);
+      expect(h.daemon.confirmedDisconnected.size).toBe(0);
+      expect(h.devices.size).toBe(2);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
+  test("a revoked leased plan can reappear and vanish again while draining", async () => {
+    const h = harness();
+    const { execution } = startLeasedPlan(h.device.id, "holder");
+    const finished: Array<string | undefined> = [];
+    h.daemon.getDevicePool().recordEmulatorLossIncident = async (id) => {
+      h.losses.push(id);
+      return `incident-${h.losses.length}`;
+    };
+    h.daemon.getDevicePool().finishEmulatorLossIncident = async (id) => {
+      finished.push(id);
+    };
+    try {
+      await h.tick();
+      await h.tick();
+      expect(execution.abortController.signal.aborted).toBe(true);
+      h.manager.bootedDevices.push({ deviceId: h.device.id, platform: "ios", name: "iPhone" });
+      await h.tick();
+      h.manager.bootedDevices = [];
+      await h.tick();
+      await h.tick();
+      expect(h.losses).toEqual([h.device.id, h.device.id]);
+      expect(finished).toEqual(["incident-1", "incident-2"]);
+      expect(h.released).toEqual([]);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
+  test("a new lease in the same session re-arms loss without a presence tick", async () => {
+    const h = harness();
+    const first = startLeasedPlan(h.device.id, "holder");
+    try {
+      await h.tick();
+      await h.tick();
+      expect(first.execution.abortController.signal.aborted).toBe(true);
+      await h.tick();
+      expect(h.losses).toHaveLength(1);
+      first.lease.release();
+      executionTracker.endExecution(first.execution.id);
+      const next = startLeasedPlan(h.device.id, "holder");
+      await h.tick();
+      expect(next.execution.abortController.signal.aborted).toBe(false);
+      await h.tick();
+      expect(next.execution.abortController.signal.aborted).toBe(true);
+      await h.tick();
+      expect(h.losses).toEqual([h.device.id, h.device.id]);
+      expect(h.released).toEqual([]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
   test("a lease acquired during the listed-state probe protects the device in the same sweep", async () => {
     const h = harness("android");
     let lease: PlanExecutionLease | undefined;

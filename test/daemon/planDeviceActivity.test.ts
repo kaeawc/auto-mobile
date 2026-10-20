@@ -65,6 +65,32 @@ describe("plan device activity from execution leases", () => {
     expect(other.abortController.signal.aborted).toBe(false);
   });
 
+  test("loss monitoring skips revoked bindings while admission still refuses them", async () => {
+    const h = harness();
+    const plan = h.tracker.startExecution("executePlan", undefined, "base");
+    h.plans[0] = { sessionUuid: "base", executionId: plan.id };
+    h.activity.bindPlanExecutions("old", "base");
+    await h.tracker.cancelDeviceExecutions("old", "device lost", {
+      onlySessionUuid: "base",
+      onlyToolName: "executePlan",
+    });
+    expect(() => h.activity.bindPlanExecutions("old", "base")).not.toThrow();
+    expect(() => h.tracker.bindDeviceExecution(plan.id, "old")).toThrow();
+    expect(h.tracker.getActiveDeviceExecutionCount("old")).toBe(1);
+  });
+
+  test("broker-granted label holders resolve to the plan's base session", () => {
+    const h = harness();
+    // Broker allocation uses the existing base:B holder and publishes this same
+    // label map before its allocation promise resolves; it mints no new session.
+    h.plans[0] = { sessionUuid: "base", executionId: "broker-plan" };
+    expect(h.activity.hasPlanExecution(h.label.assignedDevice!, "base")).toBe(true);
+    expect(h.activity.getPlanExecutionIds(h.label.assignedDevice!, "base")).toEqual([
+      "broker-plan",
+    ]);
+    expect(h.activity.hasPlanExecution(h.label.assignedDevice!, "other")).toBe(false);
+  });
+
   test("a sessionless lease protects its explicit device", () => {
     const h = harness();
     h.plans.splice(0, 1, { deviceId: "sessionless" });

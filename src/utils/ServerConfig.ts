@@ -280,7 +280,9 @@ class ServerConfig {
     return [...this._planExecutions];
   }
 
-  // Compatibility/test seam; production code must use acquirePlanExecutionLease().
+  // Compatibility/test seam for global activity and monitor cadence only: this
+  // targetless lease never defers device cleanup. Production must register a
+  // scoped target with acquirePlanExecutionLease().
   setPlanExecutionActive(active: boolean): void {
     if (active) {
       this._compatPlanExecutionLease ??= this.acquirePlanExecutionLease();

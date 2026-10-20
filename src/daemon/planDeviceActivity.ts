@@ -29,6 +29,12 @@ export class PlanDeviceActivity {
     return this.leasesForDevice(deviceId, sessionUuid).length > 0;
   }
 
+  getPlanExecutionIds(deviceId: string, sessionUuid: string): readonly string[] {
+    return this.leasesForDevice(deviceId, sessionUuid).flatMap((plan) =>
+      plan.executionId ? [plan.executionId] : [],
+    );
+  }
+
   /** Bind only the registered invocations before the existing scoped cancel.
    * This includes iOS/pre-adb work and plans that switched devices mid-step,
    * while another plan merely sharing a session or earlier device is spared.
@@ -36,7 +42,7 @@ export class PlanDeviceActivity {
   bindPlanExecutions(deviceId: string, sessionUuid: string): void {
     for (const plan of this.leasesForDevice(deviceId, sessionUuid)) {
       if (plan.executionId) {
-        this.executions.bindDeviceExecution(plan.executionId, deviceId);
+        this.executions.bindDeviceExecution(plan.executionId, deviceId, { skipRevoked: true });
       }
     }
   }

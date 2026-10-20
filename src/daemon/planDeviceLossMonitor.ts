@@ -17,6 +17,7 @@ interface PlanLossTarget {
   assignmentCount: number;
   sessionId: string;
   planSessionUuid: string;
+  executionIds: readonly string[];
 }
 
 export interface PlanDeviceLossPort {
@@ -26,6 +27,7 @@ export interface PlanDeviceLossPort {
   getDevice(deviceId: string): PooledDevice | null;
   getPlanSessionUuid(sessionId: string): string;
   hasPlanExecution(deviceId: string, planSessionUuid: string): boolean;
+  getPlanExecutionIds(deviceId: string, planSessionUuid: string): readonly string[];
   isStartupLeased(deviceId: string): boolean;
   isShutdownReserved(deviceId: string): Promise<boolean>;
   discover(platform: "android" | "ios" | "either"): Promise<BootedDeviceDiscovery>;
@@ -127,12 +129,14 @@ export class PlanDeviceLossMonitor {
     ) {
       return undefined;
     }
+    const planSessionUuid = this.port.getPlanSessionUuid(holderOf(device)!);
     const target: PlanLossTarget = {
       device,
       incarnation: device.incarnation,
       assignmentCount: device.assignmentCount,
       sessionId: holderOf(device)!,
-      planSessionUuid: this.port.getPlanSessionUuid(holderOf(device)!),
+      planSessionUuid,
+      executionIds: this.port.getPlanExecutionIds(deviceId, planSessionUuid),
     };
     return this.reported.has(deviceId) || !this.hasPlanWork(target) ? undefined : target;
   }
@@ -210,12 +214,15 @@ export class PlanDeviceLossMonitor {
 
   private isCurrent(target: PlanLossTarget): boolean {
     const device = this.port.getDevice(target.device.id);
+    const executionIds = this.port.getPlanExecutionIds(target.device.id, target.planSessionUuid);
     return (
       device === target.device &&
       device.incarnation === target.incarnation &&
       device.assignmentCount === target.assignmentCount &&
       holderOf(device) === target.sessionId &&
-      this.port.getPlanSessionUuid(target.sessionId) === target.planSessionUuid
+      this.port.getPlanSessionUuid(target.sessionId) === target.planSessionUuid &&
+      executionIds.length === target.executionIds.length &&
+      target.executionIds.every((id) => executionIds.includes(id))
     );
   }
 
@@ -229,28 +236,29 @@ export class PlanDeviceLossMonitor {
 
   private async reportLoss(target: PlanLossTarget): Promise<void> {
     const incidentId = await this.port.recordLoss(target.device.id);
-    if (!this.isCurrent(target) || !this.hasPlanWork(target)) {
+    try {
+      if (!this.isCurrent(target) || !this.hasPlanWork(target)) {
+        return;
+      }
+      const reserved = await this.port.isShutdownReserved(target.device.id);
+      if (reserved || !this.isCurrent(target) || !this.hasPlanWork(target)) {
+        return;
+      }
+      // Mark before abort dispatch: listeners may synchronously end the plan.
+      this.reported.set(target.device.id, target);
+      this.pending.delete(target.device.id);
+      await this.port.cancelPlan(
+        target.device.id,
+        target.planSessionUuid,
+        deviceLossCancellationReason(target.device.id, incidentId),
+      );
+    } finally {
+      // Settlement belongs to the captured incident even if cancellation throws
+      // or replaces the device; no stale pool/session action follows the await.
+      if (!this.isCurrent(target)) {
+        this.reported.delete(target.device.id);
+      }
       await this.port.finishLoss(incidentId);
-      return;
     }
-    const reserved = await this.port.isShutdownReserved(target.device.id);
-    if (reserved || !this.isCurrent(target) || !this.hasPlanWork(target)) {
-      await this.port.finishLoss(incidentId);
-      return;
-    }
-    // Mark before abort dispatch: listeners may synchronously end the plan.
-    this.reported.set(target.device.id, target);
-    this.pending.delete(target.device.id);
-    await this.port.cancelPlan(
-      target.device.id,
-      target.planSessionUuid,
-      deviceLossCancellationReason(target.device.id, incidentId),
-    );
-    // Settlement belongs to the captured incident even if cancellation replaced
-    // the device. No pool/session action may follow this await on a stale target.
-    if (!this.isCurrent(target)) {
-      this.reported.delete(target.device.id);
-    }
-    await this.port.finishLoss(incidentId);
   }
 }

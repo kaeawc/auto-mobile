@@ -239,10 +239,10 @@ export class DaemonDisconnect {
 
     const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(
       deviceManager,
-      () =>
+      (platform) =>
         this.discoverAndReconcile(deviceManager, {
           planActive: true,
-          platform: "android",
+          platform,
           bypassAndroidDeviceListCache: true,
         }),
       transportRestarts,
@@ -394,7 +394,7 @@ export class DaemonDisconnect {
         result.missed.map(({ deviceId }) => deviceId),
         bootedDeviceIds,
       );
-      logger.debug("[DisconnectMonitor] Deferring actions — plan execution active");
+      logger.debug("[DisconnectMonitor] Checked device-scoped plan loss evidence");
     };
   }
 
@@ -802,7 +802,7 @@ export class DaemonDisconnect {
     const { planActive } = sweep;
 
     this.startDeferredSessionRecoverySweep(planActive);
-    const activeRecordings = planActive ? [] : await listRecordings();
+    const activeRecordings = await listRecordings();
     const heldDevices = activeRecordings.map(({ deviceId, platform }) => ({
       assignedDevice: deviceId,
       platform,
@@ -816,11 +816,19 @@ export class DaemonDisconnect {
     const missingByDevice = new Map<string, string[]>();
     const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
       this.collectDisconnectCandidates(activeRecordings);
+    const planDeviceIds = new Set(
+      [...candidateDeviceIds].filter((id) =>
+        executionTracker.hasActiveDeviceExecutions(id, { onlyToolName: "executePlan" }),
+      ),
+    );
+    const ordinaryCandidateIds = new Set(
+      [...candidateDeviceIds].filter((id) => !planDeviceIds.has(id)),
+    );
     const listed = await probeListedAndroidStates(
       this.host.services.devicePool(),
       deviceManager,
-      planActive,
-      candidateDeviceIds,
+      false,
+      ordinaryCandidateIds,
       bootedDeviceIds,
       candidatePlatforms,
     );
@@ -886,22 +894,21 @@ export class DaemonDisconnect {
       );
       return;
     }
-    this.logDisconnectMisses(disconnectResult, planActive, bootedDeviceIds);
-    // Keep absence evidence current, but leave allocation's pool/session
-    // state untouched. Two inactive ticks can confirm continued absence;
-    // a booted device clears the evidence during evaluation.
-    if (planActive) {
-      return await checkPlanDeviceLoss(disconnectResult, bootedDeviceIds);
-    }
-    for (const deviceId of disconnectResult.disconnected) {
+    this.logDisconnectMisses(disconnectResult, planDeviceIds, bootedDeviceIds);
+    // Only a plan bound to this device owns its bounded confirmation and grace.
+    await checkPlanDeviceLoss(disconnectResult, bootedDeviceIds);
+    for (const deviceId of disconnectResult.disconnected.filter((id) => !planDeviceIds.has(id))) {
       missingByDevice.set(deviceId, []);
     }
-    const detectedAdbServerResetCohort = getProcessWideAdbServerResetCohort(
-      bootedDeviceIds,
-      succeededPlatforms,
-      this.host.forceDisconnectedDeviceIds(),
-      this.host.services.devicePool().getAllDevices(),
-    );
+    // Cohort detachment is process-wide and must not race plan-owned recovery.
+    const detectedAdbServerResetCohort = planActive
+      ? []
+      : getProcessWideAdbServerResetCohort(
+          bootedDeviceIds,
+          succeededPlatforms,
+          this.host.forceDisconnectedDeviceIds(),
+          this.host.services.devicePool().getAllDevices(),
+        );
     const adbServerResetDetachment =
       detectedAdbServerResetCohort.length > 0
         ? await this.host.services

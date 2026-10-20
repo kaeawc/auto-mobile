@@ -270,6 +270,7 @@ test/daemon/perSourceIosLiveness.test.ts
 test/daemon/performancePushSocketServer.test.ts
 test/daemon/performancePushSocketServerCharacterization.test.ts
 test/daemon/performanceStreamSocketServerCharacterization.test.ts
+test/daemon/planDeviceLossMonitor.ios.test.ts
 test/daemon/planLabelRegistry.test.ts
 test/daemon/poolCapacityError.test.ts
 test/daemon/poolOwnershipConcurrency.property.test.ts

@@ -332,10 +332,11 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 export function logDisconnectMisses(
   deviceDisconnectMisses: Map<string, number>,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
-  planActive: boolean,
+  planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,
 ): void {
   for (const { deviceId, misses: evaluatedMisses, budgetExhausted } of disconnectResult.missed) {
+    const planActive = planDeviceIds.has(deviceId);
     const misses = planActive
       ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
       : evaluatedMisses;

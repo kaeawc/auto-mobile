@@ -2,10 +2,11 @@ import { isBusy, holderOf } from "./deviceBinding";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
 import type { PooledDevice } from "./devicePool";
 import { classifyMissingDeviceObservation } from "./missingDeviceLiveness";
-import { didSourceSucceedForDevice } from "../utils/discoverySource";
+import { didSourceSucceedForDevice, discoverySourceFor } from "../utils/discoverySource";
 import { isPhysicalAndroidUsbSerial } from "../utils/androidSerial";
 import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import type { Timer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
 
 /** Confirm on a later plan tick, beyond the 1–3s adb root/unroot restart window. */
 export const PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS = 5_000;
@@ -27,7 +28,7 @@ export interface PlanDeviceLossPort {
   hasPlanExecution(deviceId: string, planSessionUuid: string): boolean;
   isStartupLeased(deviceId: string): boolean;
   isShutdownReserved(deviceId: string): Promise<boolean>;
-  discover(): Promise<BootedDeviceDiscovery>;
+  discover(platform: "android" | "ios" | "either"): Promise<BootedDeviceDiscovery>;
   getOfflineDeviceIds(deviceIds: Iterable<string>): Promise<Set<string>>;
   isAdbReset(bootedDeviceIds: ReadonlySet<string>, discovery: BootedDeviceDiscovery): boolean;
   recordLoss(deviceId: string): Promise<string | undefined>;
@@ -61,28 +62,56 @@ export class PlanDeviceLossMonitor {
     if (targets.length === 0) {
       return;
     }
-    // Booted discovery omits ADB-offline rows. They cannot establish loss,
-    // even when they persist beyond the confirmation window. One cache-bypassing
-    // discovery and an independent offline probe supply this sweep's evidence.
-    // Rejected probes break the evidence before the daemon's tick catch logs them.
+    await this.confirmTargets(targets);
+  }
+
+  private async confirmTargets(targets: readonly PlanLossTarget[]): Promise<void> {
+    const androidIds = targets
+      .filter(({ device }) => device.platform === "android")
+      .map(({ device }) => device.id);
+    const platform =
+      androidIds.length === targets.length ? "android" : androidIds.length === 0 ? "ios" : "either";
+    // Booted discovery omits ADB-offline rows. The independent Android probe
+    // distinguishes an absent serial from an attached but offline transport.
     let discovery: BootedDeviceDiscovery;
-    let offlineDeviceIds: Set<string>;
+    let offlineDeviceIds: ReadonlySet<string> | undefined;
     try {
       [discovery, offlineDeviceIds] = await Promise.all([
-        this.port.discover(),
-        this.port.getOfflineDeviceIds(targets.map(({ device }) => device.id)),
+        this.port.discover(platform),
+        this.readOfflineEvidence(androidIds),
       ]);
     } catch (error) {
       this.pending.clear();
       throw error;
     }
     const confirmedBootedIds = new Set(discovery.devices.map((device) => device.deviceId));
-    if (this.port.isAdbReset(confirmedBootedIds, discovery)) {
-      this.pending.clear();
-      return;
-    }
+    const adbReset = androidIds.length > 0 && this.port.isAdbReset(confirmedBootedIds, discovery);
     for (const target of targets) {
-      await this.confirmTarget(target, confirmedBootedIds, discovery, offlineDeviceIds);
+      if (target.device.platform === "android" && (adbReset || !offlineDeviceIds)) {
+        this.pending.delete(target.device.id);
+        continue;
+      }
+      await this.confirmTarget(
+        target,
+        confirmedBootedIds,
+        discovery,
+        offlineDeviceIds ?? new Set(),
+      );
+    }
+  }
+
+  private async readOfflineEvidence(
+    androidIds: readonly string[],
+  ): Promise<ReadonlySet<string> | undefined> {
+    if (androidIds.length === 0) {
+      return new Set();
+    }
+    try {
+      return await this.port.getOfflineDeviceIds(androidIds);
+    } catch (error) {
+      // Failed ADB evidence breaks Android confirmation, not simctl evidence.
+      logger.warn("[DisconnectMonitor] Plan-time Android offline probe failed", error);
+      return undefined;
     }
   }
 
@@ -90,7 +119,12 @@ export class PlanDeviceLossMonitor {
     const device = this.port.getDevice(deviceId);
     // Allocation/restart owns startup-leased and shutdown-reserved devices. The global
     // plan lease alone is not evidence that a plan has begun using this device.
-    if (!device || device.platform !== "android" || !isBusy(device) || !holderOf(device)) {
+    if (
+      !device ||
+      discoverySourceFor(device.platform, device.id) === "ios-physical" ||
+      !isBusy(device) ||
+      !holderOf(device)
+    ) {
       return undefined;
     }
     const target: PlanLossTarget = {
@@ -146,7 +180,7 @@ export class PlanDeviceLossMonitor {
     }
     // A physical USB phone does not leave a successful listing transiently,
     // so this sweep's cache-bypassing absence confirms it at once (#10493).
-    if (!this.isImmediateLoss(target.device.id) && !this.isWindowElapsed(target)) {
+    if (!this.isImmediateLoss(target.device) && !this.isWindowElapsed(target)) {
       return;
     }
     const reserved = await this.port.isShutdownReserved(target.device.id);
@@ -157,9 +191,11 @@ export class PlanDeviceLossMonitor {
     await this.reportLoss(target);
   }
 
-  private isImmediateLoss(deviceId: string): boolean {
+  private isImmediateLoss(device: PooledDevice): boolean {
     return (
-      isPhysicalAndroidUsbSerial(deviceId) && this.port.isTransportRestarting?.(deviceId) !== true
+      device.platform === "android" &&
+      isPhysicalAndroidUsbSerial(device.id) &&
+      this.port.isTransportRestarting?.(device.id) !== true
     );
   }
 

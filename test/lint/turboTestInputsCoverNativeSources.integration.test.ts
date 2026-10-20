@@ -1,5 +1,6 @@
+import { readGuardFile, guardDirectoryEntries } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -105,7 +106,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   }
 
   function loadTurbo(): TurboConfig {
-    return JSON.parse(readFileSync(join(ROOT, "turbo.json"), "utf8")) as TurboConfig;
+    return JSON.parse(readGuardFile(join(ROOT, "turbo.json"))) as TurboConfig;
   }
 
   /**
@@ -470,7 +471,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   function referencedNativePaths(): Map<string, Set<string>> {
     const found = new Map<string, Set<string>>();
     const walk = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      for (const entry of guardDirectoryEntries(dir)) {
         const abs = join(dir, entry.name);
         if (entry.isDirectory()) {
           walk(abs);
@@ -483,7 +484,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
           if (rel === GUARD_PATH) {
             continue;
           }
-          const source = readFileSync(abs, "utf8");
+          const source = readGuardFile(abs);
           const record = (path: string): void => {
             // The Markdown guard allowlists this gitignored SDK config without
             // reading it. Its presence varies by checkout, so it is not a cache input.

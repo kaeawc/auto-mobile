@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { Visitor } from "oxc-parser";
-import { parseGuardSource } from "./astGuard";
+
+import { parseGuardSource, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 
 /**
  * Every device-mutating `ide/*` socket route must reach the ownership check (#10827), as `input/*`
@@ -77,7 +77,7 @@ describe("mutating ide/* routes reach the device ownership gate (#10827)", () =>
       "socketServer/inputStrokes.ts",
     ]) {
       const file = join(import.meta.dir, "..", "..", "src", "daemon", relative);
-      for (const [name, calls] of thisCallsByMethod(file, readFileSync(file, "utf8"))) {
+      for (const [name, calls] of thisCallsByMethod(file, readGuardFile(file))) {
         methods.set(name, calls);
       }
     }

@@ -1,13 +1,16 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor, type AssignmentTarget, type Expression, type MemberExpression } from "oxc-parser";
+import { type AssignmentTarget, type Expression, type MemberExpression } from "oxc-parser";
 import {
   localBindings,
   parseGuardSource,
   relativePosix,
   typeScriptFiles,
   unwrapCallee,
+  guardTextMayMatch,
+  readGuardFile,
+  GuardVisitor as Visitor,
 } from "./astGuard";
 import preChangeWriters from "./fixtures/deviceBindingWriters.json";
 
@@ -57,7 +60,14 @@ function memberName(node: MemberExpression): string | undefined {
 }
 
 function scan(file: string, source: string): { writes: string[]; releases: number } {
-  const program = parseGuardSource(file, source);
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /sessionId|status|health|releaseDevice/),
+  );
+  if (!program) {
+    return { writes: [], releases: 0 };
+  }
   const binding = localBindings(program);
   const writes: string[] = [];
   let releases = 0;
@@ -290,7 +300,7 @@ describe("device binding single writer", () => {
   beforeAll(() => {
     for (const file of typeScriptFiles(path.join(ROOT, "src"))) {
       const relative = relativePosix(ROOT, file);
-      facts.set(relative, scan(relative, readFileSync(file, "utf8")));
+      facts.set(relative, scan(relative, readGuardFile(file)));
     }
   }, 20_000);
 

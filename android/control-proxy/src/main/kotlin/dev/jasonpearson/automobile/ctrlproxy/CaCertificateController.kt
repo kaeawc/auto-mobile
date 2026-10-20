@@ -57,49 +57,51 @@ internal class CaCertificateController(
     var error: String? = null
 
     try {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-        error = "CA certificate install requires API 21+"
-        return
-      }
+      withCaPolicyFailures(
+        onFailure = { e ->
+          error = "Failed to install CA certificate: ${e.message}"
+          Log.e(TAG, "Error installing CA certificate", e)
+        },
+      ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+          error = "CA certificate install requires API 21+"
+          return
+        }
 
-      val deviceOwnerError = validateDeviceOwnerStatus()
-      if (deviceOwnerError != null) {
-        error = deviceOwnerError
-        return
-      }
+        val deviceOwnerError = validateDeviceOwnerStatus()
+        if (deviceOwnerError != null) {
+          error = deviceOwnerError
+          return
+        }
 
-      perfProvider.startOperation("decodeCert")
-      val certBytes = decodeCertificateBytes(certificate)
-      perfProvider.endOperation("decodeCert")
-      if (certBytes == null) {
-        error = "Certificate payload is empty or invalid"
-        return
-      }
+        perfProvider.startOperation("decodeCert")
+        val certBytes = decodeCertificateBytes(certificate)
+        perfProvider.endOperation("decodeCert")
+        if (certBytes == null) {
+          error = "Certificate payload is empty or invalid"
+          return
+        }
 
-      alias = computeCertificateAlias(certBytes)
+        alias = computeCertificateAlias(certBytes)
 
-      perfProvider.startOperation("persistCert")
-      val stored = writeCaCertToStorage(alias, certBytes)
-      perfProvider.endOperation("persistCert")
-      if (!stored) {
-        error = "Failed to persist certificate for alias: $alias"
-        return
-      }
+        perfProvider.startOperation("persistCert")
+        val stored = writeCaCertToStorage(alias, certBytes)
+        perfProvider.endOperation("persistCert")
+        if (!stored) {
+          error = "Failed to persist certificate for alias: $alias"
+          return
+        }
 
-      perfProvider.startOperation("installCert")
-      try {
-        success = devicePolicy.installCaCert(certBytes)
-      } finally {
-        perfProvider.endOperation("installCert")
+        perfProvider.startOperation("installCert")
+        try {
+          success = devicePolicy.installCaCert(certBytes)
+        } finally {
+          perfProvider.endOperation("installCert")
+        }
+        if (!success) {
+          error = "DevicePolicyManager.installCaCert returned false"
+        }
       }
-      if (!success) {
-        error = "DevicePolicyManager.installCaCert returned false"
-      }
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      error = "Failed to install CA certificate: ${e.message}"
-      Log.e(TAG, "Error installing CA certificate", e)
     } finally {
       if (!success && alias != null) {
         deleteCaCertFromStorage(alias)
@@ -145,72 +147,74 @@ internal class CaCertificateController(
     var error: String? = null
 
     try {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-        error = "CA certificate removal requires API 21+"
-        return
-      }
-
-      val deviceOwnerError = validateDeviceOwnerStatus()
-      if (deviceOwnerError != null) {
-        error = deviceOwnerError
-        return
-      }
-
-      perfProvider.startOperation("resolveCert")
-      val certBytes =
-        when {
-          !alias.isNullOrBlank() -> {
-            val stored = readCaCertFromStorage(alias)
-            stored ?: certificate?.let { decodeCertificateBytes(it) }
-          }
-          !certificate.isNullOrBlank() -> decodeCertificateBytes(certificate)
-          else -> null
+      withCaPolicyFailures(
+        onFailure = { e ->
+          error = "Failed to remove CA certificate: ${e.message}"
+          Log.e(TAG, "Error removing CA certificate", e)
+        },
+      ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+          error = "CA certificate removal requires API 21+"
+          return
         }
-      perfProvider.endOperation("resolveCert")
 
-      if (certBytes == null) {
-        error =
-          if (!alias.isNullOrBlank()) {
-            "No stored certificate found for alias: $alias"
-          } else {
-            "Certificate payload is required for removal"
+        val deviceOwnerError = validateDeviceOwnerStatus()
+        if (deviceOwnerError != null) {
+          error = deviceOwnerError
+          return
+        }
+
+        perfProvider.startOperation("resolveCert")
+        val certBytes =
+          when {
+            !alias.isNullOrBlank() -> {
+              val stored = readCaCertFromStorage(alias)
+              stored ?: certificate?.let { decodeCertificateBytes(it) }
+            }
+            !certificate.isNullOrBlank() -> decodeCertificateBytes(certificate)
+            else -> null
           }
-        return
-      }
+        perfProvider.endOperation("resolveCert")
 
-      if (resolvedAlias.isNullOrBlank()) {
-        resolvedAlias = computeCertificateAlias(certBytes)
-      }
+        if (certBytes == null) {
+          error =
+            if (!alias.isNullOrBlank()) {
+              "No stored certificate found for alias: $alias"
+            } else {
+              "Certificate payload is required for removal"
+            }
+          return
+        }
 
-      val wasInstalled = isCaCertInstalled(certBytes)
-      if (wasInstalled == false) {
-        error = "CA certificate is not installed"
-        return
-      }
+        if (resolvedAlias.isNullOrBlank()) {
+          resolvedAlias = computeCertificateAlias(certBytes)
+        }
 
-      perfProvider.startOperation("removeCert")
-      try {
-        devicePolicy.uninstallCaCert(certBytes)
-      } finally {
-        perfProvider.endOperation("removeCert")
+        val wasInstalled = isCaCertInstalled(certBytes)
+        if (wasInstalled == false) {
+          error = "CA certificate is not installed"
+          return
+        }
+
+        perfProvider.startOperation("removeCert")
+        try {
+          devicePolicy.uninstallCaCert(certBytes)
+        } finally {
+          perfProvider.endOperation("removeCert")
+        }
+        val isInstalled = isCaCertInstalled(certBytes)
+        success = isInstalled == false
+        if (success) {
+          deleteCaCertFromStorage(resolvedAlias)
+        } else {
+          error =
+            if (isInstalled == null) {
+              "Unable to confirm CA certificate removal"
+            } else {
+              "CA certificate still installed after uninstall"
+            }
+        }
       }
-      val isInstalled = isCaCertInstalled(certBytes)
-      success = isInstalled == false
-      if (success) {
-        deleteCaCertFromStorage(resolvedAlias)
-      } else {
-        error =
-          if (isInstalled == null) {
-            "Unable to confirm CA certificate removal"
-          } else {
-            "CA certificate still installed after uninstall"
-          }
-      }
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      error = "Failed to remove CA certificate: ${e.message}"
-      Log.e(TAG, "Error removing CA certificate", e)
     } finally {
       perfProvider.end()
       val totalTime = timeProvider.currentTimeMillis() - startTime
@@ -222,7 +226,11 @@ internal class CaCertificateController(
     return try {
       val installedCerts = devicePolicy.getInstalledCaCerts()
       installedCerts.any { it.contentEquals(certBytes) }
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Unable to query installed CA certificates", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.w(TAG, "Unable to query installed CA certificates", e)
       null
     }
@@ -243,7 +251,14 @@ internal class CaCertificateController(
       isAdminActive = devicePolicy.isAdminActive()
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
+      error = "Failed to read device owner status: ${e.message}"
+      Log.e(TAG, "Error reading device owner status", e)
+    } catch (e: IllegalArgumentException) {
+      error = "Failed to read device owner status: ${e.message}"
+      Log.e(TAG, "Error reading device owner status", e)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       error = "Failed to read device owner status: ${e.message}"
       Log.e(TAG, "Error reading device owner status", e)
     } finally {
@@ -302,7 +317,10 @@ internal class CaCertificateController(
     val bytes =
       try {
         certFile.readBytes()
-      } catch (e: Exception) {
+      } catch (e: java.io.IOException) {
+        Log.w(TAG, "Failed to read certificate file at $devicePath", e)
+        return null
+      } catch (e: SecurityException) {
         Log.w(TAG, "Failed to read certificate file at $devicePath", e)
         return null
       }
@@ -342,7 +360,10 @@ internal class CaCertificateController(
     return try {
       certFile.writeBytes(certBytes)
       true
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      Log.w(TAG, "Failed to write CA cert file: ${certFile.absolutePath}", e)
+      false
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to write CA cert file: ${certFile.absolutePath}", e)
       false
     }
@@ -355,7 +376,10 @@ internal class CaCertificateController(
     }
     return try {
       certFile.readBytes()
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      Log.w(TAG, "Failed to read CA cert file: ${certFile.absolutePath}", e)
+      null
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to read CA cert file: ${certFile.absolutePath}", e)
       null
     }
@@ -425,3 +449,24 @@ internal class CaCertificateController(
     }
   }
 }
+
+/**
+ * Handles the platform failure set shared by these operations. Failure handlers run outside the
+ * try.
+ */
+private inline fun <T> withCaPolicyFailures(onFailure: (Exception) -> T, block: () -> T): T =
+  try {
+    block()
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: SecurityException) {
+    onFailure(e)
+  } catch (e: IllegalArgumentException) {
+    onFailure(e)
+  } catch (e: IllegalStateException) {
+    onFailure(e)
+  } catch (e: UnsupportedOperationException) {
+    onFailure(e)
+  } catch (e: java.security.NoSuchAlgorithmException) {
+    onFailure(e)
+  }

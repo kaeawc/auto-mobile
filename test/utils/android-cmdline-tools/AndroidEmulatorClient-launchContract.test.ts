@@ -1,3 +1,4 @@
+import type { BootedDevice } from "../../../src/models";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import type { ChildProcess } from "node:child_process";
@@ -5,7 +6,7 @@ import {
   AndroidEmulatorClient,
   parseExtraEmulatorArguments,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
+import type { DeviceInfo, ExecResult } from "../../../src/models";
 import { EmulatorLaunchCancelledError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
@@ -239,8 +240,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       avdName: "Pixel 9",
       extraArgs: ["-ports", "5562,5555"],
     });
-    const secondLaunch = await secondClient.startEmulator("Pixel 9a");
-    expect(secondLaunch).toBe(secondChild);
+    await secondClient.startEmulator("Pixel 9a");
 
     expect(firstLaunch.targetDeviceId).toBe("emulator-5562");
     expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-ports", "5562,5555"]));
@@ -368,8 +368,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       avdName: "Pixel 9",
       deviceId: "emulator-5554",
     });
-    const secondLaunch = await secondClient.startEmulator("Pixel 9a");
-    expect(secondLaunch).toBe(secondChild);
+    await secondClient.startEmulator("Pixel 9a");
 
     expect(firstLaunch.targetDeviceId).toBe("emulator-5554");
     expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5554"]));

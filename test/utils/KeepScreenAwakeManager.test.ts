@@ -3,6 +3,7 @@ import {
   KeepScreenAwakeManager,
   type KeepScreenAwakeSettingsClient,
   type KeepScreenAwakeState,
+  type KeepScreenAwakeRestoreOutcome,
 } from "../../src/utils/KeepScreenAwakeManager";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../src/models";
@@ -530,14 +531,11 @@ describe("typed restore outcomes", () => {
         { setting: "screen_off_timeout", error: `fake adb: command failed: ${timeout}` },
       ],
     },
-  ] as Array<{
+  ] satisfies Array<{
     name: string;
     state: KeepScreenAwakeState;
     reject: string[];
-    failures: Array<{
-      setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
-      error: string;
-    }>;
+    failures: Extract<KeepScreenAwakeRestoreOutcome, { status: "failed" }>["failures"];
   }>)("$name", async ({ state, reject, failures }) => {
     const adb = new FakeAdb({ reject });
     const mgr = new KeepScreenAwakeManager(
@@ -585,10 +583,10 @@ describe("typed restore outcomes", () => {
     name: string;
     state: KeepScreenAwakeState;
     calls: string[];
-    settings: Array<{
-      setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
-      value: string;
-    }>;
+    settings: Extract<
+      KeepScreenAwakeRestoreOutcome,
+      { status: "restored_to_baseline" }
+    >["settings"];
   }>)("$name", async ({ state, calls, settings }) => {
     const adb = new FakeAdb();
     const mgr = new KeepScreenAwakeManager(
@@ -629,10 +627,9 @@ describe("typed restore outcomes", () => {
     name: string;
     state: KeepScreenAwakeState;
     reject: string[];
-    baselineSettings: Array<{
-      setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
-      value: string;
-    }>;
+    baselineSettings: NonNullable<
+      Extract<KeepScreenAwakeRestoreOutcome, { status: "failed" }>["baselineSettings"]
+    >;
   }>)("$name", async ({ state, reject, baselineSettings }) => {
     const adb = new FakeAdb({ reject });
     const mgr = new KeepScreenAwakeManager(
@@ -640,22 +637,17 @@ describe("typed restore outcomes", () => {
       makeFactory(adb),
       () => failingSettingsClient,
     );
-    const failures = reject.map(
-      (
-        command,
-      ): {
-        setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
-        error: string;
-      } => ({
-        setting:
-          command === disable
-            ? "svc_stayon"
-            : command === timeout
-              ? "screen_off_timeout"
-              : "stay_on_while_plugged_in",
-        error: `fake adb: command failed: ${command}`,
-      }),
-    );
+    const failures = reject.map<
+      Extract<KeepScreenAwakeRestoreOutcome, { status: "failed" }>["failures"][number]
+    >((command) => ({
+      setting:
+        command === disable
+          ? "svc_stayon"
+          : command === timeout
+            ? "screen_off_timeout"
+            : "stay_on_while_plugged_in",
+      error: `fake adb: command failed: ${command}`,
+    }));
     expect(await mgr.restore(state)).toEqual({
       status: "failed",
       failures,

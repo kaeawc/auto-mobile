@@ -69,153 +69,177 @@ object KotlinSourceScan {
    *   surrounding code's brace/paren matching stays correct.
    */
   fun maskLiteralsAndComments(src: String): String {
-    val out = StringBuilder(src.length)
-    val n = src.length
-    var i = 0
-    // Parallel stacks: lexer state + (for INTERP) its running brace depth.
-    val states = ArrayDeque<Int>().apply { addLast(CODE) }
-    val interpDepth = ArrayDeque<Int>()
+    return LiteralMasker(src).mask()
+  }
 
-    fun blank(count: Int) {
+  private class LiteralMasker(private val src: String) {
+    private val out = StringBuilder(src.length)
+    private val n = src.length
+    private var i = 0
+    // Parallel stacks: lexer state + (for INTERP) its running brace depth.
+    private val states = ArrayDeque<Int>().apply { addLast(CODE) }
+    private val interpDepth = ArrayDeque<Int>()
+
+    private fun blank(count: Int) {
       repeat(count) { out.append(' ') }
     }
 
-    while (i < n) {
-      val c = src[i]
-      val next = if (i + 1 < n) src[i + 1] else ' '
-      when (states.last()) {
-        CODE,
-        INTERP -> {
-          when {
-            c == '/' && next == '/' -> {
-              states.addLast(LINE_COMMENT)
-              blank(2)
-              i += 2
-            }
-            c == '/' && next == '*' -> {
-              states.addLast(BLOCK_COMMENT)
-              blank(2)
-              i += 2
-            }
-            c == '"' && next == '"' && i + 2 < n && src[i + 2] == '"' -> {
-              states.addLast(RAW)
-              blank(3)
-              i += 3
-            }
-            c == '"' -> {
-              states.addLast(STR)
-              blank(1)
-              i++
-            }
-            c == '\'' -> {
-              states.addLast(CHAR)
-              blank(1)
-              i++
-            }
-            states.last() == INTERP && c == '{' -> {
-              interpDepth.addLast(interpDepth.removeLast() + 1)
-              blank(1)
-              i++
-            }
-            states.last() == INTERP && c == '}' -> {
-              val d = interpDepth.removeLast() - 1
-              blank(1)
-              i++
-              if (d == 0) states.removeLast() else interpDepth.addLast(d)
-            }
-            states.last() == INTERP -> {
-              out.append(if (c == '\n') '\n' else ' ')
-              i++
-            }
-            else -> { // CODE: preserve real structure (braces, parens, identifiers).
-              out.append(c)
-              i++
-            }
-          }
+    fun mask(): String {
+      while (i < n) {
+        val c = src[i]
+        val next = if (i + 1 < n) src[i + 1] else ' '
+        when (states.last()) {
+          CODE,
+          INTERP -> scanCode(c, next)
+          STR -> scanString(c, next)
+          RAW -> scanRawString(c, next)
+          CHAR -> scanChar(c)
+          LINE_COMMENT -> scanLineComment(c)
+          else -> scanBlockComment(c, next)
         }
-        STR -> {
-          when {
-            c == '\\' -> {
-              blank(2)
-              i += 2
-            }
-            c == '$' && next == '{' -> {
-              states.addLast(INTERP)
-              interpDepth.addLast(1)
-              blank(2)
-              i += 2
-            }
-            c == '"' -> {
-              states.removeLast()
-              blank(1)
-              i++
-            }
-            else -> {
-              out.append(if (c == '\n') '\n' else ' ')
-              i++
-            }
-          }
+      }
+      return out.toString()
+    }
+
+    private fun scanCode(c: Char, next: Char) {
+      when {
+        c == '/' && next == '/' -> {
+          states.addLast(LINE_COMMENT)
+          blank(2)
+          i += 2
         }
-        RAW -> {
-          when {
-            c == '$' && next == '{' -> {
-              states.addLast(INTERP)
-              interpDepth.addLast(1)
-              blank(2)
-              i += 2
-            }
-            c == '"' -> {
-              var run = 0
-              while (i + run < n && src[i + run] == '"') run++
-              blank(run)
-              i += run
-              if (run >= 3) states.removeLast() // last three quotes close the raw string
-            }
-            else -> {
-              out.append(if (c == '\n') '\n' else ' ')
-              i++
-            }
-          }
+        c == '/' && next == '*' -> {
+          states.addLast(BLOCK_COMMENT)
+          blank(2)
+          i += 2
         }
-        CHAR -> {
-          when {
-            c == '\\' -> {
-              blank(2)
-              i += 2
-            }
-            c == '\'' -> {
-              states.removeLast()
-              blank(1)
-              i++
-            }
-            else -> {
-              blank(1)
-              i++
-            }
-          }
+        c == '"' && next == '"' && i + 2 < n && src[i + 2] == '"' -> {
+          states.addLast(RAW)
+          blank(3)
+          i += 3
         }
-        LINE_COMMENT -> {
-          if (c == '\n') {
-            states.removeLast()
-            out.append('\n')
-          } else {
-            blank(1)
-          }
+        c == '"' -> {
+          states.addLast(STR)
+          blank(1)
           i++
         }
-        else -> { // BLOCK_COMMENT
-          if (c == '*' && next == '/') {
-            states.removeLast()
-            blank(2)
-            i += 2
-          } else {
-            out.append(if (c == '\n') '\n' else ' ')
-            i++
-          }
+        c == '\'' -> {
+          states.addLast(CHAR)
+          blank(1)
+          i++
+        }
+        else -> scanCodeCharacter(c)
+      }
+    }
+
+    private fun scanCodeCharacter(c: Char) {
+      when {
+        states.last() == INTERP && c == '{' -> {
+          interpDepth.addLast(interpDepth.removeLast() + 1)
+          blank(1)
+          i++
+        }
+        states.last() == INTERP && c == '}' -> {
+          val d = interpDepth.removeLast() - 1
+          blank(1)
+          i++
+          if (d == 0) states.removeLast() else interpDepth.addLast(d)
+        }
+        states.last() == INTERP -> {
+          out.append(if (c == '\n') '\n' else ' ')
+          i++
+        }
+        else -> { // CODE: preserve real structure (braces, parens, identifiers).
+          out.append(c)
+          i++
         }
       }
     }
-    return out.toString()
+
+    private fun scanString(c: Char, next: Char) {
+      when {
+        c == '\\' -> {
+          blank(2)
+          i += 2
+        }
+        c == '$' && next == '{' -> {
+          states.addLast(INTERP)
+          interpDepth.addLast(1)
+          blank(2)
+          i += 2
+        }
+        c == '"' -> {
+          states.removeLast()
+          blank(1)
+          i++
+        }
+        else -> {
+          out.append(if (c == '\n') '\n' else ' ')
+          i++
+        }
+      }
+    }
+
+    private fun scanRawString(c: Char, next: Char) {
+      when {
+        c == '$' && next == '{' -> {
+          states.addLast(INTERP)
+          interpDepth.addLast(1)
+          blank(2)
+          i += 2
+        }
+        c == '"' -> {
+          var run = 0
+          while (i + run < n && src[i + run] == '"') run++
+          blank(run)
+          i += run
+          if (run >= 3) states.removeLast() // last three quotes close the raw string
+        }
+        else -> {
+          out.append(if (c == '\n') '\n' else ' ')
+          i++
+        }
+      }
+    }
+
+    private fun scanChar(c: Char) {
+      when {
+        c == '\\' -> {
+          blank(2)
+          i += 2
+        }
+        c == '\'' -> {
+          states.removeLast()
+          blank(1)
+          i++
+        }
+        else -> {
+          blank(1)
+          i++
+        }
+      }
+    }
+
+    private fun scanLineComment(c: Char) {
+      if (c == '\n') {
+        states.removeLast()
+        out.append('\n')
+      } else {
+        blank(1)
+      }
+      i++
+    }
+
+    private fun scanBlockComment(c: Char, next: Char) {
+      if (c == '*' && next == '/') {
+        states.removeLast()
+        blank(2)
+        i += 2
+      } else {
+        out.append(if (c == '\n') '\n' else ' ')
+        i++
+      }
+    }
   }
 
   private const val CODE = 0

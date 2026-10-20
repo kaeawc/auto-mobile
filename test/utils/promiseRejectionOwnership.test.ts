@@ -118,7 +118,7 @@ describe("detached promise rejection ownership", () => {
       timer,
     });
     try {
-      // Empty package/hierarchy avoid performance monitoring and navigation work.
+      // Empty package/hierarchy avoids performance monitoring and navigation work.
       client.handleHierarchyUpdate({ updatedAt: timer.now(), packageName: "", hierarchy: {} });
       await timer.advanceTimersByTimeAsync(0);
       expect(warnings).toHaveBeenCalledWith(

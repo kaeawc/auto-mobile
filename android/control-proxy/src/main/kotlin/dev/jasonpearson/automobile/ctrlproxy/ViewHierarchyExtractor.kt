@@ -271,7 +271,14 @@ internal constructor(
         prototypeSuspended = prototypeSuspended().takeIf { it },
         prototypeHiddenReason = prototypeHiddenReason(displayId ?: Display.DEFAULT_DISPLAY, null),
       )
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Error extracting view hierarchy", e)
+      ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.e(TAG, "Error extracting view hierarchy", e)
+      ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
+    } catch (e: SecurityException) {
       Log.e(TAG, "Error extracting view hierarchy", e)
       ViewHierarchy(error = "Failed to extract view hierarchy: ${e.message}")
     } finally {
@@ -470,7 +477,14 @@ internal constructor(
               ),
             )
           }
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
+          if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
+          Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
+        } catch (e: IllegalStateException) {
+          if (e is kotlinx.coroutines.CancellationException) throw e
+          if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
+          Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
+        } catch (e: SecurityException) {
           if (prototypeTitle && !prototypeRootRead) prototypeRootUnreadable = true
           Log.e(TAG, "Error extracting hierarchy from window ${window.id}", e)
         } finally {
@@ -482,12 +496,12 @@ internal constructor(
       // Fallback to activeWindowRoot when it can still recover application content. When the
       // selected app has no root, rootInActiveWindow can be the active system status bar, which is
       // not a substitute for application content.
-      if (
+      val canRecoverActiveWindow =
         mainHierarchy == null &&
           activeWindowRoot != null &&
           (!primaryAppWindowHasNullRoot ||
             activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
-      ) {
+      if (canRecoverActiveWindow) {
         val (element, fallbackReasons) =
           budget.inScope(reserved = reserveFallback) { fallbackBudget ->
             val extracted =
@@ -700,7 +714,14 @@ internal constructor(
       val rootNode =
         try {
           window.root
-        } catch (error: Exception) {
+        } catch (error: IllegalArgumentException) {
+          Log.d(TAG, "Could not read window root for accessibility focus", error)
+          null
+        } catch (error: IllegalStateException) {
+          if (error is kotlinx.coroutines.CancellationException) throw error
+          Log.d(TAG, "Could not read window root for accessibility focus", error)
+          null
+        } catch (error: SecurityException) {
           Log.d(TAG, "Could not read window root for accessibility focus", error)
           null
         } ?: continue
@@ -1421,7 +1442,14 @@ internal constructor(
       } else {
         elementInfo
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Error extracting node info at depth $depth", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.e(TAG, "Error extracting node info at depth $depth", e)
+      null
+    } catch (e: SecurityException) {
       Log.e(TAG, "Error extracting node info at depth $depth", e)
       null
     }
@@ -1963,13 +1991,13 @@ internal constructor(
           if (!seen.add(group.bounds)) continue
           val entry = group.firstAfter(i) ?: continue
           val bounds = group.bounds
-          if (
+          val overlapsLaterNode =
             entry.index > i &&
               bounds.left < node.bounds.right &&
               bounds.right > node.bounds.left &&
               bounds.top < node.bounds.bottom &&
               bounds.bottom > node.bounds.top
-          ) {
+          if (overlapsLaterNode) {
             candidates.add(entry to bounds)
           }
         }
@@ -2291,7 +2319,14 @@ internal constructor(
         tooltipText = tooltipText,
         paneTitle = paneTitle,
       )
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Error extracting focused element info", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.e(TAG, "Error extracting focused element info", e)
+      null
+    } catch (e: SecurityException) {
       Log.e(TAG, "Error extracting focused element info", e)
       null
     }
@@ -2472,7 +2507,12 @@ internal constructor(
           child.recycle()
         }
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Error collecting focusable element at depth $depth", e)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Error collecting focusable element at depth $depth", e)
+    } catch (e: SecurityException) {
       Log.w(TAG, "Error collecting focusable element at depth $depth", e)
     }
   }
@@ -2512,7 +2552,14 @@ internal constructor(
         bounds = elementBounds,
         testTag = testTag,
       )
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Error extracting simple element info", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Error extracting simple element info", e)
+      null
+    } catch (e: SecurityException) {
       Log.w(TAG, "Error extracting simple element info", e)
       null
     }
@@ -2535,7 +2582,14 @@ internal constructor(
       return bounds1 == bounds2 &&
         node1.viewIdResourceName == node2.viewIdResourceName &&
         node1.text?.toString() == node2.text?.toString()
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Could not compare accessibility nodes", e)
+      return false
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Could not compare accessibility nodes", e)
+      return false
+    } catch (e: SecurityException) {
       Log.w(TAG, "Could not compare accessibility nodes", e)
       return false
     }

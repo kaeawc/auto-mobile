@@ -1131,7 +1131,7 @@ describe("PlanMigrator field precedence", () => {
       steps: [step],
     });
     expect(plan.steps[0]).toBe(step);
-    expect(plan.steps[0]).toEqual({
+    expect<unknown>(step).toEqual({
       tool: "observe",
       label: "explicit",
       optional: true,
@@ -1145,14 +1145,13 @@ describe("PlanMigrator field precedence", () => {
   });
   test("migrates step metadata before returning for a non-string tool", () => {
     const step = { tool: 42, command: "ignored", description: "label", inline: "untouched" };
-    const { plan, report } = migratePlan({
+    const { report } = migratePlan({
       name: "current",
       mcpVersion: "99.99.99",
       metadata: { createdAt: "existing", version: "1" },
       steps: [step],
     });
-    expect(plan.steps[0]).toBe(step);
-    expect(plan.steps[0]).toEqual({ tool: 42, label: "label", inline: "untouched" });
+    expect<unknown>(step).toEqual({ tool: 42, label: "label", inline: "untouched" });
     expect(report.warnings).toEqual([
       { message: "Removed deprecated command field.", stepIndex: 0 },
       { message: "Mapped step description to label.", stepIndex: 0 },

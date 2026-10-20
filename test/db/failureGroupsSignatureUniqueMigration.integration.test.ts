@@ -44,7 +44,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     totalCount: number;
     uniqueSessions: number;
     lastOccurrence?: number;
-    type?: string;
+    type?: "crash" | "anr" | "tool_failure" | "nonfatal";
   }): Promise<void> {
     await db
       .insertInto("failure_groups")

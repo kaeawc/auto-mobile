@@ -221,7 +221,7 @@ describe("production CoreDevice wiring", () => {
       simctl: {
         getDeviceInfo: async () => null,
         listSimulatorImages: async () => [
-          { name: "sim", platform: "ios", deviceId: "sim-1", state: "Booted", isRunning: true },
+          { name: "sim", platform: "ios", deviceId: "sim-1", isRunning: true, state: "Booted" },
         ],
       },
     });
@@ -317,8 +317,8 @@ describe("production CoreDevice wiring", () => {
               name: "sim",
               platform: "ios",
               deviceId: "sim-1",
-              state,
               isRunning: state === "Booted",
+              state,
               deviceType: "nonDuo",
             },
           ];

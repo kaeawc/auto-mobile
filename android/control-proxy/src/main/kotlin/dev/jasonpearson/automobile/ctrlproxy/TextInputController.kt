@@ -102,9 +102,9 @@ internal class TextInputController(
       val node = findFocusedEditableNode(host.activeWindowRoot())
       val state =
         try {
-          if (
+          val hasUsableFocusedNode =
             node != null && node.refresh() && node.isEditable && node.isFocused && !node.isPassword
-          ) {
+          if (hasUsableFocusedNode) {
             InsertTextSnapshot(
               node.text?.toString(),
               node.isShowingHintTextCompat(),
@@ -204,14 +204,7 @@ internal class TextInputController(
       // This prevents the keyboard from stealing touch events and accessibility focus
       // from UI elements behind it during subsequent tapOn steps.
       if (success && dismissKeyboard) {
-        try {
-          host.hideSoftKeyboard()
-          Log.d(TAG, "[KeyboardDismiss] Set SHOW_MODE_HIDDEN after text injection")
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          Log.w(TAG, "[KeyboardDismiss] softKeyboardController failed", e)
-        }
+        dismissSoftKeyboard()
       }
 
       val totalTime = timeProvider.currentTimeMillis() - startTime
@@ -230,11 +223,34 @@ internal class TextInputController(
     } catch (e: CancellationException) {
       perfProvider.end()
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing set text", e)
       broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
+    } catch (e: IllegalStateException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing set text", e)
+      broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
+    } catch (e: SecurityException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing set text", e)
+      broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
+    }
+  }
+
+  private fun dismissSoftKeyboard() {
+    try {
+      host.hideSoftKeyboard()
+      Log.d(TAG, "[KeyboardDismiss] Set SHOW_MODE_HIDDEN after text injection")
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: IllegalStateException) {
+      Log.w(TAG, "[KeyboardDismiss] softKeyboardController failed", e)
+    } catch (e: SecurityException) {
+      Log.w(TAG, "[KeyboardDismiss] softKeyboardController failed", e)
     }
   }
 
@@ -247,7 +263,13 @@ internal class TextInputController(
         host.publishSettledHierarchy()
       } catch (e: CancellationException) {
         throw e
-      } catch (e: Exception) {
+      } catch (e: java.io.IOException) {
+        Log.w(TAG, "Failed to refresh hierarchy after text input", e)
+      } catch (e: IllegalArgumentException) {
+        Log.w(TAG, "Failed to refresh hierarchy after text input", e)
+      } catch (e: IllegalStateException) {
+        Log.w(TAG, "Failed to refresh hierarchy after text input", e)
+      } catch (e: SecurityException) {
         Log.w(TAG, "Failed to refresh hierarchy after text input", e)
       }
     }
@@ -507,14 +529,13 @@ internal class TextInputController(
       val mutationNodeKey = nodeKey()
       fun readMutationSnapshot(): InsertTextSnapshot? {
         // After writing, never re-find and move a caret in a different focused field.
-        if (
+        val hasInvalidMutationTarget =
           !targetNode.refresh() ||
             nodeKey() != mutationNodeKey ||
             !targetNode.isEditable ||
             !targetNode.isFocused ||
             targetNode.isPassword
-        )
-          return null
+        if (hasInvalidMutationTarget) return null
         return InsertTextSnapshot(
           targetNode.text?.toString(),
           targetNode.isShowingHintTextCompat(),
@@ -617,7 +638,33 @@ internal class TextInputController(
       nodeToRecycle?.recycle()
       finishPerf()
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      rememberedInsert = null
+      nodeToRecycle?.recycle()
+      finishPerf()
+      Log.e(TAG, "Error inserting text", e)
+      broadcastInsertTextResult(
+        requestId,
+        false,
+        e.message,
+        timeProvider.currentTimeMillis() - startTime,
+        partialApplication = textMutated,
+        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+      )
+    } catch (e: IllegalStateException) {
+      rememberedInsert = null
+      nodeToRecycle?.recycle()
+      finishPerf()
+      Log.e(TAG, "Error inserting text", e)
+      broadcastInsertTextResult(
+        requestId,
+        false,
+        e.message,
+        timeProvider.currentTimeMillis() - startTime,
+        partialApplication = textMutated,
+        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+      )
+    } catch (e: SecurityException) {
       rememberedInsert = null
       nodeToRecycle?.recycle()
       finishPerf()
@@ -783,7 +830,13 @@ internal class TextInputController(
               host.sendKeycodeEnter()
             } catch (e: CancellationException) {
               throw e
-            } catch (e: Exception) {
+            } catch (e: java.io.IOException) {
+              Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
+              false
+            } catch (e: InterruptedException) {
+              Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
+              false
+            } catch (e: SecurityException) {
               Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
               false
             }
@@ -818,7 +871,55 @@ internal class TextInputController(
     } catch (e: CancellationException) {
       finishPerf()
       throw e
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      finishPerf()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing IME action", e)
+      broadcastImeActionResult(
+        requestId,
+        action,
+        false,
+        e.message,
+        errorTime - startTime,
+        approximated,
+      )
+    } catch (e: InterruptedException) {
+      finishPerf()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing IME action", e)
+      broadcastImeActionResult(
+        requestId,
+        action,
+        false,
+        e.message,
+        errorTime - startTime,
+        approximated,
+      )
+    } catch (e: IllegalArgumentException) {
+      finishPerf()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing IME action", e)
+      broadcastImeActionResult(
+        requestId,
+        action,
+        false,
+        e.message,
+        errorTime - startTime,
+        approximated,
+      )
+    } catch (e: IllegalStateException) {
+      finishPerf()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing IME action", e)
+      broadcastImeActionResult(
+        requestId,
+        action,
+        false,
+        e.message,
+        errorTime - startTime,
+        approximated,
+      )
+    } catch (e: SecurityException) {
       finishPerf()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
@@ -926,7 +1027,17 @@ internal class TextInputController(
       )
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing select all", e)
+      broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
+    } catch (e: IllegalStateException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing select all", e)
+      broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
+    } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing select all", e)

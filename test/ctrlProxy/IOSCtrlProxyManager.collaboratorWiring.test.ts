@@ -1,6 +1,6 @@
-import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { describe, expect, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
+import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
@@ -40,17 +40,17 @@ interface AppLookup {
 }
 
 function recordingAppManager(lookups: AppLookup[], hash: string | null) {
-  const manager = new DeviceAppManager();
-  manager.getInstalledAppBundleHash = async (
-    deviceId: string,
-    bundleId: string,
-    simulator?: boolean,
-  ) => {
-    lookups.push({ deviceId, bundleId, simulator });
-    return hash;
-  };
-  manager.uninstallApp = async () => {};
-  return manager;
+  return new (class extends DeviceAppManager {
+    override async getInstalledAppBundleHash(
+      deviceId: string,
+      bundleId: string,
+      simulator?: boolean,
+    ) {
+      lookups.push({ deviceId, bundleId, simulator });
+      return hash;
+    }
+    override async uninstallApp() {}
+  })();
 }
 
 /** Runs `fn` with the skip variable set (or unset when `value` is undefined), then restores it. */

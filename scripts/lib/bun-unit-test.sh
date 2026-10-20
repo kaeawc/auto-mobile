@@ -32,12 +32,11 @@ configure_bun_unit_test() {
   # The randomized diagnostic deliberately uses a separate non-isolated command.
   # Windows' unsharded lane retains its existing platform-specific flags.
   # Consumed by the sourcing scripts; Bash arrays cannot be exported.
-  # shellcheck disable=SC2034
   BUN_UNIT_TEST_COMMAND=(bun test --isolate --timeout "$(bun_test_timeout_ms "$runner_os")" \
     --no-orphans --preload "$root/test/setup/fileTimingProbe.ts")
   # The same contract without --isolate, for the allow-listed files that share
   # one process per shard (test/shared-process-allowlist.txt, #10583).
-  # shellcheck disable=SC2034
   BUN_UNIT_SHARED_TEST_COMMAND=(bun test --timeout "$(bun_test_timeout_ms "$runner_os")" \
     --no-orphans --preload "$root/test/setup/fileTimingProbe.ts")
+  : "${BUN_UNIT_TEST_COMMAND[@]}" "${BUN_UNIT_SHARED_TEST_COMMAND[@]}"
 }

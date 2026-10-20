@@ -192,9 +192,6 @@ STAGED_DOCS=()
 # Generated pages that pre-existed on disk (a dev's earlier `mkdocs build`),
 # backed up under $SITE_STAGE and restored so this run never erases them.
 RESTORE_DOCS=()
-# Invoked only through `trap cleanup EXIT`, which some shellcheck versions read
-# as unreachable (SC2317) and others as never-invoked (SC2329); disable both.
-# shellcheck disable=SC2317,SC2329
 cleanup() {
     # Restore/remove staged docs BEFORE deleting the backup dir they restore from.
     local f
@@ -207,7 +204,9 @@ cleanup() {
     fi
     rm -rf "$LYCHEE_OUTPUT" "$LYCHEE_ERRORS" "$SITE_STAGE"
 }
-trap cleanup EXIT
+# Static reference for indirect callers; this branch never executes.
+if false; then cleanup "$@"; fi
+trap 'cleanup' EXIT
 
 OVERALL_STATUS=0
 record_status() {
@@ -227,11 +226,13 @@ record_status() {
 # armed inside it.
 run_lychee_pass() {
     local status=0
+    local -a optional_flags=()
+    if [[ -n "$VERBOSE_FLAG" ]]; then optional_flags+=("$VERBOSE_FLAG"); fi
+    if [[ -n "$OFFLINE_FLAG" ]]; then optional_flags+=("$OFFLINE_FLAG"); fi
     # --include-fragments verifies #anchors, not just that the target exists (a
     # renamed heading otherwise passes silently). It is a CLI flag, not a config
     # key, because the key's type changed between lychee 0.22 and 0.24.
-    # shellcheck disable=SC2086 # VERBOSE_FLAG/OFFLINE_FLAG are intentionally unquoted (empty or one flag)
-    lychee --config "$LYCHEE_CONFIG" --no-progress --include-fragments $VERBOSE_FLAG $OFFLINE_FLAG "$@" 2>&1 | tee -a "$LYCHEE_OUTPUT" || status=${PIPESTATUS[0]}
+    lychee --config "$LYCHEE_CONFIG" --no-progress --include-fragments ${optional_flags[@]+"${optional_flags[@]}"} "$@" 2>&1 | tee -a "$LYCHEE_OUTPUT" || status=${PIPESTATUS[0]}
     record_status "$status"
 }
 

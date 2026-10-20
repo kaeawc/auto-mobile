@@ -82,11 +82,10 @@ class ImeCommitDriver(
   private var terminalDecisionTraced = false
 
   private fun record(event: String, vararg fields: Pair<String, Any?>) {
-    if (
+    val isTerminalDecision =
       event == "decision" &&
         fields.any { it.first == "kind" && (it.second == "fail" || it.second == "succeed") }
-    )
-      terminalDecisionTraced = true
+    if (isTerminalDecision) terminalDecisionTraced = true
     runCatching { trace.record(event, fields) }
   }
 
@@ -112,15 +111,12 @@ class ImeCommitDriver(
     completed = true
     // Editor writes are oneway; a failed request may have already issued some of them.
     // Keep the result partial when the round-trip cannot confirm quiescence.
-    val outcome =
-      if (
-        !result.success &&
-          committedUnits > 0 &&
-          sink.nowMs() < hardDeadlineMs &&
-          !sink.syncEditorState()
-      )
-        result.copy(partialApplication = true)
-      else result
+    val hasUnconfirmedPartialWrite =
+      !result.success &&
+        committedUnits > 0 &&
+        sink.nowMs() < hardDeadlineMs &&
+        !sink.syncEditorState()
+    val outcome = if (hasUnconfirmedPartialWrite) result.copy(partialApplication = true) else result
     val delta =
       if (!reportInsertedText) null
       else outcome.insertedText ?: if (readDelta) insertedText?.invoke() else null
@@ -260,13 +256,12 @@ class ImeCommitDriver(
     }
 
     fun readInsertedText(): String? {
-      if (
+      val cannotReadInsertedText =
         !reportInsertedText ||
           baseline == null ||
           sink.editorIdentity() != identity ||
           sink.nowMs() >= hardDeadlineMs
-      )
-        return null
+      if (cannotReadInsertedText) return null
       return editorDelta(sink.readEditorTextBeforeCursor(EDITOR_READ_CAP))
     }
 
@@ -750,12 +745,11 @@ class ImeCommitDriver(
         else -> "other"
       }
 
-    private fun editorDelta(baseline: String?, now: String?): String? =
-      if (
+    private fun editorDelta(baseline: String?, now: String?): String? {
+      val hasAppendedText =
         baseline != null && now != null && now.length < EDITOR_READ_CAP && now.startsWith(baseline)
-      )
-        now.removePrefix(baseline)
-      else null
+      return if (hasAppendedText) now.removePrefix(baseline) else null
+    }
 
     private fun confirmedUnits(applied: String, dispatched: List<String>): Int? {
       var length = 0

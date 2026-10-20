@@ -689,7 +689,7 @@ export class LivenessScenario {
         }),
         avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
         bindingExclusionFactory: () => NO_BINDINGS,
-        foreignCtrlProxyForwardEvidence: () => undefined,
+        foreignCtrlProxyForwardEvidence: { read: async () => ({ kind: "none" }) },
       },
     );
     const exitFiles = new FakeDaemonExitRecordFileSystem();
@@ -866,10 +866,11 @@ export class LivenessScenario {
           return;
         }
         if (stall.lateAckDelayMs === undefined || stall.lateAckTaken) {
-          await new Promise<void>(() => {});
+          return await new Promise<void>(() => {});
         }
+        const delayMs = stall.lateAckDelayMs;
         stall.lateAckTaken = true;
-        await new Promise<void>((resolve) => this.timer.setTimeout(resolve, stall.lateAckDelayMs));
+        await new Promise<void>((resolve) => this.timer.setTimeout(resolve, delayMs));
       },
       delivered: (params: Record<string, unknown>) => {
         if (typeof params.livenessOwnerToken === "string") {
@@ -967,10 +968,14 @@ export class LivenessScenario {
         });
       }
       // Acquisition prepared the device, as getAndroid's readiness setup records.
-      manager.setDeviceReadiness(this.minted, "automationReady");
+      const minted = this.minted;
+      if (!minted) {
+        throw new Error("Scenario acquisition did not mint a session");
+      }
+      manager.setDeviceReadiness(minted, "automationReady");
       return tool === "provisionDevice"
-        ? provisionDeviceResult(this.minted, deviceId)
-        : deviceStartResult(this.minted);
+        ? provisionDeviceResult(minted, deviceId)
+        : deviceStartResult(minted);
     }
     try {
       return await this.tools.call(tool, args, requestSignal);
@@ -1063,7 +1068,7 @@ export class LivenessScenario {
       PLATFORM,
       this.deviceIds.map((id) => ({ ...this.device(id), source: "local", isRunning: false })),
     );
-    await pool.removeDevice(deviceId, true, pool.getDevice(deviceId));
+    await pool.removeDevice(deviceId, true, pool.getDevice(deviceId) ?? undefined);
     await drainMicrotasks(TURNS_PER_EVENT);
   }
 

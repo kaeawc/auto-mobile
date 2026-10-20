@@ -114,12 +114,14 @@ internal class RecompositionSnapshotReceiver(
     }
 
     val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT) ?: return
-    try {
-      val snapshot = jsonLenient.decodeFromString(serializer<RecompositionSnapshot>(), payload)
-      recompositionStore.updateSnapshot(snapshot)
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to parse recomposition snapshot", e)
-    }
+    val snapshot =
+      try {
+        jsonLenient.decodeFromString(serializer<RecompositionSnapshot>(), payload)
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Failed to parse recomposition snapshot", e)
+        return
+      }
+    recompositionStore.updateSnapshot(snapshot)
   }
 }
 
@@ -137,27 +139,29 @@ internal class FrameMetricsSnapshotReceiver(
     }
 
     val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_SNAPSHOT) ?: return
-    try {
-      val snapshot = jsonLenient.decodeFromString(serializer<FrameMetricsSnapshot>(), payload)
-      frameMetricsStore.updateSnapshot(snapshot)
-      // Forward live so the host can feed real app-frame data into perfSnapshot.
-      if (isRunning()) {
-        val response =
-          FrameMetricsEventResponse(
-            timestamp = snapshot.timestamp,
-            frameMetrics =
-              FrameMetricsData(
-                applicationId = snapshot.applicationId,
-                fps = snapshot.fps,
-                frameTimeMs = snapshot.frameTimeMs,
-                jankFrames = snapshot.jankFrames,
-                totalFrames = snapshot.totalFrames,
-              ),
-          )
-        scope.launch { broadcast(response) }
+    val snapshot =
+      try {
+        jsonLenient.decodeFromString(serializer<FrameMetricsSnapshot>(), payload)
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Failed to parse frame metrics snapshot", e)
+        return
       }
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to parse frame metrics snapshot", e)
+    frameMetricsStore.updateSnapshot(snapshot)
+    // Forward live so the host can feed real app-frame data into perfSnapshot.
+    if (isRunning()) {
+      val response =
+        FrameMetricsEventResponse(
+          timestamp = snapshot.timestamp,
+          frameMetrics =
+            FrameMetricsData(
+              applicationId = snapshot.applicationId,
+              fps = snapshot.fps,
+              frameTimeMs = snapshot.frameTimeMs,
+              jankFrames = snapshot.jankFrames,
+              totalFrames = snapshot.totalFrames,
+            ),
+        )
+      scope.launch { broadcast(response) }
     }
   }
 }

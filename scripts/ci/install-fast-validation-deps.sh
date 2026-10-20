@@ -127,7 +127,8 @@ run_with_retry() {
 install_xmlstarlet_from_fallback_mirror() {
   local codename="${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}"
   if [[ -z "$codename" && -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091 # system file, not part of the repo.
+    # Host OS metadata is unavailable on non-Linux analysis hosts.
+    # shellcheck source=/dev/null
     codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
   fi
   codename="${codename:-noble}"
@@ -173,9 +174,8 @@ main() {
     # per-attempt cleanup every subsequent retry would fail instantly on it.
     # `timeout` is an external binary and cannot run a shell function, so the
     # cleanup+clone pair is composed with `bash -c`.
-    # shellcheck disable=SC2016 # $1 is deliberately expanded by the inner bash, not here.
     run_with_retry "clone bats-core" \
-      bash -c 'rm -rf "$1" && git clone --depth 1 --branch "$2" https://github.com/bats-core/bats-core.git "$1"' \
+      bash -c "rm -rf \"\$1\" && git clone --depth 1 --branch \"\$2\" https://github.com/bats-core/bats-core.git \"\$1\"" \
       _ "$BATS_CLONE_DIR" "$BATS_CORE_TAG"
     bats_commit="$(git -C "$BATS_CLONE_DIR" rev-parse HEAD)"
     [[ "$bats_commit" == "$BATS_CORE_COMMIT" ]] ||

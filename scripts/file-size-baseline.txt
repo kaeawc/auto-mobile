@@ -32,7 +32,6 @@
 1636	src/server/finalizeToolResponse.ts
 2267	src/server/interactionTools.ts
 1323	src/server/planExecutionOrchestrator.ts
-2848	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
 2185	src/server/videoRecordingManager.ts
 1427	src/server/videoRecordingTools.ts

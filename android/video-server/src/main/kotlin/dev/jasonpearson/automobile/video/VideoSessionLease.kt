@@ -3,8 +3,10 @@ package dev.jasonpearson.automobile.video
 import android.os.SystemClock
 import android.system.Os
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.HexFormat
+import org.json.JSONException
 import org.json.JSONObject
 
 /**
@@ -237,13 +239,7 @@ class VideoSessionLease(
         File(LEASE_DIRECTORY)
           .listFiles { file -> file.extension == "json" }
           ?.asSequence()
-          ?.mapNotNull { file ->
-            try {
-              JSONObject(file.readText())
-            } catch (_: Exception) {
-              null
-            }
-          }
+          ?.mapNotNull { file -> CollisionRecordReader.read(file) }
           ?.firstOrNull {
             it.optString("socketName") == socketName &&
               it.optString("sessionTokenHash") != requestedTokenHash
@@ -257,4 +253,19 @@ class VideoSessionLease(
         "tokenMismatch=true ageMs=$ageMs")
     }
   }
+}
+
+// Keep the Android JSON exception type out of the lease companion's initialization: JVM tests
+// exercise injected serializers without android.jar on their runtime classpath.
+private object CollisionRecordReader {
+  fun read(file: File): JSONObject? =
+    try {
+      JSONObject(file.readText())
+    } catch (_: IOException) {
+      null
+    } catch (_: JSONException) {
+      null
+    } catch (_: SecurityException) {
+      null
+    }
 }

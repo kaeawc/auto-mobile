@@ -178,14 +178,16 @@ internal class PaneSessionProviderStabilityTest : PaneSessionProviderStabilityDi
       },
     )
     rememberWorkspaceDeviceControl(
-      column = column,
-      clientProvider = { null },
-      enabled = true,
-      sessionUuidProvider = provider,
-      streamFactory = {
-        root.counts.control++
-        FakeObservationStream()
-      },
+      dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceDeviceControlOptions(
+        column = column,
+        clientProvider = { null },
+        enabled = true,
+        sessionUuidProvider = provider,
+        streamFactory = {
+          root.counts.control++
+          FakeObservationStream()
+        },
+      ),
     )
   }
 

@@ -37,7 +37,17 @@ class DeviceControlInputForwarderTest {
 
   private fun forward(spec: ForwardRequest) =
     with(spec) {
-      forwarder.forwardTap(point, client, platform, deviceId, onError, frameContext)
+      forwarder.forwardTap(
+        point,
+        target =
+          dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+            client,
+            platform,
+            deviceId,
+            onError,
+            frameContext,
+          ),
+      )
     }
 
   @Test
@@ -178,11 +188,14 @@ class DeviceControlInputForwarderTest {
       start = DevicePoint(x = 540, y = 1800, inBounds = true),
       end = DevicePoint(x = 540, y = 400, inBounds = true),
       durationMs = 300,
-      client = fake,
-      platform = "ios",
-      deviceId = "sim-udid",
-      onError = { error("unexpected error: $it") },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client = fake,
+          platform = "ios",
+          deviceId = "sim-udid",
+          onError = { error("unexpected error: $it") },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
 
     assertEquals(
@@ -212,21 +225,27 @@ class DeviceControlInputForwarderTest {
       start = DevicePoint(x = 540, y = 1800, inBounds = true),
       end = DevicePoint(x = 540, y = 9_000, inBounds = false),
       durationMs = 300,
-      client = fake,
-      platform = "android",
-      deviceId = "emulator-5554",
-      onError = { error = it },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client = fake,
+          platform = "android",
+          deviceId = "emulator-5554",
+          onError = { error = it },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
     forwarder.forwardSwipe(
       start = DevicePoint(x = -4, y = 10, inBounds = false),
       end = DevicePoint(x = 540, y = 400, inBounds = true),
       durationMs = 300,
-      client = fake,
-      platform = "android",
-      deviceId = "emulator-5554",
-      onError = { error = it },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client = fake,
+          platform = "android",
+          deviceId = "emulator-5554",
+          onError = { error = it },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
 
     assertTrue(fake.inputSwipeCalls.isEmpty(), "an off-screen endpoint must not be sent")
@@ -251,11 +270,14 @@ class DeviceControlInputForwarderTest {
       start = DevicePoint(x = 1, y = 2, inBounds = true),
       end = DevicePoint(x = 3, y = 400, inBounds = true),
       durationMs = 300,
-      client = fake,
-      platform = "android",
-      deviceId = null,
-      onError = { error = it },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client = fake,
+          platform = "android",
+          deviceId = null,
+          onError = { error = it },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
 
     assertEquals("No active android device to swipe", error)
@@ -276,11 +298,14 @@ class DeviceControlInputForwarderTest {
       start = DevicePoint(x = 1, y = 2, inBounds = true),
       end = DevicePoint(x = 3, y = 400, inBounds = true),
       durationMs = 300,
-      client = throwing,
-      platform = "android",
-      deviceId = null,
-      onError = { error = it },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client = throwing,
+          platform = "android",
+          deviceId = null,
+          onError = { error = it },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
 
     assertEquals("daemon socket closed", error)
@@ -294,11 +319,14 @@ class DeviceControlInputForwarderTest {
       start = DevicePoint(x = 1, y = 2, inBounds = true),
       end = DevicePoint(x = 3, y = 400, inBounds = true),
       durationMs = 300,
-      client = null,
-      platform = "android",
-      deviceId = null,
-      onError = { error = it },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client = null,
+          platform = "android",
+          deviceId = null,
+          onError = { error = it },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
 
     assertNull(error)
@@ -312,11 +340,14 @@ class DeviceControlInputForwarderTest {
 
     forwarder.forwardTypeText(
       text = "",
-      client = client,
-      platform = "android",
-      deviceId = "emulator-5554",
-      onError = { fail("empty text must not be an error, it must be a no-op: $it") },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client = client,
+          platform = "android",
+          deviceId = "emulator-5554",
+          onError = { fail("empty text must not be an error, it must be a no-op: $it") },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
 
     assertEquals(emptyList(), client.inputTypeTextCalls)
@@ -327,9 +358,39 @@ class DeviceControlInputForwarderTest {
     var error: String? = null
     val onError: (String) -> Unit = { error = it }
 
-    forwarder.forwardPressButton("back", null, "android", null, onError, TEST_FRAME_CONTEXT)
-    forwarder.forwardTypeText("a", null, "android", null, onError, TEST_FRAME_CONTEXT)
-    forwarder.forwardKey("enter", null, "android", null, onError, TEST_FRAME_CONTEXT)
+    forwarder.forwardPressButton(
+      "back",
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          null,
+          "android",
+          null,
+          onError,
+          TEST_FRAME_CONTEXT,
+        ),
+    )
+    forwarder.forwardTypeText(
+      "a",
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          null,
+          "android",
+          null,
+          onError,
+          TEST_FRAME_CONTEXT,
+        ),
+    )
+    forwarder.forwardKey(
+      "enter",
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          null,
+          "android",
+          null,
+          onError,
+          TEST_FRAME_CONTEXT,
+        ),
+    )
 
     assertNull(error)
   }
@@ -343,11 +404,14 @@ class DeviceControlInputForwarderTest {
 
     forwarder.forwardKey(
       "enter",
-      client,
-      "ios",
-      "iphone-1",
-      onError = { error = it },
-      frameContext = TEST_FRAME_CONTEXT,
+      target =
+        dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+          client,
+          "ios",
+          "iphone-1",
+          onError = { error = it },
+          frameContext = TEST_FRAME_CONTEXT,
+        ),
     )
 
     assertEquals("unsupported on ios", error)
@@ -358,48 +422,36 @@ class DeviceControlInputForwarderTest {
     val client = FakeAutoMobileClient()
     val context = TEST_FRAME_CONTEXT
     val onError: (String) -> Unit = { fail("unexpected error: $it") }
+    val target =
+      dev.jasonpearson.automobile.desktop.core.control.DeviceInputTarget(
+        client = client,
+        platform = "android",
+        deviceId = "emulator-5554",
+        frameContext = context,
+        onError = onError,
+      )
 
     forwarder.forwardTap(
       point = DevicePoint(x = 1, y = 2, inBounds = true),
-      client = client,
-      platform = "android",
-      deviceId = "emulator-5554",
-      frameContext = context,
-      onError = onError,
+      target = target,
     )
     forwarder.forwardSwipe(
       start = DevicePoint(x = 1, y = 2, inBounds = true),
       end = DevicePoint(x = 3, y = 4, inBounds = true),
       durationMs = 300,
-      client = client,
-      platform = "android",
-      deviceId = "emulator-5554",
-      frameContext = context,
-      onError = onError,
+      target = target,
     )
     forwarder.forwardPressButton(
       button = "back",
-      client = client,
-      platform = "android",
-      deviceId = "emulator-5554",
-      frameContext = context,
-      onError = onError,
+      target = target,
     )
     forwarder.forwardTypeText(
       text = "a",
-      client = client,
-      platform = "android",
-      deviceId = "emulator-5554",
-      frameContext = context,
-      onError = onError,
+      target = target,
     )
     forwarder.forwardKey(
       key = "enter",
-      client = client,
-      platform = "android",
-      deviceId = "emulator-5554",
-      frameContext = context,
-      onError = onError,
+      target = target,
     )
 
     assertEquals(context, client.inputTapCalls.single().frameContext)

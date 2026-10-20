@@ -82,53 +82,41 @@ internal fun DeviceControlSession.forward(
   command: DeviceControlInputCommand,
   onError: (String) -> Unit,
 ) {
+  val target =
+    DeviceInputTarget(
+      command.client,
+      command.platform,
+      command.snapshot.deviceId,
+      onError,
+      command.snapshot.frameContext,
+    )
   when (command) {
     is DeviceControlInputCommand.Tap ->
       forwarder.forwardTap(
         point = command.point,
-        client = command.client,
-        platform = command.platform,
-        deviceId = command.snapshot.deviceId,
-        frameContext = command.snapshot.frameContext,
-        onError = onError,
+        target = target,
       )
     is DeviceControlInputCommand.Swipe ->
       forwarder.forwardSwipe(
         start = command.start,
         end = command.end,
         durationMs = command.durationMs,
-        client = command.client,
-        platform = command.platform,
-        deviceId = command.snapshot.deviceId,
-        frameContext = command.snapshot.frameContext,
-        onError = onError,
+        target = target,
       )
     is DeviceControlInputCommand.PressButton ->
       forwarder.forwardPressButton(
         button = command.button,
-        client = command.client,
-        platform = command.platform,
-        deviceId = command.snapshot.deviceId,
-        frameContext = command.snapshot.frameContext,
-        onError = onError,
+        target = target,
       )
     is DeviceControlInputCommand.TypeText ->
       forwarder.forwardTypeText(
         text = command.text,
-        client = command.client,
-        platform = command.platform,
-        deviceId = command.snapshot.deviceId,
-        frameContext = command.snapshot.frameContext,
-        onError = onError,
+        target = target,
       )
     is DeviceControlInputCommand.SendKey ->
       forwarder.forwardKey(
         key = command.key,
-        client = command.client,
-        platform = command.platform,
-        deviceId = command.snapshot.deviceId,
-        frameContext = command.snapshot.frameContext,
-        onError = onError,
+        target = target,
       )
     is DeviceControlInputCommand.StreamGesture ->
       // Streamed gestures are driven by executeStreamGesture, never the one-shot forwarder.

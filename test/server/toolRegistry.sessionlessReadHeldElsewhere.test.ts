@@ -209,8 +209,6 @@ describe("a sessionless read never readies a device held outside this daemon's s
             holder: "session_broker",
             scopeKey: "scope",
             bindingIndex: 0,
-            scopeState: null,
-            execSessionUuid: "slot-exec",
           });
         }
       };

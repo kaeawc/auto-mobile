@@ -145,9 +145,11 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           is IllegalArgumentException -> {
+            Log.e(TAG, "SDK provider unavailable for $packageName", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           else -> {
@@ -268,6 +270,7 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           else -> {
@@ -386,6 +389,7 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           else -> {
@@ -541,6 +545,7 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK subscription denied for $packageName (SDK not installed)", e)
             SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
           }
           else -> {
@@ -672,6 +677,7 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           else -> {
@@ -742,6 +748,7 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           else -> {
@@ -792,6 +799,7 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           else -> {
@@ -839,6 +847,7 @@ class StorageSubscriptionManager(
       onFailure = { e ->
         when (e) {
           is SecurityException -> {
+            Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
             Result.failure(StorageError.SdkNotInstalled(packageName))
           }
           else -> {

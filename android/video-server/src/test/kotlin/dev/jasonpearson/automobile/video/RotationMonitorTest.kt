@@ -334,6 +334,59 @@ class RotationMonitorTest {
 
   @Test
   fun throwingCallbackDoesNotRetryRotationOrResetNestedReaderFailures() {
+    val fixture = NestedFailureFixture()
+    with(fixture) {
+      try {
+        monitor.start {
+          observed.add(it)
+          if (it == 1) {
+            // A framework notification during the callback begins a new reader-failure run.
+            failing = true
+            requireNotNull(listenerCallback).invoke()
+            throw IllegalStateException("capture swap failed")
+          }
+        }
+        assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+        rotation = 1
+        ticks.release()
+        assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+        assertEquals(
+          listOf(
+            "RotationMonitor reader failed: display unavailable",
+            "RotationMonitor callback failed: capture swap failed",
+          ),
+          logs.toList(),
+        )
+
+        ticks.release()
+        assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+        assertEquals("callback failure must not reset the reader-failure run", 2, logs.size)
+        failing = false
+        ticks.release()
+        assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+        assertEquals(listOf(1), observed.toList())
+        assertEquals("RotationMonitor reader recovered after 2 consecutive failures", logs.last())
+
+        rotation = 2
+        ticks.release()
+        assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
+        assertEquals(
+          "the poll loop must still dispatch distinct changes",
+          listOf(1, 2),
+          observed.toList(),
+        )
+        assertEquals(3, logs.size)
+      } finally {
+        monitor.stop()
+        pollThread.get()?.let {
+          it.join(TimeUnit.SECONDS.toMillis(2))
+          assertFalse("the interrupted poll thread must unwind", it.isAlive)
+        }
+      }
+    }
+  }
+
+  private class NestedFailureFixture {
     var failing = false
     var rotation = 0
     var listenerCallback: (() -> Unit)? = null
@@ -359,54 +412,6 @@ class RotationMonitorTest {
         },
         log = { logs.add(it) },
       )
-
-    try {
-      monitor.start {
-        observed.add(it)
-        if (it == 1) {
-          // A framework notification during the callback begins a new reader-failure run.
-          failing = true
-          requireNotNull(listenerCallback).invoke()
-          throw IllegalStateException("capture swap failed")
-        }
-      }
-      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
-      rotation = 1
-      ticks.release()
-      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
-      assertEquals(
-        listOf(
-          "RotationMonitor reader failed: display unavailable",
-          "RotationMonitor callback failed: capture swap failed",
-        ),
-        logs.toList(),
-      )
-
-      ticks.release()
-      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
-      assertEquals("callback failure must not reset the reader-failure run", 2, logs.size)
-      failing = false
-      ticks.release()
-      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
-      assertEquals(listOf(1), observed.toList())
-      assertEquals("RotationMonitor reader recovered after 2 consecutive failures", logs.last())
-
-      rotation = 2
-      ticks.release()
-      assertTrue(parked.tryAcquire(2, TimeUnit.SECONDS))
-      assertEquals(
-        "the poll loop must still dispatch distinct changes",
-        listOf(1, 2),
-        observed.toList(),
-      )
-      assertEquals(3, logs.size)
-    } finally {
-      monitor.stop()
-      pollThread.get()?.let {
-        it.join(TimeUnit.SECONDS.toMillis(2))
-        assertFalse("the interrupted poll thread must unwind", it.isAlive)
-      }
-    }
   }
 
   private companion object {

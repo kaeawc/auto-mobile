@@ -136,6 +136,14 @@ export class GestureClassifier {
   // -------------------------------------------------------------------------
 
   private updateContacts(frame: RawTouchFrame): void {
+    // A release packet can carry the contact's last move; only the position counts (pressure is 0).
+    for (const slot of frame.releasedFinalSamples ?? []) {
+      const existing = this.contacts.get(slot.slotId);
+      if (existing) {
+        existing.lastX = slot.x;
+        existing.lastY = slot.y;
+      }
+    }
     for (const slot of frame.activeSlots) {
       const existing = this.contacts.get(slot.slotId);
       if (existing) {

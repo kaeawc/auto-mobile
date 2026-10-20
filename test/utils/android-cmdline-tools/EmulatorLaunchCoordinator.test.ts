@@ -1,6 +1,4 @@
 import { resolve } from "node:path";
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import type { BootAdmission } from "../../../src/models/BootAdmission";
@@ -15,16 +13,16 @@ import type {
   EmulatorLauncher,
   EmulatorProcessLaunch,
   EmulatorProcessOptions,
-} from "../../../src/utils/android-cmdline-tools/EmulatorLaunchSupport";
+} from "../../../src/utils/android-cmdline-tools/EmulatorLauncher";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-function child(): ChildProcess {
-  const process = new EventEmitter() as ChildProcess;
-  process.killed = false;
-  process.kill = (() => {
+function child(): FakeChildProcess {
+  const process = new FakeChildProcess(new FakeTimer());
+  process.kill = () => {
     process.killed = true;
     return true;
-  }) as ChildProcess["kill"];
+  };
   return process;
 }
 
@@ -145,11 +143,11 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
     const { coordinator, launcher } = setup();
     const spawned = child();
     let kills = 0;
-    spawned.kill = (() => {
+    spawned.kill = () => {
       kills++;
       spawned.killed = true;
       return true;
-    }) as ChildProcess["kill"];
+    };
     launcher.onStart = async () => ({ process: spawned, outcome: "launched" });
     const handle = await coordinator.launchEmulator({ avdName: "Pixel" });
     handle.dispose();
@@ -180,8 +178,8 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
       release: () => {
         released++;
       },
-      markSpawned: () => {},
-    } as BootAdmission;
+      handOff: () => {},
+    };
     launcher.onStart = async (options) => {
       options.onAdmitted?.(admission);
       throw new Error("spawn failed");
@@ -254,7 +252,7 @@ describe("DefaultEmulatorLaunchCoordinator cancellation helpers", () => {
     const { coordinator, reservations } = setup();
     const reservation = {
       deviceId: "emulator-5554",
-      ports: { console: 5554, adb: 5555 },
+      ports: { consolePort: 5554, adbPort: 5555 },
       appendPort: true,
       avdName: "Pixel",
     };

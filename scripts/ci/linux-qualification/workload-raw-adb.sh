@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Same cadence as W: cold-launch Settings, tap search, text + enter, screenshot, 1s.
 set -euo pipefail
-# shellcheck source=scripts/ci/linux-qualification/lib.sh disable=SC1091
+# shellcheck source=scripts/ci/linux-qualification/lib.sh
 source "$(dirname "$0")/lib.sh"
 end=$(( $(now) + LOAD_SECONDS ))
 timestamp=$(now)

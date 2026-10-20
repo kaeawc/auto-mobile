@@ -111,8 +111,9 @@ class WebSocketServer(
         (lenientJson.parseToJsonElement(raw) as? JsonObject)?.get(field)?.let { element ->
           (element as? JsonPrimitive)?.takeIf { it.isString }?.content
         }
-      } catch (_: IllegalArgumentException) {
+      } catch (e: IllegalArgumentException) {
         // Expected for genuinely malformed payloads; correlation is best-effort by design.
+        Log.d(TAG, "Could not extract request ID from malformed payload", e)
         null
       }
 
@@ -864,7 +865,7 @@ class WebSocketServer(
    * @param messageBuilder Function that takes optional perfTiming JsonElement and returns the
    *   complete message
    */
-  suspend fun broadcastWithPerf(
+  fun broadcastWithPerf(
     routeByRequestId: Boolean = true,
     messageBuilder: (perfTiming: JsonElement?) -> String,
   ) {
@@ -892,7 +893,7 @@ class WebSocketServer(
    * @param messageBuilder Function that takes optional perfTiming JsonElement and returns the
    *   complete message
    */
-  suspend fun broadcastWithPerfSync(
+  fun broadcastWithPerfSync(
     routeByRequestId: Boolean = true,
     messageBuilder: (perfTiming: JsonElement?) -> String,
   ) {
@@ -1147,7 +1148,7 @@ class WebSocketServer(
   }
 
   /** Send a typed terminal failure only to the client whose inbound message failed. */
-  private suspend fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
+  private fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
     correlationRequestId(response)?.let { requestId ->
       synchronized(connections) { requestConnections.remove(requestId) }

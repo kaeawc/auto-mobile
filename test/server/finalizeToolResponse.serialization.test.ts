@@ -27,7 +27,7 @@ class FakeArtifactWriter implements ObservationArtifactWriter {
   }
 }
 
-function observation(text = "Run"): ObserveResult {
+function observation(text = "Run") {
   return {
     updatedAt: 123,
     screenSize: { width: 100, height: 200 },
@@ -45,7 +45,10 @@ function observation(text = "Run"): ObserveResult {
         },
       },
     },
-  } as ObserveResult;
+  } satisfies Pick<
+    ObserveResult,
+    "updatedAt" | "screenSize" | "activeWindow" | "screenshotPath" | "viewHierarchy"
+  > & { screenshot: string };
 }
 
 function capture(payload: Record<string, unknown>, name: string, mode: "always" | "oversized") {

@@ -11,7 +11,7 @@ BASE_REF="${STDLIB_FIRST_BASE_REF:-origin/main}"
 
 cd "$ROOT_DIR"
 
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$ROOT_DIR/scripts/lib/vcs-diff.sh"
 
 set +e

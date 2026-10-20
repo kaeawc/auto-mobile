@@ -81,7 +81,9 @@ describe("TapOnElement extended selectors", () => {
       new Error("touchscreen input unavailable"),
     );
 
-    await tapOn.testHooks.executeAndroidLongPress(50, 25, 20_000, makeElement(), undefined, true);
+    await tapOn.testHooks.executeAndroidLongPress(50, 25, 20_000, makeElement(), {
+      skipSemanticAction: true,
+    });
 
     expect(
       adb
@@ -419,16 +421,10 @@ describe("TapOnElement extended selectors", () => {
       const options = { action: "longPress" as const, resolvedHierarchy: notificationHierarchy };
       const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
       try {
-        await tapOn.executeAndroidTap(
-          "longPress",
-          50,
-          25,
-          1000,
-          uniqueIdElement,
-          undefined,
-          options,
-          false,
-        );
+        await tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+          options: options,
+          isTalkBackEnabled: false,
+        });
         expect(proxy.getHierarchyRequestCount()).toBe(0);
         expect(proxy.getActionHistory()).toMatchObject([
           { action: "long_click", resourceId: uniqueIdElement["resource-id"] },
@@ -454,16 +450,10 @@ describe("TapOnElement extended selectors", () => {
         const options = { action: "longPress" as const, resolvedHierarchy };
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
         try {
-          await harness.tapOn.executeAndroidTap(
-            "longPress",
-            50,
-            25,
-            1000,
-            element,
-            undefined,
-            options,
-            false,
-          );
+          await harness.tapOn.executeAndroidTap("longPress", 50, 25, 1000, element, {
+            options: options,
+            isTalkBackEnabled: false,
+          });
           expect(harness.proxy.getHierarchyRequestCount()).toBe(0);
           expectCoordinateFallback(harness);
         } finally {
@@ -484,16 +474,11 @@ describe("TapOnElement extended selectors", () => {
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(raw);
         const read = spyOn(proxy, "getAccessibilityHierarchy");
         try {
-          await tapOn.executeAndroidTap(
-            "longPress",
-            50,
-            25,
-            1000,
-            uniqueIdElement,
-            controller.signal,
-            options,
-            false,
-          );
+          await tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+            signal: controller.signal,
+            options: options,
+            isTalkBackEnabled: false,
+          });
           expect(read).toHaveBeenCalledTimes(raw ? 0 : 1);
           if (!raw) {
             expect(read).toHaveBeenCalledWith(undefined, {
@@ -520,16 +505,10 @@ describe("TapOnElement extended selectors", () => {
       });
       try {
         await expect(
-          tapOn.executeAndroidTap(
-            "longPress",
-            50,
-            25,
-            1000,
-            uniqueIdElement,
-            controller.signal,
-            undefined,
-            false,
-          ),
+          tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+            signal: controller.signal,
+            isTalkBackEnabled: false,
+          }),
         ).rejects.toThrow("Operation cancelled");
         expect(proxy.getActionHistory()).toEqual([]);
         expect(proxy.getNodeActionHistory()).toEqual([]);
@@ -589,10 +568,12 @@ describe("TapOnElement extended selectors", () => {
           });
           expect(result.success).toBe(true);
           expect(stable).toHaveBeenCalledTimes(1);
-          expect(dispatch.mock.calls[0]?.[6]).toMatchObject({
+          expect(dispatch.mock.calls[0]?.[5]?.options).toMatchObject({
             resolvedHierarchy: notificationHierarchy,
           });
-          expect(dispatch.mock.calls[0]?.[6]?.resolvedHierarchy).toBe(notificationHierarchy);
+          expect(dispatch.mock.calls[0]?.[5]?.options?.resolvedHierarchy).toBe(
+            notificationHierarchy,
+          );
           expect(proxy.getHierarchyRequestCount()).toBe(0);
           expect(proxy.getNodeActionHistory()).toEqual([]);
           if (kind === "unique") {

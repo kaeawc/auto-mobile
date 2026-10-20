@@ -15,7 +15,7 @@ import { raceWithDeadline } from "../raceWithDeadline";
 
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+  SIMULATOR_BOOT_CLEANUP_TIMEOUT_MS,
   SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS,
 } from "../deviceTimeouts";
 
@@ -65,7 +65,7 @@ export class SimCtlShutdown {
       // The failed boot already owns this lease; reacquiring it would deadlock.
       await this.shutdownSimulatorCoordinated(
         udid,
-        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+        SIMULATOR_BOOT_CLEANUP_TIMEOUT_MS,
         cleanupSignal,
         undefined,
         lease,
@@ -86,13 +86,15 @@ export class SimCtlShutdown {
     expectedOwnerToken?: object,
     heldLease?: SimulatorBootLease,
   ): Promise<void> {
-    // Waiting for an active boot must not consume the shutdown command's own
-    // timeout, so the queue wait gets its own dedicated deadline instead of
-    // `timeoutMs`. That deadline is still a hard ceiling, independent of
-    // `signal`: callers with no ambient abort signal (CI boot recovery, a boot
-    // handle's cleanup) must not queue forever behind a wedged boot (issue #6577).
-    // Once the lease is acquired, simctl shutdown receives the complete timeoutMs budget.
-    const leaseDeadlineMs = this.context.timer.now() + SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS;
+    const verifyCleanup = heldLease !== undefined || expectedOwnerToken !== undefined;
+    const cleanupDeadlineMs = verifyCleanup
+      ? this.context.timer.now() + Math.min(timeoutMs, SIMULATOR_BOOT_CLEANUP_TIMEOUT_MS)
+      : undefined;
+    // Regular shutdown keeps a separately bounded lease wait (issue #6577).
+    // Failed/cancelled boot cleanup shares one deadline across the lease,
+    // shutdown command and verification, including callers without a request signal.
+    const leaseDeadlineMs =
+      cleanupDeadlineMs ?? this.context.timer.now() + SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS;
     const lease =
       heldLease ??
       (await this.context.acquireSimulatorBoot(udid, leaseDeadlineMs, signal, "shut down"));
@@ -103,8 +105,9 @@ export class SimCtlShutdown {
       ) {
         return;
       }
-      const verifyCleanup = heldLease !== undefined || expectedOwnerToken !== undefined;
-      try {
+      if (cleanupDeadlineMs !== undefined) {
+        await this.executeCleanupShutdown(udid, cleanupDeadlineMs, signal);
+      } else {
         await this.context.executeCommandArgv(
           ["shutdown", udid],
           timeoutMs,
@@ -112,17 +115,11 @@ export class SimCtlShutdown {
           signal,
           true,
         );
-      } catch (error) {
-        if (!verifyCleanup || !isIosSimulatorAlreadyStoppedError(error)) {
-          throw error;
-        }
-        // An already-stopped simulator is expected during cleanup; verify it below.
-        logger.debug(`[iOS] Cleanup shutdown for ${udid} reported stopped: ${errorMessage(error)}`);
       }
       this.context.invalidateDeviceListCache();
-      if (verifyCleanup) {
+      if (cleanupDeadlineMs !== undefined) {
         // Cleanup must prove its post-condition while still holding the boot lease.
-        await this.verifyCleanupShutdown(udid, timeoutMs, signal);
+        await this.verifyCleanupShutdown(udid, cleanupDeadlineMs, signal);
       }
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
@@ -133,17 +130,79 @@ export class SimCtlShutdown {
     }
   }
 
-  private async verifyCleanupShutdown(
+  private async executeCleanupShutdown(
     udid: string,
-    timeoutMs: number,
+    deadlineMs: number,
     signal?: AbortSignal,
   ): Promise<void> {
-    const state = await this.context.readSimulatorState(udid, timeoutMs, signal);
-    if (state !== "Shutdown") {
-      throw new ActionableError(
-        `iOS simulator ${udid} cleanup did not reach Shutdown (state: ${state ?? "unknown"}).`,
+    const controller = new AbortController();
+    const cleanupSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const remainingMs = this.remainingCleanupMs(udid, deadlineMs);
+    // Abort the command at the shared deadline, without waiting indefinitely for its child to settle.
+    try {
+      await raceWithDeadline(
+        () =>
+          this.context.executeCommandArgv(
+            ["shutdown", udid],
+            remainingMs,
+            `shutdown ${udid}`,
+            cleanupSignal,
+            false,
+          ),
+        {
+          timer: this.context.timer,
+          timeoutMs: remainingMs,
+          signal,
+          label: `iOS simulator ${udid} cleanup shutdown`,
+          onTimeout: () => controller.abort(),
+        },
+      );
+    } catch (error) {
+      if (!isIosSimulatorAlreadyStoppedError(error)) {
+        throw error;
+      }
+      // An already-stopped simulator is expected during cleanup; verify it under the same lease.
+      logger.debug(`[iOS] Cleanup shutdown for ${udid} reported stopped: ${errorMessage(error)}`);
+    }
+  }
+
+  private async verifyCleanupShutdown(
+    udid: string,
+    deadlineMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let state: string | undefined;
+    for (let attempt = 1; ; attempt++) {
+      const remainingMs = this.remainingCleanupMs(udid, deadlineMs, state);
+      state = await raceWithDeadline(
+        () => this.context.readSimulatorState(udid, remainingMs, signal),
+        {
+          timer: this.context.timer,
+          timeoutMs: remainingMs,
+          signal,
+          label: `iOS simulator ${udid} cleanup state read`,
+        },
+      );
+      if (state === "Shutdown") {
+        return;
+      }
+      await this.context.timer.sleep(
+        Math.min(
+          SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt),
+          this.remainingCleanupMs(udid, deadlineMs, state),
+        ),
       );
     }
+  }
+
+  private remainingCleanupMs(udid: string, deadlineMs: number, state?: string): number {
+    const remainingMs = deadlineMs - this.context.timer.now();
+    if (remainingMs <= 0) {
+      throw new ActionableError(
+        `iOS simulator ${udid} cleanup timed out before reaching Shutdown (state: ${state ?? "unknown"}).`,
+      );
+    }
+    return remainingMs;
   }
 
   async killSimulator(

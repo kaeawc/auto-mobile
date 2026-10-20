@@ -200,10 +200,13 @@ export function watchSurvivingProcess(
  * `gone` promise that settles once the process is finally absent; the AVD's
  * lifecycle lease must be held until then. `unobservable` means the exit could
  * not even be observed, so nothing can be held on.
+ * `cleanup-unconfirmed` is a failed synthetic resource shutdown, without a
+ * surviving process or an AVD hold to apply to queued lifecycle requests.
  */
 export type OwnedTermination =
   | { state: "confirmed" }
   | { state: "survived"; gone: Promise<void> }
+  | { state: "cleanup-unconfirmed" }
   | { state: "unobservable" };
 
 export interface OwnedEmulatorTerminationOptions {
@@ -233,6 +236,13 @@ export async function terminateOwnedEmulatorProcess(
       return { state: "confirmed" };
     }
   } catch (error) {
+    if (handle.terminationConfirmed !== undefined) {
+      logger.warn(
+        `[startDevice] Resource cleanup for ${label} was unconfirmed: ${errorMessage(error)}`,
+        error,
+      );
+      return { state: "cleanup-unconfirmed" };
+    }
     // The exit could not even be observed, so nothing can be held on: the lease is
     // released at once and the owner's own failure stays the one surfaced.
     logger.warn(
@@ -240,6 +250,10 @@ export async function terminateOwnedEmulatorProcess(
       error,
     );
     return { state: "unobservable" };
+  }
+  if (handle.terminationConfirmed !== undefined) {
+    logger.warn(`[startDevice] Resource cleanup for ${label} was unconfirmed`);
+    return { state: "cleanup-unconfirmed" };
   }
   logger.warn(
     `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${label} survived ` +

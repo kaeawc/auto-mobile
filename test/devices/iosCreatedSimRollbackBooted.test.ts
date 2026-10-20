@@ -39,8 +39,8 @@ function newState(): SimState {
 }
 
 /**
- * Stateful simctl fake: delete also shuts down a running device, while shutdown
- * of a stopped device reports the same state-machine 405 as the real client.
+ * Stateful simctl fake: delete rejects a running device, and shutdown of a
+ * stopped device reports the same state-machine 405 as the real client.
  */
 function statefulSimctl(state: SimState): DeviceClientSimctl {
   const listed = (): DeviceInfo[] =>
@@ -99,6 +99,11 @@ function statefulSimctl(state: SimState): DeviceClientSimctl {
       state.deleteTimeoutMs = options?.timeoutMs;
       if (state.deleteError) {
         throw state.deleteError;
+      }
+      if (state.sims.get(udid) === "Booted") {
+        throw new Error(
+          "Unable to delete device in current state: Booted (domain=com.apple.CoreSimulator.SimError, code=405)",
+        );
       }
       if (!state.ghostAfterDelete) {
         state.sims.delete(udid);
@@ -177,7 +182,7 @@ describe("findOrStartIosDevice rollback of a created simulator", () => {
     new Error("simctl shutdown timed out"),
     new SimulatorStillShuttingDownError(CREATED, "Created simulator", "Shutting Down", 10_000),
   ])(
-    "a failed shutdown warns and still deletes the created simulator: %s",
+    "a failed shutdown attempts delete and warns when Booted prevents deletion: %s",
     async (shutdownError) => {
       const state = newState();
       state.shutdownError = shutdownError;
@@ -186,11 +191,13 @@ describe("findOrStartIosDevice rollback of a created simulator", () => {
       await expect(manager.findOrStartIosDevice()).rejects.toThrow("runner readiness failed");
 
       expect(state.calls).toContain(`delete ${CREATED}`);
-      expect(state.sims.has(CREATED)).toBe(false);
+      expect(state.sims.get(CREATED)).toBe("Booted");
       const warning = warnings().find((message) => message.includes("attempting delete"));
       expect(warning).toContain(CREATED);
       expect(warning).toContain(shutdownError.message);
-      expect(warnings().some((message) => message.includes("may be left behind"))).toBe(false);
+      const leftover = warnings().find((message) => message.includes("may be left behind"));
+      expect(leftover).toContain("state: Booted");
+      expect(leftover).toContain("Unable to delete device in current state: Booted");
     },
   );
 

@@ -25,7 +25,7 @@ import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequen
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+  SIMULATOR_BOOT_CLEANUP_TIMEOUT_MS,
 } from "../deviceTimeouts";
 
 import { inferIosFormFactor } from "./iosDeviceType";
@@ -218,7 +218,7 @@ export class SimCtlBoot {
       const cleanupSignal = new AbortController().signal;
       return this.context.shutdownSimulatorCoordinated(
         udid,
-        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+        SIMULATOR_BOOT_CLEANUP_TIMEOUT_MS,
         cleanupSignal,
         ownerToken,
       );
@@ -245,7 +245,21 @@ export class SimCtlBoot {
     try {
       await this.context.shutdownAfterFailedStart(udid, lease);
     } catch (cleanupError) {
-      throw new AggregateError([error, cleanupError], errorMessage(error), { cause: error });
+      logger.warn(
+        `[iOS] Boot cleanup for ${udid} was unconfirmed: ${errorMessage(cleanupError)}`,
+        cleanupError,
+      );
+      // Keep the original identity and subtype so timeout/retry classification survives.
+      if (error instanceof Error && Object.isExtensible(error)) {
+        Object.defineProperties(error, {
+          cleanupError: { value: cleanupError, configurable: true },
+          cleanupNote: {
+            value: `Simulator cleanup was unconfirmed: ${errorMessage(cleanupError)}`,
+            configurable: true,
+          },
+        });
+      }
+      throw error;
     }
     throw error;
   }

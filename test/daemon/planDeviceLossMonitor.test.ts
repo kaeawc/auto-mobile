@@ -482,7 +482,23 @@ describe("confirmed plan device loss", () => {
       }
       await h.tick();
       await h.tick();
-      expect(h.manager.calls).toHaveLength(4);
+      // The peer has no plan: each sweep confirms its absence before the plan's own check.
+      expect(h.manager.calls.map((options) => options.bypassAndroidDeviceListCache)).toEqual([
+        false,
+        true,
+        true,
+        false,
+        true,
+        true,
+      ]);
+      expect(h.manager.platforms).toEqual([
+        "either",
+        "either",
+        "android",
+        "either",
+        "either",
+        "android",
+      ]);
       expect(plan.abortController.signal.aborted).toBe(false);
       expect(await h.incidents.list()).toEqual([]);
     },

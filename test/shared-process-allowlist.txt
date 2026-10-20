@@ -281,7 +281,6 @@ test/daemon/ownerLeaseAwaitsReap.test.ts
 test/daemon/ownershipLookupReleasesNothing.test.ts
 test/daemon/passiveWorkPolicy.test.ts
 test/daemon/perSourceIosLiveness.test.ts
-test/daemon/performancePushSocketServer.test.ts
 test/daemon/performancePushSocketServerCharacterization.test.ts
 test/daemon/performanceStreamSocketServerCharacterization.test.ts
 test/daemon/planDeviceLossMonitor.ios.test.ts
@@ -413,6 +412,7 @@ test/daemon/sessionBroker/provisioning/executionReleaseBusyRegistry.test.ts
 test/daemon/sessionBroker/provisioning/iosBindingDeviceUnexcludedWhileCreating.test.ts
 test/daemon/sessionBroker/provisioning/iosDeviceTypeNewest.test.ts
 test/daemon/sessionBroker/provisioning/managedExecutionDaemonRestart.test.ts
+test/daemon/sessionBroker/provisioning/managedExecutionReownTerminal.test.ts
 test/daemon/sessionBroker/provisioning/managedOwnershipRelease.test.ts
 test/daemon/sessionBroker/provisioning/ownExecutionRetainedSnapshot.test.ts
 test/daemon/sessionBroker/provisioning/reconciler.test.ts
@@ -1023,6 +1023,7 @@ test/features/observe/ios/CtrlProxyKeyboardTimeout.test.ts
 test/features/observe/ios/CtrlProxyMagicTap.test.ts
 test/features/observe/ios/CtrlProxyMultiFingerFence.test.ts
 test/features/observe/ios/CtrlProxyPressDispatch.test.ts
+test/features/observe/ios/CtrlProxySdkCapabilities.test.ts
 test/features/observe/ios/CtrlProxySdkTrigger.test.ts
 test/features/observe/ios/CtrlProxyStructure.test.ts
 test/features/observe/ios/CtrlProxySwipeDispatch.test.ts
@@ -1099,7 +1100,9 @@ test/features/performance/PerfWindowBuffer.test.ts
 test/features/performance/PerformanceAudit.refreshRate.test.ts
 test/features/performance/PerformanceAudit.ttff.test.ts
 test/features/performance/PerformanceAudit.window.test.ts
+test/features/performance/PerformanceDemandProbe.test.ts
 test/features/performance/PerformanceMonitor.cost.test.ts
+test/features/performance/PerformanceMonitor.demand.test.ts
 test/features/performance/SdkFrameMetricsStore.test.ts
 test/features/preferences/AndroidPreferencesXmlFile.test.ts
 test/features/preferences/AndroidSharedPreferencesMutationCoordinator.test.ts

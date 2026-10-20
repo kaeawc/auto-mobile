@@ -56,7 +56,8 @@ export interface DaemonMaintenanceHost {
     | "databaseHealthProbe"
     | "options"
   >;
-  identity: Pick<
+  identity: Pick<DaemonIdentity, "recordControlSocketIdentity">;
+  identityState: Pick<
     DaemonIdentityState,
     | "incumbentOwnerGuard"
     | "generationStartedAt"
@@ -108,6 +109,9 @@ export class DaemonMaintenance {
         httpServer: () => this.host.services.httpIngress().server,
         socketServerListening: () => this.host.lifecycle.socketServer()?.isListening() ?? false,
         observationStreamHealthy: () => this.host.observationStreamHealth().isHealthy(),
+        // The production recovery retries through startAuxiliarySocket, which keeps a live
+        // holder as a warning and clears degradation/records ownership after a successful bind.
+        retryDegradedObservationStream: () => this.host.observationStreamHealth().recover(),
         databaseHealthProbe: () => this.host.services.databaseHealthProbe(),
         onDatabaseFailureChanged: (message) => {
           this.host.setLastDatabaseHealthFailure(message);
@@ -269,31 +273,35 @@ export class DaemonMaintenance {
             undefined,
             FeatureFlagService.getInstance(),
             {
-              identityStartedAt: this.host.identity.generationStartedAt(),
-              processGenerationToken: this.host.identity.processGenerationToken(),
+              identityStartedAt: this.host.identityState.generationStartedAt(),
+              processGenerationToken: this.host.identityState.processGenerationToken(),
               startupOptions: this.host.services.options(),
               onRepublishIdentity: () => this.host.republishIdentity(),
               startupCompletion: this.host.lifecycle.startupCompletion(),
               pidFilePath: PID_FILE_PATH,
               sockets: getDaemonSocketPathsByName(),
               dbPath: getDatabasePath(),
-              processStartedAt: this.host.identity.processStartedAt(),
+              processStartedAt: this.host.identityState.processStartedAt(),
               onRestartAccepted: () => {
                 setImmediate(() => process.kill(process.pid, "SIGTERM"));
               },
-              liveAcceptanceStartupSecret: this.host.identity.liveAcceptanceStartupSecret(),
-              acceptanceDiscoveryCapability: this.host.identity.acceptanceDiscoveryCapability(),
+              liveAcceptanceStartupSecret: this.host.identityState.liveAcceptanceStartupSecret(),
+              acceptanceDiscoveryCapability:
+                this.host.identityState.acceptanceDiscoveryCapability(),
               mcpDispatcher: this.host.services.mcpDispatcher(),
             },
             this.host.services.idGenerator(),
             // Recovery reuses the same ownership evidence as initial startup. A
             // replacement socket is never reclaimed merely because this daemon
             // previously held the namespace.
-            { ownerLiveness: this.host.identity.incumbentOwnerGuard().asSocketOwnerLiveness() },
+            {
+              ownerLiveness: this.host.identityState.incumbentOwnerGuard().asSocketOwnerLiveness(),
+            },
           ),
         );
         try {
           await this.host.lifecycle.socketServer()!.start();
+          this.host.identity.recordControlSocketIdentity();
           logger.info("Socket server restarted successfully");
         } catch (error) {
           logger.error(`Failed to restart socket server: ${error}`);

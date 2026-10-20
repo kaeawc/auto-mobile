@@ -92,6 +92,21 @@ const timeoutFailure = {
 };
 
 describe("SDK capability transport uncertainty", () => {
+  test("cached SDK availability is tri-state, app-bound and expires negative replies", async () => {
+    const h = createHarness(() => ({ success: true, available: false }));
+    expect(h.probe.getSdkAvailability("com.example.sdk")).toBeUndefined();
+    await h.probe.requestSdkCapabilities(0);
+    expect(h.probe.getSdkAvailability("com.example.sdk")).toBe(false);
+    h.timer.advanceTime(5000);
+    expect(h.probe.getSdkAvailability("com.example.sdk")).toBeUndefined();
+    h.probe.seedForTesting("com.example.sdk", []);
+    expect(h.probe.getSdkAvailability("com.example.sdk")).toBe(true);
+    expect(h.probe.getSdkAvailability("com.example.other")).toBeUndefined();
+    h.probe.invalidateSdkCapabilities();
+    expect(h.probe.getSdkAvailability("com.example.sdk")).toBeUndefined();
+    expect(h.state.attempts).toBe(1);
+  });
+
   test.each(["abort", "deadline"] as const)(
     "the owner's %s leaves a longer-budget joiner alive",
     async (boundary) => {

@@ -1074,6 +1074,7 @@ test/features/observe/ios/CtrlProxyMagicTap.test.ts
 test/features/observe/ios/CtrlProxyMultiFingerFence.test.ts
 test/features/observe/ios/CtrlProxyPressDispatch.test.ts
 test/features/observe/ios/CtrlProxySdkCapabilities.test.ts
+test/features/observe/ios/CtrlProxySdkEvents.test.ts
 test/features/observe/ios/CtrlProxySdkTrigger.test.ts
 test/features/observe/ios/CtrlProxyStructure.test.ts
 test/features/observe/ios/CtrlProxySwipeDispatch.test.ts

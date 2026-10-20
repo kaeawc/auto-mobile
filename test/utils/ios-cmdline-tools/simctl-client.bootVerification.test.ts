@@ -792,37 +792,37 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
   });
 
-  test("session auto-start cleans up a post-boot registration failure", async () => {
+  test("session auto-start cleans up when the verified boot row is unavailable", async () => {
     const harness = createConcurrentStartHarness(
       () => Promise.resolve(createExecResult("", "")),
-      (invocation) =>
-        invocation === 1
-          ? bootedSimulatorListResult()
-          : createExecResult(JSON.stringify({ devices: {} }), ""),
+      () => bootedDeviceListResult(false, "runtime unavailable"),
     );
 
     const client = harness.createClient();
     await expect(client.bootSimulator(UDID)).rejects.toThrow(
-      `Failed to boot iOS simulator ${UDID}`,
+      `Simulator with UDID ${UDID} booted but is unavailable: runtime unavailable`,
     );
     expect(await client.getBootedSimulatorsChecked()).toEqual([]);
     expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
   });
 
-  test("session auto-start preserves a post-boot registration discovery error", async () => {
-    const registrationError = new Error("registration discovery failed");
+  test("session auto-start needs no discovery after successful verification", async () => {
+    let reads = 0;
     const harness = createConcurrentStartHarness(
       () => Promise.resolve(createExecResult("", "")),
-      (invocation) => {
-        if (invocation === 1) {
+      () => {
+        if (++reads === 1) {
           return bootedSimulatorListResult();
         }
-        throw registrationError;
+        throw new Error("unexpected repeated discovery");
       },
     );
 
-    await expect(harness.createClient().bootSimulator(UDID)).rejects.toBe(registrationError);
-    expect(harness.lifecycleCalls).toEqual(["bootstatus-1", "shutdown"]);
+    await expect(harness.createClient().bootSimulator(UDID)).resolves.toMatchObject({
+      deviceId: UDID,
+    });
+    expect(reads).toBe(1);
+    expect(harness.lifecycleCalls).toEqual(["bootstatus-1"]);
   });
 
   test("rejects a queued public owner but lets session and readiness adopt success", async () => {
@@ -923,7 +923,7 @@ describe("SimCtlClient boot self-verification", () => {
     const harness = createConcurrentStartHarness(
       () => Promise.resolve(createExecResult("", "")),
       (invocation) =>
-        invocation === 3
+        invocation === 2
           ? createExecResult(JSON.stringify({ devices: {} }), "")
           : bootedSimulatorListResult(),
     );
@@ -1833,11 +1833,9 @@ describe("SimCtlClient boot self-verification", () => {
     expect(bootstatusCalls(harness.calls).length).toBe(2);
     expect(shutdownCalls(harness.calls).length).toBe(1);
     expect(commandTimeouts(harness, `xcrun simctl bootstatus ${UDID} -b`)).toEqual([true, true]);
-    // 4 reads: the post-bootstatus-1 verification, the post-shutdown settle
-    // poll, the post-bootstatus-2 verification, and the post-boot metadata
-    // resolution (resolveReadySimulator).
+    // 3 reads: the post-bootstatus-1 verification, the post-shutdown settle
+    // poll, and the post-bootstatus-2 verification, reused for metadata resolution.
     expect(commandTimeouts(harness, "xcrun simctl list devices --json")).toEqual([
-      true,
       true,
       true,
       true,
@@ -2268,8 +2266,7 @@ describe("boot readiness provisioning classification", () => {
       simulatorAppPresenter: { presentAfterStart: async () => {} },
       shutdownSimulatorCoordinated: async () => {},
       executeCommandArgs: async () => createExecResult("", ""),
-      listSimulatorImages: async () => [],
-      listSimulators: async () => ({ devices: {} }),
+      readSimulatorTarget: async () => undefined,
     });
   }
 

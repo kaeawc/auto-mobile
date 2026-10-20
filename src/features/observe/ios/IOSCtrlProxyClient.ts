@@ -459,9 +459,16 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     resolveWebSocketHost: () => this.resolveWebSocketHost(),
     pollSdkEvents: () => this.pollSdkEvents(),
     getSdkScreenIdentity: (appId) => this.getSdkScreenIdentity(appId),
+    getSdkAvailability: (appId) =>
+      appId && appId === this.lastForegroundBundleId
+        ? this.sdkCapability.getSdkAvailability(appId)
+        : undefined,
   });
-  public refreshSdkScreenIdentity(appId?: string): Promise<ScreenIdentity | undefined> {
-    return this.sdkEvents.refreshSdkScreenIdentity(appId);
+  public refreshSdkScreenIdentity(
+    appId?: string,
+    capturedAt?: number,
+  ): Promise<ScreenIdentity | undefined> {
+    return this.sdkEvents.refreshSdkScreenIdentity(appId, capturedAt);
   }
   public pollSdkEvents(): Promise<SdkEventPollResult> {
     return this.sdkEvents.pollSdkEvents();
@@ -867,10 +874,15 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   }
 
   protected handleMessage(data: WebSocket.Data): void {
-    // Inbound frames indicate an active app; reset the SDK-event poll backoff.
-    this.sdkEvents.noteSdkEventPollWsActivity();
     try {
       const message = JSON.parse(data.toString()) as WebSocketMessage;
+      // Only app activity resets backoff; runner metrics and handshakes do not.
+      if (
+        message.type === "hierarchy_update" ||
+        (message.requestId && message.type !== "performance_update" && message.type !== "connected")
+      ) {
+        this.sdkEvents.noteSdkEventPollWsActivity();
+      }
       this.processMessage(message);
     } catch (error) {
       logger.warn(`[IOSCtrlProxyClient] Failed to parse message: ${error}`);

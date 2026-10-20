@@ -15,6 +15,7 @@ import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/inter
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 
 const avdName = "Pixel_9_Pro";
 
@@ -184,6 +185,8 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
           }
           await timer.advanceTimeAsync(0);
           await timer.advanceTimeAsync(1_000);
+          // Immediate wake-up can remove every timer before advanceTimeAsync drains continuations.
+          await drainUntil(() => rejection !== undefined, { description: "readiness exit" });
           expect(rejection).toBeInstanceOf(ActionableError);
           expect(rejection).toBeInstanceOf(EmulatorExitedDuringReadinessError);
           expect((rejection as { exitCode: number | null }).exitCode).toBe(exitCode);

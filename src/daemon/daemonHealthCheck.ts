@@ -29,6 +29,8 @@ export interface DaemonHealthCheckDeps {
   httpServer(): { listening: boolean } | null | undefined;
   socketServerListening(): boolean;
   observationStreamHealthy(): boolean;
+  /** Retry only the optional stream bind; a held path must not restart healthy transports. */
+  retryDegradedObservationStream(): Promise<void>;
   databaseHealthProbe(): { check(): Promise<void> };
   /** Receives the latest probe failure message, or undefined once a probe passes. */
   onDatabaseFailureChanged(message: string | undefined): void;
@@ -146,11 +148,29 @@ export function createDaemonHealthCheck(deps: DaemonHealthCheckDeps): SingleFlig
     return true;
   };
 
+  const retryDegradedObservation = async (): Promise<void> => {
+    if (isAuxiliarySocketUnavailable("observation-stream") && !deps.observationStreamHealthy()) {
+      try {
+        await deps.retryDegradedObservationStream();
+      } catch (error) {
+        // Optional stream retries must not hide DB health or disrupt healthy transports.
+        logger.warn(
+          `Observation stream bind retry failed; keeping daemon serving: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+  };
+
   const tick = async (): Promise<void> => {
     const tickGap = lateness.tick();
     try {
-      if (listenersHealthy() && !(await checkDatabase(tickGap))) {
-        return;
+      if (listenersHealthy()) {
+        const databaseConclusive = await checkDatabase(tickGap);
+        await retryDegradedObservation();
+        if (!databaseConclusive) {
+          return;
+        }
       }
       if (failedCheckCount >= MAX_FAILED_HEALTH_CHECKS) {
         logger.error(`Health check failed ${failedCheckCount} times, attempting recovery...`);

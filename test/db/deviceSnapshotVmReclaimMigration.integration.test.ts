@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
+import type { Generated } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
@@ -8,6 +9,18 @@ import {
   up as vmReclaimUp,
 } from "../../src/db/migrations/2026_09_13_000_device_snapshot_vm_reclaim";
 import { runMigrations } from "../../src/db/migrator";
+
+interface MigrationDatabase {
+  device_snapshots: {
+    snapshot_name: string;
+    platform: string;
+    snapshot_type: string;
+    size_bytes: Generated<number>;
+    size_unknown: Generated<number>;
+    pending_reclaim: Generated<number>;
+    pending_reclaim_reason: Generated<string | null>;
+  };
+}
 
 const MIGRATION_NAME = "2026_09_13_000_device_snapshot_vm_reclaim";
 
@@ -19,7 +32,7 @@ function provider(): MigrationProvider {
   };
 }
 
-async function columnNames<T>(db: Kysely<T>): Promise<string[]> {
+async function columnNames(db: Kysely<MigrationDatabase>): Promise<string[]> {
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('device_snapshots')
   `.execute(db);
@@ -27,21 +40,10 @@ async function columnNames<T>(db: Kysely<T>): Promise<string[]> {
 }
 
 describe("device snapshot VM reclaim migration (#6490)", () => {
-  type SnapshotSchema = {
-    device_snapshots: {
-      snapshot_name: string;
-      platform: string;
-      snapshot_type: string;
-      size_bytes: number;
-      size_unknown?: number;
-      pending_reclaim?: number;
-      pending_reclaim_reason?: string | null;
-    };
-  };
-  let db: Kysely<SnapshotSchema>;
+  let db: Kysely<MigrationDatabase>;
 
   beforeEach(async () => {
-    db = new Kysely<SnapshotSchema>({
+    db = new Kysely<MigrationDatabase>({
       dialect: new BunSqliteDialect({ database: new BunDatabase(":memory:") }),
     });
     await db.schema
@@ -73,7 +75,7 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
         platform: "android",
         snapshot_type: "full",
         size_bytes: 4096,
-      })
+      } as never)
       .execute();
 
     await runMigrations(db, { provider: provider(), env: {} });
@@ -106,7 +108,7 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
         platform: "android",
         snapshot_type: "vm",
         size_bytes: 0,
-      })
+      } as never)
       .execute();
 
     await runMigrations(db, { provider: provider(), env: {} });

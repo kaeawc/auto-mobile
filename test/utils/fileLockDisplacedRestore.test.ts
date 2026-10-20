@@ -407,7 +407,7 @@ test.each(["stat", "readText"] as const)(
   "undecidable retained %s backs out without retrying P",
   (op) => {
     const f = retained();
-    const checkReadable = (path: string): void => {
+    const assertReadable = (path: string): void => {
       if (path === F) {
         const error: NodeJS.ErrnoException = new Error("unreadable retained marker");
         error.code = "EACCES";
@@ -415,14 +415,14 @@ test.each(["stat", "readText"] as const)(
       }
     };
     const failure =
-      op === "stat"
-        ? spyOn(f.fs, "stat").mockImplementation((path) => {
-            checkReadable(path);
-            return FakeLockFileSystem.prototype.stat.call(f.fs, path);
-          })
-        : spyOn(f.fs, "readText").mockImplementation((path) => {
-            checkReadable(path);
+      op === "readText"
+        ? spyOn(f.fs, "readText").mockImplementation((path) => {
+            assertReadable(path);
             return FakeLockFileSystem.prototype.readText.call(f.fs, path);
+          })
+        : spyOn(f.fs, "stat").mockImplementation((path) => {
+            assertReadable(path);
+            return FakeLockFileSystem.prototype.stat.call(f.fs, path);
           });
     try {
       const acquirer = f.acquire(303);

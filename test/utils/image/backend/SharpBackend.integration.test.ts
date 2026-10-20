@@ -25,8 +25,10 @@ function makeRecordingSharpFactory(events: string[]): SharpPort {
   function toBuffer(options: { resolveWithObject: true }): Promise<SharpRawResult>;
   async function toBuffer(options?: { resolveWithObject: true }): Promise<Buffer | SharpRawResult> {
     events.push("toBuffer");
-    const data = Buffer.from("encoded");
-    return options?.resolveWithObject ? { data, info: { width: 1, height: 1 } } : data;
+    if (options) {
+      throw new Error("Recording factory only supports encoded output");
+    }
+    return Buffer.from("encoded");
   }
   const image: SharpPipeline = {
     resize(options) {

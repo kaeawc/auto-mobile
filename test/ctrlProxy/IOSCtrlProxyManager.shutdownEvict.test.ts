@@ -226,6 +226,9 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
               return remoteStart.promise;
             },
             stop: async ({ pid }: { pid: number }) => {
+              if (pid === undefined) {
+                throw new Error("Expected a runner PID");
+              }
               stoppedPids.push(pid);
               if (stoppedPids.length === 1) {
                 if (firstStopFailure === "rejects") {
@@ -289,7 +292,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
         },
         stop: async ({ pid }) => {
           if (pid === undefined) {
-            throw new Error("Expected stop PID");
+            throw new Error("Expected a runner PID");
           }
           stoppedPids.push(pid);
           // Admission cleanup (the first stop) never settles; the shutdown force-stop does.

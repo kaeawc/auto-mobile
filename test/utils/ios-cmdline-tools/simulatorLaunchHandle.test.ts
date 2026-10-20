@@ -24,7 +24,7 @@ describe("createSimulatorLaunchHandle", () => {
       exits++;
     });
     if (!(handle instanceof EventEmitter)) {
-      throw new Error("Expected event emitter");
+      throw new Error("Expected an event-emitting launch handle");
     }
     handle.emit("exit");
     expect(exits).toBe(1);

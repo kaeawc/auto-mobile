@@ -247,14 +247,14 @@ describe("resolveIosLaunchBackend", () => {
     const launchArguments = ["--automobile-mutation-token", "test-token"];
     const simulatorCalls: Array<{
       bundleId: string;
-      options?: { foregroundIfRunning?: boolean; launchArguments?: string[] };
+      options?: { launchArguments?: string[]; foregroundIfRunning?: boolean };
     }> = [];
     const launcher = new FakeDeviceAppLauncher();
     const deps = {
       simctl: {
         launchApp: async (
           id: string,
-          options?: { foregroundIfRunning?: boolean; launchArguments?: string[] },
+          options?: { launchArguments?: string[]; foregroundIfRunning?: boolean },
         ) => {
           simulatorCalls.push({ bundleId: id, options });
           return { success: true };

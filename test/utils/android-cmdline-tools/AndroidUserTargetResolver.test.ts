@@ -213,7 +213,7 @@ describe("AndroidUserTargetResolver.resolve", () => {
   test.each(cases)("$name", async ({ request, users, foreground, expected }) => {
     const adb = new FakeAdbExecutor();
     if (users) {
-      adb.setUsers(users);
+      adb.setUsers([...users]);
     }
     if (foreground !== undefined) {
       adb.setForegroundApp(foreground);

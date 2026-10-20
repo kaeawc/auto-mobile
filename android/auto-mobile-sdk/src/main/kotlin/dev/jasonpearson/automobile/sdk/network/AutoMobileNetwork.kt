@@ -232,14 +232,7 @@ object AutoMobileNetwork {
       val policy = capturePolicyProvider?.invoke()
       val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
       val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
-      val parsedUrl =
-        if (record.host == null || record.path == null) {
-          try {
-            java.net.URL(record.url)
-          } catch (_: MalformedURLException) {
-            null
-          }
-        } else null
+      val parsedUrl = parseRecordUrl(record)
       val host = record.host ?: parsedUrl?.host
       val path = record.path ?: parsedUrl?.path
       buf.add(
@@ -270,6 +263,15 @@ object AutoMobileNetwork {
       }
     }
   }
+
+  private fun parseRecordUrl(record: NetworkRequestRecord): java.net.URL? =
+    if (record.host == null || record.path == null) {
+      try {
+        java.net.URL(record.url)
+      } catch (_: MalformedURLException) {
+        null
+      }
+    } else null
 
   /**
    * Start a transport-neutral capture lifecycle. Use the returned handle from success, failure,

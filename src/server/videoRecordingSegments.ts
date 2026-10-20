@@ -1,4 +1,5 @@
 import type { DeviceInfo, VideoRecordingHighlightEntry } from "../models";
+import { registerSegmentedRecordingCleanup } from "../daemon/segmentedRecordingCleanup";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
@@ -335,3 +336,12 @@ export async function finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(
     }
   }
 }
+
+registerSegmentedRecordingCleanup({
+  adoptOwnerlessSegmentedVideoRecordings,
+  hasSegmentedVideoRecordingsForOwner,
+  segmentedVideoRecordingHandlesForOwner,
+  captureSegmentedRecordingIdsForOwner,
+  stopSegmentedVideoRecordingsForOwner,
+  finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
+});

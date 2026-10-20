@@ -29,7 +29,7 @@ import {
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";

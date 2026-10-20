@@ -13,7 +13,7 @@ import type {
 } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { TASK_ELIGIBILITY } from "../../../src/server/tasks/toolCallTasks";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import * as videoRecordingManager from "../../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../../src/daemon/videoRecordingManager";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";

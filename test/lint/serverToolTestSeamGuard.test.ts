@@ -8,7 +8,6 @@ const ALLOWLIST: Record<string, number> = {
   "deviceReadinessProxyProvider.ts": 1,
   "deviceSnapshotManager.ts": 1,
   "deviceTools.ts": 2,
-  "videoRecordingManager.ts": 1,
   "videoRecordingSegments.ts": 1,
   "webrtcStreamManager.ts": 1,
 };

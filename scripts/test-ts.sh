@@ -1121,9 +1121,16 @@ run_unit_shards() {
       "$shared_total" "${#isolated_files[@]}" >&2
   fi
 
-  cap_unit_workers "$unit_workers"
-  worker_count="$capped_workers"
-  if [[ "$shard_mode" == coverage ]]; then worker_count="$coverage_shards"; fi
+  if [[ "$shard_mode" == coverage ]]; then
+    # The shard count is explicit configuration (AUTOMOBILE_COVERAGE_SHARDS) and
+    # shapes the partition, so it is never reduced; hold host slots for it so the
+    # coverage lane is accounted like any other unit lane.
+    if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then cap_unit_workers "$coverage_shards"; fi
+    worker_count="$coverage_shards"
+  else
+    cap_unit_workers "$unit_workers"
+    worker_count="$capped_workers"
+  fi
   if [[ "$worker_count" -gt "${#test_files[@]}" ]]; then
     worker_count="${#test_files[@]}"
   fi

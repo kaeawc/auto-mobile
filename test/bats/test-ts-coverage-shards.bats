@@ -21,7 +21,11 @@ EOF
 
 setup() {
   export AUTOMOBILE_RUNNER_CALIBRATION=0
-  unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
+  # The supervisor declines a retry on a loaded host; pin the load so retry
+  # policy tests do not depend on the machine running them.
+  export AUTOMOBILE_TEST_LOADAVG_FILE="$BATS_TEST_TMPDIR/loadavg"
+  echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
+  unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -54,6 +58,21 @@ number="${key%%-*}"
 chunk="${key##*-}"
 shards_dir="${coverage_dir%/*}"
 printf 'start %s\n' "$number" >> "$shards_dir/events"
+# Infra-exit simulation (make_infra_timeout): the unit shard supervisor runs each
+# attempt through the portable watchdog, so a stubbed `timeout` is never used.
+# A chunk that exits 124/137 is what a killed attempt looks like to it.
+if [[ "${STUB_INFRA_EXIT_ONCE:-0}" == 1 ]]; then
+  count_file="$BATS_TEST_TMPDIR/attempt-shard-$number"
+  count=0
+  [[ ! -f "$count_file" ]] || count="$(cat "$count_file")"
+  printf '%s\n' "$((count + 1))" > "$count_file"
+  if [[ "$count" -eq 0 || "${ALWAYS_INFRA_EXIT:-0}" == 1 ]]; then
+    # A killed attempt may leave invalid partial JUnit. It must be archived,
+    # never globbed into the final coverage timing gate or merged report.
+    printf 'incomplete attempt\n' > "$shards_dir/shard-${number}-chunk-99.xml"
+    exit "${INFRA_EXIT:-124}"
+  fi
+fi
 printf '%s\n' "${files[@]}" > "$shards_dir/files-${number}-${chunk}"
 printf '%s\n' "${AUTOMOBILE_TEST_TIMING_LOG:-}" > "$shards_dir/timing-env-${number}"
 sleep 0.05
@@ -331,30 +350,11 @@ EOF
   [ ! -f coverage/lcov.info ]
 }
 
-# Fast infra simulation: timeout runs once as an infra exit, then executes the
-# chunker normally. No real sleeps or 720s watchdog is needed for retry policy.
+# Fast infra simulation: the first attempt of each shard exits as an infra kill
+# (see the stub bun), then the retry runs normally. No real sleeps or 720s
+# watchdog is needed for retry policy.
 make_infra_timeout() {
-  cat > "$STUB_BIN/timeout" <<'SH'
-#!/usr/bin/env bash
-shift 3 # timeout -k 2 SECONDS COMMAND...
-if [[ "$1" == bun && "$2" == */runner-calibration.ts ]]; then exec "$@"; fi
-key="${AUTOMOBILE_WATCHDOG_LABEL// /-}"
-key="${key//\//-}"
-count_file="$BATS_TEST_TMPDIR/attempt-$key"
-count=0
-[[ ! -f "$count_file" ]] || count="$(cat "$count_file")"
-printf '%s\n' "$((count + 1))" > "$count_file"
-if [[ "$count" -eq 0 || "${ALWAYS_INFRA_EXIT:-0}" == 1 ]]; then
-  shard="${AUTOMOBILE_WATCHDOG_LABEL##* }"
-  shard="${shard%%/*}"
-  # A killed attempt may leave invalid partial JUnit. It must be archived,
-  # never globbed into the final coverage timing gate or merged report.
-  printf 'incomplete attempt\n' > "coverage/shards/shard-${shard}-chunk-99.xml"
-  exit "${INFRA_EXIT:-124}"
-fi
-exec "$@"
-SH
-  chmod +x "$STUB_BIN/timeout"
+  export STUB_INFRA_EXIT_ONCE=1
 }
 
 @test "coverage retries infra exits once with fresh chunks and retains retry diagnostics" {

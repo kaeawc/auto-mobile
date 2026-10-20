@@ -145,13 +145,17 @@ private fun View.bindXmlSemanticLinks() {
   findViewById<TextView>(R.id.semantic_links_xml_paragraph).apply {
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
     setTextColor(textColor)
-    text = createXmlInlineLinks { result.text = "Last activated: $it" }
+    text = createXmlInlineLinks {
+      result.text = resources.getString(R.string.semantic_links_last_activated, it)
+    }
     movementMethod = LinkMovementMethod.getInstance()
   }
   findViewById<TextView>(R.id.semantic_links_xml_standalone).apply {
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
     setTextColor(textColor)
-    text = createXmlStandaloneLink { result.text = "Last activated: $it" }
+    text = createXmlStandaloneLink {
+      result.text = resources.getString(R.string.semantic_links_last_activated, it)
+    }
     movementMethod = LinkMovementMethod.getInstance()
   }
 }

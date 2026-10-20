@@ -114,6 +114,9 @@ class MediaPlayerViewModel : ViewModel(), MediaPlaybackControls {
                           _duration.value = player.duration
                           Log.d("MediaPlayerVM", "Duration: ${player.duration}")
                         }
+                        Player.STATE_IDLE,
+                        Player.STATE_BUFFERING,
+                        Player.STATE_ENDED -> Unit
                       }
                     }
 
@@ -233,7 +236,6 @@ class MediaPlayerViewModel : ViewModel(), MediaPlaybackControls {
   }
 
   override fun onCleared() {
-    super.onCleared()
     releasePlayer()
   }
 }

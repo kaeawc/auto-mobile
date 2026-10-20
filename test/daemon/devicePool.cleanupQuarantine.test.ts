@@ -239,7 +239,7 @@ test("a deferred release never frees a same-id replacement entry after late tear
     const original = pool.getDevice(device.deviceId)!;
     expect(original.sessionId).toBe("test-1");
     const replacement = { ...original, incarnation: original.incarnation + 1 };
-    pool["devices"].set(device.deviceId, replacement);
+    pool.testHooks.devices.set(device.deviceId, replacement);
 
     cleanup.resolve();
     await manager.getPendingDeviceCleanup(device.deviceId);
@@ -249,7 +249,7 @@ test("a deferred release never frees a same-id replacement entry after late tear
     expect(replacement.sessionId).toBe("test-1");
     expect(original.sessionId).toBe("test-1");
     // The stale deferred entry is cleared, so it cannot keep reporting a hold on the replacement.
-    expect(pool["deferredDeviceReleases"].has(device.deviceId)).toBe(false);
+    expect(pool.testHooks.deferredDeviceReleases.has(device.deviceId)).toBe(false);
   } finally {
     cleanup.resolve();
     manager.stopCleanupTimer();

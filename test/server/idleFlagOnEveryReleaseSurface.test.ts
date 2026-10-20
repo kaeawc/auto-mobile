@@ -1,3 +1,6 @@
+import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,7 +23,7 @@ import {
   sanitizeBoundSessionLoss,
   type DaemonNotification,
 } from "../../src/daemon/types";
-import { UnixSocketServer, mcpRequestFailureDetails } from "../../src/daemon/socketServer";
+import { type UnixSocketServer, mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
 import { REFUSAL_FIXTURES_DIR, REFUSAL_SURFACES_DIR } from "../helpers/refusalWireFixtures";
 
@@ -41,31 +44,30 @@ const snapshot = (reason: string): SessionReleaseSnapshot => ({
   heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1, ageMs: 1 },
 });
 
-interface ReleaseSocketHarness {
-  admitReleasedBoundSession(sessionUuid: string): Promise<void>;
-  broadcastSessionReleased(sessionUuid: string, reason: string): void;
-}
-
-// Drive the real private payload methods on a narrow fake receiver: the full socket harness
-// also owns transport lifecycle, which these serialization checks do not need.
+// Serialization checks use the real state and transport with a fake socket.
 function socketHarness(reason: string, capture?: (frame: DaemonNotification) => void) {
-  return Object.assign(Object.create(UnixSocketServer.prototype), {
-    daemonState: {
-      getSessionManager: () => ({ getTerminalReleaseSnapshot: () => snapshot(reason) }),
-    },
-    notificationSubscribers: new Set(["subscriber"]),
-    clientSockets: new Map([["subscriber", {}]]),
-    pendingSessionReleaseWrites: new Set<Promise<void>>(),
-    writeFrame: (
-      _socket: unknown,
-      _session: string,
-      frame: DaemonNotification,
-      flushed: () => void,
-    ) => {
-      capture?.(JSON.parse(JSON.stringify(frame)));
-      flushed();
-    },
-  }) as ReleaseSocketHarness;
+  const manager: ReturnType<DaemonStateAccess["getSessionManager"]> = {
+    hasSession: () => false,
+    getSession: () => null,
+    getTerminalReleaseSnapshot: () => snapshot(reason),
+    getDeviceLabels: () => undefined,
+    releaseSession: async () => null,
+  };
+  const unexpectedState = (): never => {
+    throw new Error("Unexpected daemon state access");
+  };
+  const state: ConstructorParameters<typeof UnixSocketServer>[1] = {
+    isInitialized: () => true,
+    getSessionManager: () => manager,
+    getDevicePool: unexpectedState,
+    getDeviceSessionRegistry: unexpectedState,
+  };
+  const server = createHarnessServer("unused", state, new FakeTimer());
+  const socket = new FakeSocket<DaemonNotification>();
+  socket.onWrite = (frame) => capture?.(JSON.parse(frame));
+  server.state.notificationSubscribers.add("subscriber");
+  server.state.clientSockets.set("subscriber", socket);
+  return server.testHooks.release;
 }
 
 async function boundLoss(reason: string): Promise<Holder> {
@@ -162,7 +164,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "bound session loss construction",
-    builders: ["src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession"],
+    builders: ["src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession"],
     reasonKey: "reason",
     holder: boundLoss,
   },
@@ -170,7 +172,7 @@ const surfaces: Surface[] = [
     name: "bound session loss sanitizer round trip",
     builders: [
       "src/daemon/types.ts#sanitizeBoundSessionLoss",
-      "src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession",
+      "src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession",
     ],
     reasonKey: "reason",
     holder: async (reason) =>

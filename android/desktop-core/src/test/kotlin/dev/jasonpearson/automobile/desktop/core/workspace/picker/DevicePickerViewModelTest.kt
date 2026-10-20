@@ -17,33 +17,157 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class DevicePickerViewModelTest {
+internal abstract class DevicePickerViewModelFixture {
 
-  private val testScope = TestScope(UnconfinedTestDispatcher())
+  protected val testScope = TestScope(UnconfinedTestDispatcher())
 
-  private fun fake(): FakeMcpResourceClient =
+  protected fun fake(): FakeMcpResourceClient =
     FakeMcpResourceClient().apply {
       bootedDevicesResponse = SINGLE_BOOTED_PIXEL8
       deviceImagesResponse = THREE_IMAGES
     }
 
-  private fun content(vm: DevicePickerViewModel) = vm.state.value as DevicePickerUiState.Content
+  protected fun content(vm: DevicePickerViewModel) = vm.state.value as DevicePickerUiState.Content
 
-  private fun vm(
+  protected fun vm(
     resourceClient: FakeMcpResourceClient = fake(),
     bootController: DeviceBootController = FakeDeviceBootController(),
   ) = DevicePickerViewModel(resourceClient, bootController, testScope, UnconfinedTestDispatcher())
 
+  // NOTE: the former `boot selections accumulate across boots and survive a refresh` test was
+  // removed for #5220 — under the auto-observe contract each boot observes the device and the host
+  // closes the picker, so a boot never accumulates a persistent selection to survive a refresh.
+
+  protected data class BootedEntrySpec(
+    val name: String,
+    val deviceId: String,
+    val platform: String = "android",
+    val isVirtual: Boolean = true,
+    val stableId: String = deviceId,
+    val apiLevel: Int? = null,
+    val locked: Boolean? = null,
+  )
+
+  protected data class ImageEntrySpec(
+    val name: String,
+    val stableId: String,
+    val platform: String = "android",
+    val apiLevel: Int? = null,
+    val osVersion: String? = null,
+    val architecture: String? = null,
+    val lifecycleState: String = "configured",
+  )
+
+  protected companion object {
+    val SINGLE_BOOTED_PIXEL8 =
+      bootedResponse(
+        bootedEntry(
+          BootedEntrySpec(
+            "Pixel 8 API 35",
+            "emulator-5554",
+            stableId = "Pixel_8_API_35",
+            apiLevel = 35,
+          ),
+        ),
+      )
+
+    val TWO_BOOTED_PIXEL8_AND_6 =
+      bootedResponse(
+        bootedEntry(
+          BootedEntrySpec(
+            "Pixel 8 API 35",
+            "emulator-5554",
+            stableId = "Pixel_8_API_35",
+            apiLevel = 35,
+          ),
+        ),
+        bootedEntry(
+          BootedEntrySpec(
+            "Pixel 6 API 33",
+            "emulator-5556",
+            stableId = "Pixel_6_API_33",
+            apiLevel = 33,
+          ),
+        ),
+      )
+
+    val THREE_IMAGES =
+      imageResponse(
+        imageEntry(ImageEntrySpec("Pixel 8 API 35", "Pixel_8_API_35", apiLevel = 35)),
+        imageEntry(ImageEntrySpec("Pixel 6 API 33", "Pixel_6_API_33", apiLevel = 33)),
+        imageEntry(
+          ImageEntrySpec(
+            "iPhone 15",
+            "iphone-15",
+            platform = "ios",
+            osVersion = "17.2",
+            architecture = "arm64",
+          ),
+        ),
+      )
+
+    val TWO_IMAGES_8_6 =
+      imageResponse(
+        imageEntry(ImageEntrySpec("Pixel 8 API 35", "Pixel_8_API_35", apiLevel = 35)),
+        imageEntry(ImageEntrySpec("Pixel 6 API 33", "Pixel_6_API_33", apiLevel = 33)),
+      )
+
+    // Two DISTINCT images that share a display name — the simulator/AVD sibling case.
+    val TWO_SAMENAME_IMAGES =
+      imageResponse(
+        imageEntry(ImageEntrySpec("Pixel 8", "avd_a", apiLevel = 34)),
+        imageEntry(ImageEntrySpec("Pixel 8", "avd_b", apiLevel = 34)),
+      )
+
+    fun bootedJson(vararg deviceIds: String): String =
+      bootedJsonNamed(*deviceIds.map { "Pixel 8" to it }.toTypedArray())
+
+    fun bootedJsonNamed(vararg devices: Pair<String, String>): String {
+      val entries = devices.map { (name, id) -> bootedEntry(BootedEntrySpec(name, id)) }
+      return bootedResponse(*entries.toTypedArray())
+    }
+
+    fun bootedResponse(vararg devices: String): String {
+      val ios = devices.count { "\"platform\":\"ios\"" in it }
+      val physical = devices.count { "\"isVirtual\":false" in it }
+      return """{"totalCount":${devices.size},"androidCount":${devices.size - ios},"iosCount":$ios,"virtualCount":${devices.size - physical},"physicalCount":$physical,"lastUpdated":"x","devices":[${devices.joinToString(",")}]}"""
+    }
+
+    fun bootedEntry(spec: BootedEntrySpec): String {
+      val (name, deviceId, platform, isVirtual, stableId, apiLevel, locked) = spec
+      val api = apiLevel?.toString() ?: "null"
+      val lock = locked?.toString() ?: "null"
+      return """{"name":"$name","platform":"$platform","isVirtual":$isVirtual,"source":"local","identity":{"stableId":"$stableId"},"formFactor":"phone","deviceType":null,"model":null,"architecture":null,"osVersion":null,"apiLevel":$api,"runtimeId":null,"display":{"width":null,"height":null,"density":null},"capabilityInventory":null,"image":{"path":null,"target":null,"basedOn":null},"availabilityError":null,"runtime":{"deviceId":"$deviceId","connectionId":"$deviceId#1","deviceSessionUuid":null,"lifecycle":{"state":"booted","known":true},"readiness":{"state":"unknown"},"poolStatus":"idle","session":null,"serviceStatus":null,"locked":$lock,"orientation":null},"identityUnresolved":false}"""
+    }
+
+    fun imageResponse(vararg images: String): String {
+      val ios = images.count { "\"platform\":\"ios\"" in it }
+      return """{"totalCount":${images.size},"androidCount":${images.size - ios},"iosCount":$ios,"lastUpdated":"x","images":[${images.joinToString(",")}]}"""
+    }
+
+    fun imageEntry(spec: ImageEntrySpec): String {
+      val (name, stableId, platform, apiLevel, osVersion, architecture, lifecycleState) = spec
+      val api = apiLevel?.toString() ?: "null"
+      val os = osVersion?.let { "\"$it\"" } ?: "null"
+      val arch = architecture?.let { "\"$it\"" } ?: "null"
+      val target = apiLevel?.let { "\"android-$it\"" } ?: "null"
+      return """{"name":"$name","platform":"$platform","isVirtual":true,"source":"local","identity":{"stableId":"$stableId"},"formFactor":"phone","deviceType":null,"model":null,"architecture":$arch,"osVersion":$os,"apiLevel":$api,"runtimeId":null,"display":{"width":null,"height":null,"density":null},"capabilityInventory":null,"image":{"path":null,"target":$target,"basedOn":null},"availabilityError":null,"runtime":{"deviceId":null,"connectionId":null,"deviceSessionUuid":null,"lifecycle":{"state":"$lifecycleState","known":true},"readiness":{"state":"unknown"},"poolStatus":null,"session":null,"serviceStatus":null,"locked":null,"orientation":null}}"""
+    }
+  }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DevicePickerViewModelTest : DevicePickerViewModelFixture() {
   @Test
   fun `daemon booting row cannot start another boot`() = testScope.runTest {
     val client = fake()
     val avdName = "Pixel_9_API_35"
     val booting =
-      bootedEntry(avdName, avdName, stableId = avdName)
+      bootedEntry(BootedEntrySpec(avdName, avdName, stableId = avdName))
         .replace("\"deviceId\":\"$avdName\"", "\"deviceId\":null")
         .replace("\"state\":\"booted\"", "\"state\":\"booting\"")
     client.bootedDevicesResponse = bootedResponse(booting)
-    client.deviceImagesResponse = imageResponse(imageEntry(avdName, avdName))
+    client.deviceImagesResponse = imageResponse(imageEntry(ImageEntrySpec(avdName, avdName)))
     val boot = FakeDeviceBootController()
     val viewModel = vm(client, boot)
 
@@ -58,8 +182,8 @@ class DevicePickerViewModelTest {
       val client = fake()
       client.bootedDevicesResponse =
         bootedResponse(
-          bootedEntry("Android", "shared", isVirtual = false),
-          bootedEntry("iPhone", "shared", platform = "ios", isVirtual = false),
+          bootedEntry(BootedEntrySpec("Android", "shared", isVirtual = false)),
+          bootedEntry(BootedEntrySpec("iPhone", "shared", platform = "ios", isVirtual = false)),
         )
       val viewModel = vm(client)
       val twins = content(viewModel).devices.filter { it.id == "shared" }
@@ -85,8 +209,8 @@ class DevicePickerViewModelTest {
       val client = fake()
       client.deviceImagesResponse =
         imageResponse(
-          imageEntry("Android image", "shared"),
-          imageEntry("iOS image", "shared", platform = "ios"),
+          imageEntry(ImageEntrySpec("Android image", "shared")),
+          imageEntry(ImageEntrySpec("iOS image", "shared", platform = "ios")),
         )
       val boot = FakeDeviceBootController()
       val viewModel = vm(client, boot)
@@ -137,7 +261,9 @@ class DevicePickerViewModelTest {
       val client = fake()
       client.bootedDevicesResponse =
         bootedResponse(
-          bootedEntry("USB iPhone", "physical-ios", platform = "ios", isVirtual = false),
+          bootedEntry(
+            BootedEntrySpec("USB iPhone", "physical-ios", platform = "ios", isVirtual = false),
+          ),
         )
       val viewModel = vm(client)
       client.bootedDevicesResponse =
@@ -166,7 +292,7 @@ class DevicePickerViewModelTest {
       val boot = FakeDeviceBootController()
       val viewModel = vm(client, boot)
       client.bootedDevicesResponse =
-        bootedResponse(bootedEntry("New iPhone", "fresh-ios", platform = "ios"))
+        bootedResponse(bootedEntry(BootedEntrySpec("New iPhone", "fresh-ios", platform = "ios")))
           .replace(
             "\"lastUpdated\":\"x\"",
             "\"lastUpdated\":\"x\",\"observationComplete\":false,\"platformObservations\":{\"android\":{\"observationComplete\":true},\"ios\":{\"observationComplete\":false}}",
@@ -273,10 +399,12 @@ class DevicePickerViewModelTest {
     client.deviceImagesResponse =
       imageResponse(
         imageEntry(
-          "Unavailable iPhone",
-          "unavailable-iphone",
-          platform = "ios",
-          lifecycleState = "unavailable",
+          ImageEntrySpec(
+            "Unavailable iPhone",
+            "unavailable-iphone",
+            platform = "ios",
+            lifecycleState = "unavailable",
+          ),
         ),
       )
 
@@ -293,10 +421,12 @@ class DevicePickerViewModelTest {
       client.deviceImagesResponse =
         imageResponse(
           imageEntry(
-            "Booting iPhone",
-            "booting-iphone",
-            platform = "ios",
-            lifecycleState = "booting",
+            ImageEntrySpec(
+              "Booting iPhone",
+              "booting-iphone",
+              platform = "ios",
+              lifecycleState = "booting",
+            ),
           ),
         )
 
@@ -410,7 +540,7 @@ class DevicePickerViewModelTest {
   fun `a reused serial with a new boot epoch drops the old selection`() = testScope.runTest {
     val client = fake()
     fun epochEntry(epoch: String) =
-      bootedEntry("Pixel 8", "emulator-5554")
+      bootedEntry(BootedEntrySpec("Pixel 8", "emulator-5554"))
         .replace("\"deviceSessionUuid\":null", "\"deviceSessionUuid\":\"$epoch\"")
     client.bootedDevicesResponse = bootedResponse(epochEntry("epoch-a"))
     val vm = vm(client)
@@ -442,7 +572,10 @@ class DevicePickerViewModelTest {
     vm.onAction(DevicePickerAction.ObserveOne("emulator-5554"))
     assertTrue("android:emulator-5554" !in content(vm).selectedIds)
   }
+}
 
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DevicePickerRefreshTest : DevicePickerViewModelFixture() {
   @Test
   fun `observe selected seeds the column lock state from the booted snapshot`() =
     testScope.runTest {
@@ -450,7 +583,9 @@ class DevicePickerViewModelTest {
         fake().apply {
           bootedDevicesResponse =
             bootedResponse(
-              bootedEntry("Pixel 8 API 35", "emulator-5554", apiLevel = 35, locked = true),
+              bootedEntry(
+                BootedEntrySpec("Pixel 8 API 35", "emulator-5554", apiLevel = 35, locked = true),
+              ),
             )
         }
       val vm =
@@ -821,10 +956,6 @@ class DevicePickerViewModelTest {
       assertTrue(v.state.value is DevicePickerUiState.Error)
     }
 
-  // NOTE: the former `boot selections accumulate across boots and survive a refresh` test was
-  // removed for #5220 — under the auto-observe contract each boot observes the device and the host
-  // closes the picker, so a boot never accumulates a persistent selection to survive a refresh.
-
   @Test
   fun `a refresh during boot whose post-boot read fails retains uncertain inventory`() =
     testScope.runTest {
@@ -856,7 +987,10 @@ class DevicePickerViewModelTest {
       assertTrue(content(v).devices.all { it.inventoryUncertain })
       assertTrue(content(v).inventoryError != null)
     }
+}
 
+@OptIn(ExperimentalCoroutinesApi::class)
+internal class DevicePickerBootRecoveryTest : DevicePickerViewModelFixture() {
   @Test
   fun `explicit refresh failures retain the grid and selection until recovery`() =
     testScope.runTest {
@@ -1057,109 +1191,6 @@ class DevicePickerViewModelTest {
 
       boot.complete() // release so runTest can finish
     }
-
-  private companion object {
-    val SINGLE_BOOTED_PIXEL8 =
-      bootedResponse(
-        bootedEntry(
-          "Pixel 8 API 35",
-          "emulator-5554",
-          stableId = "Pixel_8_API_35",
-          apiLevel = 35,
-        ),
-      )
-
-    val TWO_BOOTED_PIXEL8_AND_6 =
-      bootedResponse(
-        bootedEntry(
-          "Pixel 8 API 35",
-          "emulator-5554",
-          stableId = "Pixel_8_API_35",
-          apiLevel = 35,
-        ),
-        bootedEntry(
-          "Pixel 6 API 33",
-          "emulator-5556",
-          stableId = "Pixel_6_API_33",
-          apiLevel = 33,
-        ),
-      )
-
-    val THREE_IMAGES =
-      imageResponse(
-        imageEntry("Pixel 8 API 35", "Pixel_8_API_35", apiLevel = 35),
-        imageEntry("Pixel 6 API 33", "Pixel_6_API_33", apiLevel = 33),
-        imageEntry(
-          "iPhone 15",
-          "iphone-15",
-          platform = "ios",
-          osVersion = "17.2",
-          architecture = "arm64",
-        ),
-      )
-
-    val TWO_IMAGES_8_6 =
-      imageResponse(
-        imageEntry("Pixel 8 API 35", "Pixel_8_API_35", apiLevel = 35),
-        imageEntry("Pixel 6 API 33", "Pixel_6_API_33", apiLevel = 33),
-      )
-
-    // Two DISTINCT images that share a display name — the simulator/AVD sibling case.
-    val TWO_SAMENAME_IMAGES =
-      imageResponse(
-        imageEntry("Pixel 8", "avd_a", apiLevel = 34),
-        imageEntry("Pixel 8", "avd_b", apiLevel = 34),
-      )
-
-    fun bootedJson(vararg deviceIds: String): String =
-      bootedJsonNamed(*deviceIds.map { "Pixel 8" to it }.toTypedArray())
-
-    fun bootedJsonNamed(vararg devices: Pair<String, String>): String {
-      val entries = devices.map { (name, id) -> bootedEntry(name, id) }
-      return bootedResponse(*entries.toTypedArray())
-    }
-
-    private fun bootedResponse(vararg devices: String): String {
-      val ios = devices.count { "\"platform\":\"ios\"" in it }
-      val physical = devices.count { "\"isVirtual\":false" in it }
-      return """{"totalCount":${devices.size},"androidCount":${devices.size - ios},"iosCount":$ios,"virtualCount":${devices.size - physical},"physicalCount":$physical,"lastUpdated":"x","devices":[${devices.joinToString(",")}]}"""
-    }
-
-    private fun bootedEntry(
-      name: String,
-      deviceId: String,
-      platform: String = "android",
-      isVirtual: Boolean = true,
-      stableId: String = deviceId,
-      apiLevel: Int? = null,
-      locked: Boolean? = null,
-    ): String {
-      val api = apiLevel?.toString() ?: "null"
-      val lock = locked?.toString() ?: "null"
-      return """{"name":"$name","platform":"$platform","isVirtual":$isVirtual,"source":"local","identity":{"stableId":"$stableId"},"formFactor":"phone","deviceType":null,"model":null,"architecture":null,"osVersion":null,"apiLevel":$api,"runtimeId":null,"display":{"width":null,"height":null,"density":null},"capabilityInventory":null,"image":{"path":null,"target":null,"basedOn":null},"availabilityError":null,"runtime":{"deviceId":"$deviceId","connectionId":"$deviceId#1","deviceSessionUuid":null,"lifecycle":{"state":"booted","known":true},"readiness":{"state":"unknown"},"poolStatus":"idle","session":null,"serviceStatus":null,"locked":$lock,"orientation":null},"identityUnresolved":false}"""
-    }
-
-    private fun imageResponse(vararg images: String): String {
-      val ios = images.count { "\"platform\":\"ios\"" in it }
-      return """{"totalCount":${images.size},"androidCount":${images.size - ios},"iosCount":$ios,"lastUpdated":"x","images":[${images.joinToString(",")}]}"""
-    }
-
-    private fun imageEntry(
-      name: String,
-      stableId: String,
-      platform: String = "android",
-      apiLevel: Int? = null,
-      osVersion: String? = null,
-      architecture: String? = null,
-      lifecycleState: String = "configured",
-    ): String {
-      val api = apiLevel?.toString() ?: "null"
-      val os = osVersion?.let { "\"$it\"" } ?: "null"
-      val arch = architecture?.let { "\"$it\"" } ?: "null"
-      val target = apiLevel?.let { "\"android-$it\"" } ?: "null"
-      return """{"name":"$name","platform":"$platform","isVirtual":true,"source":"local","identity":{"stableId":"$stableId"},"formFactor":"phone","deviceType":null,"model":null,"architecture":$arch,"osVersion":$os,"apiLevel":$api,"runtimeId":null,"display":{"width":null,"height":null,"density":null},"capabilityInventory":null,"image":{"path":null,"target":$target,"basedOn":null},"availabilityError":null,"runtime":{"deviceId":null,"connectionId":null,"deviceSessionUuid":null,"lifecycle":{"state":"$lifecycleState","known":true},"readiness":{"state":"unknown"},"poolStatus":null,"session":null,"serviceStatus":null,"locked":null,"orientation":null}}"""
-    }
-  }
 }
 
 /**
@@ -1191,5 +1222,5 @@ private class ScriptableResourceClient(var bootedJson: String, private val image
 
   override suspend fun listResources(): List<ResourceInfo> = emptyList()
 
-  override fun close() {}
+  override fun close() = Unit
 }

@@ -8,7 +8,7 @@ const root = join(import.meta.dir, "../..");
 const clients = [
   // Pre-existing rows are compatibility pins; the JUnit sends row is this step's regression.
   // Not one-shot --cli or declared-CLI proxies: see withOwnedSessionCapabilities.
-  ["src/daemon/daemonMcpProxy.ts", "sends"],
+  ["src/daemon/mcpProxy/ProxyToolRouting.ts", "sends"],
   [
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
     "sends",

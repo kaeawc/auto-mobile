@@ -17,7 +17,9 @@ export interface ScriptedHierarchyCapture {
 
 const tree = (updatedAt: number, label = "Target"): ViewHierarchyResult => ({
   updatedAt,
-  hierarchy: { node: { text: label, clickable: true, bounds: [0, 0, 10, 10] } },
+  hierarchy: {
+    node: { text: label, clickable: true, bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+  },
 });
 
 /**

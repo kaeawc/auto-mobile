@@ -336,7 +336,7 @@ describe("AutoMobile doctor cancellation", () => {
       observedSignal = probe?.signal;
       observedTimeoutMs = probe?.timeoutMs;
       await new Promise<void>((resolve) => {
-        probe?.signal?.addEventListener("abort", resolve, { once: true });
+        probe?.signal?.addEventListener("abort", () => resolve(), { once: true });
       });
       try {
         probe?.signal?.throwIfAborted();
@@ -716,7 +716,7 @@ describe("checkCtrlProxy", () => {
     fakeAdb.setDevices([device("one")]);
     configureInstalled(fakeAdb);
     await checkCtrlProxy(fakeFactory);
-    expect(AndroidCtrlProxyManager.getExistingInstance("one")).toBe(live);
+    expect(live === AndroidCtrlProxyManager.getExistingInstance("one")).toBe(true);
     expect(await live.isInstalled()).toBe(true);
     expect(await live.isEnabled()).toBe(true);
     expect(liveAdb.getExecutedCommands()).toHaveLength(commands);

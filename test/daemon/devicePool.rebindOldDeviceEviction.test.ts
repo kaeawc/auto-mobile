@@ -114,7 +114,7 @@ describe("losing the old device during a deferred rebind cleanup", () => {
 
   const evictOld = async (attemptDeviceLossRecovery: boolean): Promise<void> => {
     devices.bootedDevices = [booted[1]!];
-    const evict = Reflect.get(pool, "evictMissingPooledDevice").bind(pool) as (
+    const evict = pool.testHooks.evictMissingPooledDevice.call.bind(pool) as (
       device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
       reason: string,
       options?: { attemptDeviceLossRecovery?: boolean },
@@ -138,7 +138,7 @@ describe("losing the old device during a deferred rebind cleanup", () => {
   arranged(
     "a newer identity observation during eviction leaves the deferred release to free the old device",
     async () => {
-      const evict = Reflect.get(pool, "evictMissingPooledDevice").bind(pool) as (
+      const evict = pool.testHooks.evictMissingPooledDevice.call.bind(pool) as (
         device: NonNullable<ReturnType<DevicePool["getDevice"]>>,
         reason: string,
         options: {
@@ -153,18 +153,18 @@ describe("losing the old device during a deferred rebind cleanup", () => {
       const old = pool.getDevice(OLD)!;
       old.identityObservedAt = 1;
       const claimsReleased: string[] = [];
-      const releaseClaim = Reflect.get(pool, "releaseDeviceClaim").bind(pool) as (
+      const releaseClaim = pool.testHooks.releaseDeviceClaim.bind(pool) as (
         deviceId: string,
       ) => void;
-      Reflect.set(pool, "releaseDeviceClaim", (deviceId: string) => {
+      pool.testHooks.releaseDeviceClaim = (deviceId: string) => {
         claimsReleased.push(deviceId);
         releaseClaim(deviceId);
-      });
+      };
       // The eviction awaits here; a newer observation reconfirms OLD meanwhile.
-      Reflect.set(pool, "tryPreserveSessionForMissingDevice", async () => {
+      pool.testHooks.tryPreserveSessionForMissingDevice = async () => {
         old.identityObservedAt = 5;
         return false;
-      });
+      };
       await evict(old, "runtime identity changed", {
         identityObservation: { deviceId: OLD, name: "avd-z", platform: "android", observedAt: 3 },
       });

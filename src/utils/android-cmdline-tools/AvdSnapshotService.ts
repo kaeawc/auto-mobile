@@ -93,13 +93,16 @@ const AVD_REGISTRY_SUFFIX = ".ini";
 export class AvdSnapshotService implements AvdSnapshotOperations {
   private readonly directories: SnapshotDirectoryMeasurer;
   private readonly avdDirectories: AvdDirectoryResolver;
-  private readonly emulator: AndroidEmulator;
+  private readonly emulator: Pick<AndroidEmulator, "getBootedDevices" | "resolveAvdNameForSerial">;
   private readonly adbFactory: AdbClientFactory;
 
   constructor(
     directories: SnapshotDirectoryMeasurer = new DeviceSnapshotStore(),
     avdDirectories: AvdDirectoryResolver = new FileAvdConfigReader(),
-    emulator: AndroidEmulator = new AndroidEmulatorClient(),
+    emulator: Pick<
+      AndroidEmulator,
+      "getBootedDevices" | "resolveAvdNameForSerial"
+    > = new AndroidEmulatorClient(),
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
   ) {

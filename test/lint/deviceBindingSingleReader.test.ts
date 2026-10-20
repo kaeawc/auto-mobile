@@ -49,7 +49,8 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   // DeviceHoldFacts is an already captured availability projection.
   "src/daemon/deviceHold.ts": 2,
   // Deferred-release record (1) and discovery options (1).
-  "src/daemon/devicePool.ts": 2,
+  "src/daemon/devicePoolParts/release.ts": 1,
+  "src/daemon/devicePoolParts/targetDiscovery.ts": 1,
   // Candidate is a Session identity from pooledSessionIdentities.
   "src/daemon/deviceReservations.ts": 1,
   // existingSession is a Session, not its assigned PooledDevice.
@@ -61,7 +62,7 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   // Finalization callback record moved from SessionManager; no additional reads.
   "src/daemon/sessionSlots.ts": 1,
   // MCP failure options and live-acceptance Session candidates.
-  "src/daemon/socketServer.ts": 1,
+  "src/daemon/socketServerParts/SocketAdmission.ts": 1,
   // Live-acceptance Session candidates, moved from socketServer.ts.
   "src/daemon/socketServer/restartAdmission.ts": 2,
   // CoreDevice diagnostic capability entries.
@@ -227,7 +228,8 @@ function scan(file: string, source: string): { reads: string[] } {
         (isDeviceReceiver(node.init, node.start) ||
           // The intentional snapshot bridge has a non-device receiver name.
           // Include it explicitly so removing either field must shrink the ratchet.
-          (file === "src/daemon/devicePool.ts" &&
+          ((file === "src/daemon/devicePool.ts" ||
+            file === "src/daemon/devicePoolParts/release.ts") &&
             node.init.type === "Identifier" &&
             node.init.name === "snapshot"))
       ) {
@@ -410,7 +412,7 @@ describe("device binding single reader", () => {
 
   test("direct reads outside the owner can only shrink", () => {
     expect(facts.size).toBeGreaterThan(0);
-    expect(facts.has("src/daemon/devicePool.ts")).toBe(true);
+    expect(facts.has("src/daemon/devicePoolParts/release.ts")).toBe(true);
     expect(readViolations(facts)).toEqual([]);
   });
   test.each([1, 0, undefined])("requires lowering the constant when reads drop to %s", (count) => {

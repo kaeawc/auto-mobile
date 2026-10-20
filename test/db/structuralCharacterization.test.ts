@@ -165,6 +165,17 @@ describe("structural repository characterization", () => {
       expect(runs[0].screensVisited).toEqual(["Home"]);
       const stats = await repo.getTimingStats({
         ...record,
+        deviceId: record.deviceId ?? undefined,
+        deviceName: record.deviceName ?? undefined,
+        devicePlatform: record.devicePlatform ?? undefined,
+        deviceType: record.deviceType ?? undefined,
+        appVersion: record.appVersion ?? undefined,
+        gitCommit: record.gitCommit ?? undefined,
+        targetSdk: record.targetSdk ?? undefined,
+        jdkVersion: record.jdkVersion ?? undefined,
+        jvmTarget: record.jvmTarget ?? undefined,
+        gradleVersion: record.gradleVersion ?? undefined,
+        sessionUuid: record.sessionUuid ?? undefined,
         lookbackDays: 1,
         minSamples: 1,
         limit: 1,

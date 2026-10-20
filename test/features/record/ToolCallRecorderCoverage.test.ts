@@ -181,6 +181,9 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     expect(step).toEqual({ tool: "tapAt", params: { x: 10, y: 20 } });
     const schema = ToolRegistry.getToolForPlan("tapAt")?.schema;
     expect(schema).toBeDefined();
+    if (!schema) {
+      throw new Error("Missing tool schema");
+    }
     expect(() => schema.parse(step.params)).not.toThrow();
   });
 
@@ -357,6 +360,9 @@ describe("tools recorded by #9966", () => {
     expect(steps).toEqual([{ tool, params: args }]);
     const schema = ToolRegistry.getToolForPlan(tool)?.schema;
     expect(schema).toBeDefined();
+    if (!schema) {
+      throw new Error("Missing tool schema");
+    }
     // PlanExecutor re-injects the session for device-aware tools before parsing;
     // stageSessionDownloads declares it as required.
     expect(() => schema.parse({ ...steps[0].params, sessionUuid: "session-2" })).not.toThrow();

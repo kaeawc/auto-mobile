@@ -49,7 +49,7 @@ export function warmedTests(reset: () => void | Promise<void>) {
       for (const value of cases) {
         scenarios.push(() => scenario(...(Array.isArray(value) ? value : [value])));
       }
-      bunTest.each(cases)(name, scenario, timeout);
+      bunTest.each([...cases])(name, scenario, timeout);
     };
   }
   test.each = each;

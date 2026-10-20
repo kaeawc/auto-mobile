@@ -20,6 +20,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.slides.model.BulletPoint
+import dev.jasonpearson.automobile.slides.model.SlideContent
 
 /**
  * Bullet point slide component that displays hierarchical lists. Supports both main points and
@@ -27,13 +28,15 @@ import dev.jasonpearson.automobile.slides.model.BulletPoint
  */
 @Composable
 fun BulletPointSlideItem(
-  title: String?,
-  points: List<BulletPoint>,
+  content: SlideContent.BulletPoints,
   modifier: Modifier = Modifier,
   titleColor: Color = MaterialTheme.colorScheme.onBackground,
   bulletColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
   subBulletColor: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
 ) {
+  val title = content.title
+  val points = content.points
+
   Column(
     modifier = modifier.fillMaxSize().padding(32.dp).verticalScroll(rememberScrollState()),
     horizontalAlignment = Alignment.Start,
@@ -92,29 +95,32 @@ private fun BulletPointItem(
 fun BulletPointSlideItemPreview() {
   MaterialTheme {
     BulletPointSlideItem(
-      title = "AutoMobile Features",
-      points =
-        listOf(
-          BulletPoint(
-            text = "Source Intelligence",
-            subPoints =
-              listOf(
-                "Analyzes Android app source code",
-                "Generates intelligent test selectors",
+      content =
+        SlideContent.BulletPoints(
+          title = "AutoMobile Features",
+          points =
+            listOf(
+              BulletPoint(
+                text = "Source Intelligence",
+                subPoints =
+                  listOf(
+                    "Analyzes Android app source code",
+                    "Generates intelligent test selectors",
+                  ),
               ),
-          ),
-          BulletPoint(
-            text = "Cross-Platform Testing",
-            subPoints = listOf("Supports Android and iOS", "Unified API for both platforms"),
-          ),
-          BulletPoint(
-            text = "JUnit Integration",
-            subPoints =
-              listOf(
-                "Drop-in replacement for Espresso",
-                "Compatible with existing test infrastructure",
+              BulletPoint(
+                text = "Cross-Platform Testing",
+                subPoints = listOf("Supports Android and iOS", "Unified API for both platforms"),
               ),
-          ),
+              BulletPoint(
+                text = "JUnit Integration",
+                subPoints =
+                  listOf(
+                    "Drop-in replacement for Espresso",
+                    "Compatible with existing test infrastructure",
+                  ),
+              ),
+            ),
         ),
     )
   }
@@ -125,29 +131,32 @@ fun BulletPointSlideItemPreview() {
 fun BulletPointSlideItemLandscapePreview() {
   MaterialTheme {
     BulletPointSlideItem(
-      title = "AutoMobile Features",
-      points =
-        listOf(
-          BulletPoint(
-            text = "Source Intelligence",
-            subPoints =
-              listOf(
-                "Analyzes Android app source code",
-                "Generates intelligent test selectors",
+      content =
+        SlideContent.BulletPoints(
+          title = "AutoMobile Features",
+          points =
+            listOf(
+              BulletPoint(
+                text = "Source Intelligence",
+                subPoints =
+                  listOf(
+                    "Analyzes Android app source code",
+                    "Generates intelligent test selectors",
+                  ),
               ),
-          ),
-          BulletPoint(
-            text = "Cross-Platform Testing",
-            subPoints = listOf("Supports Android and iOS", "Unified API for both platforms"),
-          ),
-          BulletPoint(
-            text = "JUnit Integration",
-            subPoints =
-              listOf(
-                "Drop-in replacement for Espresso",
-                "Compatible with existing test infrastructure",
+              BulletPoint(
+                text = "Cross-Platform Testing",
+                subPoints = listOf("Supports Android and iOS", "Unified API for both platforms"),
               ),
-          ),
+              BulletPoint(
+                text = "JUnit Integration",
+                subPoints =
+                  listOf(
+                    "Drop-in replacement for Espresso",
+                    "Compatible with existing test infrastructure",
+                  ),
+              ),
+            ),
         ),
     )
   }

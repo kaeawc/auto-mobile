@@ -307,9 +307,11 @@ describe("explicit-display pre-dispatch read", () => {
         observe.setObserveResult(screen(key));
         const spy = markDispatch(executor, observe);
         const proxy = new PhaseCtrlProxy(observe);
+        const existing = AndroidCtrlProxyClient.createForTesting(device, executor);
+        existing.invalidateCache = (...args) => proxy.invalidateCache(...args);
         proxySpies.push(
           spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy),
-          spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(proxy),
+          spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(existing),
         );
         const result = await actions[name]!(key, executor, observe);
         spy.mockRestore();

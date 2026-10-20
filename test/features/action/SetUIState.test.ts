@@ -30,7 +30,7 @@ import {
   FakeObserveScreenForSetUIState,
   FakeFieldTypeDetector,
 } from "../../fakes/FakeSetUIStateDependencies";
-import type { ActionCall } from "../../../src/features/action/ActionCall";
+import type { ActionCall, TapOnCall } from "../../../src/features/action/ActionCall";
 
 describe("SetUIState", () => {
   const device: BootedDevice = {
@@ -103,6 +103,70 @@ describe("SetUIState", () => {
     fakeFieldTypeDetector = new FakeFieldTypeDetector();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+  });
+
+  test("skips effect settling for focus, toggle, dropdown open and selection", async () => {
+    const elements: Partial<Element>[] = [
+      { "resource-id": "name", text: "Name", class: "android.widget.EditText", editable: true },
+      {
+        "resource-id": "enabled",
+        text: "Enabled",
+        class: "android.widget.Switch",
+        checkable: true,
+      },
+      { "resource-id": "country", text: "Country", class: "android.widget.Spinner" },
+    ];
+    fakeObserve.setViewHierarchy({
+      hierarchy: {
+        node: {
+          node: elements.map((element, index) => ({
+            $: {
+              ...element,
+              bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
+            },
+          })),
+        },
+      },
+    });
+    fakeFieldTypeDetector.setFieldType("name", "text");
+    fakeFieldTypeDetector.setFieldType("enabled", "toggle");
+    fakeFieldTypeDetector.setFieldType("country", "dropdown");
+    const calls: TapOnCall[] = [];
+    const execute = fakeTap.execute.bind(fakeTap);
+    const tap = spyOn(fakeTap, "execute").mockImplementation(async (options, call?: TapOnCall) => {
+      calls.push(call ?? {});
+      if (options.elementId === "enabled") {
+        fakeFieldTypeDetector.setChecked("enabled", true);
+      }
+      if (options.text === "Choice") {
+        fakeFieldTypeDetector.setTextValue("country", "Choice");
+      }
+      return execute(options, call);
+    });
+    try {
+      const result = await createSetUIState().execute({
+        fields: [
+          { selector: { elementId: "name" }, value: "Jane" },
+          { selector: { elementId: "enabled" }, selected: true },
+          { selector: { elementId: "country" }, value: "Choice" },
+        ],
+      });
+      expect(result.success).toBe(true);
+      expect(result.fields.every((field) => field.verified)).toBe(true);
+      expect(fakeTap.getCalls().map((call) => call.options)).toEqual([
+        { elementId: "name", action: "focus" },
+        { elementId: "enabled", action: "tap" },
+        { elementId: "country", action: "tap" },
+        { text: "Choice", action: "tap" },
+      ]);
+      expect(calls).toHaveLength(4);
+      expect(calls.every((call) => call.settlePostTapEffect === false)).toBe(true);
+      expect(calls[0]?.recovery).toEqual({ throwOnKeyboardOcclusion: true });
+      // The dropdown's own opening delay remains; no tap effect delay is charged.
+      expect(fakeTimer.now()).toBe(200);
+    } finally {
+      tap.mockRestore();
+    }
   });
 
   test("warns and preserves a field failure when focus throws", async () => {
@@ -386,7 +450,7 @@ describe("SetUIState", () => {
         expect(loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]")).toHaveLength(0);
         expect(fakeTap.execute).toHaveBeenCalledWith(
           { elementId: "password", action: "focus" },
-          { recovery: { throwOnKeyboardOcclusion: true } },
+          { recovery: { throwOnKeyboardOcclusion: true }, settlePostTapEffect: false },
         );
       } finally {
         warn.mockRestore();

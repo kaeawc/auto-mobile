@@ -9,7 +9,7 @@ import org.junit.Test
 
 class ImeCommitDriverTraceTest {
   private data class Replay(
-    val sink: ImeCommitDriverTest.FakeImeCommitSink,
+    val sink: ImeCommitDriverFixtures.FakeImeCommitSink,
     val result: ImeCommitResult,
     val lines: List<String>,
     val calls: List<String>,
@@ -21,7 +21,7 @@ class ImeCommitDriverTraceTest {
     inputType: Int = InputType.TYPE_CLASS_TEXT,
     text: String = if (scenario == "keys") "A !" else TEXT,
   ): Replay {
-    val sink = ImeCommitDriverTest.FakeImeCommitSink(inputType)
+    val sink = ImeCommitDriverFixtures.FakeImeCommitSink(inputType)
     sink.editorText = BASELINE
     if (scenario == "resume") {
       sink.beforeCommit = { index -> if (index == 3) sink.stale = true }

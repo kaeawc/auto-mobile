@@ -212,7 +212,10 @@ describe("InputText.execute", () => {
         }
         // Exercise real cancellation/settlement without SDK lookup or a real process.
         spyOn(adb, "getBaseCommandParts").mockResolvedValue({ adbPath: "adb", baseArgs: [] });
-        spyOn(adb, "getDeviceTimestampMs").mockImplementation(async () => fakeTimer.now());
+        spyOn(adb, "getDeviceTimestampMsWithSource").mockImplementation(async () => ({
+          timestampMs: fakeTimer.now(),
+          source: "device-ms",
+        }));
         const input = createInputText(androidDevice, adb);
         const controller = new AbortController();
         const reason = new Error("text cancelled");

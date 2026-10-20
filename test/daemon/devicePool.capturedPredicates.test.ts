@@ -39,7 +39,7 @@ const rows: PredicateRow[] = [
     prepare: ({ pool, device, session }) => {
       device.adbServerResetSession = session;
       device.adbServerResetSessionId = session.sessionId;
-      pool["devices"].delete(device.id);
+      pool.testHooks.devices.delete(device.id);
     },
     expected: [true, false, false, false],
   },
@@ -74,7 +74,7 @@ const rows: PredicateRow[] = [
   {
     name: "same-id replacement entry",
     prepare: ({ pool, device }) => {
-      pool["devices"].set(device.id, { ...device, incarnation: device.incarnation + 1 });
+      pool.testHooks.devices.set(device.id, { ...device, incarnation: device.incarnation + 1 });
     },
     expected: [true, false, false, false],
   },
@@ -145,10 +145,10 @@ for (const autolock of [false, true]) {
     try {
       await row.prepare?.(context);
       expect([
-        pool["isPreservedSessionCurrent"](session, device.id),
-        pool["isCurrentIdleDeviceAssignable"](device),
-        pool["isSessionAssignmentCurrent"](device, session),
-        pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount),
+        pool.testHooks.isPreservedSessionCurrent(session, device.id),
+        pool.testHooks.isCurrentIdleDeviceAssignable(device),
+        pool.testHooks.isSessionAssignmentCurrent(device, session),
+        pool.testHooks.isCapturedReleaseCurrent(device, session.sessionId, assignmentCount),
       ]).toEqual([...row.expected]);
     } finally {
       manager.stopCleanupTimer();
@@ -163,10 +163,12 @@ test("captured release is refused when another session holds the device", async 
   try {
     const assignmentCount = device.assignmentCount;
     bindDevice(device, "other-session");
-    expect(pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount)).toBe(
-      false,
+    expect(
+      pool.testHooks.isCapturedReleaseCurrent(device, session.sessionId, assignmentCount),
+    ).toBe(false);
+    expect(pool.testHooks.isCapturedReleaseCurrent(device, "other-session", assignmentCount)).toBe(
+      true,
     );
-    expect(pool["isCapturedReleaseCurrent"](device, "other-session", assignmentCount)).toBe(true);
   } finally {
     manager.stopCleanupTimer();
   }

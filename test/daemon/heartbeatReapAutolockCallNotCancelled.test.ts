@@ -74,7 +74,7 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
     const devicePool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    Object.assign(devicePool, { deviceManager });
+    devicePool.testHooks.deviceManager = deviceManager;
     await devicePool.initializeWithDevices([DEVICE]);
     await devicePool.bindOrReuseDeviceSession({
       sessionId: SESSION,

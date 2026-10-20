@@ -623,11 +623,11 @@ test("a token declaration after socket close leaves no inert identity or later m
     });
     await entered.promise;
     other.socket.destroy();
-    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    expect(h.pool.testHooks.mcpSessionLivenessOwnerTokens.has(other.id)).toBe(false);
     proceed.resolve();
     await request;
     await drainMicrotasks(16);
-    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    expect(h.pool.testHooks.mcpSessionLivenessOwnerTokens.has(other.id)).toBe(false);
     await h.manager.releaseSession("bound", "explicit-release");
     h.deviceManager.bootedDevices = [
       { name: "Pixel", deviceId: "emulator-5554", platform: "android" },

@@ -56,12 +56,17 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
    */
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
-    "src/daemon/devicePool.ts": {
-      calls: 2,
+    "src/daemon/devicePoolParts/assignment.ts": {
+      calls: 1,
       reason:
         "The pool routes discovery through the identity collaborator before reading pooled identity. " +
         "The second (readLiveInventoryDeviceIds, #11568) only collects the listed device ids for the " +
         "stats surfaces' live set; it reads cached discovery and never consults pooled identity.",
+    },
+    "src/daemon/devicePoolParts/emulatorLifecycle.ts": {
+      calls: 1,
+      reason:
+        "Recovery discovery moved from DevicePool; the identity collaborator reconciles before pooled identity is read.",
     },
     "src/daemon/deviceAutoStart.ts": {
       calls: 2,

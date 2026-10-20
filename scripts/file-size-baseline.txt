@@ -5,7 +5,7 @@
 4033	src/daemon/daemon.ts
 1728	src/daemon/daemonRequestHandlers.ts
 1262	src/daemon/deviceDataStreamSocketServer.ts
-8320	src/daemon/devicePool.ts
+1013	src/daemon/devicePool.ts
 1186	src/daemon/executionTracker.ts
 1286	src/daemon/readiness/DeviceReadiness.ts
 1344	src/daemon/sessionBroker/provisioning/executionRelease.ts

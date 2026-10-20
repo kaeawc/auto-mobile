@@ -183,7 +183,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   ],
   // #11162: the veto's start and bound are judged against session-clock request deadlines.
   "src/daemon/unsettledExecutionVeto.ts": ["UnsettledExecutionVeto.judge"],
-  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+  "src/daemon/devicePoolParts/assignment.ts": [
+    "DevicePoolAssignment.recoveryAssignmentError",
+    "DevicePoolAssignment.recoveryNow",
+  ],
   "src/daemon/deviceAllocation.ts": [
     // #11162: the restart-recovery wait and retry gate compare with the recovery deadline.
     "DeviceAllocation.assignmentRetryPolicy",
@@ -390,19 +393,19 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Same names, different clocks -----------------------------------------
-  "src/daemon/devicePool.ts DevicePool.addDevice": {
+  "src/daemon/devicePoolParts/membership.ts DevicePoolMembership.addDevice": {
     writes: 2,
     reason:
       "PooledDevice.lastUsedAt is the pool's LRU order (assigned, or stored with a new pool " +
       "entry), not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.restoreSessionAssignment": {
+  "src/daemon/devicePoolParts/release.ts DevicePoolRelease.restoreSessionAssignment": {
     writes: 1,
     reason:
       "Allocation rollback restores the captured lastUsedAt without reading the clock; " +
       "explicit bookkeeping projection keeps binding and health writes in their owner (#11802).",
   },
-  "src/daemon/devicePool.ts DevicePool.initializeWithDevices": {
+  "src/daemon/devicePoolParts/membership.ts DevicePoolMembership.initializeWithDevices": {
     writes: 1,
     reason: "PooledDevice LRU order seeded for each discovered device, not a session idle clock.",
   },

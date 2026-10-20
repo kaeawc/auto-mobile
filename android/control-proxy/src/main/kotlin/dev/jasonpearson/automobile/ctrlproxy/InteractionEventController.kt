@@ -120,7 +120,7 @@ internal class InteractionEventController(
     val source =
       try {
         event.source
-      } catch (_: Exception) {
+      } catch (_: IllegalStateException) {
         null
       }
     val bounds = source?.let {
@@ -128,7 +128,7 @@ internal class InteractionEventController(
         val rect = Rect()
         it.getBoundsInScreen(rect)
         ElementBounds(rect)
-      } catch (_: Exception) {
+      } catch (_: IllegalStateException) {
         null
       }
     }
@@ -159,8 +159,9 @@ internal class InteractionEventController(
       }
     try {
       source?.recycle()
-    } catch (_: Exception) {
+    } catch (_: IllegalStateException) {
       /* already recycled */
+
     }
 
     val textValue =
@@ -204,7 +205,11 @@ internal class InteractionEventController(
         // Let cooperative cancellation unwind cleanly rather than logging it as an error
         // (#3130).
         throw e
-      } catch (e: Exception) {
+      } catch (e: java.io.IOException) {
+        Log.e(TAG, "Error broadcasting interaction event", e)
+      } catch (e: IllegalStateException) {
+        Log.e(TAG, "Error broadcasting interaction event", e)
+      } catch (e: IllegalArgumentException) {
         Log.e(TAG, "Error broadcasting interaction event", e)
       }
     }

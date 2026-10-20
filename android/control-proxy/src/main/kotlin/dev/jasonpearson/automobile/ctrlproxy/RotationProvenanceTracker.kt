@@ -159,12 +159,15 @@ internal class DisplayRotationChangeSignal(
           handleDisplayCallback("removed", displayId)
         }
       }
+    var registered = false
     try {
       manager.registerDisplayListener(registeredListener, handler)
-    } catch (e: Exception) {
-      rotationListener = null
-      thread.quitSafely()
-      throw e
+      registered = true
+    } finally {
+      if (!registered) {
+        rotationListener = null
+        thread.quitSafely()
+      }
     }
     displayListener = registeredListener
     callbackHandler = handler

@@ -157,4 +157,18 @@ class SdkTelemetryReceiversTest {
       processor.enqueueNavigationEvent(any(), any(), any(), any(), any(), any())
     }
   }
+
+  @Test
+  fun `plain runtime navigation extras failures are contained`() {
+    val intent = mockk<Intent>()
+    every { intent.action } returns AutoMobileSDK.ACTION_NAVIGATION_EVENT
+    every { intent.getStringExtra(any()) } throws RuntimeException("Parcel.readValue failed")
+    val processor = mockk<SdkEventBatchProcessor>()
+
+    NavigationEventReceiver({ processor }, FakeTimer()).onReceive(context, intent)
+
+    verify(exactly = 0) {
+      processor.enqueueNavigationEvent(any(), any(), any(), any(), any(), any())
+    }
+  }
 }

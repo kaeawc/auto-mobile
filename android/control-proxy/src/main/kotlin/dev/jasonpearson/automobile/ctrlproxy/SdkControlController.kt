@@ -43,7 +43,12 @@ internal class SdkControlController(
           putExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_ENABLED, enabled)
         }
       host.sendBroadcast(intent)
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Failed to broadcast recomposition control", e)
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Failed to broadcast recomposition control", e)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.e(TAG, "Failed to broadcast recomposition control", e)
     }
   }
@@ -67,7 +72,28 @@ internal class SdkControlController(
         NetworkMockRulesReplyReceiver(requestId, host::replyNetworkMockRules),
       )
       Log.d(TAG, "Broadcast network mock rules (awaiting report)")
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Failed to broadcast network mock rules", e)
+      if (requestId != null) {
+        host.replyNetworkMockRules(
+          networkMockRulesFailure(
+            requestId,
+            "Failed to broadcast network mock rules: ${e.message}",
+          ),
+        )
+      }
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Failed to broadcast network mock rules", e)
+      if (requestId != null) {
+        host.replyNetworkMockRules(
+          networkMockRulesFailure(
+            requestId,
+            "Failed to broadcast network mock rules: ${e.message}",
+          ),
+        )
+      }
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.e(TAG, "Failed to broadcast network mock rules", e)
       if (requestId != null) {
         host.replyNetworkMockRules(
@@ -98,7 +124,12 @@ internal class SdkControlController(
         }
       host.sendBroadcast(intent)
       Log.d(TAG, "Broadcast network error simulation: enabled=$enabled type=$errorType")
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Failed to broadcast network error simulation", e)
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Failed to broadcast network error simulation", e)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.e(TAG, "Failed to broadcast network error simulation", e)
     }
   }

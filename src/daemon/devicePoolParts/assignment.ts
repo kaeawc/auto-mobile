@@ -340,9 +340,7 @@ export class DevicePoolAssignment {
    * stale pool tally and never zero. A source whose tooling is not installed on this host is not
    * incomplete (#11605) -- unless a pooled device depends on it, which proves the tooling existed.
    */
-  async readLiveInventoryDeviceIds(
-    signal = getAbortSignal(),
-  ): Promise<Set<string>> {
+  async readLiveInventoryDeviceIds(signal = getAbortSignal()): Promise<Set<string>> {
     const live = new Set<string>();
     const read = new Map<Platform, BootedDeviceDiscovery>();
     for (const platform of ["android", "ios"] as const) {

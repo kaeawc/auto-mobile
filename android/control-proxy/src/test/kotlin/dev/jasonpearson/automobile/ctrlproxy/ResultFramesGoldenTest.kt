@@ -95,7 +95,7 @@ class ResultFramesGoldenTest {
           err,
           timing = GestureTiming(totalTimeMs = 10L, gestureTimeMs = g, perfTiming = p),
         ),
-        masked(build(id, err == null, err, 10L, g, p)),
+        masked(build(GestureFrameResult(id, err == null, err, 10L, g), p)),
       )
     }
   }
@@ -159,7 +159,19 @@ class ResultFramesGoldenTest {
         assertEquals(
           legacy,
           masked(
-            insertTextResultFrame("r", err == null, err, 3L, warning, caret, len, partial, p),
+            insertTextResultFrame(
+              InsertTextFrameResult(
+                requestId = "r",
+                success = err == null,
+                error = err,
+                totalTimeMs = 3L,
+                warning = warning,
+                caretPlaced = caret,
+                resultingTextLength = len,
+                partialApplication = partial,
+              ),
+              p,
+            ),
           ),
         )
       }
@@ -246,15 +258,17 @@ class ResultFramesGoldenTest {
       },
       masked(
         commitTextResultFrame(
-          id,
-          err == null,
-          err,
-          9L,
-          partial,
-          units,
-          inserted,
-          trace,
-          consumed,
+          CommitTextFrameResult(
+            requestId = id,
+            success = err == null,
+            error = err,
+            totalTimeMs = 9L,
+            partialApplication = partial,
+            committedUnits = units,
+            insertedText = inserted,
+            trace = trace,
+            editorConsumed = consumed,
+          ),
           p,
         ),
       ),
@@ -289,7 +303,18 @@ class ResultFramesGoldenTest {
             if (err != null) put("error", err)
           },
           masked(
-            keyboardProfilesResultFrame(id, success, version, listOf(1), active, profiles, err, p),
+            keyboardProfilesResultFrame(
+              KeyboardProfilesResult(
+                requestId = id,
+                success = success,
+                catalogVersion = version,
+                supportedCatalogVersions = listOf(1),
+                activeProfileId = active,
+                profiles = profiles,
+                error = err,
+              ),
+              p,
+            ),
           ),
         )
       }
@@ -386,7 +411,17 @@ class ResultFramesGoldenTest {
               )
             },
           ),
-          packageEventFrame(7L, "added", "com.example", 10, uid, system, removed),
+          packageEventFrame(
+            PackageEventResult(
+              timestamp = 7L,
+              action = "added",
+              packageName = "com.example",
+              userId = 10,
+              uid = uid,
+              isSystem = system,
+              removedForAllUsers = removed,
+            ),
+          ),
         )
       }
     }
@@ -404,7 +439,19 @@ class ResultFramesGoldenTest {
           if (text != null) put("text", text)
           if (err != null) put("error", err)
         },
-        masked(clipboardResultFrame(id, "get", err == null, text, err, 10L, p)),
+        masked(
+          clipboardResultFrame(
+            ClipboardFrameResult(
+              requestId = id,
+              action = "get",
+              success = err == null,
+              text = text,
+              error = err,
+              totalTimeMs = 10L,
+            ),
+            p,
+          ),
+        ),
       )
       assertEquals(
         legacyFrame("ca_cert_result", id, p) {
@@ -414,7 +461,19 @@ class ResultFramesGoldenTest {
           if (text != null) put("alias", text)
           if (err != null) put("error", err)
         },
-        masked(caCertResultFrame(id, "install", err == null, text, err, 10L, p)),
+        masked(
+          caCertResultFrame(
+            CaCertificateResult(
+              requestId = id,
+              action = "install",
+              success = err == null,
+              alias = text,
+              error = err,
+              totalTimeMs = 10L,
+            ),
+            p,
+          ),
+        ),
       )
     }
   }
@@ -431,7 +490,19 @@ class ResultFramesGoldenTest {
           put("isAdminActive", !owner)
           if (err != null) put("error", err)
         },
-        masked(deviceOwnerStatusResultFrame(id, "dev.example", owner, !owner, err, 10L, p)),
+        masked(
+          deviceOwnerStatusResultFrame(
+            DeviceOwnerResult(
+              requestId = id,
+              packageName = "dev.example",
+              isDeviceOwner = owner,
+              isAdminActive = !owner,
+              error = err,
+              totalTimeMs = 10L,
+            ),
+            p,
+          ),
+        ),
       )
     }
   }
@@ -448,7 +519,19 @@ class ResultFramesGoldenTest {
             put("totalTimeMs", 10L)
             if (err != null) put("error", err)
           },
-          masked(imeActionResultFrame(id, "next", err == null, err, 10L, approximated, p)),
+          masked(
+            imeActionResultFrame(
+              ImeActionFrameResult(
+                requestId = id,
+                action = "next",
+                success = err == null,
+                error = err,
+                totalTimeMs = 10L,
+                approximated = approximated,
+              ),
+              p,
+            ),
+          ),
         )
       }
       assertEquals(

@@ -1,12 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
 import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
 import dev.jasonpearson.automobile.protocol.RequestCommitText
@@ -35,16 +35,7 @@ internal class ImeController(
 ) {
   /** The live CtrlProxy keyboard, narrowed to what the commit path drives. */
   interface ImeTarget {
-    fun commitText(
-      text: String,
-      priorImeId: String?,
-      isCancelled: () -> Boolean,
-      delivery: ImeTextDelivery,
-      timeoutMs: Long?,
-      requestDeadlineMs: Long,
-      trace: Boolean,
-      onResult: (ImeCommitResult) -> Unit,
-    )
+    fun commitText(request: ImeCommitRequest, onResult: (ImeCommitResult) -> Unit)
   }
 
   /** Service-side operations the controller cannot perform without the service or the IME. */
@@ -104,7 +95,15 @@ internal class ImeController(
     val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
     if (state?.cancelled?.get() == true) {
       host.launchRequestScope(requestId) {
-        broadcastCommitTextResult(requestId, false, "IME commit cancelled", 0L, false)
+        broadcastCommitTextResult(
+          CommitTextFrameResult(
+            requestId = requestId,
+            success = false,
+            error = "IME commit cancelled",
+            totalTimeMs = 0L,
+            partialApplication = false,
+          ),
+        )
       }
       return
     }
@@ -133,46 +132,54 @@ internal class ImeController(
       if (state?.cancelled?.get() == true) {
         finish(ImeCommitResult(success = false, error = null))
         broadcastCommitTextResult(
-          requestId,
-          false,
-          "IME commit cancelled",
-          timeProvider.currentTimeMillis() - start,
-          false,
+          CommitTextFrameResult(
+            requestId = requestId,
+            success = false,
+            error = "IME commit cancelled",
+            totalTimeMs = timeProvider.currentTimeMillis() - start,
+            partialApplication = false,
+          ),
         )
         return@launchRequestScope
       }
       if (ime == null) {
         finish(ImeCommitResult(success = false, error = null))
         broadcastCommitTextResult(
-          requestId,
-          false,
-          "IME service did not start within timeout",
-          timeProvider.currentTimeMillis() - start,
-          false,
+          CommitTextFrameResult(
+            requestId = requestId,
+            success = false,
+            error = "IME service did not start within timeout",
+            totalTimeMs = timeProvider.currentTimeMillis() - start,
+            partialApplication = false,
+          ),
         )
         return@launchRequestScope
       }
       ime.commitText(
-        text,
-        priorImeId,
-        { state?.cancelled?.get() == true },
-        delivery,
-        timeoutMs,
-        requestDeadlineMs,
-        trace,
+        ImeCommitRequest(
+          text = text,
+          priorImeId = priorImeId,
+          isCancelled = { state?.cancelled?.get() == true },
+          delivery = delivery,
+          timeoutMs = timeoutMs,
+          requestDeadlineMs = requestDeadlineMs,
+          trace = trace,
+        ),
       ) { result ->
         finish(result)
         host.launchRequestScope(requestId) {
           broadcastCommitTextResult(
-            requestId,
-            result.success,
-            result.error,
-            timeProvider.currentTimeMillis() - start,
-            result.partialApplication,
-            result.committedUnits,
-            result.insertedText,
-            if (trace) result.trace else null,
-            editorConsumed = result.editorConsumed,
+            CommitTextFrameResult(
+              requestId = requestId,
+              success = result.success,
+              error = result.error,
+              totalTimeMs = timeProvider.currentTimeMillis() - start,
+              partialApplication = result.partialApplication,
+              committedUnits = result.committedUnits,
+              insertedText = result.insertedText,
+              trace = if (trace) result.trace else null,
+              editorConsumed = result.editorConsumed,
+            ),
           )
         }
       }
@@ -246,12 +253,14 @@ internal class ImeController(
     if (catalogVersion == null) {
       host.launchRequestScope(requestId) {
         broadcastKeyboardProfileCatalog(
-          requestId = requestId,
-          success = false,
-          supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
-          error =
-            "No mutually supported keyboard profile catalog version; device supports " +
-              KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS.joinToString(", "),
+          KeyboardProfilesResult(
+            requestId = requestId,
+            success = false,
+            supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
+            error =
+              "No mutually supported keyboard profile catalog version; device supports " +
+                KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS.joinToString(", "),
+          ),
         )
       }
       return
@@ -278,46 +287,27 @@ internal class ImeController(
     val activeProfileId = host.keyboardProfileStore().activeProfileId()
     host.launchRequestScope(requestId) {
       broadcastKeyboardProfileCatalog(
-        requestId = requestId,
-        success = true,
-        catalogVersion = catalogVersion,
-        supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
-        activeProfileId = activeProfileId,
-        profiles = profiles,
+        KeyboardProfilesResult(
+          requestId = requestId,
+          success = true,
+          catalogVersion = catalogVersion,
+          supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
+          activeProfileId = activeProfileId,
+          profiles = profiles,
+        ),
       )
     }
   }
 
-  private suspend fun broadcastCommitTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    partialApplication: Boolean,
-    committedUnits: Int = 0,
-    insertedText: String? = null,
-    trace: List<String>? = null,
-    editorConsumed: Boolean = false,
-  ) {
+  private suspend fun broadcastCommitTextResult(outcome: CommitTextFrameResult) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
       return
     }
 
-    resultBroadcaster.guard(requestId, "commit_text_result") {
+    resultBroadcaster.guard(outcome.requestId, "commit_text_result") {
       responseSender.broadcastWithPerfSync { perfTiming ->
-        commitTextResultFrame(
-          requestId,
-          success,
-          error,
-          totalTimeMs,
-          partialApplication,
-          committedUnits,
-          insertedText,
-          trace,
-          editorConsumed,
-          perfTiming,
-        )
+        commitTextResultFrame(outcome, perfTiming)
       }
       Log.d(
         TAG,
@@ -357,32 +347,15 @@ internal class ImeController(
     }
   }
 
-  private suspend fun broadcastKeyboardProfileCatalog(
-    requestId: String?,
-    success: Boolean,
-    catalogVersion: Int? = null,
-    supportedCatalogVersions: List<Int>,
-    activeProfileId: String? = null,
-    profiles: List<KeyboardProfileInfo> = emptyList(),
-    error: String? = null,
-  ) {
+  private suspend fun broadcastKeyboardProfileCatalog(outcome: KeyboardProfilesResult) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping keyboard profile catalog response")
       return
     }
 
-    resultBroadcaster.guard(requestId, "keyboard_profiles_result") {
+    resultBroadcaster.guard(outcome.requestId, "keyboard_profiles_result") {
       responseSender.broadcastWithPerfSync { perfTiming ->
-        keyboardProfilesResultFrame(
-          requestId,
-          success,
-          catalogVersion,
-          supportedCatalogVersions,
-          activeProfileId,
-          profiles,
-          error,
-          perfTiming,
-        )
+        keyboardProfilesResultFrame(outcome, perfTiming)
       }
     }
   }

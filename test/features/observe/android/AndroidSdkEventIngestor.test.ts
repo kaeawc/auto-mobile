@@ -5,7 +5,7 @@ import {
   type AndroidHandledExceptionEvent,
 } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 import type { FailureRecorderService } from "../../../../src/features/failures/interfaces/FailureRecorderService";
-import type { StackTraceElement } from "../../../../src/server/failuresResources";
+import type { StackTraceElement } from "../../../../src/models/failureAnalytics";
 import type {
   SdkAnrPayload,
   SdkCrashPayload,

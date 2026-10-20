@@ -23,7 +23,7 @@ import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta"
 import { SessionReleasedDuringCreationError } from "../../src/models/deviceAcquisitionRefusals";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 

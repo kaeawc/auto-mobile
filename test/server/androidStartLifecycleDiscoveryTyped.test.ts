@@ -7,7 +7,7 @@ import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { ActionableError } from "../../src/models/ActionableError";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import type { BootedDevice } from "../../src/models";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 

@@ -141,7 +141,7 @@ test("the liveness controller's port getSession calls stay within the retained e
 // findSession.
 const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "deviceLabelMapping.ts#releaseDeviceLabelSessions": 1,
-  "deviceToolsStartDevice.ts#callerMayReuse": 1,
+  "deviceToolsBootPreparation.ts#callerMayReuse": 1,
   "pipeline/deviceCallDispatch.ts#refuseControlCallBeforeAdmission": 1,
   "pipeline/ingress/executeToolCall.ts#foreignOwnedExplicitSessionUuid": 1,
   "pipeline/ingress/routing.ts#admittedSessionDevice": 1,
@@ -259,7 +259,7 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
 // src/features: the one remaining reader consumes the session object and, when it is expired,
 // relies on the lazy release to take the "no session" branch (#12581).
 const RETAINED_FEATURES_EXPIRY_READERS: Readonly<Record<string, number>> = {
-  "deviceLifecycle/deviceLifecycleCore.ts#createSystemUiAnrRebooter": 1,
+  "deviceLifecycle/core/readiness.ts#createSystemUiAnrRebooter": 1,
 };
 
 function scanGetSession(source: string): { line: number }[] {

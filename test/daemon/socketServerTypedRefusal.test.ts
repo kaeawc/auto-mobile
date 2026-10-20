@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { DeviceOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";

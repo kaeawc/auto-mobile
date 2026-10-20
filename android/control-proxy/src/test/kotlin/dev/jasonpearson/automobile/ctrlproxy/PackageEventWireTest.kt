@@ -27,13 +27,15 @@ class PackageEventWireTest {
     val frame =
       Json.parseToJsonElement(
           packageEventFrame(
-            1L,
-            action,
-            packageName,
-            userId,
-            flags.uid,
-            flags.isSystem,
-            flags.removedForAllUsers,
+            PackageEventResult(
+              timestamp = 1L,
+              action = action,
+              packageName = packageName,
+              userId = userId,
+              uid = flags.uid,
+              isSystem = flags.isSystem,
+              removedForAllUsers = flags.removedForAllUsers,
+            ),
           ),
         )
         .jsonObject

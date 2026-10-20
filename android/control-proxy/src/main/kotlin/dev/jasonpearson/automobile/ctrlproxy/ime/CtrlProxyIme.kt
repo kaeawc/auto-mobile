@@ -291,18 +291,9 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       )
     }
 
-  fun commitText(
-    text: String,
-    priorImeId: String?,
-    isCancelled: () -> Boolean = { false },
-    delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
-    timeoutMs: Long? = null,
-    requestDeadlineMs: Long = Long.MAX_VALUE,
-    trace: Boolean = false,
-    onResult: (ImeCommitResult) -> Unit,
-  ) {
+  fun commitText(request: ImeCommitRequest, onResult: (ImeCommitResult) -> Unit) {
     mainHandler.post {
-      if (isCancelled()) {
+      if (request.isCancelled()) {
         onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
         return@post
       }
@@ -325,11 +316,11 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       val secureInput = ImeCommitDriver.isPasswordInput(currentInputEditorInfo?.inputType)
       recordTrace(
         "commitStart",
-        "delivery" to delivery.name,
-        "textLength" to if (secureInput) null else text.length,
+        "delivery" to request.delivery.name,
+        "textLength" to if (secureInput) null else request.text.length,
         "secure" to if (secureInput) true else null,
       )
-      val restoreId = priorImeId?.takeUnless { it == ownImeId() }
+      val restoreId = request.priorImeId?.takeUnless { it == ownImeId() }
       rememberRestore(driver, restoreId)
       var finished = false
       fun finish(result: ImeCommitResult) {
@@ -342,7 +333,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           "committedUnits" to result.committedUnits,
           "insertedLength" to result.insertedText?.length,
         )
-        val tracedResult = if (trace) result.copy(trace = traceRecorder.snapshot()) else result
+        val tracedResult =
+          if (request.trace) result.copy(trace = traceRecorder.snapshot()) else result
         if (activeDriver === driver) {
           activeDriver = null
           cancelActiveCommit = null
@@ -354,15 +346,15 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         finish(ImeCommitResult(success = false, error = reason))
       }
       awaitInputConnection(
-        text = text,
+        text = request.text,
         priorImeId = restoreId,
         driver = driver,
-        deadlineMs = connectionDeadlineMs(SystemClock.uptimeMillis(), requestDeadlineMs),
+        deadlineMs = connectionDeadlineMs(SystemClock.uptimeMillis(), request.requestDeadlineMs),
         generation = generation,
-        isCancelled = isCancelled,
-        delivery = delivery,
-        commitBudgetMs = commitTimeoutMs(timeoutMs, ImeGraphemes.split(text).size),
-        requestDeadlineMs = requestDeadlineMs,
+        isCancelled = request.isCancelled,
+        delivery = request.delivery,
+        commitBudgetMs = commitTimeoutMs(request.timeoutMs, ImeGraphemes.split(request.text).size),
+        requestDeadlineMs = request.requestDeadlineMs,
         onResult = ::finish,
       )
     }

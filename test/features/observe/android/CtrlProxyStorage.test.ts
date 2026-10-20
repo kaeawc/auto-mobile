@@ -469,7 +469,7 @@ describe("CtrlProxyStorage (Android)", function () {
   });
 
   describe("unsubscribeStorage", function () {
-    // CtrlProxyMessageHandlerTest.kt's `unsubscribe_storage with only subscriptionId resolves
+    // CtrlProxyMessageHandlerStorageTest.kt's `unsubscribe_storage with only subscriptionId resolves
     // packageName and fileName` uses the same JSON shape; changing either side must change both.
     const subscriptionId = "com.example:settings.xml";
 

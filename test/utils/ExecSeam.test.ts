@@ -107,7 +107,7 @@ describe("runExecSeam", function () {
 
   test("wraps thrown errors with command context", async function () {
     const invoke = async (): Promise<RawExecOutput> => {
-      const error = new Error("boom") as NodeJS.ErrnoException & { stderr?: string };
+      const error: Error & { code?: number; stderr?: string } = new Error("boom");
       error.code = 7;
       error.stderr = "detailed stderr";
       throw error;

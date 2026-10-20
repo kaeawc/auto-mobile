@@ -2,22 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:ScreenshotSlideItem.kt:@Composable fun ScreenshotSlideItem</ID>
-    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and AutoMobileRed.toArgb())</ID>
-    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and PromoBlue.toArgb())</ID>
-    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and PromoOrange.toArgb())</ID>
-    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and backgroundColor.toArgb())</ID>
-    <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and textColor.toArgb())</ID>
-    <ID>LongMethod:MermaidDiagramSlideItem.kt:&lt;no name provided&gt;$override fun onPageFinished</ID>
-    <ID>LongMethod:MermaidDiagramSlideItem.kt:@Composable fun MermaidDiagramSlideItem</ID>
-    <ID>LongMethod:MermaidDiagramSlideItem.kt:private fun createMermaidDiagramHtml: String</ID>
-    <ID>LongMethod:SlidesScreen.kt:@Composable fun SlidesScreen</ID>
-    <ID>LongMethod:SlidesScreen.kt:@androidx.media3.common.util.UnstableApi @Composable private fun SlideItem</ID>
-    <ID>LongParameterList:BulletPointSlideItem.kt:@Composable fun BulletPointSlideItem</ID>
-    <ID>LongParameterList:CodeSampleSlideItem.kt:@Composable fun CodeSampleSlideItem</ID>
-    <ID>LongParameterList:LargeTextSlideItem.kt:@Composable private fun AutoResizingText</ID>
-    <ID>LongParameterList:ScreenshotSlideItem.kt:@Composable fun ScreenshotSlideItem</ID>
-    <ID>LongParameterList:VideoPlayerSlideItem.kt:@Composable fun VideoPlayerSlideItem</ID>
     <ID>TooGenericExceptionCaught:MermaidDiagramSlideItem.kt:&lt;no name provided&gt;$e: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>

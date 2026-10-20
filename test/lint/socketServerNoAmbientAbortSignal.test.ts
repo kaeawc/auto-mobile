@@ -19,9 +19,10 @@ describe("control-socket server reads no ambient abort signal (#11817)", () => {
   test("socketServer.ts and socketServer/ submodules never call getAbortSignal()", () => {
     const files = [
       SOCKET_SERVER,
-      ...typeScriptFiles(path.join(ROOT, "src/daemon/socketServer")).map((file) =>
-        path.relative(ROOT, file).split(path.sep).join("/"),
-      ),
+      ...[
+        ...typeScriptFiles(path.join(ROOT, "src/daemon/socketServer")),
+        ...typeScriptFiles(path.join(ROOT, "src/daemon/socketServerParts")),
+      ].map((file) => path.relative(ROOT, file).split(path.sep).join("/")),
     ];
     const offenders = files.filter((file) =>
       AMBIENT_READ.test(readFileSync(path.join(ROOT, file), "utf8")),

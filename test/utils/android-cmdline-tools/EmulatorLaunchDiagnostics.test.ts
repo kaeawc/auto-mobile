@@ -85,10 +85,17 @@ describe("launch failure formatting", () => {
   });
 
   test("formatEarlyExitError lists the header, diagnostic and accel-check sections", () => {
-    const error = formatEarlyExitError("Pixel", 1, "SIGSEGV", "acceleration", " boom ", " accel ");
+    const error = formatEarlyExitError(
+      "Pixel",
+      1,
+      "SIGSEGV",
+      "hardware_acceleration_unavailable",
+      " boom ",
+      " accel ",
+    );
     expect(error.message).toBe(
       [
-        "Emulator process exited with code: 1 (signal: SIGSEGV) (AVD 'Pixel'; category=acceleration)",
+        "Emulator process exited with code: 1 (signal: SIGSEGV) (AVD 'Pixel'; category=hardware_acceleration_unavailable)",
         "Diagnostic:\nboom",
         "emulator -accel-check:\naccel",
       ].join("\n"),
@@ -101,9 +108,9 @@ describe("launch failure formatting", () => {
   });
 
   test("appendCategory suffixes the category line", () => {
-    expect(appendCategory(new ActionableError("failed"), "acceleration").message).toBe(
-      "failed\n\ncategory=acceleration",
-    );
+    expect(
+      appendCategory(new ActionableError("failed"), "hardware_acceleration_unavailable").message,
+    ).toBe("failed\n\ncategory=hardware_acceleration_unavailable");
   });
 });
 

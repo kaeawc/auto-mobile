@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlPolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesture
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
@@ -568,17 +569,20 @@ class DeviceControlSession(
     if (!coordinatesAreStillDispatchable(snapshot)) return false
     val decision =
       DeviceDragGesturePolicy.evaluate(
-        start = start,
-        end = end,
-        deviceWidth = snapshot.deviceWidth,
-        deviceHeight = snapshot.deviceHeight,
-        // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
-        // endpoints are in. Read from the clicked snapshot, never from current stream state.
-        coordinateSpace = snapshot.coordinateSpace,
-        nativeScale = snapshot.nativeScale,
-        // Replay the swipe at the speed the user flicked, so an inspector swipe flings like a real
-        // one; null (an older caller) keeps the fixed fallback duration.
-        gestureDurationMs = gestureDurationMs,
+        DeviceDragGesture(
+          start = start,
+          end = end,
+          deviceWidth = snapshot.deviceWidth,
+          deviceHeight = snapshot.deviceHeight,
+          // The threshold is a PHYSICAL distance, so its numeric value depends on the unit these
+          // endpoints are in. Read from the clicked snapshot, never from current stream state.
+          coordinateSpace = snapshot.coordinateSpace,
+          nativeScale = snapshot.nativeScale,
+          // Replay the swipe at the speed the user flicked, so an inspector swipe flings like a
+          // real
+          // one; null (an older caller) keeps the fixed fallback duration.
+          gestureDurationMs = gestureDurationMs,
+        ),
       )
     // Ignored is not a failure: it means the gesture was never a swipe. Nothing is sent, nothing is
     // surfaced, and the refresh tracker is left alone.
@@ -1010,12 +1014,14 @@ class DeviceControlSession(
         if (event.cancel) return
         val decision =
           DeviceDragGesturePolicy.evaluate(
-            start = command.start,
-            end = event.point,
-            deviceWidth = command.snapshot.deviceWidth,
-            deviceHeight = command.snapshot.deviceHeight,
-            coordinateSpace = command.snapshot.coordinateSpace,
-            nativeScale = command.snapshot.nativeScale,
+            DeviceDragGesture(
+              start = command.start,
+              end = event.point,
+              deviceWidth = command.snapshot.deviceWidth,
+              deviceHeight = command.snapshot.deviceHeight,
+              coordinateSpace = command.snapshot.coordinateSpace,
+              nativeScale = command.snapshot.nativeScale,
+            ),
           )
         if (decision is DeviceDragDecision.Swipe) {
           forwarder.forwardSwipe(

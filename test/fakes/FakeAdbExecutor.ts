@@ -460,10 +460,9 @@ export class FakeAdbExecutor implements AdbExecutor {
     return this.devices;
   }
 
-  async getDeviceStates(_options?: {
-    timeoutMs?: number;
-    signal?: AbortSignal;
-  }): Promise<AdbDeviceState[]> {
+  async getDeviceStates(
+    _options?: Parameters<NonNullable<AdbExecutor["getDeviceStates"]>>[0],
+  ): Promise<AdbDeviceState[]> {
     return this.deviceStates;
   }
 

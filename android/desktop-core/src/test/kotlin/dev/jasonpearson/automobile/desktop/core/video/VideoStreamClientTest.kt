@@ -52,37 +52,28 @@ class VideoStreamClientTest {
   private fun sampleH264(): ByteArray =
     checkNotNull(javaClass.classLoader.getResourceAsStream("sample.h264")).use { it.readBytes() }
 
-  private fun relay(
-    success: Boolean = true,
-    error: String? = null,
-    permissionJson: String? = null,
-    payload: ByteArray? = null,
-    keepOpen: Boolean = false,
-    rotation: Int? = null,
-    maxConnections: Int = 1,
-    heartbeatMs: Long? = null,
-    sendHeartbeatAfterPayload: Boolean = false,
-    subscriptionKind: String? = null,
-    extraBytes: ByteArray = byteArrayOf(),
-    extraBytesOnReconnect: ByteArray = extraBytes,
-  ): FakeRelay =
-    FakeRelay(
-        success,
-        error,
-        permissionJson,
-        payload,
-        keepOpen,
-        rotation,
-        maxConnections,
-        heartbeatMs,
-        sendHeartbeatAfterPayload,
-        subscriptionKind,
-        extraBytes,
-        extraBytesOnReconnect,
-      )
-      .also { servers.add(it) }
+  private data class RelaySpec(
+    val success: Boolean = true,
+    val error: String? = null,
+    val permissionJson: String? = null,
+    val payload: ByteArray? = null,
+    val keepOpen: Boolean = false,
+    val rotation: Int? = null,
+    val maxConnections: Int = 1,
+    val heartbeatMs: Long? = null,
+    val sendHeartbeatAfterPayload: Boolean = false,
+    val subscriptionKind: String? = null,
+    val extraBytes: ByteArray = byteArrayOf(),
+    val extraBytesOnReconnect: ByteArray = extraBytes,
+  )
 
-  // int64 BE (bit 61 | code), int32 BE zero length: a 12-byte notice header.
+  private fun relay(spec: RelaySpec = RelaySpec()): FakeRelay =
+    with(spec) {
+      FakeRelay(spec).also { servers.add(it) }
+
+      // int64 BE (bit 61 | code), int32 BE zero length: a 12-byte notice header.
+    }
+
   private fun notice(code: Long): ByteArray =
     ByteBuffer.allocate(12)
       .order(ByteOrder.BIG_ENDIAN)
@@ -96,7 +87,7 @@ class VideoStreamClientTest {
       .toByteArray()
 
   private suspend fun assertAckKind(wire: String?, expected: VideoStreamSubscriptionKind?) {
-    val server = relay(payload = sampleH264(), keepOpen = true, subscriptionKind = wire)
+    val server = relay(RelaySpec(payload = sampleH264(), keepOpen = true, subscriptionKind = wire))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
     try {
       client.connect("emulator-5554")
@@ -126,12 +117,14 @@ class VideoStreamClientTest {
   fun `downgrade keeps streaming and latches read only until reconnect`() = runBlocking {
     val server =
       relay(
-        payload = sampleH264(),
-        keepOpen = true,
-        subscriptionKind = "owner",
-        maxConnections = 2,
-        extraBytes = notice(1),
-        extraBytesOnReconnect = byteArrayOf(),
+        RelaySpec(
+          payload = sampleH264(),
+          keepOpen = true,
+          subscriptionKind = "owner",
+          maxConnections = 2,
+          extraBytes = notice(1),
+          extraBytesOnReconnect = byteArrayOf(),
+        ),
       )
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
     try {
@@ -151,7 +144,8 @@ class VideoStreamClientTest {
 
   @Test
   fun `unknown notice is ignored while stream remains usable`() = runBlocking {
-    val server = relay(payload = sampleH264(), keepOpen = true, extraBytes = notice(99) + notice(1))
+    val server =
+      relay(RelaySpec(payload = sampleH264(), keepOpen = true, extraBytes = notice(99) + notice(1)))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
     try {
       client.connect("emulator-5554")
@@ -168,7 +162,7 @@ class VideoStreamClientTest {
     expected: VideoStreamEndReason,
     line: ByteArray = terminal(expected.wire),
   ) {
-    val server = relay(payload = sampleH264(), extraBytes = notice(code) + line)
+    val server = relay(RelaySpec(payload = sampleH264(), extraBytes = notice(code) + line))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
     try {
       client.connect("emulator-5554")
@@ -246,7 +240,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `old daemon EOF still reports live mirroring stopped`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
     try {
       client.connect("emulator-5554")
@@ -259,7 +253,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -279,7 +273,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `subscribes with quality, fps and bitrate hints when configured`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client =
       VideoStreamClient(
         socketPathValue = server.socketPath.toString(),
@@ -301,7 +295,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `omits the quality hints by default`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -318,7 +312,7 @@ class VideoStreamClientTest {
   @Test
   fun `reports the decoded size, not the advertised header size`() = runBlocking {
     // The daemon advertises 0x0 unless a hint was sent; the truth is in the SPS.
-    val server = relay(payload = sampleH264(), keepOpen = true)
+    val server = relay(RelaySpec(payload = sampleH264(), keepOpen = true))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect(null)
@@ -336,7 +330,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `parses the relay's advertised heartbeat cadence from the ack`() = runBlocking {
-    val server = relay(payload = sampleH264(), heartbeatMs = 1_000)
+    val server = relay(RelaySpec(payload = sampleH264(), heartbeatMs = 1_000))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -349,7 +343,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `heartbeatMs stays null for a daemon that predates the field`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -367,7 +361,9 @@ class VideoStreamClientTest {
     // reset value, rather than racing a before/after snapshot around the first-frame wait, is what
     // makes this deterministic.
     val server =
-      relay(payload = sampleH264(), heartbeatMs = 1_000, sendHeartbeatAfterPayload = true)
+      relay(
+        RelaySpec(payload = sampleH264(), heartbeatMs = 1_000, sendHeartbeatAfterPayload = true),
+      )
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -385,7 +381,7 @@ class VideoStreamClientTest {
   fun `stamps decoded frames with the rotation attested by a config packet`() = runBlocking {
     // Issue #4786: the config packet attests rotation 3, so the decoded frame carries it
     // end-to-end.
-    val server = relay(payload = sampleH264(), rotation = 3)
+    val server = relay(RelaySpec(payload = sampleH264(), rotation = 3))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -400,7 +396,7 @@ class VideoStreamClientTest {
   fun `leaves rotation null when the stream does not attest it`() = runBlocking {
     // An unattested stream (screenrecord/iOS relay) leaves rotation unknown so control fails
     // closed.
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -412,7 +408,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `omits the device id when none is given`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect(null)
@@ -425,7 +421,7 @@ class VideoStreamClientTest {
   @Test
   fun `subscribe carries the session uuid the provider supplies`() = runBlocking {
     // #4751 stream-socket auth: a resolved daemon session UUID authenticates the subscribe.
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client =
       VideoStreamClient(
         socketPathValue = server.socketPath.toString(),
@@ -443,7 +439,7 @@ class VideoStreamClientTest {
   fun `subscribe omits the session uuid when the provider returns null`() = runBlocking {
     // Default: the desktop holds no daemon session identity yet (issue #4924); the field must be
     // omitted so a pre-#4751 daemon still accepts the subscribe.
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -455,7 +451,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `a refused subscribe surfaces the daemon's reason`() = runBlocking {
-    val server = relay(success = false, error = "No connected device with id ghost.")
+    val server = relay(RelaySpec(success = false, error = "No connected device with id ghost."))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("ghost")
@@ -476,9 +472,11 @@ class VideoStreamClientTest {
   fun `a Screen Recording denial becomes structured permission state`() = runBlocking {
     val server =
       relay(
-        success = false,
-        permissionJson =
-          """{"kind":"screen_recording","status":"needs_approval","approvalTarget":"AutoMobile"}""",
+        RelaySpec(
+          success = false,
+          permissionJson =
+            """{"kind":"screen_recording","status":"needs_approval","approvalTarget":"AutoMobile"}""",
+        ),
       )
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
@@ -513,7 +511,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `disconnect returns to idle and stops the reader`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -526,7 +524,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `a decoder that cannot start is reported, not thrown`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val client =
       VideoStreamClient(
         socketPathValue = server.socketPath.toString(),
@@ -542,7 +540,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `a disconnect during decoder startup does not subscribe`() = runBlocking {
-    val server = relay(payload = sampleH264())
+    val server = relay(RelaySpec(payload = sampleH264()))
     val decoderStarted = CountDownLatch(1)
     val releaseDecoder = CountDownLatch(1)
     val decoderFinished = CountDownLatch(1)
@@ -573,7 +571,7 @@ class VideoStreamClientTest {
 
   @Test
   fun `an orderly relay close reports the stream as unavailable`() = runBlocking {
-    val server = relay()
+    val server = relay(RelaySpec())
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
 
     client.connect("emulator-5554")
@@ -653,28 +651,42 @@ class VideoStreamClientTest {
   }
 
   /** A relay speaking the daemon's handshake then its binary framing over up to N connections. */
-  private inner class FakeRelay(
-    private val success: Boolean,
-    private val error: String?,
-    private val permissionJson: String?,
-    private val payload: ByteArray?,
-    private val keepOpen: Boolean,
-    // When set, the framed packet is flagged CONFIG and attests this rotation (issue #4786), as the
-    // daemon relay does on a parameter-set packet.
-    private val rotation: Int? = null,
-    // How many sequential subscribe connections to serve. >1 lets a reconnect (disconnect+connect)
-    // be exercised against one relay; each connection is handled on its own daemon thread so a
-    // keepOpen session never blocks the accept loop.
-    private val maxConnections: Int = 1,
-    // Advertised in the ack's `heartbeatMs` field (issue #7549); null omits the field, modeling a
-    // daemon that predates it.
-    private val heartbeatMs: Long? = null,
-    // When true, writes one zero-payload heartbeat packet right after the video payload.
-    private val sendHeartbeatAfterPayload: Boolean = false,
-    private val subscriptionKind: String? = null,
-    private val extraBytes: ByteArray = byteArrayOf(),
-    private val extraBytesOnReconnect: ByteArray = extraBytes,
-  ) : AutoCloseable {
+  private inner class FakeRelay(private val spec: RelaySpec) : AutoCloseable {
+    private val success
+      get() = spec.success
+
+    private val error
+      get() = spec.error
+
+    private val permissionJson
+      get() = spec.permissionJson
+
+    private val payload = spec.payload
+
+    private val keepOpen
+      get() = spec.keepOpen
+
+    private val rotation
+      get() = spec.rotation
+
+    private val maxConnections
+      get() = spec.maxConnections
+
+    private val heartbeatMs
+      get() = spec.heartbeatMs
+
+    private val sendHeartbeatAfterPayload
+      get() = spec.sendHeartbeatAfterPayload
+
+    private val subscriptionKind
+      get() = spec.subscriptionKind
+
+    private val extraBytes
+      get() = spec.extraBytes
+
+    private val extraBytesOnReconnect
+      get() = spec.extraBytesOnReconnect
+
     private val tempDir: Path = Files.createTempDirectory(Path.of("/tmp"), "amvsc-")
     val socketPath: Path = tempDir.resolve("video-stream.sock")
 

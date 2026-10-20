@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { scopedSelectionMatrix } from "../../helpers/scopedSelectionMatrix";
 import { afterEach, expect, spyOn, test } from "bun:test";
@@ -125,7 +126,7 @@ function harness(route: Route, kind: Kind = "success", vision = false) {
   const predictions: unknown[] = [];
   action.observedInteraction = (callback, options) => {
     predictions.push(options?.predictionContext?.toolArgs);
-    return callback(observation);
+    return runBlockWith(observation)(callback, options);
   };
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const drag = spyOn(client, "requestDrag").mockResolvedValue({ success: true, totalTimeMs: 0 });

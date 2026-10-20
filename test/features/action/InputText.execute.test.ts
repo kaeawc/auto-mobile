@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { EventEmitter } from "node:events";
@@ -517,8 +518,7 @@ describe("InputText.execute", () => {
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
     });
-    tap.observedInteraction = async (action) => ({
-      ...(await action(recordObservationRead(observation))),
+    tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
       observation,
     });
     const error =

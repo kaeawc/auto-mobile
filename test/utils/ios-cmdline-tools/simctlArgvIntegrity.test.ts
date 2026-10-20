@@ -4,8 +4,7 @@ import {
   DAEMON_LAUNCH_CWD_ENV,
 } from "../../../src/utils/workingDirectory";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { EventEmitter } from "node:events";
-import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { restoreIosSettings } from "../../../src/utils/ios-cmdline-tools/iosSettings";
@@ -271,7 +270,7 @@ describe("custom simctl device set (#6900)", () => {
         }
         process.env[DAEMON_LAUNCH_CWD_ENV] = "/launch";
         const calls: Array<{ file: string; args: string[] }> = [];
-        const child = new EventEmitter() as HostChildProcess;
+        const child = new FakeChildProcess(new FakeTimer());
         const client = new Simctl(
           null,
           async (file, args) => {

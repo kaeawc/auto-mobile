@@ -629,7 +629,11 @@ test("a kill asks for the adb states in the mode that rejects a missing adb exec
   // ownership of an emulator that is alive (#11643).
   const { client, adb } = offlineFixture(offlineEmulator);
   const asked: Array<boolean | undefined> = [];
-  adb.getDeviceStates = async (options?: { throwOnMissingAdb?: boolean }) => {
+  adb.getDeviceStates = async (options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    throwOnMissingAdb?: boolean;
+  }) => {
     asked.push(options?.throwOnMissingAdb);
     throw new Error("ADB executable is unavailable");
   };

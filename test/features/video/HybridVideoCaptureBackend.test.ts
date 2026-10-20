@@ -95,10 +95,8 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
       device: {
         platform: "android",
         deviceId: "android-device",
-        deviceType: "emulator",
-        sdkVersion: 33,
-        booted: true,
-      } as BootedDevice,
+        name: "Test Android",
+      } satisfies BootedDevice,
     };
   });
 
@@ -162,8 +160,9 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
       ...baseConfig,
       device: {
         platform: "ios",
+        name: "Test iOS",
         deviceId: "00008030-001C2D3E1234567A", // physical UDID (8-hex + 16-hex)
-      } as BootedDevice,
+      } satisfies BootedDevice,
     };
     const handle = await backend.start(physicalConfig);
 
@@ -183,8 +182,9 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
       ...baseConfig,
       device: {
         platform: "ios",
+        name: "Test iOS",
         deviceId: "a".repeat(40),
-      } as BootedDevice,
+      } satisfies BootedDevice,
     };
     await backend.start(legacyConfig);
 
@@ -197,8 +197,9 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
       ...baseConfig,
       device: {
         platform: "ios",
+        name: "Test iOS",
         deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890", // simulator UUID
-      } as BootedDevice,
+      } satisfies BootedDevice,
     };
     await backend.start(simulatorConfig);
     expect(ffmpegBackend.startCalls.length).toBe(1);
@@ -255,11 +256,9 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
       ...baseConfig,
       device: {
         platform: "ios",
+        name: "Test iOS",
         deviceId: "ios-device",
-        deviceType: "simulator",
-        sdkVersion: 17,
-        booted: true,
-      } as BootedDevice,
+      } satisfies BootedDevice,
     };
 
     const handle = await backend.start(iosConfig);

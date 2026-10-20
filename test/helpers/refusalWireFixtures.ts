@@ -15,6 +15,7 @@ import { AndroidIdentityUnresolvedError } from "../../src/devices/AndroidIdentit
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
+import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
 import {
   deviceSessionErrorFields,
@@ -227,13 +228,22 @@ function shaped(error: unknown): RefusalWireResult {
   }
 }
 
-/** The error the boot admission gate throws for an Android boot refused at capacity. */
-function bootCapacityRefusal(platform: "android" | "ios" = "android"): unknown {
+/** The error the boot admission gate throws for a boot refused at capacity. */
+function bootCapacityRefusal(platform: "android" | "ios" = "android", heldOnly = false): unknown {
   const ios = platform === "ios";
   const decision = atCapacityDecision(2, { maxBooted: 2, source: "derived" }, 5_000, {
     noun: ios ? "simulator" : "emulator",
     envName: ios ? IOS_SIM_MAX_BOOTED_ENV : "AUTO_MOBILE_MAX_BOOTED",
-    externalDevices: [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    externalDevices: heldOnly
+      ? []
+      : [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    ...(ios
+      ? {
+          heldDevices: heldOnly
+            ? ["9A1B2C3D-0000-4000-8000-000000000001", "9A1B2C3D-0000-4000-8000-000000000002"]
+            : ["9A1B2C3D-0000-4000-8000-000000000002"],
+        }
+      : {}),
   });
   try {
     if (!decision) {
@@ -399,6 +409,38 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget")),
   ],
   [
+    "cancelled.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled")),
+  ],
+  [
+    "timeout.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("timeout", "SDK capability query timed out")),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "not_connected",
+          "SDK capability query not connected to CtrlProxy",
+        ),
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "sdk_capability_query_failed",
+          "SDK capability query failed: invalid capability reply",
+        ),
+      ),
+  ],
+  [
     "provision_device.platform_command_failed.create_rejected",
     "ProvisionDeviceCreateRejectedError via createToolErrorResponse",
     () => provisionEnvelope(new ProvisionDeviceCreateRejectedError("Platform rejected creation")),
@@ -517,6 +559,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "capacity_exhausted.ios",
     "assertBootCapacityGranted via shapeToolCallError",
     () => shaped(bootCapacityRefusal("ios")),
+  ],
+  [
+    "capacity_exhausted.ios.held_only",
+    "assertBootCapacityGranted via shapeToolCallError",
+    () => shaped(bootCapacityRefusal("ios", true)),
   ],
   [
     "discovery_incomplete.ios",
@@ -903,6 +950,30 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     "timeout.iosHomeLaunch",
     () => new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget"),
   ],
+  [
+    "cancelled.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled"),
+  ],
+  [
+    "timeout.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("timeout", "SDK capability query timed out"),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    () =>
+      new SdkCapabilityQueryError(
+        "not_connected",
+        "SDK capability query not connected to CtrlProxy",
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    () =>
+      new SdkCapabilityQueryError(
+        "sdk_capability_query_failed",
+        "SDK capability query failed: invalid capability reply",
+      ),
+  ],
   ["timeout.boot", () => new DeviceBootTimeoutError("boot", "readiness", 1_000, 1_000, DEVICE)],
   [
     "daemon_handoff_interrupted",
@@ -944,6 +1015,7 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     () => new BindingOwnershipLostError(SESSION),
   ],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
+  ["capacity_exhausted.ios.held_only", () => bootCapacityRefusal("ios", true) as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
   [
     "device_outside_broker_grant",
@@ -1112,6 +1184,10 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "daemon_restart_deferred",
   "viewer_read_only",
   "target_identity_unresolved",
+  "cancelled",
+  "timeout",
+  "not_connected",
+  "sdk_capability_query_failed",
 ];
 
 /** Every exported Error in the coded-refusal modules is covered or has an honest, reviewable gap. */

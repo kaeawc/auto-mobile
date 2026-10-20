@@ -1,3 +1,5 @@
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { SdkCapabilityProbeSupersededError } from "./SdkCapabilityProbeSupersededError";
 import type { Timer } from "../../../utils/SystemTimer";
 import type {
   CtrlProxyNode,
@@ -121,9 +123,14 @@ export class CtrlProxyHierarchyTelemetry {
       this.host.lastForegroundBundleId = bundleId;
       this.host.sdkCapability.invalidateSdkCapabilities();
       void this.host.sdkCapability.refreshSdkCapabilitiesAndSync().catch((error) => {
-        // Foreground apps without AutoMobileSDK are normal.
-        logger.debug(
-          `[IOSCtrlProxyClient] SDK capability refresh after app change failed: ${error}`,
+        if (error instanceof SdkCapabilityProbeSupersededError) {
+          // The newer foreground generation refreshes its own capabilities.
+          logger.debug(`[IOSCtrlProxyClient] SDK capability refresh superseded: ${error.message}`);
+          return;
+        }
+        logger.warn(
+          `[IOSCtrlProxyClient] SDK capability refresh after app change failed: ${errorMessage(error)}`,
+          error,
         );
       });
       // Start performance monitoring for this device/bundle

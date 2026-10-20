@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { DefaultIosAppBundleGuard } from "../../../src/ctrlProxy/ios/IosAppBundleGuard";
 import { logger } from "../../../src/utils/logger";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
@@ -97,4 +97,8 @@ describe("IosAppBundleGuard", () => {
 
     expect(lookups).toEqual([]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

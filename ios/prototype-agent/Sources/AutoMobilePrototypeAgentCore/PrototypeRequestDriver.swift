@@ -25,8 +25,8 @@ final class PrototypeRequestDriver {
     static let hostGraceMs = 2000
 
     private let clock: PrototypeClock
-    private let device: (any PrototypeHttpClient)?
-    private let hostRoute: HostRoute
+    private var device: (any PrototypeHttpClient)?
+    private var hostRoute: HostRoute
     private var hostWatchdogs: [String: PrototypeTimerHandle] = [:]
     private var deviceTasks: [String: Task<Void, Never>] = [:]
     private var notices: [Task<Void, Never>] = []
@@ -48,6 +48,12 @@ final class PrototypeRequestDriver {
 
     convenience init(clock: PrototypeClock, device: (any PrototypeHttpClient)?, sendToHost: @escaping SendToHost) {
         self.init(clock: clock, device: device, hostRoute: .daemon(sendToHost))
+    }
+
+    /// Updates embedded routing without resetting the session or cancelling calls already started.
+    func updateClients(device: any PrototypeHttpClient, hostRoute: HostRoute) {
+        self.device = device
+        self.hostRoute = hostRoute
     }
 
     /// Requests running now (host calls awaiting a response and device tasks).

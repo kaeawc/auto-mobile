@@ -136,17 +136,18 @@ export function selectAdmission(snapshot: BrokerSnapshot, limits: BrokerLimits):
     return { kind: "refuse", reason: "session-cap-reached" };
   }
 
+  // Reuse does not increase the total, including after a cap reduction.
+  const reusable = newestCompatibleIdle(snapshot);
+  if (reusable) {
+    return { kind: "reuse", resourceId: reusable.id };
+  }
+
   const total = snapshot.resources.length;
   if (limits.totalDeviceCap !== undefined && total > limits.totalDeviceCap) {
     const candidate = oldestIdle(snapshot);
     return candidate
       ? { kind: "evict", resourceId: candidate.id }
       : { kind: "refuse", reason: "total-device-cap-exceeded" };
-  }
-
-  const reusable = newestCompatibleIdle(snapshot);
-  if (reusable) {
-    return { kind: "reuse", resourceId: reusable.id };
   }
 
   if (limits.totalDeviceCap === undefined || total < limits.totalDeviceCap) {

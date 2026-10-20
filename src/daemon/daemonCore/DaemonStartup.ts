@@ -162,6 +162,7 @@ export interface DaemonStartupHost extends Pick<
   initializeIosServices: DaemonStartup["initializeIosServices"];
   restoreIncumbentOwnerRecord: DaemonIdentity["restoreIncumbentOwnerRecord"];
   republishIdentity: DaemonIdentity["republishIdentity"];
+  recordControlSocketIdentity: DaemonIdentity["recordControlSocketIdentity"];
   startAuxiliarySocket: DaemonIdentity["startAuxiliarySocket"];
   configureDeviceDataStreamServer: DaemonStreams["configureDeviceDataStreamServer"];
   setupDeviceSessionRouting: DaemonStreams["setupDeviceSessionRouting"];
@@ -580,6 +581,7 @@ export class DaemonStartup {
     logger.info("Starting Unix socket server...");
     startupBenchmark.startPhase("socketServerStart");
     await this.host.lifecycle.socketServer()!.start();
+    this.host.recordControlSocketIdentity();
     return this.host.lifecycle.socketServer()!;
   }
 

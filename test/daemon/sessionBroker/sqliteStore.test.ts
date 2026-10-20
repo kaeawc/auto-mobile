@@ -12,6 +12,7 @@ import {
   type BrokerResourceRecord,
 } from "../../../src/daemon/sessionBroker/store";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { SessionBrokerInvariantError } from "../../../src/daemon/sessionBroker/SessionBrokerInvariantError";
 import {
   SessionRequestOwnerMismatchError,
   SESSION_BROKER_RETRY_AFTER_MS,
@@ -481,13 +482,36 @@ describe("session broker durable admission", () => {
   test("release cannot return a device while its old session still owns physical execution", async () => {
     const first = await prepare("first");
     await store.beginRelease(first.sessionId, OWNER);
-    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toThrow(
-      "execution or journal work",
+    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
     );
     expect((await store.listResources())[0]?.state).toBe("resetting");
     await registry.releaseExecution(key(first.resource), first.sessionId);
     await store.completeCleanRelease("first", OWNER, {});
     expect((await store.listResources())[0]?.state).toBe("idle");
+  });
+
+  test("clean release reports permanent invalid state and lost reservation", async () => {
+    const first = await prepare("first");
+    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
+    );
+    await returnClean("first", first.resource);
+    await prepare("second");
+    // The first receipt still names the resource now owned by second; stale activation is fenced.
+    await expect(store.activate("first", OWNER, first.sessionId)).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
+    );
+  });
+
+  test("clean release reports a permanent missing stable binding", async () => {
+    const first = await prepare("first");
+    await store.beginRelease(first.sessionId, OWNER);
+    await registry.releaseExecution(key(first.resource), first.sessionId);
+    await clearPhysicalBinding(first.resource);
+    await expect(store.completeCleanRelease("first", OWNER, {})).rejects.toBeInstanceOf(
+      SessionBrokerInvariantError,
+    );
   });
 
   test("zero-pool release retains cleanup ownership until confirmed destruction", async () => {

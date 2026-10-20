@@ -1,7 +1,7 @@
 import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import { readToolResponse, toolJson } from "../helpers/toolResponse";
 import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   createPostNotificationHandler,
   postNotificationSchema,
@@ -240,3 +240,7 @@ test.each([
     }
   },
 );
+
+afterEach(() => {
+  mock.restore();
+});

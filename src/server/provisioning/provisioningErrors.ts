@@ -15,6 +15,7 @@ import {
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DeviceLostError } from "../../models/DeviceLostError";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
+import { ActionableError } from "../../models/ActionableError";
 import {
   buildProvisionDeviceRecoveryEvidence,
   type ProvisionDeviceFailureBoundary,
@@ -24,6 +25,7 @@ import {
 import { getCurrentBuildIdentity } from "../../daemon/buildIdentity";
 import { DAEMON_VERSION } from "../../daemon/constants";
 import { DaemonHandoffInterruptionError } from "../../daemon/daemonHandoffInterruption";
+import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { DeviceBootTimeoutError } from "../../devices/deviceBootService";
 import { AdbDeviceOfflineError } from "../../utils/android-cmdline-tools/AdbDeviceHealth";
 import { RunnerReadinessError } from "../../ctrlProxy/RunnerReadinessError";
@@ -97,14 +99,19 @@ function capacityExhaustedProvisionError(
   args: ProvisionDeviceArgs,
   error: BootCapacityExhaustedError,
 ): ProvisionDeviceError {
-  const { limit, booted, externalDevices } = error.details;
+  const { limit, booted, externalDevices, heldDevices } = error.details;
   return new ProvisionDeviceError(
     "capacity_exhausted",
     `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
     true,
     {
       retryAfterMs: error.retryAfterMs,
-      capacity: { limit, booted, ...(externalDevices ? { externalDevices } : {}) },
+      capacity: {
+        limit,
+        booted,
+        ...(externalDevices ? { externalDevices } : {}),
+        ...(heldDevices ? { heldDevices } : {}),
+      },
     },
   );
 }
@@ -251,13 +258,36 @@ export function toProvisionDeviceError(
   // A readiness phase that ran out of budget is a purely time-based failure:
   // report it as `timeout` so a controller that retries timeouts but treats
   // `platform_command_failed` as terminal does not give up on it.
-  const isDeadlineFailure =
-    error instanceof DeviceBootTimeoutError ||
-    (error instanceof RunnerReadinessError && error.deadlineExhausted);
+  const deadlineFailure = isDeadlineFailure(error);
   return new ProvisionDeviceError(
-    isDeadlineFailure ? "timeout" : "platform_command_failed",
+    deadlineFailure ? "timeout" : "platform_command_failed",
     `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
   );
+}
+
+// Bound traversal even for cyclic/foreign Error.cause graphs.
+const MAX_DEADLINE_CAUSE_DEPTH = 8;
+
+function isDeadlineFailure(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < MAX_DEADLINE_CAUSE_DEPTH; depth += 1) {
+    if (
+      current instanceof DeviceBootTimeoutError ||
+      current instanceof SimctlCommandTimeoutError ||
+      (current instanceof RunnerReadinessError && current.deadlineExhausted) ||
+      (current instanceof DOMException && current.name === "TimeoutError")
+    ) {
+      return true;
+    }
+    // Only plain contextual wrappers delegate classification to their cause.
+    // A platform/typed failure owns its classification, even if an unrelated
+    // earlier step left a timeout in its cause chain. Cancellation is not a deadline.
+    if (!(current instanceof ActionableError) || current.constructor !== ActionableError) {
+      return false;
+    }
+    current = current.cause;
+  }
+  return false;
 }
 
 export function provisionDeviceLifecycleReason(error: ProvisionDeviceError) {

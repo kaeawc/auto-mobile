@@ -1,6 +1,8 @@
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import type { Timer } from "../../utils/SystemTimer";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
+import { classifyCleanReleaseError } from "./cleanReleaseFailure";
+import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
@@ -9,6 +11,7 @@ import {
   type SessionDeviceCatalog,
   type SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
+import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import {
@@ -144,7 +147,8 @@ export class SessionBroker {
     exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
     if (this.stopping) {
-      return Promise.reject(new ActionableError("Session broker is stopping"));
+      // Refuse before prepareOnce/failureFor: no terminal receipt prevents a successor retry.
+      return Promise.reject(new SessionBrokerStoppingError());
     }
     const controller = new AbortController();
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -242,8 +246,8 @@ export class SessionBroker {
             ...result,
             failure: {
               ...failure,
-              retryable: failure.retryable && !result.cleanupPending,
-              // The stored receipt owns the retry hint, so the first reply matches every replay.
+              retryable: Boolean(result.failure?.retryable),
+              // The stored receipt owns retry guidance, so the first reply matches every replay.
               ...(result.failure?.retryRequires
                 ? { retryRequires: result.failure.retryRequires }
                 : {}),
@@ -358,10 +362,22 @@ export class SessionBroker {
     // Each eviction removes a distinct idle resource. No creation reservation is made until
     // the existing journal confirms that device's absence.
     while (admission.kind === "evict") {
-      if (!(await this.destroy(admission.resource))) {
-        throw new ActionableError(
-          "Device eviction remains unresolved; its capacity is still reserved",
-        );
+      const destroyed = await this.destroy(admission.resource).catch((error: unknown) => {
+        if (classifyCleanReleaseError(error) !== "retryable") {
+          throw error;
+        }
+        // The durable destroying row retains capacity until recovery confirms absence.
+        logger.warn(`Device eviction remains pending: ${errorMessage(error)}`, error);
+        return false;
+      });
+      if (!destroyed) {
+        // A new request ID may evict the next idle device during this destroy, bounded by pool size.
+        throw new SessionBrokerFailureError({
+          code: "eviction_pending",
+          message: "Device eviction remains unresolved; its capacity is still reserved",
+          retryable: true,
+          retryAfterMs: 1_000,
+        });
       }
       signal.throwIfAborted();
       admission = await this.options.store.continueAdmission(input);
@@ -444,7 +460,7 @@ export class SessionBroker {
 
   async abandon(requestId: string, ownerToken: string): Promise<SessionBrokerResult> {
     if (this.stopping) {
-      throw new ActionableError("Session broker is stopping");
+      throw new SessionBrokerStoppingError();
     }
     const abandonment = await this.options.store.abandon(requestId, this.options.owner, ownerToken);
     for (const preparation of this.preparationOwners.values()) {
@@ -633,7 +649,12 @@ export class SessionBroker {
   }
 
   async close(): Promise<void> {
-    await this.markRestartHandoff();
+    try {
+      await this.markRestartHandoff();
+    } catch (error) {
+      // Preparations are already aborted; retry the handoff after joining their native work.
+      logger.warn(`Session broker restart handoff failed: ${errorMessage(error)}`, error);
+    }
     await Promise.allSettled([...this.preparationOwners.keys()]);
     // Retry after joining preparations in case the first snapshot or an inline mark failed;
     // the store makes each mark idempotent.
@@ -653,6 +674,7 @@ export class SessionBroker {
     this.stopping = true;
     this.cleanup.stop();
     for (const preparation of this.preparationOwners.values()) {
+      // Already admitted work still fails through failureFor and retains its terminal receipt.
       preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
     const requests = await this.options.store.listRecoverableRequests();
@@ -882,6 +904,7 @@ export class SessionBroker {
     sessionUuid: string,
     signal?: AbortSignal,
   ): Promise<"idle" | "destroy" | "pending"> {
+    let resetClean = false;
     try {
       if (!(await this.options.devices.release(sessionUuid)).settled) {
         return "pending";
@@ -898,6 +921,7 @@ export class SessionBroker {
         return "destroy";
       }
       signal?.throwIfAborted();
+      resetClean = true;
       const tickets = await this.options.store.completeCleanRelease(
         request.requestId,
         this.options.owner,
@@ -909,11 +933,27 @@ export class SessionBroker {
       }
       return "idle";
     } catch (error) {
+      // Admission refusal leaves a healthy erased simulator shut down. Keep the durable reset
+      // pending and let recovery retry it; the consumer's release is already durable.
+      if (error instanceof BootCapacityExhaustedError) {
+        logger.warn(
+          `Session ${sessionUuid} clean release awaits boot capacity: ${errorMessage(error)}`,
+        );
+        return "pending";
+      }
+      // A failed or timed-out gate sample is not a capacity refusal and falls through to destruction.
       // Native execution/journal fences still prevent destructive work before the drain joins.
       logger.warn(
         `Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`,
       );
-      return "destroy";
+      const kind = classifyCleanReleaseError(error);
+      if (kind === "permanent" || (!resetClean && kind === "unknown")) {
+        return "destroy";
+      }
+      // A clean baseline survives unknown receipt-write failures; earlier failures need a
+      // known retryable kind. recover()/service redrive bounds each pass, not total retries:
+      // no per-request attempt/time cap exists, so persistent failures can stay pending forever.
+      return "pending";
     }
   }
 
@@ -959,11 +999,15 @@ export class SessionBroker {
     request: BrokerRequestRecord,
     resource: BrokerResourceRecord | undefined,
   ): SessionBrokerFailure {
-    const retryable = request.retryable && !this.cleanupIsPending(request, resource);
+    const retryable =
+      request.retryable &&
+      (request.errorCode === "eviction_pending" || !this.cleanupIsPending(request, resource));
     return {
       code: request.errorCode ?? "session_preparation_failed",
       message: request.error ?? "",
       retryable,
+      // Eviction retains capacity for redrive; a new request may try again after cleanup.
+      ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
       // The refusal is a stored terminal receipt: only a new request ID can observe freed capacity.
       ...(retryable && request.errorCode === "capacity_exhausted"
         ? { retryRequires: "new_request_id" as const }

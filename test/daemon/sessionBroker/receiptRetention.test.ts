@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   RECEIPT_PRUNE_BATCH,
   RECEIPT_RETENTION_MS,
@@ -20,6 +20,10 @@ import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtu
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function config(requestId: string): SessionConfig {
   return {

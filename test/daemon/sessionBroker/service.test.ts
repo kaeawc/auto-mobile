@@ -20,6 +20,8 @@ import {
 } from "../../../src/daemon/sessionBroker/service";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { SESSION_BROKER_RETRY_AFTER_MS } from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
+import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "../../../src/daemon/sessionBroker/timing";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
 
@@ -135,7 +137,9 @@ describe("session broker service lifecycle", () => {
     await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
       description: "idle recovery loop",
     });
-    expect(timer.getPendingTimeouts()).toEqual([5_000]);
+    expect(SESSION_BROKER_RETRY_AFTER_MS).toBe(5_000);
+    expect(SESSION_BROKER_RETRY_AFTER_MS).toBe(SESSION_BROKER_RECOVERY_INTERVAL_MS);
+    expect(timer.getPendingTimeouts()).toEqual([SESSION_BROKER_RETRY_AFTER_MS]);
 
     const first = service.close();
     const second = service.close();

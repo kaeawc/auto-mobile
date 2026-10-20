@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import type { FailureObservationSummary } from "../../src/models/FailureObservation";
 import type { AbortStrategy, Plan, PlanExecutionResult } from "../../src/models/Plan";
@@ -396,4 +396,8 @@ describe("selectParallelFailure", () => {
       );
     });
   }
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -28,6 +28,8 @@ export interface HostChildProcess {
   readonly exitCode: number | null;
   readonly signalCode: NodeJS.Signals | null;
   readonly killed: boolean;
+  /** Synthetic handles can confirm asynchronous resource cleanup instead of OS process exit. */
+  readonly terminationConfirmed?: Promise<boolean>;
   kill(signal?: NodeJS.Signals | number): boolean;
   on(event: string, listener: (...args: any[]) => void): this;
   once(event: string, listener: (...args: any[]) => void): this;

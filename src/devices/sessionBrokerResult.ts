@@ -3,6 +3,7 @@ import type { SessionDeviceProfile } from "./sessionRequirements";
 export type SessionBrokerProtocolErrorCode =
   | "session_broker_exclusive"
   | "session_broker_unavailable"
+  | "session_broker_stopping"
   | "session_config_invalid"
   | "session_request_not_found"
   | "session_restart_handoff_pending"
@@ -11,9 +12,12 @@ export type SessionBrokerProtocolErrorCode =
   | "session_export_identity_mismatch";
 
 export interface SessionBrokerFailure {
+  /** Includes `eviction_pending` for unfinished idle eviction; managed `cleanup_pending` is distinct. */
   code: string;
   message: string;
   retryable: boolean;
+  /** Suggested delay under a new request ID; durable `eviction_pending` receipts derive 1000 ms. */
+  retryAfterMs?: number;
   /**
    * Set when a retry only succeeds under a fresh request ID: this request ID's terminal refusal
    * is stored and replays byte-identically, so resending it can never succeed.

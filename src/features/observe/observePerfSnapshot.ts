@@ -33,9 +33,7 @@ export async function attachObservePerfSnapshot(
   try {
     // Ensure continuous sampling is active for this device/package. The first
     // observe warms the window; subsequent observes see a fuller snapshot.
-    // start() schedules the sampling interval (idempotent); startMonitoring()
-    // alone only registers the device and would never accumulate samples if
-    // the daemon had not already started the monitor.
+    // Both entry points are idempotent; the first monitored device arms the interval.
     const { getPerformanceMonitor, getLastStartupTimingMs } =
       await import("../performance/PerformanceMonitor");
     const monitor = getPerformanceMonitor();

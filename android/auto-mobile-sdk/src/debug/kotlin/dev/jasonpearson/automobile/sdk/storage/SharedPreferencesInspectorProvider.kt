@@ -296,7 +296,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
       try {
         KeyValueType.valueOf(typeStr)
       } catch (e: IllegalArgumentException) {
-        throw IllegalArgumentException("Invalid type: $typeStr")
+        throw IllegalArgumentException("Invalid type: $typeStr", e)
       }
 
     val value = deserializeValue(valueStr, type)
@@ -457,7 +457,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
   private fun handleGetChanges(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
       extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
-    val sinceSequence = extras?.getLong("sinceSequence", 0L) ?: 0L
+    val sinceSequence = extras.getLong("sinceSequence", 0L)
 
     val driverImpl =
       driver as? SharedPreferencesDriverImpl

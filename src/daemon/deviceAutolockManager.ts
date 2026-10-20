@@ -1020,4 +1020,15 @@ export class DeviceAutolockManager {
     this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
     this.mcpSessionAutolockMap.delete(mcpSessionId);
   }
+
+  /** @internal Read-only state used by deterministic ownership tests. */
+  get testHooks() {
+    return {
+      mcpSessionAutolockMap: this.mcpSessionAutolockMap as ReadonlyMap<string, string>,
+      mcpSessionAcquiredAutolocks: this.mcpSessionAcquiredAutolocks as ReadonlyMap<
+        string,
+        ReadonlySet<string>
+      >,
+    };
+  }
 }

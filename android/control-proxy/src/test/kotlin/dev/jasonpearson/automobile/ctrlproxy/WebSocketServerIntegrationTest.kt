@@ -70,25 +70,28 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        sdkInt = { GestureDisplayRouting.DISPLAY_API },
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun addHighlight(
-                requestId: String?,
-                highlightId: String?,
-                shape: HighlightShape?,
-              ) {
-                val error =
-                  when {
-                    highlightId.isNullOrBlank() -> "Missing highlight id"
-                    shape == null -> "Missing highlight shape"
-                    shape.type != "circle" -> "Only hand-drawn circle highlights are supported"
-                    else -> null
+        options =
+          WebSocketServerOptions(
+            sdkInt = { GestureDisplayRouting.DISPLAY_API },
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun addHighlight(
+                    requestId: String?,
+                    highlightId: String?,
+                    shape: HighlightShape?,
+                  ) {
+                    val error =
+                      when {
+                        highlightId.isNullOrBlank() -> "Missing highlight id"
+                        shape == null -> "Missing highlight shape"
+                        shape.type != "circle" -> "Only hand-drawn circle highlights are supported"
+                        else -> null
+                      }
+                    enqueueHighlightResponse(requestId, error == null, error)
                   }
-                enqueueHighlightResponse(requestId, error == null, error)
-              }
-            },
+                },
+              ),
           ),
       )
   }
@@ -848,13 +851,16 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun requestScreenshot(request: RequestScreenshot) {
-                throw IllegalStateException("kaboom")
-              }
-            },
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun requestScreenshot(request: RequestScreenshot) {
+                    throw IllegalStateException("kaboom")
+                  }
+                },
+              ),
           ),
       )
     startAndWait(throwingServer)
@@ -892,13 +898,16 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun requestScreenshot(request: RequestScreenshot) {
-                throw IllegalStateException("kaboom")
-              }
-            },
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun requestScreenshot(request: RequestScreenshot) {
+                    throw IllegalStateException("kaboom")
+                  }
+                },
+              ),
           ),
       )
     startAndWait(throwingServer)
@@ -923,17 +932,20 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun setRecompositionTracking(enabled: Boolean) {
-                order.add("flags")
-              }
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun setRecompositionTracking(enabled: Boolean) {
+                    order.add("flags")
+                  }
 
-              override suspend fun requestScreenshot(request: RequestScreenshot) {
-                order.add("screenshot")
-              }
-            },
+                  override suspend fun requestScreenshot(request: RequestScreenshot) {
+                    order.add("screenshot")
+                  }
+                },
+              ),
           ),
       )
     startAndWait(orderedServer)
@@ -1070,20 +1082,23 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun requestScreenshot(request: RequestScreenshot) {
-                val requestId = request.requestId
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun requestScreenshot(request: RequestScreenshot) {
+                    val requestId = request.requestId
 
-                // Fire-and-forget: the real work runs in a launched coroutine that throws
-                // after
-                // this method (and handleMessage) has already returned.
-                runnerHolder[0]!!.launch(requestId, "screenshot") {
-                  throw IllegalStateException("async boom")
-                }
-              }
-            },
+                    // Fire-and-forget: the real work runs in a launched coroutine that throws
+                    // after
+                    // this method (and handleMessage) has already returned.
+                    runnerHolder[0]!!.launch(requestId, "screenshot") {
+                      throw IllegalStateException("async boom")
+                    }
+                  }
+                },
+              ),
           ),
       )
     runnerHolder[0] =
@@ -1159,17 +1174,20 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun requestScreenshot(request: RequestScreenshot) {
-                val requestId = request.requestId
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun requestScreenshot(request: RequestScreenshot) {
+                    val requestId = request.requestId
 
-                runnerHolder[0]!!.launch(requestId, "screenshot") {
-                  throw IllegalStateException("async boom")
-                }
-              }
-            },
+                    runnerHolder[0]!!.launch(requestId, "screenshot") {
+                      throw IllegalStateException("async boom")
+                    }
+                  }
+                },
+              ),
           ),
       )
     runnerHolder[0] =
@@ -1233,17 +1251,22 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun requestScreenshot(request: RequestScreenshot) {
-                val requestId = request.requestId
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun requestScreenshot(request: RequestScreenshot) {
+                    val requestId = request.requestId
 
-                testScope.launch {
-                  rawSuccessServer.broadcast("""{"type":"screenshot","requestId":"$requestId"}""")
-                }
-              }
-            },
+                    testScope.launch {
+                      rawSuccessServer.broadcast(
+                        """{"type":"screenshot","requestId":"$requestId"}""",
+                      )
+                    }
+                  }
+                },
+              ),
           ),
       )
     return rawSuccessServer
@@ -1255,28 +1278,31 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun requestScreenshot(request: RequestScreenshot) {
-                val requestId = request.requestId
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun requestScreenshot(request: RequestScreenshot) {
+                    val requestId = request.requestId
 
-                testScope.launch {
-                  typedSuccessServer.broadcast(
-                    SettingsGetResult(
-                      timestamp = 1234L,
-                      requestId = requestId,
-                      success = true,
-                      namespace = "secure",
-                      key = "setting",
-                      value = "value",
-                      found = true,
-                      totalTimeMs = 1L,
-                    ),
-                  )
-                }
-              }
-            },
+                    testScope.launch {
+                      typedSuccessServer.broadcast(
+                        SettingsGetResult(
+                          timestamp = 1234L,
+                          requestId = requestId,
+                          success = true,
+                          namespace = "secure",
+                          key = "setting",
+                          value = "value",
+                          found = true,
+                          totalTimeMs = 1L,
+                        ),
+                      )
+                    }
+                  }
+                },
+              ),
           ),
       )
     return typedSuccessServer
@@ -1288,17 +1314,20 @@ class WebSocketServerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = testScope,
-        messageHandler =
-          CtrlProxyMessageHandler(
-            object : NoOpCtrlProxyActions() {
-              override suspend fun requestHierarchy(request: RequestHierarchy) {
-                // Mirror production: a terminal reply followed by an unsolicited event.
-                testScope.launch {
-                  hierarchyServer.broadcastWithPerfSync { reply }
-                  hierarchyServer.broadcast("""{"type":"hierarchy_update","hierarchy":{}}""")
-                }
-              }
-            },
+        options =
+          WebSocketServerOptions(
+            messageHandler =
+              CtrlProxyMessageHandler(
+                object : NoOpCtrlProxyActions() {
+                  override suspend fun requestHierarchy(request: RequestHierarchy) {
+                    // Mirror production: a terminal reply followed by an unsolicited event.
+                    testScope.launch {
+                      hierarchyServer.broadcastWithPerfSync { reply }
+                      hierarchyServer.broadcast("""{"type":"hierarchy_update","hierarchy":{}}""")
+                    }
+                  }
+                },
+              ),
           ),
       )
     return hierarchyServer

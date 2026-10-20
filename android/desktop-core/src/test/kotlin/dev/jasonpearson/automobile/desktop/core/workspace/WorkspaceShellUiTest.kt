@@ -25,11 +25,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-class WorkspaceShellUiTest {
+internal abstract class WorkspaceShellUiFixture {
 
-  private fun col(id: String, name: String, platform: Platform = Platform.Android) =
+  protected fun col(id: String, name: String, platform: Platform = Platform.Android) =
     DeviceColumn(deviceId = id, name = name, platform = platform)
 
+  protected val availableUpdate =
+    UpdateStatus.UpdateAvailable(
+      version = "0.0.53",
+      asset = ReleaseAsset("AutoMobile-0.0.53-macos.dmg", "https://x/dmg", 1),
+      releaseNotesUrl = "https://notes",
+    )
+
+  // #4846: full-window overlays must be modal to keyboard/screen-reader focus — the dimmed
+  // workspace behind the scrim must leave the accessibility/focus tree so a Tab or a screen-reader
+  // swipe cannot reach the visually-dimmed controls behind the overlay.
+
+  // #6035: the health sheet gains a daemon recovery affordance ("Start daemon" parity with the
+  // device picker), shown only for a Red status (daemon down) and driving the hoisted
+  // onRecoverDaemon (the host wires it to DaemonBootstrap.ensureReady()).
+
+}
+
+@OptIn(ExperimentalTestApi::class)
+internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
   @Test
   fun `top bar exposes a command-palette trigger`() = runComposeUiTest {
     var opened = false
@@ -46,13 +65,6 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Open command palette").performClick()
     assertTrue(opened)
   }
-
-  private val availableUpdate =
-    UpdateStatus.UpdateAvailable(
-      version = "0.0.53",
-      asset = ReleaseAsset("AutoMobile-0.0.53-macos.dmg", "https://x/dmg", 1),
-      releaseNotesUrl = "https://notes",
-    )
 
   @Test
   fun `top bar shows the update pill only when an update is available`() = runComposeUiTest {
@@ -455,7 +467,10 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Locale iPhone 15").assertDoesNotExist()
     onNodeWithContentDescription("Power iPhone 15").assertIsDisplayed()
   }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class WorkspaceShellFacetsUiTest : WorkspaceShellUiFixture() {
   @Test
   fun `iOS simulator offers Locale and hides Power`() = runComposeUiTest {
     val state =
@@ -863,7 +878,10 @@ class WorkspaceShellUiTest {
     }
     onNodeWithContentDescription("Browse navigation history").assertIsDisplayed()
   }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class WorkspaceShellRecoveryUiTest : WorkspaceShellUiFixture() {
   @Test
   fun `Browse navigation history opens the offline browse overlay`() = runComposeUiTest {
     setContent {
@@ -880,10 +898,6 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Browse navigation history").performClick()
     onNodeWithText("offline-browse-body").assertIsDisplayed()
   }
-
-  // #4846: full-window overlays must be modal to keyboard/screen-reader focus — the dimmed
-  // workspace behind the scrim must leave the accessibility/focus tree so a Tab or a screen-reader
-  // swipe cannot reach the visually-dimmed controls behind the overlay.
 
   @Test
   fun `opening the health sheet isolates the workspace background from accessibility`() =
@@ -975,10 +989,6 @@ class WorkspaceShellUiTest {
     // Pane controls behind the compare scrim have left the accessibility tree.
     onNodeWithContentDescription("Close Pixel").assertDoesNotExist()
   }
-
-  // #6035: the health sheet gains a daemon recovery affordance ("Start daemon" parity with the
-  // device picker), shown only for a Red status (daemon down) and driving the hoisted
-  // onRecoverDaemon (the host wires it to DaemonBootstrap.ensureReady()).
 
   @Test
   fun `red status health sheet shows the daemon recovery affordance`() = runComposeUiTest {

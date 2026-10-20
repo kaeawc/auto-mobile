@@ -345,6 +345,24 @@ const noUnknownCastRule = {
   },
 };
 
+const noAsAnyRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      asAny:
+        "Avoid `as any` (and `<any>x`): it switches the type checker off for the expression. Use a typed fake or builder, a `Pick<Interface, ...>` view, `satisfies`, or a type guard.",
+    },
+  },
+  create(context) {
+    const report = (node) => {
+      if (node.typeAnnotation?.type === "TSAnyKeyword") {
+        context.report({ node, messageId: "asAny" });
+      }
+    };
+    return { TSAsExpression: report, TSTypeAssertion: report };
+  },
+};
+
 // Building a collection by mutating it inside a callback. These are the forms
 // that have a direct declarative replacement (map/filter/flatMap), as opposed to
 // a callback that logs or recurses, where the only rewrite is a loop.
@@ -1827,6 +1845,7 @@ const plugin = {
     "no-inline-error-normalize": noInlineErrorNormalizeRule,
     "no-caught-error-interpolation": noCaughtErrorInterpolationRule,
     "no-unknown-cast": noUnknownCastRule,
+    "no-as-any": noAsAnyRule,
     "no-accumulator-foreach": noAccumulatorForEachRule,
     "no-bare-expect": noBareExpectRule,
     "stress-explicit-timeout": stressExplicitTimeoutRule,

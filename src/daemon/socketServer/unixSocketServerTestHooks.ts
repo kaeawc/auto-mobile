@@ -1,3 +1,5 @@
+import type { SocketServerInputTestHooks } from "./socketServerInputTestHooks";
+import type { SocketServerOperations } from "../socketServerParts/socketServerOperations";
 import type { DaemonRequest } from "../types";
 import type { ListChangedKind, McpForwardRoute } from "../socketServer";
 import type { InterceptableMethod } from "../interceptableMethod";
@@ -9,6 +11,25 @@ import type { ProgressExtendableDeadline } from "../mcpRequestTimeout";
  * never reads it.
  */
 export interface UnixSocketServerTestHooks {
+  readonly ide: Pick<
+    SocketServerOperations,
+    | "requireFeatureFlagService"
+    | "assertBrokerConnectionHostMutation"
+    | "assertBrokerConnectionControl"
+    | "resolveIdeActionDevices"
+    | "assertSocketToolEnabled"
+    | "handleIdeSocketRequest"
+  >;
+  readonly transport: Pick<
+    SocketServerOperations,
+    "processSocketRequestLine" | "writeTerminalSocketResponse"
+  >;
+  readonly routing: Pick<SocketServerOperations, "getToolsCallForwardRoute">;
+  readonly input: SocketServerInputTestHooks;
+  readonly release: Pick<
+    SocketServerOperations,
+    "admitReleasedBoundSession" | "broadcastSessionReleased"
+  >;
   restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void>;
   getMcpForwardRoute(
     request: DaemonRequest,

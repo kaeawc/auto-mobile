@@ -286,6 +286,9 @@ object AutoMobileAnr {
     @Synchronized
     private fun reportNext() {
       if (isFinished) return
+      fun wasReportedAtCursor(identity: String): Boolean =
+        cursor.idsAtTimestamp == null || identity in cursor.idsAtTimestamp.orEmpty()
+
       while (pending.isNotEmpty()) {
         val item = pending.first()
         pending = pending.drop(1)
@@ -293,8 +296,7 @@ object AutoMobileAnr {
         val timestamp = item.timestamp
         if (
           timestamp < cursor.timestamp ||
-            (timestamp == cursor.timestamp &&
-              (cursor.idsAtTimestamp == null || identity in cursor.idsAtTimestamp.orEmpty()))
+            (timestamp == cursor.timestamp && wasReportedAtCursor(identity))
         ) {
           AutoMobileSDK.logger.d(TAG) {
             "Skipping already reported ANR: time=$timestamp, identity=$identity"

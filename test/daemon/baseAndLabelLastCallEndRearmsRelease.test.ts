@@ -78,7 +78,7 @@ describe("base call ends retry deferred release and all orders finish with nothi
     const pool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [PRIMARY, LABELLED];
-    Object.assign(pool, { deviceManager });
+    pool.testHooks.deviceManager = deviceManager;
     await pool.initializeWithDevices([PRIMARY, LABELLED]);
     await pool.bindOrReuseDeviceSession({
       sessionId: BASE,

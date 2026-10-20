@@ -56,12 +56,17 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
    */
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
-    "src/daemon/devicePool.ts": {
-      calls: 2,
+    "src/daemon/devicePoolParts/assignment.ts": {
+      calls: 1,
       reason:
         "The pool routes discovery through the identity collaborator before reading pooled identity. " +
         "The second (readLiveInventoryDeviceIds, #11568) only collects the listed device ids for the " +
         "stats surfaces' live set; it reads cached discovery and never consults pooled identity.",
+    },
+    "src/daemon/devicePoolParts/emulatorLifecycle.ts": {
+      calls: 1,
+      reason:
+        "Recovery discovery moved from DevicePool; the identity collaborator reconciles before pooled identity is read.",
     },
     "src/daemon/deviceAutoStart.ts": {
       calls: 2,
@@ -159,12 +164,17 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 2,
       reason: "Publishes pool epoch/label per serial; reconciles before resolvePoolDeviceContext.",
     },
-    "src/features/deviceLifecycle/deviceLifecycleCore.ts": {
-      calls: 4,
-      reason:
-        "Teardown precondition, pre-boot serial validation, start lifecycle target, and the " +
-        "shutdown preflight (moved here from deviceTools.ts and deviceToolsShutdown.ts, #11827) " +
-        "route their discoveries through the funnel.",
+    "src/features/deviceLifecycle/core/bootIdentity.ts": {
+      calls: 2,
+      reason: "Pre-boot serial validation and start lifecycle target reconcile their discoveries.",
+    },
+    "src/features/deviceLifecycle/core/shutdownDiscovery.ts": {
+      calls: 1,
+      reason: "Shutdown preflight routes its discovery through the funnel.",
+    },
+    "src/features/deviceLifecycle/core/teardownDiscovery.ts": {
+      calls: 1,
+      reason: "Teardown precondition routes its discovery through the funnel.",
     },
     "src/server/deviceToolsStartupLease.ts": {
       calls: 1,
@@ -331,11 +341,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     discoveryCallCounts();
     const routed = [
       "src/daemon/deviceLossDiscovery.ts",
-      "src/daemon/socketServer.ts",
+      "src/daemon/socketServerParts/SocketIdeRoutes.ts",
       "src/daemon/socketServer/ideDeviceRoutes.ts",
       "src/daemon/socketServer/inputDeviceGating.ts",
       "src/server/bootedDeviceResources.ts",
-      "src/features/deviceLifecycle/deviceLifecycleCore.ts",
+      "src/features/deviceLifecycle/core/bootIdentity.ts",
+      "src/features/deviceLifecycle/core/shutdownDiscovery.ts",
+      "src/features/deviceLifecycle/core/teardownDiscovery.ts",
       "src/server/deviceToolsStartupLease.ts",
       "src/server/deviceToolsListing.ts",
       "src/server/provisioning/provisioningBoot.ts",

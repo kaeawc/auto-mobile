@@ -2,14 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$timestamp &lt; cursor.timestamp || (timestamp == cursor.timestamp &amp;&amp; (cursor.idsAtTimestamp == null || identity in cursor.idsAtTimestamp.orEmpty()))</ID>
-    <ID>ComplexCondition:AutoMobileSDK.kt:AutoMobileSDK$!_isEnabled || name.isBlank() || context == null || navigationOnlyMode</ID>
-    <ID>ComplexCondition:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$identity == null || identity != cached.identity || needsWritableConnection || needsExactReadOnlyConnection</ID>
-    <ID>ComplexCondition:TapGestureClassifier.kt:TapGestureClassifier$hadDown &amp;&amp; dx * dx + dy * dy &lt; slopPx * slopPx &amp;&amp; duration &gt;= 0 &amp;&amp; duration &lt; timeoutMs</ID>
-    <ID>EmptyFunctionBlock:AutoMobileClickTracker.kt:AutoMobileClickTracker.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:AutoMobileLog.kt:AutoMobileLog${}</ID>
-    <ID>InstanceOfCheckForException:DatabaseInspectorProvider.kt:DatabaseInspectorProvider$e is DatabaseError.SqlError</ID>
-    <ID>InstanceOfCheckForException:SdkEventBuffer.kt:SdkEventBuffer$error is UnsentEventBatchesException</ID>
     <ID>LargeClass:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver : DatabaseDriver</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:AutoMobileNetwork$fun startCapture: NetworkCaptureSession?</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:NetworkCaptureSession</ID>
@@ -30,12 +22,6 @@
     <ID>LongParameterList:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer$constructor</ID>
-    <ID>NestedBlockDepth:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun scanSqlTokens</ID>
-    <ID>SwallowedException:AutoMobileCrashes.kt:AutoMobileCrashes.AutoMobileExceptionHandler$t: Throwable</ID>
-    <ID>SwallowedException:Navigation3Adapter.kt:Navigation3Adapter$e: Exception</ID>
-    <ID>SwallowedException:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: Exception</ID>
-    <ID>SwallowedException:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: SQLiteReadOnlyDatabaseException</ID>
-    <ID>SwallowedException:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$e: IllegalArgumentException</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$error: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileBiometrics.kt:AutoMobileBiometrics$e: Exception</ID>
@@ -82,7 +68,5 @@
     <ID>TooManyFunctions:SdkEventBuffer.kt:SdkEventBuffer</ID>
     <ID>TooManyFunctions:SharedPreferencesDriverImpl.kt:SharedPreferencesDriverImpl : SharedPreferencesDriver</ID>
     <ID>TooManyFunctions:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider : ContentProvider</ID>
-    <ID>UnnecessarySafeCall:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$response.body?.contentLength()</ID>
-    <ID>UnnecessarySafeCall:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$extras?.getLong("sinceSequence", 0L)</ID>
   </CurrentIssues>
 </SmellBaseline>

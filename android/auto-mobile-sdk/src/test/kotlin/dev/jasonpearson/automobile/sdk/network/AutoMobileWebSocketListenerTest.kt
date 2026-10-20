@@ -68,7 +68,7 @@ class AutoMobileWebSocketListenerTest {
   /** Minimal no-op WebSocket for testing callbacks */
   private val fakeWebSocket =
     object : WebSocket {
-      override fun cancel() {}
+      override fun cancel() = Unit
 
       override fun close(code: Int, reason: String?) = false
 

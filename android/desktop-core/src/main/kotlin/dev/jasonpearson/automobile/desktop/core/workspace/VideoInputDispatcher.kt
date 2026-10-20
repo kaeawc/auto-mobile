@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.daemon.isDeviceOwnedRefusal
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesture
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyStroke
@@ -198,13 +199,15 @@ class VideoInputDispatcher(
   ) {
     val decision =
       DeviceDragGesturePolicy.evaluate(
-        start = start,
-        end = end,
-        deviceWidth = snapshot.deviceWidth,
-        deviceHeight = snapshot.deviceHeight,
-        coordinateSpace = snapshot.coordinateSpace,
-        nativeScale = snapshot.nativeScale,
-        gestureDurationMs = gestureDurationMs,
+        DeviceDragGesture(
+          start = start,
+          end = end,
+          deviceWidth = snapshot.deviceWidth,
+          deviceHeight = snapshot.deviceHeight,
+          coordinateSpace = snapshot.coordinateSpace,
+          nativeScale = snapshot.nativeScale,
+          gestureDurationMs = gestureDurationMs,
+        ),
       )
     if (decision !is DeviceDragDecision.Swipe) return
     flushPendingText()
@@ -374,12 +377,14 @@ class VideoInputDispatcher(
         if (event.cancel) return
         val decision =
           DeviceDragGesturePolicy.evaluate(
-            start = start,
-            end = event.point,
-            deviceWidth = snapshot.deviceWidth,
-            deviceHeight = snapshot.deviceHeight,
-            coordinateSpace = snapshot.coordinateSpace,
-            nativeScale = snapshot.nativeScale,
+            DeviceDragGesture(
+              start = start,
+              end = event.point,
+              deviceWidth = snapshot.deviceWidth,
+              deviceHeight = snapshot.deviceHeight,
+              coordinateSpace = snapshot.coordinateSpace,
+              nativeScale = snapshot.nativeScale,
+            ),
           )
         if (decision is DeviceDragDecision.Swipe) {
           val result =

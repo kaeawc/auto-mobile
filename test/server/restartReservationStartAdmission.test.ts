@@ -430,7 +430,7 @@ describe("start admission and owner resume for restart reservations", () => {
     const adoption = spyOn(f.pool, "adoptResumedAutolockSession").mockImplementation(
       async (...args) => {
         expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(f.device.deviceId);
-        const leases = Reflect.get(f.pool, "mcpSessionRecoveryDevices") as Map<string, unknown>;
+        const leases = f.pool.testHooks.mcpSessionRecoveryDevices as Map<string, unknown>;
         leases.set("owner-conn", {
           device: { ...f.pool.getDevice(f.device.deviceId)!, deviceId: "other" },
           token: Symbol("adoption-refusal"),

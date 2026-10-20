@@ -72,10 +72,10 @@ test("discarding a capture only removes the capture for the named device", async
     const { pool, captures } = context;
     pool.testHooks.captureReleasedDevice(HOLDER, DEVICE.deviceId);
 
-    pool["discardReleasedCapture"](HOLDER, OTHER.deviceId);
+    pool.testHooks.discardReleasedCapture(HOLDER, OTHER.deviceId);
     expect(captures.has(HOLDER)).toBe(true);
 
-    pool["discardReleasedCapture"](HOLDER, DEVICE.deviceId);
+    pool.testHooks.discardReleasedCapture(HOLDER, DEVICE.deviceId);
     expect(captures.has(HOLDER)).toBe(false);
   } finally {
     dispose(context);
@@ -141,7 +141,7 @@ test("device-loss release drops the capture the session release recorded (#11123
     const { pool, captures } = context;
     const device = pool.getDevice(DEVICE.deviceId)!;
 
-    const released = await pool["releaseSessionForEvictedDevice"](device, undefined);
+    const released = await pool.testHooks.releaseSessionForEvictedDevice(device, undefined);
 
     expect(released).toBe(true);
     expect(device.sessionId).toBeNull();

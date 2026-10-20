@@ -8,5 +8,4 @@
 1516	src/features/webrtc/IosH264Source.ts
 1979	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
-1636	src/server/finalizeToolResponse.ts
 2185	src/server/videoRecordingManager.ts

@@ -9,28 +9,16 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -49,7 +37,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import dev.jasonpearson.automobile.design.system.components.AutoMobileClickableCard
-import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
@@ -147,27 +134,12 @@ fun FullscreenMediaPlayer() {
     }
   }
 
-  Box(
-    modifier =
-      Modifier.fillMaxSize().background(Color.Black).clickable(
-        interactionSource = remember { MutableInteractionSource() },
-        indication = null,
-      ) {
-        showControls = !showControls
-      },
-  ) {
-
-    // Media controls overlay
-    AnimatedVisibility(
-      visible = showControls,
-      enter = fadeIn(),
-      exit = fadeOut(),
-      modifier = Modifier.align(Alignment.BottomCenter),
-    ) {
-      MediaControlsOverlay(
-        isPlaying = isPlaying,
-        currentTime = currentTime,
-        volume = volume,
+  FullscreenMediaContent(
+    state = MediaControlsState(isPlaying, currentTime, volume),
+    showControls = showControls,
+    onToggleControls = { showControls = !showControls },
+    actions =
+      MediaControlsActions(
         onPlayPause = {
           isPlaying = !isPlaying
           showControls = true
@@ -180,13 +152,46 @@ fun FullscreenMediaPlayer() {
           volume = newVolume
           showControls = true
         },
+      ),
+  )
+}
+
+@Composable
+private fun FullscreenMediaContent(
+  state: MediaControlsState,
+  showControls: Boolean,
+  onToggleControls: () -> Unit,
+  actions: MediaControlsActions,
+) {
+  Box(
+    modifier =
+      Modifier.fillMaxSize().background(Color.Black).clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+      ) {
+        onToggleControls()
+      },
+  ) {
+
+    // Media controls overlay
+    AnimatedVisibility(
+      visible = showControls,
+      enter = fadeIn(),
+      exit = fadeOut(),
+      modifier = Modifier.align(Alignment.BottomCenter),
+    ) {
+      MediaControlsOverlay(
+        state = state,
+        onPlayPause = actions.onPlayPause,
+        onSeek = actions.onSeek,
+        onVolumeChange = actions.onVolumeChange,
       )
     }
 
     // Progress indicator when playing
-    if (isPlaying) {
+    if (state.isPlaying) {
       LinearProgressIndicator(
-        progress = { currentTime / 100f },
+        progress = { state.currentTime / 100f },
         modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
         color = MaterialTheme.colorScheme.primary,
         trackColor = Color.Transparent,
@@ -195,90 +200,11 @@ fun FullscreenMediaPlayer() {
   }
 }
 
-/** Media controls overlay with play/pause, seek, and volume controls. */
-@Composable
-fun MediaControlsOverlay(
-  isPlaying: Boolean,
-  currentTime: Float,
-  volume: Float,
-  onPlayPause: () -> Unit,
-  onSeek: (Float) -> Unit,
-  onVolumeChange: (Float) -> Unit,
-) {
-  Column(
-    modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.7f)).padding(16.dp),
-    horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.spacedBy(16.dp),
-  ) {
-    // Progress slider
-    Column {
-      Text(
-        text = "${formatTime(currentTime)} / ${formatTime(100f)}",
-        color = Color.White,
-        fontSize = 14.sp,
-      )
-      Slider(
-        value = currentTime,
-        onValueChange = onSeek,
-        valueRange = 0f..100f,
-        modifier = Modifier.fillMaxWidth(),
-        colors =
-          SliderDefaults.colors(
-            thumbColor = MaterialTheme.colorScheme.primary,
-            activeTrackColor = MaterialTheme.colorScheme.primary,
-            inactiveTrackColor = Color.Gray,
-          ),
-      )
-    }
-
-    // Control buttons
-    Row(
-      horizontalArrangement = Arrangement.spacedBy(24.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      // Volume control
-      Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(
-          imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-          contentDescription = "Volume Up",
-          tint = Color.White,
-        )
-        Slider(
-          value = volume,
-          onValueChange = onVolumeChange,
-          valueRange = 0f..1f,
-          modifier = Modifier.width(120.dp),
-          colors =
-            SliderDefaults.colors(
-              thumbColor = MaterialTheme.colorScheme.primary,
-              activeTrackColor = MaterialTheme.colorScheme.primary,
-              inactiveTrackColor = Color.Gray,
-            ),
-        )
-      }
-
-      // Play/Pause button
-      AutoMobileContentButton(
-        onClick = onPlayPause,
-        modifier = Modifier.size(64.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-      ) {
-        Icon(
-          imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-          contentDescription = if (isPlaying) "Pause" else "Play",
-          tint = Color.White,
-        )
-      }
-    }
-  }
-}
-
-/** Format time in seconds to MM:SS format. */
-private fun formatTime(seconds: Float): String {
-  val minutes = (seconds / 60).toInt()
-  val remainingSeconds = (seconds % 60).toInt()
-  return "%02d:%02d".format(minutes, remainingSeconds)
-}
+private data class MediaControlsActions(
+  val onPlayPause: () -> Unit,
+  val onSeek: (Float) -> Unit,
+  val onVolumeChange: (Float) -> Unit,
+)
 
 /** Media type selection card. */
 @OptIn(ExperimentalMaterial3Api::class)

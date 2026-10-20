@@ -27,6 +27,7 @@ class McpProtocolNegotiationTest {
       McpHttpClient(
         dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
           "http://localhost:$port/auto-mobile/streamable",
+          tokenProvider = DaemonHttpTokenProvider { null },
         ),
       )
   }

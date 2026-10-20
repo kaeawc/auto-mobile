@@ -17,6 +17,7 @@ internal object HeartbeatTransport {
   private val HTTP_SUCCESS = 200..299
   private val json = Json { ignoreUnknownKeys = true }
   private val userIdResolver = DaemonUserIdResolver()
+  private val tokenProvider: DaemonHttpTokenProvider = FileDaemonHttpTokenProvider()
 
   fun sendHeartbeat(sessionId: String) {
     // A missing port is a miss, not an acknowledgement: it must not confirm the session.
@@ -34,10 +35,27 @@ internal object HeartbeatTransport {
     endpoint: URL,
     sessionId: String,
     livenessOwnerToken: String = DaemonLivenessOwner.token,
+    tokenProvider: DaemonHttpTokenProvider = this.tokenProvider,
   ) {
+    if (
+      sendBeat(endpoint, sessionId, livenessOwnerToken, tokenProvider, retryAuthentication = true)
+    ) {
+      sendBeat(endpoint, sessionId, livenessOwnerToken, tokenProvider, retryAuthentication = false)
+    }
+  }
+
+  private fun sendBeat(
+    endpoint: URL,
+    sessionId: String,
+    livenessOwnerToken: String,
+    tokenProvider: DaemonHttpTokenProvider,
+    retryAuthentication: Boolean,
+  ): Boolean {
     val connection = endpoint.openConnection() as HttpURLConnection
     try {
+      connection.instanceFollowRedirects = false
       connection.requestMethod = "POST"
+      tokenProvider.read()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
       connection.setRequestProperty("Content-Type", "application/json")
       DaemonHeartbeat.applyBeatTimeouts(connection)
       connection.doOutput = true
@@ -52,6 +70,10 @@ internal object HeartbeatTransport {
       connection.outputStream.use { it.write(payload.toByteArray()) }
 
       val status = connection.responseCode
+      if (status == HttpURLConnection.HTTP_UNAUTHORIZED && retryAuthentication) {
+        connection.errorStream?.use { it.readBytes() }
+        return true
+      }
       if (status == HttpURLConnection.HTTP_NOT_FOUND) {
         val body = connection.errorStream?.use { String(it.readBytes()) }.orEmpty()
         throw sessionReleased(sessionId, body)
@@ -61,6 +83,7 @@ internal object HeartbeatTransport {
         throw IOException("Daemon heartbeat for $sessionId failed with HTTP $status")
       }
       connection.inputStream.use { it.readBytes() }
+      return false
     } finally {
       connection.disconnect()
     }

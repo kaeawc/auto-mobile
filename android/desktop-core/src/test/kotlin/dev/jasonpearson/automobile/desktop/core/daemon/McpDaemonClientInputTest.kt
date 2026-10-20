@@ -581,7 +581,10 @@ internal class McpDaemonClientInputTest : McpDaemonClientInputFixture() {
         val client =
           McpDaemonClient(
             socketPathValue = server.socketPath.toString(),
-            inputRequestTimeoutMs = 1_234,
+            requestTimeouts =
+              DaemonRequestTimeouts(
+                inputRequestTimeoutMs = 1_234,
+              ),
           )
 
         client.inputTap(
@@ -1099,7 +1102,10 @@ internal class McpDaemonClientInputDeadlineTest : McpDaemonClientInputFixture() 
       val client =
         McpDaemonClient(
           socketPathValue = socketPath.toString(),
-          inputRequestTimeoutMs = 100,
+          requestTimeouts =
+            DaemonRequestTimeouts(
+              inputRequestTimeoutMs = 100,
+            ),
         )
       val error =
         assertFailsWith<DaemonUnavailableException> {
@@ -1152,7 +1158,10 @@ internal class McpDaemonClientInputDeadlineTest : McpDaemonClientInputFixture() 
       val client =
         McpDaemonClient(
           socketPathValue = socketPath.toString(),
-          inputRequestTimeoutMs = 100,
+          requestTimeouts =
+            DaemonRequestTimeouts(
+              inputRequestTimeoutMs = 100,
+            ),
         )
       val error =
         assertFailsWith<DaemonUnavailableException> {

@@ -1,3 +1,4 @@
+import { createDevicePoolSeams } from "./devicePoolSeams";
 import { createDevicePoolParts } from "./devicePoolParts/createParts";
 import { DevicePoolState } from "./devicePoolParts/state";
 import type { DevicePoolOperations as PoolOps } from "./devicePoolParts/operations";
@@ -27,170 +28,9 @@ export class DevicePool {
   private readonly state = new DevicePoolState();
   private readonly parts = createDevicePoolParts(
     this.state,
-    {
-      setDeviceProcessStartedListener: (...args) => this.setDeviceProcessStartedListener(...args),
-      initializeWithDevices: (...args) => this.initializeWithDevices(...args),
-      refreshDevices: (...args) => this.refreshDevices(...args),
-      refreshDevicesWithOutcome: (...args) => this.refreshDevicesWithOutcome(...args),
-      getDeviceRemovalStampCountForTest: (...args) =>
-        this.getDeviceRemovalStampCountForTest(...args),
-      notifyDeviceReady: (...args) => this.notifyDeviceReady(...args),
-      addDevice: (...args) => this.addDevice(...args),
-      removeDevice: (...args) => this.removeDevice(...args),
-      clearAndroidRebootBudgetForDeletedAvd: (...args) =>
-        this.clearAndroidRebootBudgetForDeletedAvd(...args),
-      removeDisconnectedDevice: (...args) => this.removeDisconnectedDevice(...args),
-      recordEmulatorLossIncident: (...args) => this.recordEmulatorLossIncident(...args),
-      waitForEmulatorLossIncident: (...args) => this.waitForEmulatorLossIncident(...args),
-      finishEmulatorLossIncident: (...args) => this.finishEmulatorLossIncident(...args),
-      isCurrentDisconnectedDevice: (...args) => this.isCurrentDisconnectedDevice(...args),
-      markIntentionalShutdown: (...args) => this.markIntentionalShutdown(...args),
-      releaseDeviceRestartReservationForStop: (...args) =>
-        this.releaseDeviceRestartReservationForStop(...args),
-      hasRestartHandoffReservation: (...args) => this.hasRestartHandoffReservation(...args),
-      restartStopConfirmedPooledIdentity: (...args) =>
-        this.restartStopConfirmedPooledIdentity(...args),
-      hasUnconfirmedRestartStopReservation: (...args) =>
-        this.hasUnconfirmedRestartStopReservation(...args),
-      restartReservationForStop: (...args) => this.restartReservationForStop(...args),
-      restartStopConnectionHasLiveSession: (...args) =>
-        this.restartStopConnectionHasLiveSession(...args),
-      clearIntentionalShutdown: (...args) => this.clearIntentionalShutdown(...args),
-      noteLatePlatformShutdownSettled: (...args) => this.noteLatePlatformShutdownSettled(...args),
-      assignMultipleDevices: (...args) => this.assignMultipleDevices(...args),
-      assignMultipleDevicesByCriteria: (...args) => this.assignMultipleDevicesByCriteria(...args),
-      hasReusableSerial: (...args) => this.hasReusableSerial(...args),
+    createDevicePoolSeams(this, {
       evictMissingPooledDevice: (...args) => this.evictMissingPooledDevice(...args),
-      prepareSessionPreservingRecovery: (...args) => this.prepareSessionPreservingRecovery(...args),
-      finishSessionPreservingRecoveryPreparation: (...args) =>
-        this.finishSessionPreservingRecoveryPreparation(...args),
-      recoverSessionBoundAndroidDeviceAfterLoss: (...args) =>
-        this.recoverSessionBoundAndroidDeviceAfterLoss(...args),
-      recoverSessionBoundDeviceAfterLoss: (...args) =>
-        this.recoverSessionBoundDeviceAfterLoss(...args),
-      recoverSessionBoundIOSSimulatorAfterLoss: (...args) =>
-        this.recoverSessionBoundIOSSimulatorAfterLoss(...args),
-      retryDueDeferredSessionRecoveries: (...args) =>
-        this.retryDueDeferredSessionRecoveries(...args),
-      waitForSessionPreservingRecovery: (...args) => this.waitForSessionPreservingRecovery(...args),
-      isSessionRecoveryInFlight: (...args) => this.isSessionRecoveryInFlight(...args),
-      recoverSessionBoundAndroidDeviceAfterAdbServerReset: (...args) =>
-        this.recoverSessionBoundAndroidDeviceAfterAdbServerReset(...args),
-      detachAdbServerResetCohort: (...args) => this.detachAdbServerResetCohort(...args),
-      waitForAdbServerResetRecovery: (...args) => this.waitForAdbServerResetRecovery(...args),
-      getRecoveringAndroidTargets: (...args) => this.getRecoveringAndroidTargets(...args),
-      reserveAndroidStartupLease: (...args) => this.reserveAndroidStartupLease(...args),
-      waitForAdbServerResetRecoveryMatchingName: (...args) =>
-        this.waitForAdbServerResetRecoveryMatchingName(...args),
-      releaseAdbServerResetCohortReservations: (...args) =>
-        this.releaseAdbServerResetCohortReservations(...args),
-      isDeviceLeasedForAndroidStartup: (...args) => this.isDeviceLeasedForAndroidStartup(...args),
-      trackStartedDeviceProcess: (...args) => this.trackStartedDeviceProcess(...args),
-      hasStartedDeviceProcess: (...args) => this.hasStartedDeviceProcess(...args),
-      assignDeviceToSession: (...args) => this.assignDeviceToSession(...args),
-      assertNotClaimedByForeignDaemon: (...args) => this.assertNotClaimedByForeignDaemon(...args),
-      releaseDeviceClaimsForShutdown: (...args) => this.releaseDeviceClaimsForShutdown(...args),
-      refreshInventoryOwnership: (...args) => this.refreshInventoryOwnership(...args),
-      getRefreshedStats: (...args) => this.getRefreshedStats(...args),
-      getRefreshedInventory: (...args) => this.getRefreshedInventory(...args),
-      getDeviceHealthMarker: (...args) => this.getDeviceHealthMarker(...args),
-      assertDeviceCleanupComplete: (...args) => this.assertDeviceCleanupComplete(...args),
-      releaseDevice: (...args) => this.releaseDevice(...args),
-      retireDeviceForShutdown: (...args) => this.retireDeviceForShutdown(...args),
-      retireDeviceAfterSystemUiAnrRecoveryFailure: (...args) =>
-        this.retireDeviceAfterSystemUiAnrRecoveryFailure(...args),
-      replaceDeviceForShutdown: (...args) => this.replaceDeviceForShutdown(...args),
-      replaceDeviceForSystemUiAnrRecovery: (...args) =>
-        this.replaceDeviceForSystemUiAnrRecovery(...args),
-      reserveDeviceForReadiness: (...args) => this.reserveDeviceForReadiness(...args),
-      reserveRestartRecoveryReadiness: (...args) => this.reserveRestartRecoveryReadiness(...args),
-      reserveDeviceForShutdown: (...args) => this.reserveDeviceForShutdown(...args),
-      isUnderShutdownReservation: (...args) => this.isUnderShutdownReservation(...args),
-      isReservedForReadiness: (...args) => this.isReservedForReadiness(...args),
-      assertNotPreparedForOtherRequest: (...args) => this.assertNotPreparedForOtherRequest(...args),
-      isSafeForObservationServiceStart: (...args) => this.isSafeForObservationServiceStart(...args),
-      reserveDevicesForRehydration: (...args) => this.reserveDevicesForRehydration(...args),
-      releaseRehydrationReservation: (...args) => this.releaseRehydrationReservation(...args),
-      restartReservationForStart: (...args) => this.restartReservationForStart(...args),
-      restartReservationExclusions: (...args) => this.restartReservationExclusions(...args),
-      isRestartReservationOwnedByOtherConnection: (...args) =>
-        this.isRestartReservationOwnedByOtherConnection(...args),
-      bindOrReuseDeviceSession: (...args) => this.bindOrReuseDeviceSession(...args),
-      releaseUndeliveredAcquisition: (...args) => this.releaseUndeliveredAcquisition(...args),
-      holderReleaseRemainingMs: (...args) => this.holderReleaseRemainingMs(...args),
-      beginMcpBind: (...args) => this.beginMcpBind(...args),
-      beginMcpToolCall: (...args) => this.beginMcpToolCall(...args),
-      declareMcpSessionLivenessOwnerToken: (...args) =>
-        this.declareMcpSessionLivenessOwnerToken(...args),
-      beginMcpSessionOwnerCall: (...args) => this.beginMcpSessionOwnerCall(...args),
-      settlePooledRuntimeIdentity: (...args) => this.settlePooledRuntimeIdentity(...args),
-      reconcileDiscoveryObservation: (...args) => this.reconcileDiscoveryObservation(...args),
-      getAndroidTransportRouting: (...args) => this.getAndroidTransportRouting(...args),
-      getAndroidTransportAliases: (...args) => this.getAndroidTransportAliases(...args),
-      getAndroidTransportAvdName: (...args) => this.getAndroidTransportAvdName(...args),
-      mapAndroidDiscovery: (...args) => this.mapAndroidDiscovery(...args),
-      mapAndroidReadinessDiscovery: (...args) => this.mapAndroidReadinessDiscovery(...args),
-      resolveAndroidCanonicalId: (...args) => this.resolveAndroidCanonicalId(...args),
-      isAndroidTransportAssignable: (...args) => this.isAndroidTransportAssignable(...args),
-      androidTransportMayAliasDevice: (...args) => this.androidTransportMayAliasDevice(...args),
-      androidBindingHold: (...args) => this.androidBindingHold(...args),
-      needsAndroidTransportNormalization: (...args) =>
-        this.needsAndroidTransportNormalization(...args),
-      normalizeAndroidDiscovery: (...args) => this.normalizeAndroidDiscovery(...args),
-      describesPooledRuntime: (...args) => this.describesPooledRuntime(...args),
-      matchesRuntimeIdentity: (...args) => this.matchesRuntimeIdentity(...args),
-      isPooledIdentityUnresolved: (...args) => this.isPooledIdentityUnresolved(...args),
-      assertDeviceActionable: (...args) => this.assertDeviceActionable(...args),
-      autolockDevice: (...args) => this.autolockDevice(...args),
-      captureAutolockSessionForMcpSession: (...args) =>
-        this.captureAutolockSessionForMcpSession(...args),
-      adoptResumedAutolockSession: (...args) => this.adoptResumedAutolockSession(...args),
-      resolveAutolockSessionForMcpSession: (...args) =>
-        this.resolveAutolockSessionForMcpSession(...args),
-      resolveOwnedDeviceSessionForMcpSession: (...args) =>
-        this.resolveOwnedDeviceSessionForMcpSession(...args),
-      restoreAutolockSessionsForMcpSession: (...args) =>
-        this.restoreAutolockSessionsForMcpSession(...args),
-      attachExplicitSessionUuidCall: (...args) => this.attachExplicitSessionUuidCall(...args),
-      attachAutolockSessionToMcpSession: (...args) =>
-        this.attachAutolockSessionToMcpSession(...args),
-      assertAutolockAccess: (...args) => this.assertAutolockAccess(...args),
-      restoreOwnedDeviceSessionsForMcpSession: (...args) =>
-        this.restoreOwnedDeviceSessionsForMcpSession(...args),
-      sessionExecutionsEnded: (...args) => this.sessionExecutionsEnded(...args),
-      releaseMcpSessionBindings: (...args) => this.releaseMcpSessionBindings(...args),
-      isSessionOwnedByOtherConnection: (...args) => this.isSessionOwnedByOtherConnection(...args),
-      isSessionOwnedByConnection: (...args) => this.isSessionOwnedByConnection(...args),
       hasConnectedMcpSessionOwner: (...args) => this.hasConnectedMcpSessionOwner(...args),
-      recordDeviceError: (...args) => this.recordDeviceError(...args),
-      clearDeviceError: (...args) => this.clearDeviceError(...args),
-      getDevice: (...args) => this.getDevice(...args),
-      getDeviceIncarnation: (...args) => this.getDeviceIncarnation(...args),
-      bumpDeviceIncarnation: (...args) => this.bumpDeviceIncarnation(...args),
-      getDeviceForSession: (...args) => this.getDeviceForSession(...args),
-      bindingOwnershipGate: (...args) => this.bindingOwnershipGate(...args),
-      assertSessionReadyForAutomation: (...args) => this.assertSessionReadyForAutomation(...args),
-      isShutdownReserved: (...args) => this.isShutdownReserved(...args),
-      isShutdownReservationHeld: (...args) => this.isShutdownReservationHeld(...args),
-      getIdleDevices: (...args) => this.getIdleDevices(...args),
-      getAssignedDevices: (...args) => this.getAssignedDevices(...args),
-      getErrorDevices: (...args) => this.getErrorDevices(...args),
-      getAvailableDeviceCount: (...args) => this.getAvailableDeviceCount(...args),
-      getTotalDeviceCount: (...args) => this.getTotalDeviceCount(...args),
-      getAllDevices: (...args) => this.getAllDevices(...args),
-      getRecoveryPolicy: (...args) => this.getRecoveryPolicy(...args),
-      getRecoveryEligibility: (...args) => this.getRecoveryEligibility(...args),
-      genericAvailability: (...args) => this.genericAvailability(...args),
-      bindingRefusalFor: (...args) => this.bindingRefusalFor(...args),
-      bindingSnapshotRetainedAfterFailedRead: (...args) =>
-        this.bindingSnapshotRetainedAfterFailedRead(...args),
-      assertNotAssignedToBinding: (...args) => this.assertNotAssignedToBinding(...args),
-      bindingStableIds: (...args) => this.bindingStableIds(...args),
-      matchesRestartRecoveryTarget: (...args) => this.matchesRestartRecoveryTarget(...args),
-      poolBucket: (...args) => this.poolBucket(...args),
-      getStatsForPlatform: (...args) => this.getStatsForPlatform(...args),
-      getStats: (...args) => this.getStats(...args),
-      getStatusReport: (...args) => this.getStatusReport(...args),
       cancelOldDeviceWorkForSystemUiAnr: (...args) =>
         this.cancelOldDeviceWorkForSystemUiAnr(...args),
       notifyRehydrationReservationChanged: (...args) =>
@@ -203,7 +43,7 @@ export class DevicePool {
       releaseDeviceClaim: (...args) => this.releaseDeviceClaim(...args),
       tryPreserveSessionForMissingDevice: (...args) =>
         this.tryPreserveSessionForMissingDevice(...args),
-    },
+    }),
     {
       cancelOldDeviceWorkForSystemUiAnr: {
         current: () => this.cancelOldDeviceWorkForSystemUiAnr.bind(this),

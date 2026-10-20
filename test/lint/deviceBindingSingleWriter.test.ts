@@ -210,6 +210,7 @@ function scan(file: string, source: string): { writes: string[]; releases: numbe
         // Only their exact rest-argument delegates are excluded; real calls still consume the inventory.
         const forwarded =
           (file === "src/daemon/devicePool.ts" ||
+            file === "src/daemon/devicePoolSeams.ts" ||
             file === "src/daemon/devicePoolParts/release.ts") &&
           node.arguments.length === 1 &&
           node.arguments[0].type === "SpreadElement" &&

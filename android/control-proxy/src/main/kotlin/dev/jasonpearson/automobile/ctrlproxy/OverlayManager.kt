@@ -9,17 +9,16 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 
+// WindowManager.LayoutParams constants are inlined on every API level; preserve their values.
+private const val CUTOUT_MODE_SHORT_EDGES = 1 // LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES, API 28.
+private const val CUTOUT_MODE_ALWAYS = 3 // LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS, API 30.
+private const val APPLICATION_OVERLAY_TYPE = 2038 // TYPE_APPLICATION_OVERLAY, API 26.
+
 class OverlayManager(
   private val context: Context,
   private val windowManager: WindowManager =
     context.getSystemService(Context.WINDOW_SERVICE) as WindowManager,
-  private val canDrawOverlays: (Context) -> Boolean = {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      Settings.canDrawOverlays(it)
-    } else {
-      true
-    }
-  },
+  private val canDrawOverlays: (Context) -> Boolean = { Settings.canDrawOverlays(it) },
   private val viewFactory: (Context) -> View = { HighlightOverlayView(it) },
   private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) {
@@ -30,9 +29,8 @@ class OverlayManager(
     internal fun resolveCutoutMode(sdkInt: Int): Int? =
       when {
         sdkInt < Build.VERSION_CODES.P -> null
-        sdkInt < Build.VERSION_CODES.R ->
-          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        else -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        sdkInt < Build.VERSION_CODES.R -> CUTOUT_MODE_SHORT_EDGES
+        else -> CUTOUT_MODE_ALWAYS
       }
   }
 
@@ -158,7 +156,7 @@ class OverlayManager(
     return if (prototypeAttached) {
       WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
     } else if (canDrawOverlays(context)) {
-      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+      APPLICATION_OVERLAY_TYPE
     } else {
       Log.w(TAG, "SYSTEM_ALERT_WINDOW not granted; using accessibility overlay.")
       WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY

@@ -149,6 +149,11 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 
+// AccessibilityEvent constants are inlined on every API level; preserve the subscribed values.
+private const val SPEECH_STATE_CHANGE_EVENT = 0x02000000 // TYPE_SPEECH_STATE_CHANGE, API 33.
+private const val VIEW_TARGETED_BY_SCROLL_EVENT =
+  0x04000000 // TYPE_VIEW_TARGETED_BY_SCROLL, API 34.
+
 /**
  * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
  * original depth-first first match. The caller owns the root and the returned node; children
@@ -707,8 +712,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         AccessibilityEvent.TYPE_WINDOWS_CHANGED,
         AccessibilityEvent.TYPE_VIEW_CONTEXT_CLICKED,
         AccessibilityEvent.TYPE_ASSIST_READING_CONTEXT,
-        AccessibilityEvent.TYPE_SPEECH_STATE_CHANGE,
-        AccessibilityEvent.TYPE_VIEW_TARGETED_BY_SCROLL,
+        SPEECH_STATE_CHANGE_EVENT,
+        VIEW_TARGETED_BY_SCROLL_EVENT,
       )
 
     /**
@@ -1278,7 +1283,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       host =
         object : ScreenshotController.Host {
           override fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback) {
-            this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+              this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
+            }
           }
 
           override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
@@ -3293,7 +3300,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
       if (powerManager == null) {
         "Awake"
-      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && powerManager.isDeviceIdleMode) {
+      } else if (powerManager.isDeviceIdleMode) {
         "Dozing"
       } else if (powerManager.isInteractive) {
         "Awake"

@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.util.Base64
 import android.util.Log
+import androidx.annotation.RequiresApi
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
@@ -58,6 +59,7 @@ internal class ScreenshotController(
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
     /** `AccessibilityService.takeScreenshot` on the service's main executor (API 30+). */
+    @RequiresApi(Build.VERSION_CODES.R)
     fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback)
 
     /** The display-change tracker, bound once the service connects. */
@@ -122,6 +124,7 @@ internal class ScreenshotController(
     }
   }
 
+  @RequiresApi(Build.VERSION_CODES.R)
   private suspend fun captureBitmap(targetDisplayId: Int): ScreenshotCallbackResult {
     // Use suspendCancellableCoroutine to bridge callback-based API
     val rotationProvenance = host.rotationProvenance()

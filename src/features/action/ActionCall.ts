@@ -30,6 +30,8 @@ export function resolveActionCallWithPerf(
 /** `ActionCall` for tapOn: also carries the keyboard-occlusion recovery policy. */
 export interface TapOnCall extends ActionCall {
   recovery?: { throwOnKeyboardOcclusion?: boolean };
+  /** Default true. Internal callers that do not need a settled effect may skip its polling. */
+  settlePostTapEffect?: boolean;
 }
 
 /** `ActionCall` for tapAt: also carries the plan context. */

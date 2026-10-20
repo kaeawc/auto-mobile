@@ -1,3 +1,4 @@
+import { deadlineRequest, type TapOnCall } from "./ActionCall";
 import type { ElementSelectionResult } from "../../models";
 import type { DisplayFence, ObservedActionResult } from "./BaseVisualChange";
 import { describeFocusTarget } from "./tapFocusIdentity";
@@ -15,7 +16,7 @@ import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
 import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
 import { isFocusEditableElement } from "../utility/ElementResolver";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import { BaseVisualChange } from "./BaseVisualChange";
 import {
   ActionableError,
   BootedDevice,
@@ -143,6 +144,7 @@ interface TapExecutionState {
   focusLabelText?: string;
   ensureCheckedTapTimestamp?: number;
   completedDisplayGesture: boolean;
+  settlePostTapEffect?: boolean;
 }
 interface TapHierarchyState {
   observeResult: ObserveResult;
@@ -169,11 +171,10 @@ export class TapExecution {
   constructor(private readonly host: TapExecutionHost) {}
   async executeWithReadScope(
     options: TapOnElementOptions,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    recovery?: { throwOnKeyboardOcclusion?: boolean },
-    request?: { requestDeadlineMs?: number },
+    call: TapOnCall = {},
   ): Promise<TapOnFocusResult> {
+    const { progress, signal, recovery, settlePostTapEffect } = call;
+    const request = deadlineRequest(call.deadlineMs);
     // Validate before display resolution/observation can issue any device command.
     this.host.assertLongPressWithinRequestBudget(options, request);
     if (options.display !== undefined) {
@@ -211,6 +212,7 @@ export class TapExecution {
       previousObserveResult: null,
       selectionCapture: null,
       completedDisplayGesture: false,
+      settlePostTapEffect,
     };
     try {
       throwIfAborted(signal);
@@ -262,6 +264,7 @@ export class TapExecution {
         state.previousObserveResult,
         result.observation,
         signal,
+        { settlePostTapEffect: state.settlePostTapEffect },
       );
       result.effect = postTap.effect;
       // The observation that established the effect must be returned and become

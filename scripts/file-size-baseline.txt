@@ -10,7 +10,6 @@
 1180	src/daemon/videoStreamSocketServer.ts
 1596	src/doctor/checks/ios.ts
 1693	src/features/observe/output/SkeletonProjection.ts
-1399	src/features/utility/ElementResolver.ts
 1502	src/features/video/FfmpegVideoProcessingBackend.ts
 1516	src/features/webrtc/IosH264Source.ts
 1979	src/server/bootedDeviceResources.ts

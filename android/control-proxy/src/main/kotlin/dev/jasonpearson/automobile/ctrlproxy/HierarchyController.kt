@@ -47,13 +47,11 @@ internal class HierarchyController(
   private val displayController: DisplayController,
   diagnostics: HierarchyDiagnosticsDependencies,
   private val jsonCompact: Json,
-) {
+) : HierarchyRequestController(host, serviceScope, diagnostics) {
   private val perfProvider = diagnostics.perfProvider
-  private val timeProvider = diagnostics.timeProvider
-  private val workStats = diagnostics.workStats
 
   /** Service-side operations the controller cannot perform without the accessibility service. */
-  interface Host {
+  interface Host : HierarchyDeliveryHost {
     fun currentFrameContext(): String
 
     fun selectDisplayWindows(displayId: Int?): ViewHierarchyExtractor.DisplayWindows
@@ -73,31 +71,6 @@ internal class HierarchyController(
     fun isEmulator(): Boolean
 
     fun accessibilityTool(): Boolean?
-
-    /** True once the WebSocket server exists and is running. */
-    fun isServerRunning(): Boolean
-
-    fun connectionCount(): Int
-
-    fun releaseRequestOwner(requestId: String?)
-
-    suspend fun broadcastHierarchyWithPerf(
-      routeByRequestId: Boolean,
-      messageBuilder: (perfTiming: JsonElement?) -> String,
-    )
-
-    suspend fun broadcastHierarchyWithPerfSync(
-      routeByRequestId: Boolean,
-      messageBuilder: (perfTiming: JsonElement?) -> String,
-    )
-
-    suspend fun broadcastHierarchyExtractFrame(frame: ErrorResponse?, externallyCorrelated: Boolean)
-
-    fun launchRequestScope(requestId: String?, block: suspend CoroutineScope.() -> Unit): Job
-
-    fun openFileOutput(filename: String, mode: Int): OutputStream
-
-    fun filesDir(): java.io.File
   }
 
   companion object {
@@ -108,70 +81,15 @@ internal class HierarchyController(
 
   // A hierarchy has object identity for its short trip from extraction to broadcast. Retaining the
   // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
-  internal val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
+  internal override val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
     Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
 
-  // Job for collecting hierarchy flow results
-  private var hierarchyFlowJob: Job? = null
-
-  /** The debouncer; only valid after [start] (tests may assign a fake one). */
-  internal lateinit var debouncer: HierarchyDebouncer
-
-  /** Creates the debouncer and starts collecting its results. */
-  fun start() {
-    // Initialize the smart hierarchy debouncer with structural hash comparison
-    debouncer =
-      HierarchyDebouncer(
-        scope = serviceScope,
-        timeProvider = timeProvider,
-        perfProvider = perfProvider,
-        config =
-          HierarchyDebouncerConfig(
-            quickDebounceMs = 5L,
-            animationSkipWindowMs = 100L,
-            unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
-          ),
-        stats = workStats,
-        dependencies =
-          HierarchyDebouncerDependencies(
-            onDiscardedHierarchy = { extractedHierarchyFrameContexts.remove(it) },
-            extractHierarchy = { disableAllFiltering, snapshotOptions ->
-              extractHierarchyDirect(disableAllFiltering, snapshotOptions)
-            },
-          ),
-      )
-
-    // Event-driven extraction is admitted before this collector at the configured interval.
-    // Deliver every admitted result so extraction time cannot cause a final refresh to be lost.
-    hierarchyFlowJob =
-      debouncer.hierarchyFlow.onEach { result -> deliverResult(result) }.launchIn(serviceScope)
-  }
-
-  /** Cancels the result collector and resets the debouncer. */
-  fun stop() {
-    // Cancel hierarchy flow subscription
-    hierarchyFlowJob?.cancel()
-  }
-
-  fun resetDebouncer() {
-    if (::debouncer.isInitialized) {
-      debouncer.reset()
-    }
-  }
-
-  /** Feeds an accessibility event to the debouncer when it exists. */
-  fun onAccessibilityEvent() {
-    if (::debouncer.isInitialized) {
-      debouncer.onAccessibilityEvent()
-    }
-  }
-
-  /** Requests an immediate debounced extraction when the debouncer exists. */
-  fun extractNow() {
-    if (::debouncer.isInitialized) {
-      debouncer.extractNow()
-    }
-  }
+  override val captureDirect: (Boolean, HierarchySnapshotOptions) -> ViewHierarchy? =
+    ::extractHierarchyDirect
+  override val deliverCollectedResult: suspend (HierarchyResult) -> Unit = ::deliverResult
+  override val extractRequestedHierarchy:
+    suspend (Boolean, HierarchySnapshotOptions, String?) -> Unit =
+    ::extractHierarchyNow
 
   private suspend fun deliverResult(result: HierarchyResult) {
     // Guard the whole body: serialization was hoisted here (issue #5469) out of
@@ -218,50 +136,6 @@ internal class HierarchyController(
     } catch (e: Exception) {
       Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
     }
-  }
-
-  suspend fun requestHierarchy(request: RequestHierarchy) {
-    val disableAllFiltering = request.disableAllFiltering
-    val maxDepth = request.maxDepth
-    val maxNodes = request.maxNodes
-    val displayId = request.displayId
-    val requestId = request.requestId
-
-    extractHierarchyNow(
-      disableAllFiltering,
-      HierarchySnapshotOptions(
-        maxDepth = maxDepth ?: 100,
-        maxNodes = maxNodes ?: 10_000,
-        displayId = displayId,
-      ),
-      requestId,
-    )
-  }
-
-  suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
-    var extractionRequested = false
-    debouncer.extractIfStale(sinceTimestamp) {
-      extractionRequested = true
-      host
-        .launchRequestScope(requestId) { extractHierarchyNow(requestId = requestId) }
-        .invokeOnCompletion { cause ->
-          // Also release when the service scope cancels the launch before extraction starts.
-          if (cause is CancellationException) {
-            host.releaseRequestOwner(requestId)
-          }
-        }
-    }
-    if (!extractionRequested) {
-      host.releaseRequestOwner(requestId)
-    }
-  }
-
-  fun setHierarchyInterval(intervalMs: Long?) {
-    val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
-    if (::debouncer.isInitialized) {
-      debouncer.setUnsolicitedIntervalMs(resolvedIntervalMs)
-    }
-    Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
   }
 
   /**
@@ -765,5 +639,164 @@ internal class HierarchyController(
       // Don't let cleanup errors prevent the main operation
 
     }
+  }
+}
+
+/** Delivery and request ownership supplied by the live service. */
+internal interface HierarchyDeliveryHost : HierarchyFileHost {
+  /** True once the WebSocket server exists and is running. */
+  fun isServerRunning(): Boolean
+
+  fun connectionCount(): Int
+
+  fun releaseRequestOwner(requestId: String?)
+
+  suspend fun broadcastHierarchyWithPerf(
+    routeByRequestId: Boolean,
+    messageBuilder: (perfTiming: JsonElement?) -> String,
+  )
+
+  suspend fun broadcastHierarchyWithPerfSync(
+    routeByRequestId: Boolean,
+    messageBuilder: (perfTiming: JsonElement?) -> String,
+  )
+
+  suspend fun broadcastHierarchyExtractFrame(frame: ErrorResponse?, externallyCorrelated: Boolean)
+
+  fun launchRequestScope(requestId: String?, block: suspend CoroutineScope.() -> Unit): Job
+}
+
+/** File operations used by hierarchy delivery and cleanup. */
+internal interface HierarchyFileHost {
+  fun openFileOutput(filename: String, mode: Int): OutputStream
+
+  fun filesDir(): java.io.File
+}
+
+/** Owns request admission and debouncer lifecycle while extraction stays in the controller. */
+internal abstract class HierarchyRequestController(
+  private val host: HierarchyController.Host,
+  private val serviceScope: CoroutineScope,
+  private val diagnostics: HierarchyDiagnosticsDependencies,
+) {
+  internal abstract val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String>
+  protected abstract val captureDirect: (Boolean, HierarchySnapshotOptions) -> ViewHierarchy?
+  protected abstract val deliverCollectedResult: suspend (HierarchyResult) -> Unit
+  protected abstract val extractRequestedHierarchy:
+    suspend (Boolean, HierarchySnapshotOptions, String?) -> Unit
+
+  private companion object {
+    const val TAG = "CtrlProxy"
+    const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS =
+      HierarchyController.DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
+  }
+
+  // Job for collecting hierarchy flow results
+  private var hierarchyFlowJob: Job? = null
+
+  /** The debouncer; only valid after [start] (tests may assign a fake one). */
+  internal lateinit var debouncer: HierarchyDebouncer
+
+  /** Creates the debouncer and starts collecting its results. */
+  fun start() {
+    // Initialize the smart hierarchy debouncer with structural hash comparison
+    debouncer =
+      HierarchyDebouncer(
+        scope = serviceScope,
+        timeProvider = diagnostics.timeProvider,
+        perfProvider = diagnostics.perfProvider,
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 5L,
+            animationSkipWindowMs = 100L,
+            unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
+          ),
+        stats = diagnostics.workStats,
+        dependencies =
+          HierarchyDebouncerDependencies(
+            onDiscardedHierarchy = { extractedHierarchyFrameContexts.remove(it) },
+            extractHierarchy = { disableAllFiltering, snapshotOptions ->
+              captureDirect(disableAllFiltering, snapshotOptions)
+            },
+          ),
+      )
+
+    // Event-driven extraction is admitted before this collector at the configured interval.
+    // Deliver every admitted result so extraction time cannot cause a final refresh to be lost.
+    val deliverResult = deliverCollectedResult
+    hierarchyFlowJob =
+      debouncer.hierarchyFlow.onEach { result -> deliverResult(result) }.launchIn(serviceScope)
+  }
+
+  /** Cancels the result collector and resets the debouncer. */
+  fun stop() {
+    // Cancel hierarchy flow subscription
+    hierarchyFlowJob?.cancel()
+  }
+
+  fun resetDebouncer() {
+    if (::debouncer.isInitialized) {
+      debouncer.reset()
+    }
+  }
+
+  /** Feeds an accessibility event to the debouncer when it exists. */
+  fun onAccessibilityEvent() {
+    if (::debouncer.isInitialized) {
+      debouncer.onAccessibilityEvent()
+    }
+  }
+
+  /** Requests an immediate debounced extraction when the debouncer exists. */
+  fun extractNow() {
+    if (::debouncer.isInitialized) {
+      debouncer.extractNow()
+    }
+  }
+
+  suspend fun requestHierarchy(request: RequestHierarchy) {
+    val disableAllFiltering = request.disableAllFiltering
+    val maxDepth = request.maxDepth
+    val maxNodes = request.maxNodes
+    val displayId = request.displayId
+    val requestId = request.requestId
+
+    extractRequestedHierarchy(
+      disableAllFiltering,
+      HierarchySnapshotOptions(
+        maxDepth = maxDepth ?: 100,
+        maxNodes = maxNodes ?: 10_000,
+        displayId = displayId,
+      ),
+      requestId,
+    )
+  }
+
+  suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
+    var extractionRequested = false
+    debouncer.extractIfStale(sinceTimestamp) {
+      extractionRequested = true
+      host
+        .launchRequestScope(requestId) {
+          extractRequestedHierarchy(false, HierarchySnapshotOptions(), requestId)
+        }
+        .invokeOnCompletion { cause ->
+          // Also release when the service scope cancels the launch before extraction starts.
+          if (cause is CancellationException) {
+            host.releaseRequestOwner(requestId)
+          }
+        }
+    }
+    if (!extractionRequested) {
+      host.releaseRequestOwner(requestId)
+    }
+  }
+
+  fun setHierarchyInterval(intervalMs: Long?) {
+    val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
+    if (::debouncer.isInitialized) {
+      debouncer.setUnsolicitedIntervalMs(resolvedIntervalMs)
+    }
+    Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
   }
 }

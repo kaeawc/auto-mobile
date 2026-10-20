@@ -9,15 +9,12 @@
     <ID>InjectDispatcher:PrototypeImeLiftTest.kt:PrototypeImeLiftTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest$Unconfined</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityTest.kt:SavedPrototypeActivityTest$Unconfined</ID>
-    <ID>LargeClass:CtrlProxyMessageHandlerTest.kt:CtrlProxyMessageHandlerTest</ID>
-    <ID>LargeClass:ImeCommitDriverTest.kt:ImeCommitDriverTest</ID>
     <ID>LargeClass:PrototypeControllerTest.kt:PrototypeControllerTest</ID>
     <ID>LargeClass:PrototypeHostTest.kt:PrototypeHostTest</ID>
     <ID>LargeClass:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest</ID>
     <ID>LargeClass:PrototypeRenderModelTest.kt:PrototypeRenderModelTest</ID>
     <ID>LargeClass:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest</ID>
     <ID>LargeClass:SavedPrototypeStoreTest.kt:SavedPrototypeStoreTest</ID>
-    <ID>LargeClass:StorageSubscriptionManagerTest.kt:StorageSubscriptionManagerTest</ID>
     <ID>LargeClass:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest</ID>
     <ID>LongMethod:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest$@Test fun `metadata attributes two then three surfaces and survives middle dismissal`</ID>
     <ID>LongMethod:PrototypePreviewRequestTest.kt:PrototypePreviewRequestTest$@Test fun `contact sheet lays images out in a near-square grid`</ID>

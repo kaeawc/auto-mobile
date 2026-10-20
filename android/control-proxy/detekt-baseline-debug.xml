@@ -96,18 +96,11 @@
     <ID>TooManyFunctions:CtrlProxyActions.kt:CtrlProxyActions</ID>
     <ID>TooManyFunctions:CtrlProxyIme.kt:CtrlProxyIme : InputMethodServiceLifecycleOwnerSavedStateRegistryOwner</ID>
     <ID>TooManyFunctions:GestureController.kt:GestureController</ID>
-    <ID>TooManyFunctions:HierarchyController.kt:HierarchyController</ID>
-    <ID>TooManyFunctions:HierarchyController.kt:HierarchyController$Host</ID>
-    <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitDriver$CommitSequence</ID>
-    <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitSink</ID>
-    <ID>TooManyFunctions:ImeConnection.kt:ImeConnection</ID>
-    <ID>TooManyFunctions:InputConnectionAdapter.kt:InputConnectionAdapter : ImeConnection</ID>
     <ID>TooManyFunctions:PrototypeController.kt:PrototypeController</ID>
     <ID>TooManyFunctions:PrototypeHost.kt:DefaultPrototypeHost : PrototypeHost</ID>
     <ID>TooManyFunctions:PrototypeHost.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHost.kt</ID>
     <ID>TooManyFunctions:PrototypeResultBroadcaster.kt:PrototypeResultBroadcaster : PrototypeResultSink</ID>
     <ID>TooManyFunctions:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore : SavedPrototypeStore</ID>
-    <ID>TooManyFunctions:StorageController.kt:StorageController</ID>
     <ID>TooManyFunctions:StorageSubscriptionManager.kt:StorageSubscriptionManager</ID>
     <ID>TooManyFunctions:TextInputController.kt:TextInputController</ID>
     <ID>TooManyFunctions:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>

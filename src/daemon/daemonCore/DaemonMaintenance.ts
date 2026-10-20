@@ -4,9 +4,13 @@ import type {
   DaemonLifecycleState,
 } from "./DaemonCoreState";
 import { forceStuckSessionRelease } from "../releaseSessionAndDevice";
-import { logger } from "../../utils/logger";
+import { logSinkStalledWithin, logger } from "../../utils/logger";
 import { UnixSocketServer } from "../socketServer";
-import { createDaemonHealthCheck, type HealthFailureKind } from "../daemonHealthCheck";
+import {
+  createDaemonHealthCheck,
+  HOST_IO_STALL_MEMORY_MS,
+  type HealthFailureKind,
+} from "../daemonHealthCheck";
 import { SessionHeartbeatMonitor } from "../SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { DEFAULT_SOCKET_PATH, SOCKET_PATH } from "../constants";
@@ -109,6 +113,7 @@ export class DaemonMaintenance {
           this.host.setLastDatabaseHealthFailure(message);
         },
         recover: (kind) => this.host.attemptRecovery(kind),
+        hostIoStalled: () => logSinkStalledWithin(HOST_IO_STALL_MEMORY_MS),
       }),
     );
     this.host.healthCheck()!.start();

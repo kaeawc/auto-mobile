@@ -1,3 +1,5 @@
+import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { registerDatabaseResources } from "../../src/server/databaseResources";
@@ -90,6 +92,35 @@ describe("iOS database inspection server integration", function () {
     IOSCtrlProxyClient.resetInstances();
     serverConfig.setEmbeddedSdkEnabled(false);
   });
+
+  test.each(["timeout", "not_connected", "sdk_capability_query_failed"] as const)(
+    "sqlQuery preserves SDK probe %s through tool error shaping",
+    async (code) => {
+      const failure = new SdkCapabilityQueryError(code, "SDK probe failed");
+      useIosClient({
+        executeSQLForIos: async () => {
+          throw failure;
+        },
+      });
+      registerDatabaseTools(iosClient);
+      const tool = ToolRegistry.getTool("sqlQuery")!;
+      const error = await rejectionOf(
+        tool.deviceAwareHandler!(iosDevice, {
+          appId: "com.example.app",
+          databasePath: "app.db",
+          query: "SELECT 1",
+        }),
+      );
+      expect(error).toBe(failure);
+      const result = shapeToolCallError(error, { toolName: "sqlQuery", source: "MCP" });
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: false,
+        error: "SDK probe failed",
+        code,
+        retryable: true,
+      });
+    },
+  );
 
   test("sqlQuery executes SELECT on iOS through CtrlProxy and keeps Android response shape", async function () {
     const executeSQLForIos = mock(async () => ({

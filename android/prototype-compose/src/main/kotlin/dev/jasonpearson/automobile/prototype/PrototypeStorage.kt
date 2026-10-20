@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.prototype
 
 import android.content.Context
+import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageLoad
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
@@ -54,16 +55,34 @@ interface PrototypeStorage {
   }
 }
 
-internal fun PrototypeStorage.adapt(): PrototypeStorageStore =
-  object : PrototypeStorageStore {
-    override fun load(id: String): PrototypeStorageLoad =
-      this@adapt.load(id)?.let { PrototypeStorageLoad.Loaded(it) } ?: PrototypeStorageLoad.Missing
+/** Retains typed corrupt/missing results for AutoMobile hosts sharing an existing store. */
+@InternalAutoMobilePrototypeApi
+fun prototypeHostStorage(store: PrototypeStorageStore): PrototypeStorage =
+  HostPrototypeStorage(store)
 
-    override fun save(id: String, stored: PrototypeStoredValues) = this@adapt.save(id, stored)
+private class HostPrototypeStorage(val store: PrototypeStorageStore) : PrototypeStorage {
+  override fun load(id: String): PrototypeStoredValues? =
+    (store.load(id) as? PrototypeStorageLoad.Loaded)?.stored
 
-    override fun delete(id: String): Boolean {
-      val existed = this@adapt.load(id) != null
-      this@adapt.delete(id)
-      return existed
-    }
+  override fun save(id: String, values: PrototypeStoredValues) = store.save(id, values)
+
+  override fun delete(id: String) {
+    store.delete(id)
   }
+}
+
+internal fun PrototypeStorage.adapt(): PrototypeStorageStore =
+  if (this is HostPrototypeStorage) store
+  else
+    object : PrototypeStorageStore {
+      override fun load(id: String): PrototypeStorageLoad =
+        this@adapt.load(id)?.let { PrototypeStorageLoad.Loaded(it) } ?: PrototypeStorageLoad.Missing
+
+      override fun save(id: String, stored: PrototypeStoredValues) = this@adapt.save(id, stored)
+
+      override fun delete(id: String): Boolean {
+        val existed = this@adapt.load(id) != null
+        this@adapt.delete(id)
+        return existed
+      }
+    }

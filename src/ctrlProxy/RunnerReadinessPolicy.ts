@@ -1,5 +1,10 @@
 export const READINESS_RETRY_DELAY_MS = 250;
 
+// A fresh XCUITest snapshot can be slow: allow more than the 2s steady-state
+// readiness probe, while leaving room for retries in the default 30s health window.
+export const IOS_POST_SETUP_FIRST_PROBE_TIMEOUT_MS = 8_000;
+export const IOS_POST_SETUP_RESTART_MIN_FAILED_PROBES = 3;
+
 export const CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS = 5_000;
 
 export const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;

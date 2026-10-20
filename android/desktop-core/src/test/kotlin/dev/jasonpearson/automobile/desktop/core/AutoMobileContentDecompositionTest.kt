@@ -23,8 +23,8 @@ class AutoMobileContentDecompositionTest {
         "DeviceIcon.kt" to listOf("fun DeviceIcon", "fun AndroidDeviceIcon", "fun AppleDeviceIcon"),
         "DeviceManagementPanel.kt" to listOf("fun DeviceManagementPanel"),
         "DeviceManagementItems.kt" to listOf("fun DeviceSectionHeader", "fun DeviceListItem"),
-        "DevicesSection.kt" to
-          listOf("fun DevicesSection", "fun DeviceImagesGrouped", "fun BootedDeviceRow"),
+        "DevicesSection.kt" to listOf("fun DevicesSection", "fun DeviceImagesGrouped"),
+        "BootedDeviceRow.kt" to listOf("fun BootedDeviceRow"),
         "shell/LeftSidebarPanel.kt" to listOf("fun LeftSidebarPanel"),
         "shell/AvailableDeviceImagesSection.kt" to
           listOf("fun AvailableDeviceImagesSection", "fun FilterChip"),

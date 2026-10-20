@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenOptions
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.video.LiveVideoFrame
@@ -295,36 +296,40 @@ private fun ArmedDeviceStream(column: DeviceColumn, armed: ArmedStreamControl) {
     // relay dropped a frame source; the retained live frame now covers those windows.
     screenshotData = null,
     liveFrame = armedFrame.bitmap,
-    screenWidth = renderSnapshot?.deviceWidth ?: 0,
-    screenHeight = renderSnapshot?.deviceHeight ?: 0,
-    rotation = renderSnapshot?.rotation ?: 0,
-    hierarchy = renderSnapshot?.hierarchy?.root,
-    selectedElementId = null,
-    hoveredElementId = null,
-    onElementSelected = {},
-    onElementHovered = {},
-    elementMap = renderSnapshot?.hierarchy?.elementMap?.takeIf { it.isNotEmpty() },
     // Tagged so tests can pin WHICH surface rendered (interactive video vs. hint/mirror).
     modifier = Modifier.fillMaxSize().testTag(DEVICE_CONTROL_SURFACE_TEST_TAG),
-    controlMode = DeviceScreenControlMode.Control,
-    controlSnapshot = controlSnapshot,
-    // The view maps a click through `snapshot`'s geometry and hands back the device-mapped
-    // `point`; the dispatcher sends it to the daemon input/tap helper off the UI thread with NO
-    // frameContext, so it can never be rejected as stale (the wedge). Perf spans T0 (tap
-    // initiated) and the frame-age baseline (`capturedAtMs`) are stamped here, at the click.
-    onControlTap = { snapshot, point ->
-      control.tracer.tapInitiated(column.deviceId, snapshot.capturedAtMs)
-      control.dispatcher.tap(point)
-    },
-    onControlSwipe = { snapshot, start, end, durationMs ->
-      control.dispatcher.swipe(snapshot, start, end, durationMs)
-    },
-    // Streaming (real-time) drag: a non-null handle means this drag streams live; null keeps the
-    // atomic onControlSwipe above (flag off / unsupported). See VideoInputDispatcher.
-    onControlGestureStreamBegin = { snapshot, downPoint ->
-      control.dispatcher.beginGestureStream(snapshot, downPoint)
-    },
-    onControlKey = { snapshot, stroke -> control.dispatcher.key(stroke) },
+    options =
+      DeviceScreenOptions(
+        screenWidth = renderSnapshot?.deviceWidth ?: 0,
+        screenHeight = renderSnapshot?.deviceHeight ?: 0,
+        rotation = renderSnapshot?.rotation ?: 0,
+        hierarchy = renderSnapshot?.hierarchy?.root,
+        selectedElementId = null,
+        hoveredElementId = null,
+        onElementSelected = {},
+        onElementHovered = {},
+        elementMap = renderSnapshot?.hierarchy?.elementMap?.takeIf { it.isNotEmpty() },
+        controlMode = DeviceScreenControlMode.Control,
+        controlSnapshot = controlSnapshot,
+        // The view maps a click through `snapshot`'s geometry and hands back the device-mapped
+        // `point`; the dispatcher sends it to the daemon input/tap helper off the UI thread with NO
+        // frameContext, so it can never be rejected as stale (the wedge). Perf spans T0 (tap
+        // initiated) and the frame-age baseline (`capturedAtMs`) are stamped here, at the click.
+        onControlTap = { snapshot, point ->
+          control.tracer.tapInitiated(column.deviceId, snapshot.capturedAtMs)
+          control.dispatcher.tap(point)
+        },
+        onControlSwipe = { snapshot, start, end, durationMs ->
+          control.dispatcher.swipe(snapshot, start, end, durationMs)
+        },
+        // Streaming (real-time) drag: a non-null handle means this drag streams live; null keeps
+        // the
+        // atomic onControlSwipe above (flag off / unsupported). See VideoInputDispatcher.
+        onControlGestureStreamBegin = { snapshot, downPoint ->
+          control.dispatcher.beginGestureStream(snapshot, downPoint)
+        },
+        onControlKey = { snapshot, stroke -> control.dispatcher.key(stroke) },
+      ),
   )
 }
 

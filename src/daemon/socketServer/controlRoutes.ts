@@ -1,3 +1,7 @@
+import type { DaemonNotification, DaemonResponse } from "../types";
+import { ListChangedBroadcaster, type ListChangedKind } from "../listChangedBroadcast";
+import type { McpForwardContext } from "../socketServerParts/socketServerContracts";
+
 import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../constants";
 import type { GestureFrameKind, InputRouteEntry, InputRouteHandler } from "../inputRoutes";
 import type { DaemonRequest } from "../types";
@@ -141,4 +145,104 @@ const PASSTHROUGH_ROUTES: ReadonlyMap<string, PassthroughRoute> = new Map<string
  */
 export function runPassthroughForward(ctx: PassthroughContext): Promise<unknown> | undefined {
   return PASSTHROUGH_ROUTES.get(ctx.request.method)?.(ctx);
+}
+
+/** Already JSON-copied and SDK-validated answers. Only the small frame envelope varies per call. */
+const serializedLists = new WeakMap<object, string>();
+
+/** Preserve JSON.stringify's field order and escaping while reusing the large result's bytes. */
+export function serializeControlFrame(frame: DaemonResponse | DaemonNotification): string {
+  const result: unknown = "result" in frame ? frame.result : undefined;
+  const serialized = result && typeof result === "object" ? serializedLists.get(result) : undefined;
+  if (serialized === undefined) {
+    return JSON.stringify(frame) + "\n";
+  }
+  return (
+    "{" +
+    Object.entries(frame)
+      .flatMap(([key, value]) => {
+        const bytes = key === "result" ? serialized : JSON.stringify(value);
+        return bytes === undefined ? [] : [`${JSON.stringify(key)}:${bytes}`];
+      })
+      .join(",") +
+    "}\n"
+  );
+}
+
+interface Entry {
+  readonly generation: number;
+  readonly result: object;
+}
+
+/**
+ * Control-socket discovery only (#13550). A miss uses the normal MCP hop, including its JSON
+ * boundary and SDK result validation. A hit reuses that validated result and serialized bytes.
+ * Socket identity is deliberately part of the scope: its keyed SessionToolBindingStore can
+ * override the seeds and must never share another connection's answer, even with equal seeds.
+ */
+export class ControlDiscoveryCache {
+  private readonly entries = new Map<string, Entry>();
+  constructor(private readonly refreshResources: () => Promise<void>) {}
+  // Bound retention across disconnected/churning scopes; eviction only makes the next read cold.
+  private static readonly MAX_ENTRIES = 128;
+
+  async read(context: McpForwardContext, load: () => Promise<unknown>): Promise<unknown> {
+    const kind: ListChangedKind | undefined =
+      context.request.method === "tools/list"
+        ? "tools"
+        : context.request.method === "resources/list"
+          ? "resources"
+          : undefined;
+    if (!kind) {
+      return await load();
+    }
+    context.signal?.throwIfAborted();
+    const { route } = context;
+    const key = JSON.stringify([
+      kind,
+      context.socketSessionId,
+      route.clientKey,
+      route.sessionUuid,
+      route.toolSelectionProfileUuid,
+      route.releasedSessionUuid,
+    ]);
+    const entry = this.entries.get(key);
+    if (kind === "resources" && entry?.generation === ListChangedBroadcaster.generation(kind)) {
+      // Devices/apps can change outside AutoMobile. Keep the list refresher contract on hits,
+      // outside the caller's async context just as the loopback server would run it. Misses
+      // still refresh in the MCP handler; a changed generation below falls through to it.
+      await this.refreshResources();
+      context.signal?.throwIfAborted();
+    }
+    const generation = ListChangedBroadcaster.generation(kind);
+    if (entry?.generation === generation) {
+      this.entries.delete(key);
+      this.entries.set(key, entry);
+      return entry.result;
+    }
+    this.entries.delete(key);
+    const result = await load();
+    context.signal?.throwIfAborted();
+    this.retain(kind, key, generation, result);
+    return result;
+  }
+
+  private retain(kind: ListChangedKind, key: string, generation: number, result: unknown): void {
+    // A notification during the await fences out this fill. Never retain errors or old epochs.
+    if (
+      generation !== ListChangedBroadcaster.generation(kind) ||
+      !result ||
+      typeof result !== "object"
+    ) {
+      return;
+    }
+    serializedLists.set(result, JSON.stringify(result));
+    this.entries.set(key, { generation, result });
+    if (this.entries.size > ControlDiscoveryCache.MAX_ENTRIES) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest !== undefined) {
+        this.entries.delete(oldest);
+      }
+    }
+  }
 }

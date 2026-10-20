@@ -1,3 +1,4 @@
+import { serializeControlFrame } from "../socketServer/controlRoutes";
 import {
   applyResourceSubscription,
   broadcastListChanged as fanOutListChanged,
@@ -609,7 +610,7 @@ export class SocketTransport {
       return;
     }
     try {
-      const payload = JSON.stringify(frame) + "\n";
+      const payload = serializeControlFrame(frame);
       const byteLength = Buffer.byteLength(payload);
       const guard = this.callbacks.connectionFor(socket, sessionId).outboundWriteGuard();
       const queuedBytes = guard.admit(byteLength);

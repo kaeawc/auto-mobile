@@ -10,7 +10,7 @@ import {
   rollbackVideoRecordingStart,
   startVideoRecording,
   stopVideoRecording,
-} from "./videoRecordingManager";
+} from "../daemon/videoRecordingManager";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";

@@ -39,6 +39,8 @@ include(":auto-mobile-sdk")
 
 include(":protocol")
 
+include(":prototype-compose")
+
 include(":junit-runner")
 
 include(":test-plan-validation")

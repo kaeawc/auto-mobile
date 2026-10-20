@@ -19,7 +19,7 @@ import {
   type TaskLeaseHoldRequest,
 } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { TASK_ELIGIBILITY } from "../../../src/server/tasks/toolCallTasks";
-import { resetVideoRecordingManagerDependencies } from "../../../src/server/videoRecordingManager";
+import { resetVideoRecordingManagerDependencies } from "../../../src/daemon/videoRecordingManager";
 import { DefaultDeviceMatcher } from "../../../src/utils/deviceMatcher";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";

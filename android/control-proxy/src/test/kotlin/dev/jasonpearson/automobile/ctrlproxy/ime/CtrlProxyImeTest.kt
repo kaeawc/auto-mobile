@@ -58,7 +58,7 @@ class CtrlProxyImeTest {
   @Test
   fun `finish during active commit neither cancels nor restores but idle finish restores`() {
     val service = Robolectric.buildService(CtrlProxyIme::class.java).create().get()
-    val sink = ImeCommitDriverTest.FakeImeCommitSink(1)
+    val sink = ImeCommitDriverFixtures.FakeImeCommitSink(1)
     val driver = ImeCommitDriver(sink) { listOf(it) }
     var cancellations = 0
     fun set(name: String, value: Any?) {

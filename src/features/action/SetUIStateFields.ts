@@ -597,7 +597,12 @@ export class SetUIStateFields {
         target["resource-id"]
           ? { elementId: target["resource-id"], action: "focus" }
           : this.buildTapOptions(fieldSpec.selector, "focus"),
-        { progress, signal, recovery: { throwOnKeyboardOcclusion: true } },
+        {
+          progress,
+          signal,
+          recovery: { throwOnKeyboardOcclusion: true },
+          settlePostTapEffect: false,
+        },
       );
     try {
       return await focus(element);
@@ -830,7 +835,7 @@ export class SetUIStateFields {
     if (isChecked !== fieldSpec.selected) {
       const tapResult = await tapOnElement.execute(
         this.buildTapOptions(fieldSpec.selector, "tap"),
-        { progress, signal },
+        { progress, signal, settlePostTapEffect: false },
       );
       if (!tapResult.success) {
         return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
@@ -854,6 +859,7 @@ export class SetUIStateFields {
     const openResult = await tapOnElement.execute(this.buildTapOptions(fieldSpec.selector, "tap"), {
       progress,
       signal,
+      settlePostTapEffect: false,
     });
     if (!openResult.success) {
       return { success: false, error: `Failed to open dropdown: ${openResult.error}` };
@@ -865,7 +871,7 @@ export class SetUIStateFields {
     // Tap on the desired value
     const selectResult = await tapOnElement.execute(
       { text: fieldSpec.value, action: "tap" },
-      { progress, signal },
+      { progress, signal, settlePostTapEffect: false },
     );
     if (!selectResult.success) {
       return {

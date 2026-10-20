@@ -4,8 +4,11 @@ import {
   type LatestVideoRecordingLookup,
   getVideoRecordingMetadata,
   listVideoRecordings,
-} from "./videoRecordingManager";
-import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingResourceUris";
+} from "../daemon/videoRecordingManager";
+import {
+  buildVideoArchiveItemUri,
+  VIDEO_RESOURCE_URIS,
+} from "../daemon/videoRecordingResourceUris";
 import { logger } from "../utils/logger";
 import * as fs from "fs/promises";
 import { getTempDir, TEMP_SUBDIRS } from "../utils/tempDir";

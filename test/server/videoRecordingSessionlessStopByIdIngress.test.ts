@@ -15,7 +15,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";

@@ -1,3 +1,7 @@
+import {
+  fakePublicHostResolver,
+  permissivePrototypeEgressPolicy,
+} from "../../fakes/FakePrototypeEgressPolicy";
 import { applyPrototypeRequestOutcome } from "../../../src/features/prototype/prototypeRequestOutcome";
 import { describe, expect, test } from "bun:test";
 import {
@@ -44,7 +48,13 @@ function executorFor(
 ) {
   return {
     timer,
-    executor: new FetchPrototypeHttpExecutor({ fetch: fetchImpl, timer, maxResponseBytes }),
+    executor: new FetchPrototypeHttpExecutor({
+      fetch: fetchImpl,
+      timer,
+      maxResponseBytes,
+      policy: permissivePrototypeEgressPolicy,
+      resolver: fakePublicHostResolver,
+    }),
   };
 }
 
@@ -240,7 +250,7 @@ describe("FetchPrototypeHttpExecutor", () => {
     expect(called).toBe(false);
   });
 
-  test("allows localhost and private addresses", async () => {
+  test("allows local fixture addresses only with an injected permissive policy", async () => {
     const urls: string[] = [];
     const { executor } = executorFor(async (url) => {
       urls.push(url);

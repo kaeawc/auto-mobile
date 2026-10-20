@@ -1,5 +1,6 @@
+import { registerPrototypeDaemonPort } from "../features/prototype/prototypeDaemonPorts";
 import {} from "./networkStateSessionCleanup";
-import {} from "../server/recordingSessionCleanup";
+import {} from "./recordingSessionCleanup";
 import {} from "./observationRequestBatch";
 import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
@@ -404,6 +405,7 @@ export class Daemon {
     );
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
+    registerPrototypeDaemonPort(this.port);
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
     this.host = options.host || "127.0.0.1";

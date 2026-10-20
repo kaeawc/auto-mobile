@@ -1,5 +1,5 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
 1788	src/daemon/sessionManager.ts
+2185	src/daemon/videoRecordingManager.ts
 1979	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
-2185	src/server/videoRecordingManager.ts

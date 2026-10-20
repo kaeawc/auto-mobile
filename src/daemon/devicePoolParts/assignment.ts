@@ -341,7 +341,7 @@ export class DevicePoolAssignment {
    * incomplete (#11605) -- unless a pooled device depends on it, which proves the tooling existed.
    */
   async readLiveInventoryDeviceIds(
-    signal = getAbortSignal() ?? new AbortController().signal,
+    signal = getAbortSignal(),
   ): Promise<Set<string>> {
     const live = new Set<string>();
     const read = new Map<Platform, BootedDeviceDiscovery>();

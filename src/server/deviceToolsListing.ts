@@ -68,7 +68,7 @@ async function transitionalHeldListing(input: {
     discovered,
     devicePool: pool,
     deviceManager,
-    signal: getAbortSignal() ?? new AbortController().signal,
+    signal: getAbortSignal(),
     onProbeFailure: (failure) => {
       probeFailure = failure;
     },

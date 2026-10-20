@@ -28,7 +28,7 @@ export async function adbOfflineHeldDevices(input: {
   discovered: readonly BootedDevice[];
   devicePool: Pick<DevicePool, "getAssignedDevices"> | null | undefined;
   deviceManager: Pick<PlatformDeviceManager, "getAndroidListedDeviceStates">;
-  /** Cancel signal for the state probe; callers resolve it (undefined = uncancellable). */
+  /** Cancel signal for the state probe, resolved by the caller. */
   signal: AbortSignal | undefined;
   /**
    * What a failed probe means. `throw` refuses with `discovery_incomplete`; a callback receives

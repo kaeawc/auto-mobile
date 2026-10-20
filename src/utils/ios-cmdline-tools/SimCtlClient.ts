@@ -85,7 +85,7 @@ export class SimCtlClient implements SimCtl {
       },
       acquireSimulatorBoot: (...args) => client.acquireSimulatorBoot(...args),
       executeCommandArgv: (...args) => client.executeCommandArgv(...args),
-      readSimulatorState: (...args) => client.readSimulatorState(...args),
+      readSimulatorState: (...args) => client.simCtlBoot.readSimulatorState(...args),
       get execAsync() {
         return client.execAsync;
       },
@@ -596,8 +596,8 @@ export class SimCtlClient implements SimCtl {
   ): Promise<SimulatorBootLease> {
     return this.simCtlBoot.acquireSimulatorBoot(udid, deadlineMs, signal, operation);
   }
-  private shutdownAfterFailedStart(udid: string): Promise<void> {
-    return this.simCtlShutdown.shutdownAfterFailedStart(udid);
+  private shutdownAfterFailedStart(udid: string, lease: SimulatorBootLease): Promise<void> {
+    return this.simCtlShutdown.shutdownAfterFailedStart(udid, lease);
   }
 
   private shutdownSimulatorCoordinated(
@@ -644,9 +644,6 @@ export class SimCtlClient implements SimCtl {
     return this.simCtlInventory.resolveRuntimeIdentifiersForBounds(minVersion, maxVersion, signal);
   }
 
-  private readSimulatorState(udid: string, timeoutMs: number): Promise<string | undefined> {
-    return this.simCtlBoot.readSimulatorState(udid, timeoutMs);
-  }
   listSimulatorImages(
     timeoutMs?: number,
     options: { bypassCache?: boolean; signal?: AbortSignal } = {},

@@ -23,7 +23,10 @@ import { Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+} from "../deviceTimeouts";
 
 import { inferIosFormFactor } from "./iosDeviceType";
 
@@ -43,7 +46,7 @@ export interface SimCtlBootContext {
   ): Promise<BootedDevice[]>;
   bootPresentationGenerations: Map<string, string>;
   idGenerator: IdGenerator;
-  shutdownAfterFailedStart(udid: string): Promise<void>;
+  shutdownAfterFailedStart(udid: string, lease: SimulatorBootLease): Promise<void>;
   presentSimulatorAfterStart(
     udid: string,
     bootGeneration: string,
@@ -101,7 +104,7 @@ export class SimCtlBoot {
         lease.state.lastBootSucceeded = false;
         lease.state.ownerToken = undefined;
       }
-      await this.startSimulatorExclusive(udid, deadlineMs, startSignal);
+      await this.startSimulatorExclusive(udid, deadlineMs, startSignal, lease);
       const ownerToken = {};
       lease.state.lastBootSucceeded = true;
       lease.state.ownerToken = ownerToken;
@@ -115,6 +118,7 @@ export class SimCtlBoot {
     udid: string,
     deadlineMs: number,
     startSignal: AbortSignal | undefined,
+    lease: SimulatorBootLease,
   ): Promise<void> {
     logger.debug(`Starting iOS simulator ${udid}`);
     const perf = createGlobalPerformanceTracker();
@@ -127,7 +131,7 @@ export class SimCtlBoot {
     perf.startOperation("bootstatus");
     try {
       this.context.bootPresentationGenerations.delete(udid);
-      await this.runOwnedBoot(udid, () => this.bootAndVerify(udid, deadlineMs));
+      await this.runOwnedBoot(udid, lease, () => this.bootAndVerify(udid, deadlineMs));
     } finally {
       perf.endOperation("bootstatus");
     }
@@ -139,8 +143,11 @@ export class SimCtlBoot {
       startSignal,
     );
     if (startSignal?.aborted) {
-      await this.context.shutdownAfterFailedStart(udid);
-      throw startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
+      await this.failBootWithCleanup(
+        udid,
+        lease,
+        startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`),
+      );
     }
   }
 
@@ -205,27 +212,42 @@ export class SimCtlBoot {
     // a no-op (issue #3938), return an honest handle: `pid` is undefined (no OS
     // process), and `kill()` performs the meaningful cancellation for a simulator
     // — shutting it back down. `ChildProcess.kill` is synchronous, so the
-    // shutdown is fired best-effort and the boolean result reports that a
-    // cancellation was initiated.
-    return createSimulatorLaunchHandle((): boolean => {
+    // boolean result reports initiation; exit is emitted only after shutdown settles.
+    return createSimulatorLaunchHandle(() => {
       // Cancellation cleanup must not inherit an already-aborted request signal.
       const cleanupSignal = new AbortController().signal;
-      void this.context
-        .shutdownSimulatorCoordinated(udid, 10_000, cleanupSignal, ownerToken)
-        .catch((error) => {
-          logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
-        });
-      return true;
-    });
+      return this.context.shutdownSimulatorCoordinated(
+        udid,
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+        cleanupSignal,
+        ownerToken,
+      );
+    }, udid);
   }
 
-  async runOwnedBoot<T>(udid: string, operation: () => Promise<T>): Promise<T> {
+  async runOwnedBoot<T>(
+    udid: string,
+    lease: SimulatorBootLease,
+    operation: () => Promise<T>,
+  ): Promise<T> {
     try {
       return await operation();
     } catch (error) {
-      await this.context.shutdownAfterFailedStart(udid);
-      throw error;
+      return this.failBootWithCleanup(udid, lease, error);
     }
+  }
+
+  private async failBootWithCleanup(
+    udid: string,
+    lease: SimulatorBootLease,
+    error: unknown,
+  ): Promise<never> {
+    try {
+      await this.context.shutdownAfterFailedStart(udid, lease);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], errorMessage(error), { cause: error });
+    }
+    throw error;
   }
 
   async runCoordinatedBoot<T>(
@@ -269,7 +291,7 @@ export class SimCtlBoot {
           udid,
         );
       }
-      const result = ownsBoot ? await this.runOwnedBoot(udid, operation) : await operation();
+      const result = ownsBoot ? await this.runOwnedBoot(udid, lease, operation) : await operation();
       lease.state.lastBootSucceeded = true;
       return result;
     } finally {
@@ -593,14 +615,21 @@ export class SimCtlBoot {
    *         wrapper boot verification should use instead of calling this
    *         directly.
    */
-  async readSimulatorState(udid: string, timeoutMs: number): Promise<string | undefined> {
+  async readSimulatorState(
+    udid: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
     // `bypassCache: true` because a stale cached/last-good snapshot would defeat
     // the "never trust a stale snapshot" contract this method promises boot
     // verification (issue #6576); a bypassCache read always throws on discovery
     // failure rather than falling back, so that failure propagates to
     // {@link readSimulatorStateRetrying} for its own retry-vs-surface decision
     // (issue #6411) instead of being swallowed here.
-    const devices = await this.context.listSimulatorImages(timeoutMs, { bypassCache: true });
+    const devices = await this.context.listSimulatorImages(timeoutMs, {
+      bypassCache: true,
+      signal,
+    });
     return devices.find((device) => device.deviceId === udid)?.state;
   }
 

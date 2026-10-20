@@ -9,7 +9,11 @@ import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline
 import { ActionableError } from "../../../src/models";
 import { DeviceAlreadyRunningError } from "../../../src/models/DeviceAlreadyRunningError";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
+import { terminateColdBootProcess } from "../../../src/devices/coldBootProcessTermination";
+import {
+  DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+} from "../../../src/utils/deviceTimeouts";
 
 const UDID = "11111111-2222-3333-4444-555555555555";
 const OTHER_UDID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
@@ -341,6 +345,143 @@ async function waitForCondition(
 describe("SimCtlClient boot self-verification", () => {
   beforeEach(resetSimctlState);
 
+  test("attaches unconfirmed failed-start cleanup to the original boot failure", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    const failure = new Error("boot failed");
+    harness.failBootStatusWith(failure);
+    harness.setStates(["Booting"]);
+    const result = await harness.simctl.startSimulator(UDID).catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(AggregateError);
+    if (!(result instanceof AggregateError)) {
+      throw new Error("Expected boot and cleanup errors");
+    }
+    expect(result.cause).toBe(failure);
+    expect(result.message).toBe("boot failed");
+    expect(result.errors[0]).toBe(failure);
+    expect(String(result.errors[1])).toContain("Booting");
+    expect(harness.calls).toContain("xcrun simctl list devices --json");
+  });
+
+  test("failed-start cleanup gets the teardown budget and awaits a timed-out command", async () => {
+    const shutdown = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+    const bootFailure = new Error("boot failed");
+    let cleanupSignal: AbortSignal | undefined;
+    const harness = createConcurrentStartHarness(
+      () => Promise.reject(bootFailure),
+      shutdownSimulatorListResult,
+      {
+        shutdown: (_invocation, signal) => {
+          cleanupSignal = signal;
+          return shutdown.promise;
+        },
+      },
+    );
+    let settled = false;
+    const start = harness
+      .createClient()
+      .startSimulator(UDID)
+      .catch((error: unknown) => {
+        settled = true;
+        return error;
+      });
+    await waitForCondition(() => cleanupSignal !== undefined, "cleanup shutdown");
+    harness.timer.advanceTime(10_000);
+    await drainMicrotasks();
+    expect(cleanupSignal?.aborted).toBe(false);
+    harness.timer.advanceTime(DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS - 10_000);
+    await drainMicrotasks();
+    expect(cleanupSignal?.aborted).toBe(true);
+    expect(settled).toBe(false);
+    shutdown.reject(new Error("shutdown child exited"));
+    const result = await start;
+    expect(result).toBeInstanceOf(AggregateError);
+    if (result instanceof AggregateError) {
+      expect(result.cause).toBe(bootFailure);
+      expect(String(result.errors[1])).toContain("60000ms");
+    }
+  });
+
+  test("an aborted presentation keeps its boot error and unconfirmed cleanup", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.setStates(["Booted", "Shutting Down"]);
+    const controller = new AbortController();
+    const reason = new Error("cancelled after boot");
+    const present = spyOn(harness.simctl, "presentSimulatorAfterStart").mockImplementation(
+      async () => {
+        controller.abort(reason);
+      },
+    );
+    try {
+      const failure = await runWithAbortSignal(controller.signal, () =>
+        harness.simctl.startSimulator(UDID),
+      ).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(AggregateError);
+      if (!(failure instanceof AggregateError)) {
+        throw new Error("Expected cancellation and cleanup failure");
+      }
+      expect(failure.cause).toBe(reason);
+      expect(String(failure.errors[1])).toContain("Shutting Down");
+      const signals = harness.commandSignals.get("xcrun simctl list devices --json");
+      expect(signals).toHaveLength(2);
+      expect(signals?.[1]?.aborted).toBe(false);
+    } finally {
+      present.mockRestore();
+    }
+  });
+
+  test("a real launch handle waits for coordinated shutdown before confirming", async () => {
+    const shutdown = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+    let shutdownSignal: AbortSignal | undefined;
+    const harness = createConcurrentStartHarness(
+      () => Promise.resolve(createExecResult("", "")),
+      bootedSimulatorListResult,
+      {
+        shutdown: (_invocation, signal) => {
+          shutdownSignal = signal;
+          return shutdown.promise;
+        },
+      },
+    );
+    const handle = await harness.createClient().startSimulator(UDID);
+    const termination = terminateColdBootProcess(handle, UDID, harness.timer);
+    let settled = false;
+    void termination.confirmed.then(() => {
+      settled = true;
+    });
+    await waitForCondition(() => shutdownSignal !== undefined, "handle shutdown");
+    harness.timer.advanceTime(10_000);
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+    expect(shutdownSignal?.aborted).toBe(false);
+    expect(handle.exitCode).toBeNull();
+    shutdown.resolve(createExecResult("", ""));
+    expect(await termination.confirmed).toBe(true);
+    expect(handle.exitCode).toBe(0);
+  });
+
+  test("a real launch handle rejects confirmation when state remains Booting", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.setStates(["Booted"]);
+    const handle = await harness.simctl.startSimulator(UDID);
+    harness.setStates(["Booting"]);
+    expect(await terminateColdBootProcess(handle, UDID, harness.timer).confirmed).toBe(false);
+    expect(handle.exitCode).toBe(1);
+  });
+
+  test("failed-start cleanup verifies an already-stopped shutdown response", async () => {
+    const bootFailure = new Error("boot failed");
+    const harness = createConcurrentStartHarness(
+      () => Promise.reject(bootFailure),
+      shutdownSimulatorListResult,
+      {
+        shutdown: () =>
+          Promise.reject(new Error("Unable to shutdown device in current state: Shutdown")),
+      },
+    );
+    await expect(harness.createClient().startSimulator(UDID)).rejects.toBe(bootFailure);
+    expect(harness.shutdownInvocations()).toBe(1);
+  });
+
   test("shuts down a simulator when its start request is aborted", async () => {
     const calls: string[] = [];
     const simctl = new SimCtlClient(
@@ -414,7 +555,7 @@ describe("SimCtlClient boot self-verification", () => {
 
     timer.advanceTime(1_234);
     await waitForCondition(() => shutdownSignal !== undefined, "the bounded cleanup command");
-    timer.advanceTime(10_000);
+    timer.advanceTime(DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS);
 
     await expect(start).rejects.toThrow(
       `Command timed out after 1234ms: xcrun simctl bootstatus ${UDID} -b`,
@@ -1432,7 +1573,10 @@ describe("SimCtlClient boot self-verification", () => {
     harness.failBootStatusWith(error);
 
     await expect(harness.simctl.startSimulator(UDID, 5000)).rejects.toBe(error);
-    expect(harness.calls).not.toContain("xcrun simctl list devices --json");
+    // The only discovery is cleanup's fresh Shutdown verification, not boot recovery.
+    expect(
+      harness.calls.filter((call) => call === "xcrun simctl list devices --json"),
+    ).toHaveLength(1);
   });
 
   test("does not recover when a crafted non-simulator UDID appears in the error message", async () => {
@@ -1453,6 +1597,23 @@ describe("SimCtlClient boot self-verification", () => {
         if (args[1] === "bootstatus") {
           throw error;
         }
+        if (args[1] === "list" && args[2] === "devices") {
+          return createExecResult(
+            JSON.stringify({
+              devices: {
+                runtime: [
+                  {
+                    udid: craftedUdid,
+                    name: "Invalid fixture",
+                    state: "Shutdown",
+                    isAvailable: true,
+                  },
+                ],
+              },
+            }),
+            "",
+          );
+        }
         return createExecResult("", "");
       },
       {
@@ -1463,7 +1624,7 @@ describe("SimCtlClient boot self-verification", () => {
     );
 
     await expect(simctl.startSimulator(craftedUdid, 5000)).rejects.toBe(error);
-    expect(calls).not.toContain("xcrun simctl list devices --json");
+    expect(calls.filter((call) => call === "xcrun simctl list devices --json")).toHaveLength(1);
   });
 
   test("retries a wedged boot after a shutdown and a backoff, then succeeds", async () => {
@@ -1853,7 +2014,7 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getSleepHistory()).toEqual([250, 250]);
   });
 
-  test("cancellation during a discovery retry releases the boot lease without more reads", async () => {
+  test("cancellation during a discovery retry attaches an unavailable cleanup state read", async () => {
     const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
     harness.failListDevicesWith(new Error("discovery unavailable"), 100);
     const controller = new AbortController();
@@ -1866,9 +2027,15 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getPendingTimeouts()).toContain(250);
     const reason = new Error("request cancelled during discovery");
     controller.abort(reason);
-    expect(await outcome).toBe(reason);
+    const failure = await outcome;
+    expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError)) {
+      throw new Error("Expected original cancellation and cleanup failure");
+    }
+    expect(failure.cause).toBe(reason);
+    expect(String(failure.errors[1])).toContain("discovery unavailable");
     expect(harness.timer.getPendingTimeoutCount()).toBe(0);
-    expect(harness.calls.filter((call) => call.includes("list devices"))).toHaveLength(1);
+    expect(harness.calls.filter((call) => call.includes("list devices"))).toHaveLength(2);
     expect(shutdownCalls(harness.calls)).toHaveLength(1);
     expect(harness.timer.now()).toBe(0);
     harness.failListDevicesWith(new Error("unused"), 0);
@@ -1883,7 +2050,7 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.now()).toBe(1000);
     expect(
       harness.calls.filter((call) => call.includes("list devices")).length,
-    ).toBeLessThanOrEqual(4);
+    ).toBeLessThanOrEqual(5);
     expect(shutdownCalls(harness.calls)).toHaveLength(1);
   });
 

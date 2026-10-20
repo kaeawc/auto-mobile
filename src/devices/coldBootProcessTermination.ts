@@ -16,7 +16,7 @@ type TerminationTimer = Pick<Timer, "setTimeout" | "clearTimeout">;
 export interface ColdBootTermination {
   /** Resolves when the process emits `exit`; already resolved for a settled or non-observable handle. */
   exited: Promise<void>;
-  /** True once the process is confirmed gone; false when it survived SIGTERM and SIGKILL. */
+  /** True once termination is confirmed; false for a surviving process or failed simulator cleanup. */
   confirmed: Promise<boolean>;
 }
 
@@ -26,6 +26,8 @@ export interface ColdBootTermination {
  * more bounded wait. `kill()` only requests signal delivery, so the emulator is
  * still holding its AVD lock files until it emits `exit`; callers must not
  * release the AVD's lifecycle lease before `confirmed` resolves true.
+ * A simulator handle owns its bounded shutdown instead: wait for its
+ * exit event and confirm only a successful cleanup exit code.
  *
  * The first signal is sent synchronously, before this returns.
  */
@@ -50,9 +52,11 @@ export function terminateColdBootProcess(
   }
   return {
     exited,
-    confirmed: alreadySettled
-      ? Promise.resolve(true)
-      : awaitColdBootSettlement(exited, processHandle, label, timer),
+    confirmed:
+      processHandle.terminationConfirmed ??
+      (alreadySettled
+        ? Promise.resolve(true)
+        : awaitColdBootSettlement(exited, processHandle, label, timer)),
   };
 }
 

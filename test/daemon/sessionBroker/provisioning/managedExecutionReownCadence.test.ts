@@ -6,6 +6,7 @@ import {
   MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS,
   MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS,
   MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS,
+  MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS,
   ManagedExecutionReowner,
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
@@ -53,7 +54,10 @@ afterEach(async () => {
   }
 });
 
-async function harness(policy?: ManagedExecutionReownerDependencies["retryBackoff"]) {
+async function harness(
+  policy?: ManagedExecutionReownerDependencies["retryBackoff"],
+  ids: readonly string[] = ["a", "b"],
+) {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer, () => false);
   const scope = await registry.ensureScope({
@@ -65,7 +69,7 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
     throw new Error(scope.kind);
   }
   let assignmentA: BindingAssignmentRecord | undefined;
-  for (const [bindingIndex, sessionUuid] of ["a", "b"].entries()) {
+  for (const [bindingIndex, sessionUuid] of ids.entries()) {
     const key = { scopeKey: scope.scope.scopeKey, bindingIndex };
     await registry.initBinding(key, { role: "app", platform: "android", requestedSpec: {} });
     await registry.commitBinding(
@@ -97,6 +101,7 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
     until: 0,
     blocked: 0,
     successBlocked: 0,
+    refusalBlocked: 0,
     retry: false,
     refusal: undefined as ClaimExecutionResult | undefined,
     hangClaim: false,
@@ -115,6 +120,7 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
         throw new Error("SQLITE_BUSY: last error");
       }
       if (behavior.refusal) {
+        timer.setCurrentTime(timer.now() + behavior.refusalBlocked);
         return behavior.refusal;
       }
       if (behavior.retry) {
@@ -131,7 +137,7 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
   let opens = 0;
   const open = Promise.withResolvers<ManagedExecutionReownRegistry>();
   const opening = { hang: false };
-  const present = new Set(["a", "b"]);
+  const present = new Set(ids);
   const confirmed: number[] = [];
   const held = new Set(present);
   const lost: number[] = [];
@@ -726,10 +732,20 @@ test("published hold timing matches the derived cap in the ownership guide", () 
 
 const MAX_UNCONFIRMED_MS = MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS;
 
-for (const kind of ["scope_not_valid", "binding_missing", "device_assigned_elsewhere"] as const) {
+for (const kind of [
+  "scope_not_valid",
+  "binding_missing",
+  "device_assigned_elsewhere", // Defensive shared-result case; emitted only by commitBinding.
+  "binding_in_use",
+] as const) {
   test(`${kind} loses ownership on the first claim and releases through the hook`, async () => {
     const h = await harness();
     const refusals: Record<typeof kind, ClaimExecutionResult> = {
+      binding_in_use: {
+        kind: "binding_in_use",
+        assignment: h.assignmentA,
+        owner: { ...OWNER, sessionUuid: "peer" },
+      },
       scope_not_valid: { kind: "scope_not_valid", scope: null },
       binding_missing: { kind: "binding_missing" },
       device_assigned_elsewhere: { kind: "device_assigned_elsewhere", holder: h.assignmentA },
@@ -745,18 +761,13 @@ for (const kind of ["scope_not_valid", "binding_missing", "device_assigned_elsew
   });
 }
 
-for (const kind of ["binding_not_ready", "stale_binding", "binding_in_use"] as const) {
+for (const kind of ["binding_not_ready", "stale_binding"] as const) {
   test(`${kind} retries and can confirm later`, async () => {
     const h = await harness();
     const assignment = h.assignmentA;
     const refusals: Record<typeof kind, ClaimExecutionResult> = {
       binding_not_ready: { kind: "binding_not_ready", assignment },
       stale_binding: { kind: "stale_binding", current: assignment },
-      binding_in_use: {
-        kind: "binding_in_use",
-        assignment,
-        owner: { ...OWNER, sessionUuid: "peer" },
-      },
     };
     h.behavior.refusal = refusals[kind];
     await h.reowner.reown(["a"], { rehydrated: true });
@@ -822,7 +833,7 @@ test("a retained non-live session stops retrying without discarding its admissio
   expect(h.reowner.automationRefusal("a")).toBeInstanceOf(BindingOwnershipUnconfirmedError);
 });
 
-test("the episode deadline cancels a hung claim and ignores its late success", async () => {
+test("an in-flight attempt times out after the episode bound and ignores its abandoned success", async () => {
   const h = await harness();
   h.behavior.hangClaim = true;
   const inline = h.reowner.reown(["a"], { rehydrated: true });
@@ -830,8 +841,10 @@ test("the episode deadline cancels a hung claim and ignores its late success", a
   await inline;
   expect(h.lost).toEqual([]);
   await h.step(1);
+  expect(h.lost).toEqual([]);
+  await h.step(MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS);
   await h.reowner.whenIdle();
-  expect(h.lost).toEqual([MAX_UNCONFIRMED_MS]);
+  expect(h.lost).toEqual([60_200]);
   h.claim.resolve({ kind: "claimed", assignment: h.assignmentA });
   await h.step(0);
   expect(h.confirmed).toEqual([]);
@@ -839,17 +852,133 @@ test("the episode deadline cancels a hung claim and ignores its late success", a
   expect(h.timer.getPendingTimeoutCount()).toBe(0);
 });
 
-for (const elapsed of [14_999, 15_000]) {
-  test(`a synchronous claim completing at ${elapsed} ms obeys the episode deadline`, async () => {
+for (const elapsed of [
+  14_999,
+  15_000,
+  MAX_UNCONFIRMED_MS - 1,
+  MAX_UNCONFIRMED_MS,
+  MAX_UNCONFIRMED_MS + 1,
+]) {
+  for (const priorFailures of [0, MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS - 1]) {
+    test(`a claim confirming at ${elapsed} ms after ${priorFailures} failures wins`, async () => {
+      const h = await harness();
+      h.behavior.failures = priorFailures;
+      h.behavior.successBlocked = elapsed - (priorFailures ? 75 : 0);
+      await h.reowner.reown(["a"], { rehydrated: true });
+      if (priorFailures) {
+        await h.step(75);
+      }
+      await h.reowner.whenIdle();
+      expect(h.confirmed).toEqual([elapsed]);
+      expect(h.lost).toEqual([]);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      await h.step(MAX_UNCONFIRMED_MS);
+      expect(h.calls).toHaveLength(priorFailures + 1);
+    });
+  }
+}
+
+for (const elapsed of [MAX_UNCONFIRMED_MS, MAX_UNCONFIRMED_MS + 1]) {
+  test(`a retry refusal at ${elapsed} ms after minimum attempts loses immediately`, async () => {
     const h = await harness();
-    expect(MAX_UNCONFIRMED_MS).toBe(15_000);
-    h.behavior.successBlocked = elapsed;
+    h.behavior.failures = MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS - 1;
+    h.behavior.refusal = { kind: "binding_not_ready", assignment: h.assignmentA };
+    h.behavior.refusalBlocked = elapsed - 75;
     await h.reowner.reown(["a"], { rehydrated: true });
+    await h.step(74);
+    expect(h.lost).toEqual([]);
+    await h.step(1);
     await h.reowner.whenIdle();
-    expect(h.confirmed).toEqual(elapsed < MAX_UNCONFIRMED_MS ? [elapsed] : []);
-    expect(h.lost).toEqual(elapsed < MAX_UNCONFIRMED_MS ? [] : [elapsed]);
+    expect(h.calls).toHaveLength(MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+    expect(h.lost).toEqual([elapsed]);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
-    await h.step(MAX_UNCONFIRMED_MS);
-    expect(h.calls).toHaveLength(1);
   });
 }
+
+test("recovery beyond the bound leaves a full attempt budget after recovery", async () => {
+  const h = await harness();
+  const recovery = Promise.withResolvers<void>();
+  h.behavior.failures = Infinity;
+  h.reowner.noteRecovering("a", recovery.promise);
+  await h.step(2 * MAX_UNCONFIRMED_MS);
+  expect(h.calls).toHaveLength(0);
+  expect(h.lost).toEqual([]);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  expect(h.reowner.automationRefusal("a")).toMatchObject({ retryAfterMs: 1_000 });
+  recovery.resolve();
+  await h.step(0);
+  expect(h.calls.map((call) => call.at)).toEqual([2 * MAX_UNCONFIRMED_MS]);
+  expect(h.reowner.automationRefusal("a")).toMatchObject({ retryAfterMs: 1_000 });
+  await h.step(MAX_UNCONFIRMED_MS - 1);
+  expect(h.lost).toEqual([]);
+  await h.step(1);
+  expect(h.calls.length).toBeGreaterThanOrEqual(MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+  expect(h.lost).toEqual([3 * MAX_UNCONFIRMED_MS]);
+});
+
+test("twenty sequential contended sessions each get minimum attempts before loss", async () => {
+  const ids = Array.from({ length: 20 }, (_, i) => `session-${i}`);
+  const h = await harness(undefined, ids);
+  h.behavior.failures = Infinity;
+  h.behavior.blocked = 3_300;
+  const batch = h.reowner.reown(ids, { rehydrated: true });
+  await h.step(MAX_UNCONFIRMED_MS * ids.length);
+  await batch;
+  await h.reowner.whenIdle();
+  expect(h.lost).toHaveLength(ids.length);
+  for (const id of ids) {
+    const calls = h.calls.filter((call) => call.id === id);
+    expect(calls.length).toBeGreaterThanOrEqual(MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+    expect(h.reowner.ownershipState(id)).toBe("lost");
+  }
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("deadline delivery during a third claim waits for proof instead of overriding it", async () => {
+  const h = await harness();
+  h.behavior.failures = MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS - 1;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  await h.step(25);
+  h.behavior.hangClaim = true;
+  h.timer.setCurrentTime(MAX_UNCONFIRMED_MS - 100);
+  await h.step(0);
+  expect(h.calls).toHaveLength(MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+  await h.step(101);
+  expect(h.lost).toEqual([]);
+  h.claim.resolve({ kind: "claimed", assignment: h.assignmentA });
+  await h.step(0);
+  await h.reowner.whenIdle();
+  expect(h.confirmed).toEqual([MAX_UNCONFIRMED_MS + 1]);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("deadline with fewer than minimum attempts leaves queued retries admitted", async () => {
+  const h = await harness();
+  h.behavior.failures = Infinity;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  const pacing = new RegistryRetryPacing({ timer: h.timer });
+  const gate = Promise.withResolvers<boolean>();
+  const turn = pacing.run(
+    () => gate.promise,
+    (result) => result,
+  );
+  try {
+    await h.step(MAX_UNCONFIRMED_MS);
+    expect(h.calls).toHaveLength(1);
+    expect(h.lost).toEqual([]);
+    gate.resolve(true);
+    await turn;
+    await h.step(0);
+    expect(h.calls).toHaveLength(2);
+    expect(h.lost).toEqual([]);
+    await h.step(50);
+    await h.reowner.whenIdle();
+    expect(h.calls).toHaveLength(MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+    expect(h.lost).toEqual([MAX_UNCONFIRMED_MS + 50]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  } finally {
+    gate.resolve(true);
+    pacing.close();
+    await turn;
+  }
+});

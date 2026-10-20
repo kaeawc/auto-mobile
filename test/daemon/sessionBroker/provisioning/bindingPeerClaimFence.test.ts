@@ -400,17 +400,18 @@ describe("rehydrated managed execution peer claim fence", () => {
   );
 
   testWithFreshBinding(
-    "a peer winning between read and claim retries before current ownership proves loss",
+    "a peer winning between read and claim reports binding_in_use and warns once",
     async () => {
       faults.hooks.beforeClaim = async () => {
         faults.hooks.beforeClaim = undefined;
         expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
       };
       await reowner.reown([S], { rehydrated: true });
-      expect(reowner.automationRefusal(S)).toBeInstanceOf(BindingOwnershipUnconfirmedError);
-      await reowner.reown([S]);
-      expect(reowner.automationRefusal(S)).toBeInstanceOf(BindingOwnershipLostError);
+      expect(reowner.automationRefusal(S)?.message).toContain(
+        "terminal after binding-ownership-lost",
+      );
       expect(timer.getPendingTimeouts()).toEqual([]);
+      await reowner.reown([S]);
       expect(warn.mock.calls).toHaveLength(1);
       expect(await registry.getAssignment(key)).toMatchObject({
         execOwner: { sessionUuid: `${S2}-${PEERS[0]}` },
@@ -650,7 +651,7 @@ describe("rehydrated managed execution peer claim fence", () => {
   );
 
   testWithFreshBinding(
-    "foreign-owner evidence gates an unmarked binding_in_use refusal until a fresh read",
+    "foreign-owner evidence marks an unmarked binding_in_use refusal lost",
     async () => {
       faults.hooks.beforeClaim = async () => {
         faults.hooks.beforeClaim = undefined;
@@ -669,8 +670,6 @@ describe("rehydrated managed execution peer claim fence", () => {
           judge = viewOf(OWNER.pid);
         }
       };
-      await reowner.reown([S]);
-      expect(reowner.automationRefusal(S)).toBeInstanceOf(BindingOwnershipUnconfirmedError);
       await reowner.reown([S]);
       expect(reowner.automationRefusal(S)).toBeInstanceOf(BindingOwnershipLostError);
       expect(timer.getPendingTimeouts()).toEqual([]);

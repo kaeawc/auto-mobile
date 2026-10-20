@@ -82,8 +82,12 @@ class LaunchCancellationRethrowTest {
 
     // Four actions and two broadcast helpers; the bodyless sender declaration is skipped.
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertEquals(3, LaunchCancellationScanner.scan(withoutRethrow).violations.size)
+    assertActionsUseFailureHelper(
+      source,
+      "withCaPolicyFailures",
+      "performInstallCaCertificate",
+      "performRemoveCaCertificate",
+    )
   }
 
   @Test
@@ -92,8 +96,13 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertEquals(3, LaunchCancellationScanner.scan(withoutRethrow).violations.size)
+    assertActionsUseFailureHelper(
+      source,
+      "withSettingsFailures",
+      "performSettingsRead",
+      "performSettingsWrite",
+      "performSettingsList",
+    )
   }
 
   @Test
@@ -102,8 +111,53 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertTrue(LaunchCancellationScanner.scan(withoutRethrow).violations.isNotEmpty())
+    assertActionsUseFailureHelper(
+      source,
+      "withPackageFailures",
+      "performInstalledPackages",
+      "performPackageInfo",
+      "performLaunchIntent",
+    )
+  }
+
+  private fun assertActionsUseFailureHelper(
+    source: String,
+    helperName: String,
+    vararg actionNames: String,
+  ) {
+    val code = KotlinSourceScan.maskLiteralsAndComments(source)
+    for (actionName in actionNames) {
+      val declaration = code.indexOf("suspend fun $actionName(")
+      assertTrue("$actionName must remain a scanned suspend action", declaration >= 0)
+      val paramsOpen = code.indexOf('(', declaration)
+      val paramsEnd = KotlinSourceScan.matchParen(code, paramsOpen)
+      val bodyOpen = code.indexOf('{', paramsEnd)
+      val body = code.substring(bodyOpen, KotlinSourceScan.matchBrace(code, bodyOpen))
+      assertEquals(
+        "$actionName must route its platform work through $helperName",
+        1,
+        Regex("\\b$helperName\\s*\\(").findAll(body).count(),
+      )
+    }
+    assertFailureHelperRethrowsCancellation(source, helperName)
+  }
+
+  private fun assertFailureHelperRethrowsCancellation(source: String, helperName: String) {
+    val declaration = source.indexOf("private inline fun <T> $helperName(")
+    check(declaration >= 0) { "$helperName not found" }
+    val expression = source.indexOf("=\n", declaration)
+    check(expression >= 0) { "$helperName expression body not found" }
+    // These final, inline helpers execute in their caller's coroutine. Exercise their actual catch
+    // clauses with the scanner's broad-catch model: IllegalStateException also includes
+    // cancellation.
+    val body = source.substring(expression + 1).replace("IllegalStateException", "Exception")
+    val coroutine = "scope.launch { $body }"
+    assertTrue(LaunchCancellationScanner.scan(coroutine).violations.isEmpty())
+    assertEquals(
+      "removing the helper's cancellation rethrow must expose a swallowing catch",
+      1,
+      LaunchCancellationScanner.scan(coroutine.replace("throw e", "Unit")).violations.size,
+    )
   }
 
   @Test

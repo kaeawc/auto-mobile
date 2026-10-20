@@ -1695,4 +1695,50 @@ class StorageSubscriptionManagerTest {
     // Every distinct file's subscription is live and merged under that one observer.
     assertEquals(threadCount, manager.getActiveSubscriptions().size)
   }
+
+  @Test
+  fun `provider null pointer failure becomes a typed storage error`() {
+    every { contentResolver.call(any<Uri>(), eq("listFiles"), any(), any()) } throws
+      NullPointerException("provider failed through Binder")
+
+    val result = manager.listPreferenceFiles("com.example.app")
+
+    assertTrue(result.exceptionOrNull() is StorageError.SdkError)
+  }
+
+  @Test
+  fun `watcher survives provider null pointer and plain runtime failures`() =
+    runTest(dispatcher) {
+      val observer = slot<ContentObserver>()
+      var fetchCalls = 0
+      val runtimeFailure = RuntimeException("unclassified provider failure")
+      val provider = StorageSubscriptionManager.BackgroundCalls { _, method, _ ->
+        if (method == "getChanges") {
+          when (++fetchCalls) {
+            1 -> throw NullPointerException("provider failed through Binder")
+            2 -> throw runtimeFailure
+            else -> changesBundle("auth", listOf(1L))
+          }
+        } else Bundle()
+      }
+      manager.destroy()
+      manager = StorageSubscriptionManager(context, dispatcher, this, provider)
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        Bundle().apply { putBoolean("success", true) }
+      every { contentResolver.registerContentObserver(any(), any(), capture(observer)) } returns
+        Unit
+      manager.subscribe("com.example.app", "auth")
+      val events = mutableListOf<PreferenceChangeEvent>()
+      backgroundScope.launch { manager.changeEvents.toList(events) }
+      runCurrent()
+
+      repeat(3) {
+        observer.captured.onChange(false)
+        runCurrent()
+      }
+
+      assertEquals(3, fetchCalls)
+      assertEquals(1, events.size)
+      manager.destroy()
+    }
 }

@@ -51,7 +51,26 @@ internal fun discoverSdkCapabilities(
   } catch (error: SerializationException) {
     Log.w("SdkCapabilities", "Capability snapshot was malformed", error)
     unavailableSdkCapabilities("MALFORMED_RESPONSE")
-  } catch (error: Exception) {
+  } catch (error: IllegalArgumentException) {
+    Log.w("SdkCapabilities", "Capability discovery unavailable", error)
+    unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
+  } catch (error: IllegalStateException) {
+    if (error is kotlinx.coroutines.CancellationException) throw error
+    Log.w("SdkCapabilities", "Capability discovery unavailable", error)
+    unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
+  } catch (error: SecurityException) {
+    Log.w("SdkCapabilities", "Capability discovery unavailable", error)
+    unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
+  } catch (error: UnsupportedOperationException) {
+    Log.w("SdkCapabilities", "Capability discovery unavailable", error)
+    unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
+  } catch (error: android.os.BadParcelableException) {
+    Log.w("SdkCapabilities", "Capability discovery unavailable", error)
+    unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
+  } catch (error: NullPointerException) {
+    Log.w("SdkCapabilities", "Capability discovery unavailable", error)
+    unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
+  } catch (error: android.os.RemoteException) {
     Log.w("SdkCapabilities", "Capability discovery unavailable", error)
     unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
   }

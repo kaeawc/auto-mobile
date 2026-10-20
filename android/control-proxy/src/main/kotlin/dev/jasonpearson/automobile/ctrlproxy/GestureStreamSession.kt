@@ -184,7 +184,20 @@ internal class GestureStreamSession<S>(
               }
             },
           )
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
+          // No Android log call: this framework-free session has no injected logger for JVM tests.
+          if (!terminal && !releasing) {
+            liftFrom = precedingLift
+            fail(e.message ?: "Failed to build streamed gesture stroke")
+          }
+        } catch (e: IllegalStateException) {
+          if (e is kotlinx.coroutines.CancellationException) throw e
+          // No Android log call: this framework-free session has no injected logger for JVM tests.
+          if (!terminal && !releasing) {
+            liftFrom = precedingLift
+            fail(e.message ?: "Failed to build streamed gesture stroke")
+          }
+        } catch (e: SecurityException) {
           // No Android log call: this framework-free session has no injected logger for JVM tests.
           if (!terminal && !releasing) {
             liftFrom = precedingLift
@@ -231,7 +244,12 @@ internal class GestureStreamSession<S>(
         onFailed = { finish(false, error) },
         onRejected = { finish(false, error) },
       )
-    } catch (_: Exception) {
+    } catch (_: IllegalArgumentException) {
+      finish(false, error)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      finish(false, error)
+    } catch (_: SecurityException) {
       finish(false, error)
     }
   }

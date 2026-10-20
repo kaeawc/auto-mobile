@@ -1,6 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
+import { openSqliteBindingRegistry } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import {
+  BindingReconciler,
+  DefaultManagedSpecResolver,
+} from "../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { ProvisionDeviceError } from "../../../src/devices/exactDeviceProvisioning";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BrokerExecutionReleaseResult } from "../../../src/daemon/sessionBroker/provisioning/executionRelease";
-import type { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
+import { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { BindingJournal } from "../../../src/daemon/sessionBroker/registry/bindingJournal";
 import {
   computeBindingScopeKey,
@@ -25,6 +34,7 @@ import {
   FakeDeleter,
   FakeInventory,
   FakeMatcher,
+  FakeProvisioner,
 } from "./registry/fixtures/reconcilerFakes";
 
 const SCOPE: BindingScopeIdentity = {
@@ -199,6 +209,7 @@ describe("ManagedDevicePort preparation and release", () => {
     let received: BrokerProvisionRequest | undefined;
     const port = new ManagedDevicePort({
       scope: SCOPE,
+      timer: new FakeTimer(),
       brokerDeviceAcquisition: acquisition(async (config) => {
         received = config;
         return readyResult(config);
@@ -235,7 +246,7 @@ describe("ManagedDevicePort preparation and release", () => {
           },
         },
       ],
-      preparationTimeoutMs: 30_000,
+      preparationTimeoutMs: 20_000,
       idleTimeoutMs: 120_000,
       executionOwnerPid: 303,
     });
@@ -709,5 +720,277 @@ describe("ManagedDevicePort destruction", () => {
       stableDeviceId: "UDID-1",
       state: "settling",
     });
+  });
+});
+
+describe("ManagedDevicePort retained creation cleanup", () => {
+  test("destroying a resource cleans a created simulator retained after a retryable readiness deadline", async () => {
+    const rig = await destructionRig();
+    // The old assignment disappeared out of band; acquisition must create its replacement.
+    rig.inventory.devices = [];
+    const provisioner = new FakeProvisioner(rig.inventory);
+    provisioner.beforeReturn = async (request) => {
+      const device = rig.inventory.devices.find((candidate) => candidate.name === request.name)!;
+      device.deviceId = "UDID-retained";
+      throw new ProvisionDeviceError("timeout", "readiness deadline", true, {
+        retainedDevice: { platform: "ios", stableId: device.deviceId!, name: device.name },
+      });
+    };
+    const reconciler = new BindingReconciler({
+      registry: rig.registry,
+      inventory: rig.inventory,
+      matcher: new FakeMatcher(),
+      provisioner,
+      deleter: rig.deleter,
+      claims: new FakeClaims(),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(),
+      resolver: new DefaultManagedSpecResolver(),
+      journal: { owner: OWNER, isOwnerLive: () => false },
+    });
+    expect(
+      await reconciler.reconcile({
+        key: rig.key,
+        role: "session-broker-device",
+        platform: "ios",
+        requestedSpec: {
+          runtime: IOS.profile.runtimeId,
+          deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
+        },
+        deadlineMs: 60_000,
+      }),
+    ).toMatchObject({ outcome: "failed", failure: { retryable: true } });
+    expect(await rig.registry.listOpenBindingJournal(rig.key)).toMatchObject([
+      {
+        phase: "created",
+        target: { newStableId: "UDID-retained" },
+      },
+    ]);
+    expect(rig.deleter.calls).toEqual([]);
+    // Exercise the existing destruction path used after release/expiry, with no retry first.
+    const port = destroyingPort(rig, async (id) => releaseResult(id));
+    expect(await port.destroy(rig.resource)).toBe("absent");
+    expect(rig.inventory.devices).toEqual([]);
+    expect(rig.deleter.stableIds()).toEqual(["UDID-retained"]);
+    expect((await rig.registry.getAssignment(rig.key))?.stableDeviceId).toBeNull();
+    expect(await rig.registry.listOpenBindingJournal(rig.key)).toEqual([]);
+  });
+});
+
+describe("ManagedDevicePort retained readiness retries", () => {
+  async function retryRig(registry: BindingRegistry, timer: FakeTimer) {
+    await registry.ensureScope(SCOPE);
+    const inventory = new FakeInventory();
+    const provisioner = new FakeProvisioner(inventory);
+    const deleter = new FakeDeleter(inventory);
+    const claims = new FakeClaims();
+    const reconciler = new BindingReconciler({
+      registry,
+      inventory,
+      provisioner,
+      deleter,
+      claims,
+      matcher: new FakeMatcher(),
+      resolver: new DefaultManagedSpecResolver(),
+      timer,
+      idGenerator: new FakeIdGenerator(),
+      journal: { owner: OWNER, isOwnerLive: () => false },
+    });
+    const journal = new BindingJournal({
+      registry,
+      inventory,
+      deleter,
+      claims,
+      matcher: new FakeMatcher(),
+      timer,
+      owner: OWNER,
+      isOwnerLive: () => false,
+    });
+    const budgets: number[] = [];
+    const acquisitionPort = new BrokerDeviceAcquisition({
+      registry: async () => registry,
+      reconcile: async (_registry, request) => {
+        budgets.push(request.deadlineMs);
+        return reconciler.reconcile(request);
+      },
+      sessions: {
+        claimLivenessOwnership: async () => "claimed",
+        adoptManagedExecutionLivenessPolicy: async () => {},
+        releaseSession: async () => {},
+      },
+      owner: () => OWNER,
+      timer,
+    });
+    provisioner.beforeReturn = async (request) => {
+      if (request.mode !== "create") {
+        return;
+      }
+      const device = inventory.devices.find((candidate) => candidate.name === request.name)!;
+      throw new ProvisionDeviceError("timeout", "readiness deadline", true, {
+        retainedDevice: { platform: "ios", stableId: device.deviceId!, name: device.name },
+      });
+    };
+    const port = new ManagedDevicePort({
+      scope: SCOPE,
+      timer,
+      registry,
+      bindingJournal: journal,
+      brokerDeviceAcquisition: acquisitionPort,
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+    });
+    return { port, provisioner, inventory, deleter, budgets };
+  }
+
+  test("prepare retries the created journal by adoption without creating or destroying another simulator", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const registry = new FakeBindingRegistry(timer);
+    const rig = await retryRig(registry, timer);
+    expect(
+      await rig.port.prepare(resource(), {
+        livenessOwnerToken: "consumer",
+        preparationTimeoutMs: 1000,
+      }),
+    ).toMatchObject({ sessionId: "session-1" });
+    expect(rig.provisioner.calls.map((call) => call.mode)).toEqual(["create", "adopt"]);
+    expect(rig.provisioner.calls[1]?.deviceId).toBe("UDID-1");
+    expect(rig.provisioner.created()).toHaveLength(1);
+    expect(rig.deleter.calls).toEqual([]);
+    expect(rig.budgets[0]).toBeLessThan(rig.budgets[1]!);
+    expect(await registry.listOpenBindingJournal({ scopeKey: SCOPE_KEY, bindingIndex: 7 })).toEqual(
+      [],
+    );
+  });
+
+  test.each([
+    { timeoutMs: 900, firstDeadlineMs: 600 },
+    { timeoutMs: 600_000, firstDeadlineMs: 420_000 },
+  ])(
+    "prepare reserves a warm retry after create consumes its entire attempt budget: %p",
+    async ({ timeoutMs, firstDeadlineMs }) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const rig = await retryRig(new FakeBindingRegistry(timer), timer);
+      const firstFailure = rig.provisioner.beforeReturn!;
+      rig.provisioner.beforeReturn = async (request) => {
+        if (request.mode === "create") {
+          timer.advanceTime(request.deadlineMs - timer.now());
+          return firstFailure(request);
+        }
+      };
+
+      expect(
+        await rig.port.prepare(resource(), {
+          livenessOwnerToken: "consumer",
+          preparationTimeoutMs: timeoutMs,
+        }),
+      ).toMatchObject({ sessionId: "session-1" });
+      expect(rig.budgets).toEqual([firstDeadlineMs, timeoutMs]);
+      expect(rig.provisioner.calls.map((call) => call.mode)).toEqual(["create", "adopt"]);
+      expect(rig.provisioner.calls[1]?.deviceId).toBe("UDID-1");
+      expect(rig.provisioner.created()).toHaveLength(1);
+      expect(rig.deleter.calls).toEqual([]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test.each([
+    "ready",
+    "deadline",
+    "overall-budget-exhausted",
+    "warm-timeout",
+    "retry-delay-deadline",
+    "retry-delay-abort",
+    "abort",
+    "permanent",
+  ] as const)("broker retained readiness retry: %s", async (outcome) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const registry = await openSqliteBindingRegistry({ dbPath: ":memory:", timer });
+    const rig = await retryRig(registry, timer);
+    const controller = new AbortController();
+    const firstFailure = rig.provisioner.beforeReturn!;
+    rig.provisioner.beforeReturn = async (request) => {
+      if (request.mode === "create") {
+        if (outcome === "overall-budget-exhausted") {
+          // An overrun consumes the entire prepare budget, including its retry reserve.
+          timer.advanceTime(1000);
+        } else if (outcome === "retry-delay-deadline") {
+          timer.advanceTime(990);
+        } else if (outcome === "retry-delay-abort") {
+          timer.setTimeout(() => controller.abort(), 10);
+        }
+        return firstFailure(request);
+      }
+      if (outcome === "deadline") {
+        timer.advanceTime(1000);
+        throw new ProvisionDeviceError("timeout", "warm readiness deadline");
+      }
+      if (outcome === "warm-timeout") {
+        throw new ProvisionDeviceError("timeout", "warm readiness failed early");
+      }
+      if (outcome === "abort") {
+        controller.abort();
+        throw controller.signal.reason;
+      }
+      if (outcome === "permanent") {
+        throw new ProvisionDeviceError("identity_conflict", "identity changed");
+      }
+    };
+    const store = registry.sessionBrokerStore(SCOPE_KEY);
+    const failed = spyOn(store, "fail");
+    const destroy = spyOn(rig.port, "destroy");
+    const broker = new SessionBroker({
+      store,
+      devices: rig.port,
+      owner: OWNER,
+      limits: { totalDeviceCap: 1, sessionCap: 1, idlePoolCap: 0 },
+      catalog: async () => iosCatalog(),
+      defaults: () => iosDefaults(),
+    });
+    try {
+      const result = await broker.prepare(
+        {
+          contractVersion: 1,
+          requestId: "retained-retry",
+          preparationTimeoutMs: 1000,
+          device: {
+            schemaVersion: 1,
+            platform: "ios",
+            hardware: { kind: "omitted" },
+            os: { kind: "omitted" },
+          },
+        },
+        "consumer",
+        controller.signal,
+      );
+      expect(result.outcome).toBe(outcome === "ready" ? "ready" : "failed");
+      expect(rig.provisioner.created()).toHaveLength(1);
+      expect(rig.provisioner.calls.map((call) => call.mode)).toEqual(
+        ["overall-budget-exhausted", "retry-delay-deadline", "retry-delay-abort"].includes(outcome)
+          ? ["create"]
+          : ["create", "adopt"],
+      );
+      if (outcome === "ready") {
+        expect(failed).not.toHaveBeenCalled();
+        expect(destroy).not.toHaveBeenCalled();
+        expect((await store.listResources()).map((entry) => entry.state)).toEqual(["active"]);
+        expect(rig.deleter.calls).toEqual([]);
+      } else {
+        expect(failed).toHaveBeenCalledTimes(1);
+        expect(destroy).toHaveBeenCalled();
+        expect(rig.inventory.devices).toEqual([]);
+        expect(rig.deleter.stableIds()).toEqual(["UDID-1"]);
+        expect(result.cleanupPending).toBe(false);
+        if (outcome === "retry-delay-abort") {
+          expect(result.failure).toMatchObject({ code: "cancelled", retryable: true });
+        }
+        expect(await registry.listOpenBindingJournal()).toEqual([]);
+      }
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      await broker.close();
+      await registry.close();
+    }
   });
 });

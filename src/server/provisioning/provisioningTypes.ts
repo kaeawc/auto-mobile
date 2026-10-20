@@ -85,6 +85,8 @@ export type ProvisionBootOptions = {
 };
 
 export type ProvisionSettlementState = {
+  /** Only a retryable readiness deadline after creation, before binding, may retain a simulator. */
+  retainCreatedForRetry?: boolean;
   exactProvisioning?: Promise<unknown>;
   unownedColdBootSettlement?: Promise<void>;
   bindingSettlements: Promise<unknown>[];

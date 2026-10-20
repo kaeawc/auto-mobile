@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import {
@@ -10,6 +10,10 @@ import { SESSION_REQUEST_ABANDONED_CODE } from "../../../src/daemon/sessionBroke
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+
+afterEach(() => {
+  mock.restore();
+});
 
 function config(requestId: string): SessionConfig {
   return {
@@ -81,9 +85,10 @@ describe("broker result receipts", () => {
   test("an abandonment committed while the ready receipt is assembled is not reported ready", async () => {
     const activate = options.store.activate.bind(options.store);
     const listResources = options.store.listResources.bind(options.store);
+    const listResourcesSpy = spyOn(options.store, "listResources");
     spyOn(options.store, "activate").mockImplementationOnce(async (...args) => {
       const request = await activate(...args);
-      spyOn(options.store, "listResources").mockImplementationOnce(async () => {
+      listResourcesSpy.mockImplementationOnce(async () => {
         await options.store.abandon("raced", options.owner, "owner-token");
         return listResources();
       });

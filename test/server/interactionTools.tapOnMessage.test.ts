@@ -11,7 +11,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { ObserveResult } from "../../src/models";
 import { warmedTests } from "../helpers/interactionCancellation";
-import { afterEach, describe, expect, spyOn } from "bun:test";
+import { afterEach, describe, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   type InteractionToolDependencies,
@@ -265,16 +265,18 @@ describe("tapOnHandler (registered handler wiring)", () => {
       viewHierarchy: hierarchy,
       display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     };
-    const tap = new TapOnElement(device, adb, {
+    class ObservedTap extends TapOnElement {
+      override observedInteraction: TapOnElement["observedInteraction"] = async (action) => {
+        const result = asObservedResult(await action(recordObservationRead(observation)));
+        result.observation = observation;
+        return result;
+      };
+    }
+    const tap = new ObservedTap(device, adb, {
       timer,
       elementSelector: new FakeElementSelector(element),
       tapStrategy: new FakeTapStrategy(),
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
-    });
-    spyOn(tap, "observedInteraction").mockImplementation(async (action) => {
-      const result = asObservedResult(await action(recordObservationRead(observation)));
-      result.observation = observation;
-      return result;
     });
     const error =
       'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';

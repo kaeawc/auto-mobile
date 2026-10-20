@@ -1,8 +1,6 @@
 # AutoMobile oxlint ratchet baseline -- see scripts/oxlint-baseline.sh
 # Gated rules: eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) eslint(max-classes-per-file) auto-mobile(max-class-lines) auto-mobile(catch-convention) typescript(no-floating-promises) typescript(no-misused-promises)
 # Also counted: oxlint-disable(<rule>) and oxlint-disable-no-reason(<rule>) rows from the comment scan
-1	src/ctrlProxy/CtrlProxyManager.ts	auto-mobile(max-class-lines)
-1	src/ctrlProxy/CtrlProxyManager.ts	eslint(max-classes-per-file)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	auto-mobile(max-class-lines)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(complexity)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(max-classes-per-file)

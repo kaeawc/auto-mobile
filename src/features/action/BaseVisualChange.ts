@@ -1,4 +1,8 @@
-import { resolveObservationStartTime, resolvePackageName } from "./visualChangeObservationContext";
+import {
+  captureStabilityWindow,
+  resolveObservationStartTime,
+  resolvePackageName,
+} from "./visualChangeObservationContext";
 import { getActionClockSkewCache, type ActionClockSkewProvider } from "./ActionClockSkewCache";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { ActionableError, BootedDevice, GfxMetrics, ObserveResult } from "../../models";
@@ -283,6 +287,9 @@ export class BaseVisualChange {
     );
     const coordinateAction = this.reconcileDisplayAfterRead(options, state, previousObserveResult);
 
+    // Start the cache snapshot now; consume it after dispatch so optional stability adds no
+    // pre-gesture await (including actions that skip the stability wait entirely).
+    const beforeWindowRead = captureStabilityWindow(this.window, this.device, options);
     const { actionStartTime, clockSkewMs } = await this.readActionClock(perf);
     const blockResult = await this.runBlock(
       block,
@@ -300,7 +307,12 @@ export class BaseVisualChange {
     this.invalidateCtrlProxyCacheForDisplay(options);
 
     const observationStartTime = resolveObservationStartTime(options, actionStartTime, clockSkewMs);
-    const packageName = await resolvePackageName(this.window, options, previousObserveResult);
+    const packageName = await resolvePackageName(
+      this.window,
+      options,
+      previousObserveResult,
+      await beforeWindowRead,
+    );
     const gfxMetrics = await this.awaitUiStability(options, packageName, timeoutMs, perf);
 
     const observed = await this.takeObservation(blockResult, previousObserveResult, {

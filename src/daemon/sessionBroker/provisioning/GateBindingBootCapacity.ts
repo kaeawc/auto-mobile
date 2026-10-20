@@ -96,22 +96,33 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
 
   async check(
     platform: BindingPlatform,
-    options: { signal?: AbortSignal },
+    options: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<BindingCapacityCheck> {
+    const timeoutMs = Math.min(
+      options.timeoutMs ?? BOOT_CAPACITY_CHECK_TIMEOUT_MS,
+      BOOT_CAPACITY_CHECK_TIMEOUT_MS,
+    );
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
     try {
-      await raceWithDeadline(() => this.assertAvailable(platform, options.signal), {
+      await raceWithDeadline(() => this.assertAvailable(platform, signal), {
         timer: this.timer,
-        timeoutMs: BOOT_CAPACITY_CHECK_TIMEOUT_MS,
+        timeoutMs,
         signal: options.signal,
         label: `Checking ${platform} boot capacity`,
+        onTimeout: () => controller.abort(),
         timeoutError: () =>
           new BootCapacityCheckTimeoutError(
-            `Timed out after ${BOOT_CAPACITY_CHECK_TIMEOUT_MS}ms checking ${platform} boot capacity.`,
+            `Timed out after ${timeoutMs}ms checking ${platform} boot capacity.`,
           ),
       });
       return { kind: "available" };
     } catch (error) {
       return this.refusal(platform, error);
+    } finally {
+      controller.abort();
     }
   }
 

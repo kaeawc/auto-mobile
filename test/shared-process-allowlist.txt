@@ -75,7 +75,6 @@ test/daemon/appearanceSyncOff.test.ts
 test/daemon/appearanceSyncSchedulerResilience.test.ts
 test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
-test/daemon/auxiliarySocketDegradation.test.ts
 test/daemon/boundSessionLossMessage.test.ts
 test/daemon/canonicalPixels.property.test.ts
 test/daemon/canonicalPixels.test.ts
@@ -227,6 +226,7 @@ test/daemon/heldSessionsLateRehydration.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/holderReleaseRemaining.test.ts
+test/daemon/hostInventoryForwardRoute.test.ts
 test/daemon/hostStarvationConnectedOwnerScenario.test.ts
 test/daemon/ideMutationAfterOwnerLeft.test.ts
 test/daemon/ideRouteModule.test.ts
@@ -352,8 +352,10 @@ test/daemon/releaseCallerOrderingRecovery.test.ts
 test/daemon/releaseCallerOrderingUnknownSession.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
+test/daemon/requestBudgetNotification.test.ts
 test/daemon/requestTimeoutOnce.test.ts
 test/daemon/restartAdmission.test.ts
+test/daemon/restartAdmissionTimeout.test.ts
 test/daemon/runDaemonCommandStrayArgs.test.ts
 test/daemon/runDaemonLivenessRelease.test.ts
 test/daemon/runDaemonSessionCommandArgs.test.ts
@@ -383,6 +385,7 @@ test/daemon/sessionBroker/provisioning/bindingsPlatformChangeSqliteJournal.test.
 test/daemon/sessionBroker/provisioning/bindingsRegistryAbsentThenUnreadable.test.ts
 test/daemon/sessionBroker/provisioning/bindingsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/sessionBroker/provisioning/capacityExternalDevices.test.ts
+test/daemon/sessionBroker/provisioning/capacityHeldDevices.test.ts
 test/daemon/sessionBroker/provisioning/daemonBindingBudgetWiring.test.ts
 test/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.ownDevice.test.ts
 test/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.redrive.test.ts

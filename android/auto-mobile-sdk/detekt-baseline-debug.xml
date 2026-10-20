@@ -22,8 +22,6 @@
     <ID>LongParameterList:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer$constructor</ID>
-    <ID>NestedBlockDepth:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun scanSqlTokens</ID>
-    <ID>SwallowedException:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$error: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileBiometrics.kt:AutoMobileBiometrics$e: Exception</ID>

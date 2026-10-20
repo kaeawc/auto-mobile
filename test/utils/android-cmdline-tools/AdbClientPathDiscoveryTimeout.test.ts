@@ -52,6 +52,9 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     client["execAsync"] = async () => new Promise<ExecResult>(() => {});
     client["execWithSignal"] = async (_file, _args, _maxBuffer, timeoutMs) =>
       new Promise<ExecResult>((_resolve, reject) => {
+        if (timeoutMs === undefined) {
+          throw new Error("Expected an explicit path-discovery timeout");
+        }
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
           timeoutMs ?? 0,
@@ -142,6 +145,9 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
         return ok();
       }
       return new Promise<ExecResult>((_resolve, reject) => {
+        if (timeoutMs === undefined) {
+          throw new Error("Expected an explicit path-discovery timeout");
+        }
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
           timeoutMs ?? 0,

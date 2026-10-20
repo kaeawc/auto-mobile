@@ -2,7 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongParameterList:DemoIndexScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun DemoIndexScreen</ID>
     <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: IndexOutOfBoundsException</ID>
     <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: NullPointerException</ID>
     <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: RuntimeException</ID>

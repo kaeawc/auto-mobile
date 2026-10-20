@@ -1,5 +1,5 @@
 import { parseGuardSource, unwrapCallee } from "./astGuard";
-import { Visitor, type Expression } from "oxc-parser";
+import { Visitor, type Expression, type PropertyKey } from "oxc-parser";
 
 /** `foo`, `x.foo`, `x["foo"]` and a static template key name the same callee. */
 function calleeName(callee: Expression): string | undefined {
@@ -62,7 +62,7 @@ interface NamedRange {
   end: number;
 }
 
-function keyName(node: { type: string; name?: string; value?: unknown }): string | undefined {
+function keyName(node: PropertyKey): string | undefined {
   if (node.type === "Identifier" || node.type === "PrivateIdentifier") {
     return node.name;
   }

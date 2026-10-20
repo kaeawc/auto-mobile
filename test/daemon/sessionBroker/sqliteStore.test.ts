@@ -11,6 +11,11 @@ import {
   type BrokerAdmissionInput,
   type BrokerResourceRecord,
 } from "../../../src/daemon/sessionBroker/store";
+import { ActionableError } from "../../../src/models/ActionableError";
+import {
+  SessionRequestOwnerMismatchError,
+  SESSION_BROKER_RETRY_AFTER_MS,
+} from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { sessionRequestFingerprint } from "../../../src/daemon/sessionBroker/requestIdentity";
 
 const OWNER: BindingProcessIdentity = {
@@ -292,6 +297,52 @@ describe("session broker durable admission", () => {
       }),
     );
     expect(outcome.kind).toBe("reuse");
+  });
+
+  for (const restartHandoff of [true, false]) {
+    for (const operation of ["release", "abandon"] as const) {
+      test(`${operation} refuses a previous generation (restartHandoff=${restartHandoff}) without mutation`, async () => {
+        const requestId = "generation-refusal";
+        const parameters = { device: "phone" };
+        const active = await prepare(requestId, {
+          parameters,
+          fingerprint: sessionRequestFingerprint(parameters, CONSUMER_TOKEN),
+        });
+        if (restartHandoff) {
+          await store.relinquishForRestart(requestId, OWNER);
+        }
+        const receipt = await store.getRequest(requestId);
+        const resources = await store.listResources();
+        const binding = await registry.getAssignment(key(active.resource));
+        // Repeated refusals must neither adopt nor release/abandon the durable request.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const failure = await (
+            operation === "release"
+              ? store.beginRelease(active.sessionId, SUCCESSOR)
+              : store.abandon(requestId, SUCCESSOR, CONSUMER_TOKEN)
+          ).catch((error: unknown) => error);
+          expect(failure).toBeInstanceOf(ActionableError);
+          expect(failure).toBeInstanceOf(SessionRequestOwnerMismatchError);
+          expect(failure).toMatchObject({
+            code: restartHandoff ? "session_restart_handoff_pending" : "session_owner_mismatch",
+            retryable: restartHandoff,
+          });
+          expect(
+            failure instanceof SessionRequestOwnerMismatchError ? failure.retryAfterMs : null,
+          ).toBe(restartHandoff ? SESSION_BROKER_RETRY_AFTER_MS : undefined);
+          expect(await store.getRequest(requestId)).toEqual(receipt);
+          expect(await store.listResources()).toEqual(resources);
+          expect(await registry.getAssignment(key(active.resource))).toEqual(binding);
+        }
+      });
+    }
+  }
+
+  test("a committed abandonment replays for a successor generation", async () => {
+    const abandoned = await store.abandon("abandoned-before-restart", OWNER, CONSUMER_TOKEN);
+    expect(await store.abandon("abandoned-before-restart", SUCCESSOR, CONSUMER_TOKEN)).toEqual(
+      abandoned,
+    );
   });
 
   test("a committed release replays after daemon restart without touching a successor session", async () => {

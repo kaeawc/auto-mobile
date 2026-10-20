@@ -15,6 +15,7 @@ import { AndroidIdentityUnresolvedError } from "../../src/devices/AndroidIdentit
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
+import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
 import {
   deviceSessionErrorFields,
@@ -397,6 +398,33 @@ const BUILDERS: readonly FixtureEntry[] = [
     "timeout.iosHomeLaunch",
     "IosHomeLaunchTimeoutError via shapeToolCallError",
     () => shaped(new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget")),
+  ],
+  [
+    "timeout.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("timeout", "SDK capability query timed out")),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "not_connected",
+          "SDK capability query not connected to CtrlProxy",
+        ),
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "sdk_capability_query_failed",
+          "SDK capability query failed: invalid capability reply",
+        ),
+      ),
   ],
   [
     "provision_device.platform_command_failed.create_rejected",
@@ -903,6 +931,26 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     "timeout.iosHomeLaunch",
     () => new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget"),
   ],
+  [
+    "timeout.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("timeout", "SDK capability query timed out"),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    () =>
+      new SdkCapabilityQueryError(
+        "not_connected",
+        "SDK capability query not connected to CtrlProxy",
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    () =>
+      new SdkCapabilityQueryError(
+        "sdk_capability_query_failed",
+        "SDK capability query failed: invalid capability reply",
+      ),
+  ],
   ["timeout.boot", () => new DeviceBootTimeoutError("boot", "readiness", 1_000, 1_000, DEVICE)],
   [
     "daemon_handoff_interrupted",
@@ -1112,6 +1160,9 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "daemon_restart_deferred",
   "viewer_read_only",
   "target_identity_unresolved",
+  "timeout",
+  "not_connected",
+  "sdk_capability_query_failed",
 ];
 
 /** Every exported Error in the coded-refusal modules is covered or has an honest, reviewable gap. */

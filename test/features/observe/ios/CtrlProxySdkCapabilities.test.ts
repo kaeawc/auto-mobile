@@ -1,3 +1,12 @@
+import { registerNetworkStateSessionCleanup } from "../../../../src/daemon/networkStateSessionCleanup";
+import { FakeSessionCleanupManager } from "../../../fakes/FakeSessionCleanupManager";
+import { NetworkState } from "../../../../src/utils/NetworkState";
+import { logger } from "../../../../src/utils/logger";
+import { getPerformanceMonitor } from "../../../../src/features/performance/PerformanceMonitor";
+import { CtrlProxyHierarchyTelemetry } from "../../../../src/features/observe/ios/CtrlProxyHierarchyTelemetry";
+import { HierarchyNavigationDetector } from "../../../../src/features/navigation/HierarchyNavigationDetector";
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
+import { CtrlProxyNavigation } from "../../../../src/features/observe/ios/CtrlProxyNavigation";
 import { describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { SdkCapabilityProbeSupersededError } from "../../../../src/features/observe/ios/SdkCapabilityProbeSupersededError";
@@ -10,7 +19,7 @@ import type { DelegateContext } from "../../../../src/features/observe/ios/types
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import { drainUntil } from "../../../helpers/fakeTimerStepping";
+import { drainUntil, drainMicrotasks } from "../../../helpers/fakeTimerStepping";
 
 interface ProbeReply {
   success: boolean;
@@ -67,7 +76,7 @@ function createHarness(
     syncNetworkMockRulesToDevice: () => {},
     syncNetworkErrorSimulationToDevice: () => {},
   });
-  return { probe, state, timer, requestManager };
+  return { probe, state, timer, requestManager, context };
 }
 
 const available: ProbeReply = {
@@ -83,6 +92,99 @@ const timeoutFailure = {
 };
 
 describe("SDK capability transport uncertainty", () => {
+  test("bounds a probe by the caller deadline without starting a retry", async () => {
+    const { probe, state, timer, requestManager } = createHarness(undefined, false);
+    const pending = probe.ensureSdkCapability("database", undefined, {
+      deadlineMs: timer.now() + 250,
+    });
+    let settled = false;
+    const checked = pending.catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    await drainUntil(() => requestManager.getPendingCount() === 1, {
+      description: "bounded SDK probe",
+    });
+    timer.advanceTime(250);
+    await drainUntil(() => settled, { description: "deadline settles SDK probe" });
+    expect(await checked).toMatchObject({ code: "timeout", retryable: true });
+    expect(state.attempts).toBe(1);
+    expect(requestManager.getPendingCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("cancels a waiter independently of its shared unbounded probe", async () => {
+    const { probe, state, timer, requestManager } = createHarness(undefined, false);
+    const background = probe.ensureSdkCapability("database");
+    await drainUntil(() => state.attempts === 1, { description: "background SDK probe" });
+    const controller = new AbortController();
+    const pending = probe.ensureSdkCapability("highlight", undefined, {
+      abortSignal: controller.signal,
+    });
+    let settled = false;
+    const checked = pending.catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    await Promise.resolve();
+    controller.abort();
+    await drainUntil(() => settled, { description: "cancelled SDK probe settles" });
+    expect(await checked).toBeInstanceOf(SdkCapabilityQueryError);
+    expect(state.attempts).toBe(1);
+    expect(requestManager.getPendingCount()).toBe(1);
+    requestManager.resolve(requestManager.getPendingIds()[0]!, { ...available, totalTimeMs: 0 });
+    expect(await background).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("uses the remaining caller budget instead of the default probe timeout", async () => {
+    const h = createHarness(undefined, false);
+    let settled = false;
+    const pending = h.probe
+      .ensureSdkCapability("database", undefined, { deadlineMs: h.timer.now() + 20_000 })
+      .catch((error: unknown) => {
+        settled = true;
+        return error;
+      });
+    await drainUntil(() => h.state.attempts === 1, {
+      description: "SDK probe with explicit budget",
+    });
+    h.timer.advanceTime(IOS_HIERARCHY_REQUEST_TIMEOUT_MS);
+    await drainMicrotasks(100);
+    expect(settled).toBe(false);
+    expect(h.state.attempts).toBe(1);
+    h.timer.advanceTime(5000);
+    await drainUntil(() => settled, { description: "explicit SDK budget expires" });
+    expect(await pending).toMatchObject({ code: "timeout", retryable: true });
+    expect(h.state.attempts).toBe(1);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("bounds connection acquisition as part of the probe deadline", async () => {
+    const h = createHarness(undefined, false);
+    h.context.ensureConnected = async () => await new Promise(() => {});
+    let settled = false;
+    const pending = h.probe
+      .ensureSdkCapability("database", undefined, { deadlineMs: h.timer.now() + 250 })
+      .catch((error: unknown) => {
+        settled = true;
+        return error;
+      });
+    h.timer.advanceTime(250);
+    await drainUntil(() => settled, { description: "unanswered connection acquisition" });
+    expect(await pending).toMatchObject({ code: "timeout", retryable: true });
+    expect(h.state.attempts).toBe(0);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("does not dispatch a probe with an exhausted budget", async () => {
+    const { probe, state, timer } = createHarness(undefined, false);
+    await expect(
+      probe.ensureSdkCapability("database", undefined, { deadlineMs: timer.now() }),
+    ).rejects.toMatchObject({ code: "timeout" });
+    expect(state.attempts).toBe(0);
+  });
+
   test("returns capabilities and unavailable as distinct successful probe outcomes", async () => {
     const positive = createHarness(() => available);
     expect(await positive.probe.requestSdkCapabilities(0)).toMatchObject({
@@ -115,6 +217,22 @@ describe("SDK capability transport uncertainty", () => {
     });
     expect(await h.probe.ensureSdkCapability("database")).toBe(false);
     expect(h.state.attempts).toBe(1);
+  });
+
+  test("keeps the waiter's capability when a stale successful reply is superseded", async () => {
+    const h = createHarness(undefined, false);
+    const pending = h.probe.ensureSdkCapability("database");
+    await drainUntil(() => h.state.attempts === 1, { description: "SDK database probe" });
+    h.probe.invalidateSdkCapabilities();
+    h.requestManager.resolve(h.requestManager.getPendingIds()[0]!, {
+      ...available,
+      totalTimeMs: 0,
+    });
+    await expect(pending).rejects.toMatchObject({
+      capability: "database",
+      probeGeneration: 0,
+      currentGeneration: 1,
+    });
   });
 
   test("does not retry an invalidated generation after timeout", async () => {
@@ -332,4 +450,303 @@ describe("SDK capability caller propagation", () => {
       await client.close();
     }
   });
+});
+
+describe("SDK capability caller budgets", () => {
+  const operations: Array<{ name: string; run: (client: IOSCtrlProxyClient) => Promise<unknown> }> =
+    [
+      {
+        name: "SQL",
+        run: (client) => client.executeSQLForIos("com.example.sdk", "app.db", "select 1", 250),
+      },
+      { name: "databases", run: (client) => client.listDatabasesForIos("com.example.sdk", 250) },
+      {
+        name: "storage capabilities",
+        run: (client) => client.getStorageCapabilitiesForIos("com.example.sdk", 250),
+      },
+      {
+        name: "tables",
+        run: (client) => client.listTablesForIos("com.example.sdk", "app.db", 250),
+      },
+      {
+        name: "table data",
+        run: (client) =>
+          client.getTableDataForIos("com.example.sdk", "app.db", "items", 50, 0, 250),
+      },
+      {
+        name: "table structure",
+        run: (client) => client.getTableStructureForIos("com.example.sdk", "app.db", "items", 250),
+      },
+      {
+        name: "network simulation",
+        run: (client) => client.setNetworkErrorSimulation({ enabled: false }, 250),
+      },
+      {
+        name: "highlight",
+        run: (client) =>
+          client.requestAddHighlight(
+            "budget",
+            { type: "circle", bounds: { x: 0, y: 0, width: 10, height: 10 } },
+            250,
+          ),
+      },
+    ];
+
+  test.each(operations)("$name includes its capability gate in the timeout", async ({ run }) => {
+    const h = createHarness(undefined, false);
+    const client = IOSCtrlProxyClient.createForTesting(
+      { deviceId: "budget-test", platform: "ios", name: "fake" },
+      8765,
+      () => new FakeOpenSocket(),
+      h.timer,
+    );
+    const ensure = spyOn(
+      client.getSdkCapabilityTestHooks(),
+      "ensureSdkCapability",
+    ).mockImplementation((capability, bundleId, options) =>
+      h.probe.ensureSdkCapability(capability, bundleId, options),
+    );
+    let settled = false;
+    const checked = run(client).catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    try {
+      await drainUntil(() => h.state.attempts === 1, { description: "caller capability gate" });
+      h.timer.advanceTime(250);
+      await drainUntil(() => settled, { description: "caller budget expires" });
+      expect(await checked).toMatchObject({ code: "timeout", retryable: true });
+      expect(h.state.attempts).toBe(1);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      ensure.mockRestore();
+      await client.close();
+    }
+  });
+
+  test.each(["grace", "deadline", "abort"] as const)(
+    "successful launch with an unanswered probe settles at %s",
+    async (boundary) => {
+      const h = createHarness(undefined, false);
+      const client = IOSCtrlProxyClient.createForTesting(
+        { deviceId: "launch-budget-test", platform: "ios", name: "fake" },
+        8765,
+        () => new FakeOpenSocket(),
+        h.timer,
+      );
+      const launch = spyOn(CtrlProxyNavigation.prototype, "requestLaunchApp").mockResolvedValue({
+        success: true,
+        totalTimeMs: 0,
+      });
+      const refresh = spyOn(
+        client["sdkCapability"],
+        "refreshSdkCapabilitiesAndSync",
+      ).mockImplementation((options) => h.probe.refreshSdkCapabilitiesAndSync(options));
+      const controller = new AbortController();
+      const deadline = h.timer.now() + 200;
+      let settled = false;
+      const pending = runWithAbortSignal(undefined, () =>
+        client.requestLaunchApp(
+          "com.example.sdk",
+          boundary === "deadline" ? 200 : undefined,
+          undefined,
+          false,
+          controller.signal,
+        ),
+      );
+      void pending.then(() => {
+        settled = true;
+      });
+      try {
+        await drainUntil(() => h.state.attempts === 1, { description: "post-launch SDK probe" });
+        h.timer.advanceTime(boundary === "grace" ? 1000 : 200);
+        if (boundary === "abort") {
+          controller.abort();
+        }
+        await drainUntil(() => settled, { description: "launch settles within refresh grace" });
+        expect(await pending).toMatchObject({ success: true });
+        expect(h.timer.now()).toBe(boundary === "grace" ? 1000 : deadline);
+        expect(h.state.attempts).toBe(1);
+        expect(h.requestManager.getPendingCount()).toBe(0);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        refresh.mockRestore();
+        launch.mockRestore();
+        await client.close();
+      }
+    },
+  );
+
+  test("the default release cleanup bounds the real iOS capability gate at ten seconds", async () => {
+    const h = createHarness(undefined, false);
+    const deviceId = "release-budget-test";
+    const client = IOSCtrlProxyClient.createForTesting(
+      { deviceId, platform: "ios", name: "fake" },
+      8765,
+      () => new FakeOpenSocket(),
+      h.timer,
+    );
+    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(client);
+    const ensure = spyOn(
+      client.getSdkCapabilityTestHooks(),
+      "ensureSdkCapability",
+    ).mockImplementation((capability, bundleId, options) =>
+      h.probe.ensureSdkCapability(capability, bundleId, options),
+    );
+    const state = new NetworkState({
+      timer: h.timer,
+      notifier: { notifyResourceUpdated: () => {} },
+    });
+    state.startSimulation(deviceId, "timeout", 30, null, "released-session");
+    const manager = new FakeSessionCleanupManager();
+    registerNetworkStateSessionCleanup(manager, { state: () => state, timer: h.timer });
+    manager.release("released-session", deviceId);
+    let settled = false;
+    const pending = manager.pendingCleanups[0]!.cleanup.then(() => {
+      settled = true;
+    });
+    try {
+      await drainUntil(() => h.state.attempts === 1, { description: "release SDK probe" });
+      h.timer.advanceTime(10_000);
+      await drainUntil(() => settled, { description: "release cleanup deadline" });
+      await pending;
+      expect(h.state.attempts).toBe(1);
+      expect(h.requestManager.getPendingCount()).toBe(0);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      expect(state.getSimulation(deviceId)).toBeNull();
+    } finally {
+      existing.mockRestore();
+      ensure.mockRestore();
+      await client.close();
+    }
+  });
+
+  test("ambient deadline and cancellation reach a network mocking probe", async () => {
+    const h = createHarness(undefined, false);
+    const controller = new AbortController();
+    const client = IOSCtrlProxyClient.createForTesting(
+      { deviceId: "ambient-budget-test", platform: "ios", name: "fake" },
+      8765,
+      () => new FakeOpenSocket(),
+      h.timer,
+    );
+    const ensure = spyOn(
+      client.getSdkCapabilityTestHooks(),
+      "ensureSdkCapability",
+    ).mockImplementation((capability, bundleId, options) =>
+      h.probe.ensureSdkCapability(capability, bundleId, options),
+    );
+    const deadlineMs = h.timer.now() + 100;
+    let settled = false;
+    const pending = runWithAbortSignal(
+      controller.signal,
+      () => client.syncNetworkMockRulesIfAvailable(),
+      {
+        getDeadlineMs: () => deadlineMs,
+        textState: { dispatched: () => () => {} },
+      },
+    ).catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    try {
+      await drainUntil(() => h.state.attempts === 1, { description: "ambient SDK probe" });
+      h.timer.advanceTime(100);
+      await drainUntil(() => settled, { description: "ambient deadline settles probe" });
+      expect(await pending).toMatchObject({ code: "timeout" });
+      expect(h.state.attempts).toBe(1);
+    } finally {
+      ensure.mockRestore();
+      await client.close();
+    }
+  });
+});
+
+describe("best-effort SDK refresh diagnostics", () => {
+  test.each(["connected", "foreground", "launch"] as const)(
+    "%s warns with the original transport error and debugs only supersession",
+    async (source) => {
+      const timer = new FakeTimer();
+      const client = IOSCtrlProxyClient.createForTesting(
+        { deviceId: "refresh-log-test", platform: "ios", name: "fake" },
+        8765,
+        () => new FakeOpenSocket(),
+        timer,
+      );
+      const failure = new Error("socket transport failed");
+      const superseded = new SdkCapabilityProbeSupersededError("hierarchy", 0, 1);
+      const refresh = spyOn(client["sdkCapability"], "refreshSdkCapabilitiesAndSync");
+      const launch = spyOn(CtrlProxyNavigation.prototype, "requestLaunchApp").mockResolvedValue({
+        success: true,
+        totalTimeMs: 0,
+      });
+      const monitoring = spyOn(getPerformanceMonitor(), "startMonitoring").mockImplementation(
+        () => {},
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      const detector = new HierarchyNavigationDetector(
+        { recordHierarchyNavigation: async () => {} },
+        { timer },
+      );
+      try {
+        for (const error of [failure, superseded]) {
+          warn.mockClear();
+          debug.mockClear();
+          refresh.mockRejectedValue(error);
+          if (source === "connected") {
+            client
+              .getInboundMessageTestHooks()
+              .processMessage({ type: "connected", supportedCommands: ["get_sdk_capabilities"] });
+          } else if (source === "foreground") {
+            new CtrlProxyHierarchyTelemetry({
+              timer,
+              deviceId: "refresh-log-test",
+              sdkCapability: client["sdkCapability"],
+              buildContext: { ensureBuildContext: () => {} },
+              lastForegroundBundleId: null,
+              getHierarchyNavigationDetector: () => detector,
+            }).handleHierarchyUpdateForNavigation({
+              updatedAt: timer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: { text: "App" },
+            });
+          } else {
+            expect(await client.requestLaunchApp("com.example.sdk")).toMatchObject({
+              success: true,
+            });
+          }
+          await drainUntil(
+            () =>
+              [...warn.mock.calls, ...debug.mock.calls].some(([message]) =>
+                message.includes("SDK capability refresh"),
+              ),
+            { description: "refresh diagnostic" },
+          );
+          const warnings = warn.mock.calls.filter(([message]) =>
+            message.includes("SDK capability refresh"),
+          );
+          if (error === failure) {
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]![1]).toBe(failure);
+          } else {
+            expect(warnings).toHaveLength(0);
+            expect(
+              debug.mock.calls.some(([message]) =>
+                message.includes("SDK capability refresh superseded"),
+              ),
+            ).toBe(true);
+          }
+        }
+      } finally {
+        detector.reset();
+        refresh.mockRestore();
+        launch.mockRestore();
+        monitoring.mockRestore();
+        warn.mockRestore();
+        debug.mockRestore();
+        await client.close();
+      }
+    },
+  );
 });

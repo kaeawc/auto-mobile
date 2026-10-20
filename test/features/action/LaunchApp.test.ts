@@ -1,3 +1,4 @@
+import { drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
@@ -162,7 +163,6 @@ describe("LaunchApp", () => {
   });
 
   test("foreground launch retires the pre-launch hierarchy before post-action observation", async () => {
-    fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
     fakeAdb.setCommandResponse("shell am start --user 0", createExecResult("Starting: Intent", ""));
     const invalidator = new FakeDeviceWindowCacheInvalidator();
@@ -175,7 +175,11 @@ describe("LaunchApp", () => {
         activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
       };
     });
-    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
+    const result = await settleByFakeEvents(
+      fakeTimer,
+      launchApp.execute(packageName, { clearAppData: false, coldBoot: false }),
+      { description: "foreground launch and post-action observation" },
+    );
     expect(result.success).toBe(true);
     expect(invalidator.calls).toEqual([device]);
     // The app was not running, so this launch starts a new process.
@@ -3691,6 +3695,46 @@ describe("LaunchApp", () => {
           error: "App is not installed",
         });
         expect(installedApps.getCallCount()).toBe(1);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("bounds cancellation settlement when a retarget ignores abort", async () => {
+      const controller = new AbortController();
+      const cancellation = new Error("launch request cancelled");
+      const { iosLaunchApp, fakeCtrlProxy, cleanup } = createIOSTestHarness({
+        bundleId: userBundleId,
+        launchSuccess: true,
+      });
+      let receivedSignal: AbortSignal | undefined;
+      fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
+        receivedSignal = signal;
+        return await new Promise(() => {});
+      };
+      let settled = false;
+      const pending = iosLaunchApp
+        .execute(userBundleId, { clearAppData: false, coldBoot: false, signal: controller.signal })
+        .catch((error: unknown) => {
+          settled = true;
+          return error;
+        });
+      try {
+        await drainUntil(() => receivedSignal !== undefined, {
+          description: "resident retarget starts",
+        });
+        expect(receivedSignal).toBeDefined();
+        controller.abort(cancellation);
+        await drainUntil(() => fakeTimer.getPendingTimeoutCount() > 0, {
+          description: "retarget settlement grace starts",
+        });
+        fakeTimer.advanceTime(1000);
+        await drainUntil(() => settled, {
+          description: "retarget cancellation settles within grace",
+        });
+        expect(settled).toBe(true);
+        expect(await pending).toBe(cancellation);
+        expect(receivedSignal?.aborted).toBe(true);
       } finally {
         cleanup();
       }

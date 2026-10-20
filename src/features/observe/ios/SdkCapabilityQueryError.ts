@@ -4,6 +4,10 @@ import { ActionableError } from "../../../models/ActionableError";
 export class SdkCapabilityQueryError extends ActionableError {
   readonly retryable = true;
 
+  toPayload(): Record<string, unknown> {
+    return { code: this.code, retryable: this.retryable };
+  }
+
   constructor(
     readonly code: "timeout" | "not_connected" | "sdk_capability_query_failed",
     message: string,

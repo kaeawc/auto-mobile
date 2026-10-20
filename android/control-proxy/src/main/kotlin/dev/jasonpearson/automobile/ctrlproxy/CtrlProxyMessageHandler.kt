@@ -115,81 +115,15 @@ class CtrlProxyMessageHandler(
   private val json = Json { ignoreUnknownKeys = true }
 
   override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-    // Exhaustive over the sealed hierarchy: adding a new WebSocketRequest subclass without a branch
-    // here is a compile error, which is the whole point of retiring the string-typed `when`.
-    return when (request) {
-      is RequestHierarchy,
-      is RequestHierarchyIfStale,
-      is SetHierarchyInterval,
-      is RequestScreenshot -> handleHierarchy(request)
-      is RequestSetText,
-      is RequestInsertTextState,
-      is RequestInsertText,
-      is RequestCommitText,
-      is RequestCancelImeCommit,
-      is RequestSetKeyboardProfile,
-      is RequestListKeyboardProfiles,
-      is RequestImeAction,
-      is RequestSelectAll,
-      is RequestClickFocusedInput -> handleText(request)
-      is RequestAction,
-      is RequestActivateAccessibilityLink,
-      is RequestHitTest,
-      is RequestClipboard,
-      is RequestGlobalAction,
-      is ValidateFrameContext,
-      is GetCurrentFocus,
-      is GetTraversalOrder,
-      is AddHighlight -> handleNode(request)
-      is InstallCaCert,
-      is InstallCaCertFromPath,
-      is RemoveCaCert,
-      is RequestDeviceInfo,
-      is GetDeviceOwnerStatus,
-      is GetPermission,
-      is SetRecompositionTracking,
-      is SetAccessibilityFlags,
-      is SetNetworkMockRules,
-      is SetNetworkErrorSimulation -> handleDevice(request)
-      is ShowPrototype,
-      is DismissPrototype,
-      is InspectPrototypes,
-      is SavePrototype,
-      is PinSavedPrototype,
-      is ListSavedPrototypes,
-      is DeleteSavedPrototype,
-      is ClearPrototypeStorage,
-      is PatchPrototype,
-      is PutPrototypeAsset,
-      is RemovePrototypeAsset -> handlePrototype(request)
-      is ListPreferenceFiles,
-      is GetPreferences,
-      is DiscoverKeystore,
-      is GetSdkCapabilities,
-      is ListDataStores,
-      is GetDataStore,
-      is SubscribeStorage,
-      is UnsubscribeStorage,
-      is GetPreference,
-      is SetPreference,
-      is RemovePreference,
-      is ClearPreferences -> StorageRequests().handleStorage(request)
-      is StartRecording,
-      is StopRecording,
-      is RequestSettingsGet,
-      is RequestSettingsPut,
-      is RequestSettingsList,
-      is RequestInstalledPackages,
-      is RequestPackageInfo,
-      is RequestLaunchIntent -> handleSystem(request)
-      is RequestSwipe,
-      is RequestTapCoordinates,
-      is RequestTwoFingerSwipe,
-      is RequestDrag,
-      is RequestPinch,
-      is RequestGestureStart,
-      is RequestGestureMove,
-      is RequestGestureEnd -> GestureRequests().handleGesture(request)
+    return when (RequestRoute(request).group) {
+      RequestGroup.HIERARCHY -> handleHierarchy(request)
+      RequestGroup.TEXT -> handleText(request)
+      RequestGroup.NODE -> handleNode(request)
+      RequestGroup.DEVICE -> handleDevice(request)
+      RequestGroup.PROTOTYPE -> handlePrototype(request)
+      RequestGroup.STORAGE -> StorageRequests().handleStorage(request)
+      RequestGroup.SYSTEM -> handleSystem(request)
+      RequestGroup.GESTURE -> GestureRequests().handleGesture(request)
     }
   }
 
@@ -766,3 +700,93 @@ private fun swipeError(requestId: String?, field: String, value: Double): SwipeR
     totalTimeMs = 0L,
     error = nonFiniteError(field, value),
   )
+
+private enum class RequestGroup {
+  HIERARCHY,
+  TEXT,
+  NODE,
+  DEVICE,
+  PROTOTYPE,
+  STORAGE,
+  SYSTEM,
+  GESTURE,
+}
+
+/** Exhaustive classification keeps additions to the sealed protocol visible to the compiler. */
+private class RequestRoute(request: WebSocketRequest) {
+  val group: RequestGroup =
+    when (request) {
+      is RequestHierarchy,
+      is RequestHierarchyIfStale,
+      is SetHierarchyInterval,
+      is RequestScreenshot -> RequestGroup.HIERARCHY
+      is RequestSetText,
+      is RequestInsertTextState,
+      is RequestInsertText,
+      is RequestCommitText,
+      is RequestCancelImeCommit,
+      is RequestSetKeyboardProfile,
+      is RequestListKeyboardProfiles,
+      is RequestImeAction,
+      is RequestSelectAll,
+      is RequestClickFocusedInput -> RequestGroup.TEXT
+      is RequestAction,
+      is RequestActivateAccessibilityLink,
+      is RequestHitTest,
+      is RequestClipboard,
+      is RequestGlobalAction,
+      is ValidateFrameContext,
+      is GetCurrentFocus,
+      is GetTraversalOrder,
+      is AddHighlight -> RequestGroup.NODE
+      is InstallCaCert,
+      is InstallCaCertFromPath,
+      is RemoveCaCert,
+      is RequestDeviceInfo,
+      is GetDeviceOwnerStatus,
+      is GetPermission,
+      is SetRecompositionTracking,
+      is SetAccessibilityFlags,
+      is SetNetworkMockRules,
+      is SetNetworkErrorSimulation -> RequestGroup.DEVICE
+      is ShowPrototype,
+      is DismissPrototype,
+      is InspectPrototypes,
+      is SavePrototype,
+      is PinSavedPrototype,
+      is ListSavedPrototypes,
+      is DeleteSavedPrototype,
+      is ClearPrototypeStorage,
+      is PatchPrototype,
+      is PutPrototypeAsset,
+      is RemovePrototypeAsset -> RequestGroup.PROTOTYPE
+      is ListPreferenceFiles,
+      is GetPreferences,
+      is DiscoverKeystore,
+      is GetSdkCapabilities,
+      is ListDataStores,
+      is GetDataStore,
+      is SubscribeStorage,
+      is UnsubscribeStorage,
+      is GetPreference,
+      is SetPreference,
+      is RemovePreference,
+      is ClearPreferences -> RequestGroup.STORAGE
+      is StartRecording,
+      is StopRecording,
+      is RequestSettingsGet,
+      is RequestSettingsPut,
+      is RequestSettingsList,
+      is RequestInstalledPackages,
+      is RequestPackageInfo,
+      is RequestLaunchIntent -> RequestGroup.SYSTEM
+      is RequestSwipe,
+      is RequestTapCoordinates,
+      is RequestTwoFingerSwipe,
+      is RequestDrag,
+      is RequestPinch,
+      is RequestGestureStart,
+      is RequestGestureMove,
+      is RequestGestureEnd -> RequestGroup.GESTURE
+    }
+}

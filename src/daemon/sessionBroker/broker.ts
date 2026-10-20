@@ -228,8 +228,8 @@ export class SessionBroker {
             ...result,
             failure: {
               ...failure,
-              retryable: failure.retryable && !result.cleanupPending,
-              // The stored receipt owns the retry hint, so the first reply matches every replay.
+              retryable: Boolean(result.failure?.retryable),
+              // The stored receipt owns retry guidance, so the first reply matches every replay.
               ...(result.failure?.retryRequires
                 ? { retryRequires: result.failure.retryRequires }
                 : {}),
@@ -344,10 +344,21 @@ export class SessionBroker {
     // Each eviction removes a distinct idle resource. No creation reservation is made until
     // the existing journal confirms that device's absence.
     while (admission.kind === "evict") {
-      if (!(await this.destroy(admission.resource))) {
-        throw new ActionableError(
-          "Device eviction remains unresolved; its capacity is still reserved",
-        );
+      const destroyed = await this.destroy(admission.resource).catch((error: unknown) => {
+        if (!isRetryableCleanReleaseError(error)) {
+          throw error;
+        }
+        // The durable destroying row retains capacity until recovery confirms absence.
+        logger.warn(`Device eviction remains pending: ${errorMessage(error)}`, error);
+        return false;
+      });
+      if (!destroyed) {
+        throw new SessionBrokerFailureError({
+          code: "cleanup_pending",
+          message: "Device eviction remains unresolved; its capacity is still reserved",
+          retryable: true,
+          retryAfterMs: 1_000,
+        });
       }
       signal.throwIfAborted();
       admission = await this.options.store.continueAdmission(input);
@@ -914,11 +925,15 @@ export class SessionBroker {
     request: BrokerRequestRecord,
     resource: BrokerResourceRecord | undefined,
   ): SessionBrokerFailure {
-    const retryable = request.retryable && !this.cleanupIsPending(request, resource);
+    const retryable =
+      request.retryable &&
+      (request.errorCode === "cleanup_pending" || !this.cleanupIsPending(request, resource));
     return {
       code: request.errorCode ?? "session_preparation_failed",
       message: request.error ?? "",
       retryable,
+      // Eviction retains capacity for redrive; a new request may try again after cleanup.
+      ...(retryable && request.errorCode === "cleanup_pending" ? { retryAfterMs: 1_000 } : {}),
       // The refusal is a stored terminal receipt: only a new request ID can observe freed capacity.
       ...(retryable && request.errorCode === "capacity_exhausted"
         ? { retryRequires: "new_request_id" as const }

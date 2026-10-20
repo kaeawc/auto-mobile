@@ -14,6 +14,8 @@ export interface SessionBrokerFailure {
   code: string;
   message: string;
   retryable: boolean;
+  /** Suggested delay before retrying a transient failure under a new request ID. */
+  retryAfterMs?: number;
   /**
    * Set when a retry only succeeds under a fresh request ID: this request ID's terminal refusal
    * is stored and replays byte-identically, so resending it can never succeed.

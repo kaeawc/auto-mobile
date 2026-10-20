@@ -1,6 +1,6 @@
 import { createFlatNodeForTest, type FlatHierarchyNode } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import type { ElementBounds, PinchOnOptions, ViewHierarchyResult } from "../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -16,6 +16,18 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+
+afterEach(() => mock.restore());
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+
+let managerInstanceSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyManager, "getInstance">>;
+beforeEach(() => {
+  managerInstanceSpy = spyOn(AndroidCtrlProxyManager, "getInstance");
+});
 
 const restores: Array<() => void> = [];
 afterEach(() =>
@@ -56,9 +68,9 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
     activityName: "MainActivity",
     layoutSeqSum: 123,
   });
-  const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
+  const androidSpy = clientSpy.mockReturnValue(android);
   const iosSpy = spyOnIosClientInstance(ios);
-  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+  const managerSpy = managerInstanceSpy.mockReturnValue(
     FakeCtrlProxyManager.withAvailability(true),
   );
   restores.push(

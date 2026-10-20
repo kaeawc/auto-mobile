@@ -154,6 +154,80 @@ describe("BindingReconciler", () => {
     return result;
   }
 
+  test("retained identity must match the journal's requested creation name", async () => {
+    provisioner.beforeReturn = async () => {
+      throw new ProvisionDeviceError("timeout", "original readiness timeout", true, {
+        retainedDevice: { platform: "ios", stableId: "foreign-device", name: "foreign-name" },
+      });
+    };
+    const result = expectFailed(await reconciler.reconcile(request()));
+    expect(result.failure).toMatchObject({
+      code: "provision_failed",
+      provision: { code: "timeout" },
+    });
+    expect(result.failure).not.toHaveProperty("retainedDevice");
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(deleter.stableIds()).toEqual(["UDID-1"]);
+  });
+
+  test("a failed retained journal write preserves the readiness failure", async () => {
+    const advance = registry.advanceBindingJournal.bind(registry);
+    registry.advanceBindingJournal = async (id, input) => {
+      if (input.phase === "created") {
+        throw new Error("journal unavailable");
+      }
+      return advance(id, input);
+    };
+    provisioner.beforeReturn = async (call) => {
+      throw new ProvisionDeviceError("timeout", "original readiness timeout", true, {
+        retainedDevice: { platform: "ios", stableId: "UDID-1", name: call.name },
+      });
+    };
+    const result = expectFailed(await reconciler.reconcile(request()));
+    expect(result.failure).toMatchObject({
+      code: "provision_failed",
+      message: "original readiness timeout",
+      provision: { code: "timeout" },
+    });
+    expect(result.failure).not.toHaveProperty("retainedDevice");
+    expect(await registry.listOpenBindingJournal(key)).toMatchObject([{ phase: "creating" }]);
+  });
+
+  test("retains retryable timeout at created and reuses it on reconcile", async () => {
+    const code = "timeout";
+    provisioner.beforeReturn = async (call) => {
+      const device = inventory.devices.find((candidate) => candidate.name === call.name)!;
+      throw new ProvisionDeviceError(code, "runner deadline", true, {
+        retainedDevice: { platform: "ios", stableId: device.deviceId!, name: device.name },
+      });
+    };
+    const first = expectFailed(await reconciler.reconcile(request()));
+    expect(first.failure).toMatchObject({
+      code: "provision_failed",
+      retryable: true,
+      provision: { code },
+    });
+    expect(await registry.listOpenBindingJournal(key)).toMatchObject([
+      {
+        phase: "created",
+        target: { newStableId: "UDID-1" },
+      },
+    ]);
+    expect((await registry.listOpenBindingJournal(key))[0]?.target.removalRequested).not.toBe(true);
+    expect(inventory.has("UDID-1")).toBe(true);
+    expect(deleter.calls).toEqual([]);
+    expect((await registry.getAssignment(key))?.state).toBe("provisioning");
+    provisioner.beforeReturn = undefined;
+    const retried = expectReady(await reconciler.reconcile(request()));
+    expect(retried.disposition).toBe("reused");
+    expect(retried.assignment).toMatchObject({ stableDeviceId: "UDID-1", state: "ready" });
+    expect(provisioner.created()).toHaveLength(1);
+    expect(provisioner.calls.map((call) => call.mode)).toEqual(["create", "adopt"]);
+    expect(provisioner.calls[1]?.deviceId).toBe("UDID-1");
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(deleter.calls).toEqual([]);
+  });
+
   async function seedAssigned(spec: BindingRequestedSpec = SPEC_18): Promise<string> {
     const result = expectReady(await reconciler.reconcile(request(spec)));
     provisioner.calls.length = 0;

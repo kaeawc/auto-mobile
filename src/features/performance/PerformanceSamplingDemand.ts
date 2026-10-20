@@ -1,7 +1,9 @@
 import type { MonitoredDevice, PerformanceDemandProbe } from "./PerformanceMonitorTypes";
 
 export const PERF_WINDOW_LEASE_MS = 5 * 60 * 1000;
-export const alwaysSample: PerformanceDemandProbe = { hasDemand: () => true };
+export const alwaysSample: PerformanceDemandProbe = {
+  hasDemand: (_deviceId, _packageName, _platform) => true,
+};
 
 /** Clear interval baselines in place without changing identity, SDK ingest or health history. */
 export function resetSamplingBaselines(device: MonitoredDevice): void {
@@ -32,7 +34,7 @@ export class PerformanceSamplingDemand {
   }
 
   shouldSample(device: MonitoredDevice, now: number): boolean {
-    const demanded = this.probe.hasDemand(device.deviceId, device.packageName);
+    const demanded = this.probe.hasDemand(device.deviceId, device.packageName, device.platform);
     if (!demanded && now >= (this.perfWindowLeaseUntil.get(device.deviceId) ?? 0)) {
       this.dormantDevices.add(device.deviceId);
       return false;

@@ -1,4 +1,4 @@
-import { ObserveResult } from "../../models";
+import { ObserveResult, type ActiveWindowInfo, type BootedDevice } from "../../models";
 
 import { logger } from "../../utils/logger";
 
@@ -28,12 +28,58 @@ export function resolveObservationStartTime(
   return actionStartTime;
 }
 
-/** Package name for UI stability waiting: options, then the pre-read hierarchy, then cache. */
+/** Snapshot only the unscoped Android stability path; this never queries the device. */
+export function captureStabilityWindow(
+  window: Window,
+  device: BootedDevice,
+  options: ObservedChangeOptions,
+): Promise<ActiveWindowInfo | null> | undefined {
+  if (device.platform !== "android" || options.skipUiStability || options.display !== undefined) {
+    return undefined;
+  }
+  return window.getCachedActiveWindow();
+}
+
+async function readPostGestureWindow(
+  window: Window,
+  options: ObservedChangeOptions,
+  before: ActiveWindowInfo | null | undefined,
+): Promise<ActiveWindowInfo | null | undefined> {
+  if (before === undefined || options.display !== undefined) {
+    return undefined;
+  }
+  return window.getCachedActiveWindow();
+}
+
+function changedWindowPackage(
+  before: ActiveWindowInfo | null | undefined,
+  after: ActiveWindowInfo | null | undefined,
+): string | undefined {
+  if (before === undefined || !after?.appId) {
+    return undefined;
+  }
+  if (before === null) {
+    return after.appId;
+  }
+  const changed =
+    before.appId !== after.appId ||
+    before.activityName !== after.activityName ||
+    before.layoutSeqSum !== after.layoutSeqSum;
+  return changed ? after.appId : undefined;
+}
+
+/** A changed post-gesture window wins; otherwise preserve the pre-action package policy. */
 export async function resolvePackageName(
   window: Window,
   options: ObservedChangeOptions,
   previous: ObserveResult | null,
+  beforeWindow?: ActiveWindowInfo | null,
 ): Promise<string | undefined> {
+  const cached = await readPostGestureWindow(window, options, beforeWindow);
+  const destinationPackage = changedWindowPackage(beforeWindow, cached);
+  if (destinationPackage) {
+    return destinationPackage;
+  }
   if (options.packageName) {
     return options.packageName;
   }
@@ -45,7 +91,8 @@ export async function resolvePackageName(
   if (options.display !== undefined) {
     return undefined;
   }
-  const cachedPackageName = (await window.getCachedActiveWindow())?.appId;
+  const cachedPackageName = (cached === undefined ? await window.getCachedActiveWindow() : cached)
+    ?.appId;
   if (cachedPackageName) {
     logger.info(`[BaseVisualChange] Using cached packageName: ${cachedPackageName}`);
   }

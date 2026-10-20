@@ -174,10 +174,10 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
       expect(rig.daemon.getDevicePool().genericAvailability(rig.pooled.id)).toBe("free");
       rig.setPresent(false);
       await rig.tick();
-      expect(rig.discoveries()).toBe(1);
+      expect(rig.discoveries()).toBe(2); // Cheap read plus a fresh absence confirmation.
       expect(rig.daemon.disconnectMisses.get(rig.pooled.id)).toBe(1);
       await rig.tick();
-      expect(rig.discoveries()).toBe(2);
+      expect(rig.discoveries()).toBe(4);
       expect(rig.daemon.disconnectMisses.get(rig.pooled.id)).toBe(2);
     } finally {
       await rig.daemon.disconnectMonitor?.stop();
@@ -202,9 +202,9 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
       for (let tick = 0; tick < 5; tick++) {
         await rig.tick();
       }
-      expect(rig.discoveries()).toBe(3);
+      expect(rig.discoveries()).toBe(5); // Two absent sweeps (two reads each), then presence.
       await rig.tick();
-      expect(rig.discoveries()).toBe(4);
+      expect(rig.discoveries()).toBe(6);
     } finally {
       await rig.daemon.disconnectMonitor?.stop();
     }

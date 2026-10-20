@@ -153,12 +153,20 @@ internal fun renderPrototype(
   return renderComposable(name) { PrototypeSpecContent(model.root, theme = model.theme) }
 }
 
+/** Preserves positional content calls while sharing the default settling behavior. */
+internal fun renderComposable(
+  name: String,
+  content: @Composable () -> Unit,
+): PrototypeScreenshotComparator.Image = renderComposable(name, settle = {}, content = content)
+
 /**
  * Draws [content] in a Robolectric activity and captures the composed view. Shared by
  * [renderPrototype] and the host-chrome screenshot test.
+ * [settle] optionally synchronizes Compose effects before the final main-looper drain and capture.
  */
 internal fun renderComposable(
   name: String,
+  settle: () -> Unit = {},
   content: @Composable () -> Unit,
 ): PrototypeScreenshotComparator.Image {
   val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
@@ -166,6 +174,8 @@ internal fun renderComposable(
     val activity = controller.get()
     activity.setContent(content = content)
     shadowOf(Looper.getMainLooper()).idleFor(SETTLE)
+    settle()
+    shadowOf(Looper.getMainLooper()).idle()
     val view = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
     check(view.width > 0 && view.height > 0) { "$name: prototype view was not laid out" }
     val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)

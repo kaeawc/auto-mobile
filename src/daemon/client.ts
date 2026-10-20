@@ -1,325 +1,66 @@
-import type { Socket } from "node:net";
-import { errorMessage } from "../utils/describeUnknownError";
-import type { Duplex } from "node:stream";
+import { handleResponse } from "./clientInboundFrames";
+import type { PendingDaemonRequest } from "./clientInboundFrames";
 import { existsSync } from "node:fs";
+import type { Socket } from "node:net";
 import { platform } from "node:os";
-import { z } from "zod";
-import { logger } from "../utils/logger";
-import { ActionableError } from "../models";
-import {
-  isRelayedJsonRpcError,
-  type TaskRelayFrame,
-  type TaskRelayMethod,
-} from "./tasks/taskRelay";
-import type { LivenessOwnerHold } from "./livenessOwnerLease";
-import {
-  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
-  DaemonRequest,
-  DaemonResponse,
-  DaemonNotification,
-  daemonNotificationSchema,
-  daemonResponseSchema,
-  PROGRESS_NOTIFICATION_METHOD,
-  sanitizeBoundSessionLoss,
-  sanitizeDaemonRequestFailureCause,
-  daemonInstanceFromError,
-  releasedSessionNotFoundFields,
-} from "./types";
-import {
-  SOCKET_PATH,
-  CONNECTION_TIMEOUT_MS,
-  DAEMON_VERSION,
-  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-  DAEMON_CANCEL_REQUEST_METHOD,
-} from "./constants";
-import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
-import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
-import {
-  clampCallerMcpRequestTimeoutMs,
-  resolveMcpRequestTimeoutMs,
-  ProgressExtendableDeadline,
-} from "./mcpRequestTimeout";
-import { McpOverloadError, McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
-import { DaemonDisconnectError } from "./DaemonDisconnectError";
-import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
+import type { Duplex } from "node:stream";
+import { errorMessage } from "../utils/describeUnknownError";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import {
-  DeviceControlTransportError,
-  sanitizeDeviceControlTransportFailure,
-} from "./deviceControlTransportFailure";
-import { overflowingResponseId } from "./clientInboundOverflow";
+import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
+import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { serializeRequestFrame } from "./clientFrameSerialization";
+import { handleInboundLine } from "./clientInboundFrames";
+import { overflowingResponseId } from "./clientInboundOverflow";
+import {
+  DAEMON_RESPONSE_GRACE_MS,
+  type DaemonToolCallOptions,
+  MAX_CANCELLED_REQUEST_IDS,
+  taskRelayField,
+  toDaemonStatus,
+} from "./clientResponseDecoding";
+import {
+  type DaemonSocketConnectorHost,
+  onDaemonSocketClosed,
+  openDaemonSocket,
+} from "./clientSocketConnector";
 import { probeDaemonSocket } from "./clientSocketProbe";
 import { annotateStaleSocketHint } from "./clientStaleSocketHint";
 import {
-  onDaemonSocketClosed,
-  openDaemonSocket,
-  type DaemonSocketConnectorHost,
-} from "./clientSocketConnector";
-import { isDaemonHandshakeFailure } from "./daemonHandshake";
-import { DaemonHandshakeMismatchError } from "./DaemonHandshakeMismatchError";
+  CONNECTION_TIMEOUT_MS,
+  DAEMON_CANCEL_REQUEST_METHOD,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  DAEMON_VERSION,
+  SOCKET_PATH,
+} from "./constants";
+import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
-import { DaemonShuttingDownError } from "./DaemonShuttingDownError";
-import { DaemonBoundSessionLostError } from "./DaemonBoundSessionLostError";
-import type { DaemonOptions, DaemonStatus } from "./types";
-import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import {
+  clampCallerMcpRequestTimeoutMs,
+  ProgressExtendableDeadline,
+  resolveMcpRequestTimeoutMs,
+} from "./mcpRequestTimeout";
+import { McpTimeoutError } from "./McpTimeoutError";
 import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { type TaskRelayFrame, type TaskRelayMethod } from "./tasks/taskRelay";
+import type { DaemonStatus } from "./types";
+import { DaemonNotification, DaemonRequest, DaemonResponse } from "./types";
+export {
+  DAEMON_RESPONSE_GRACE_MS,
+  type DaemonClientFactory,
+  type DaemonClientFactoryOptions,
+  type DaemonClientLike,
+  daemonOptionsSchema,
+  daemonOptionsSchemaCoversAllKeys,
+  daemonResponseError,
+  type DaemonToolCallOptions,
+} from "./clientResponseDecoding";
 
 import { DaemonUnavailableError, toDaemonTransportError } from "./DaemonUnavailableError";
 
 export { DaemonUnavailableError, toDaemonTransportError };
-
-export const daemonOptionsSchema = z.object({
-  port: z.number().finite().optional(),
-  host: z.string().optional(),
-  strictPort: z.boolean().optional(),
-  debug: z.boolean().optional(),
-  debugPerf: z.boolean().optional(),
-  planExecutionLockScope: z.enum(["session", "global"]).optional(),
-  runnerReadinessTimeoutMs: z.number().finite().optional(),
-  videoQualityPreset: z.string().optional(),
-  videoTargetBitrateKbps: z.number().finite().optional(),
-  videoMaxThroughputMbps: z.number().finite().optional(),
-  videoFps: z.number().finite().optional(),
-  videoFormat: z.string().optional(),
-  videoMaxArchiveSizeMb: z.number().finite().optional(),
-  toolOutputsDir: z.string().optional(),
-  networkMockable: z.boolean().optional(),
-  embeddedSdk: z.boolean().optional(),
-  enabledTools: z.array(z.string()).optional(),
-  disabledTools: z.array(z.string()).optional(),
-  dismissKeyboardAfterInput: z.boolean().optional(),
-  eventAllMarkers: z.array(z.string()).optional(),
-  eventAllMarkersCliOverride: z.boolean().optional(),
-  noUiPerfMode: z.boolean().optional(),
-  memPerfAudit: z.boolean().optional(),
-  accessibilityAudit: z.boolean().optional(),
-  accessibilityLevel: z.string().optional(),
-  accessibilityFailureMode: z.string().optional(),
-  accessibilityMinSeverity: z.string().optional(),
-  accessibilityUseBaseline: z.boolean().optional(),
-  predictiveUi: z.boolean().optional(),
-  rawElementSearch: z.boolean().optional(),
-  skipCtrlProxyDownload: z.boolean().optional(),
-  toolCallRecording: z.boolean().optional(),
-  noNavigationScreenshots: z.boolean().optional(),
-  noWaitForPollingOverhead: z.boolean().optional(),
-  noA11yIncludeNotImportantViews: z.boolean().optional(),
-  noA11yReportViewIds: z.boolean().optional(),
-  noA11yRetrieveInteractiveWindows: z.boolean().optional(),
-  noOcclusion: z.boolean().optional(),
-  observeResultIncludeElements: z.boolean().optional(),
-  toolResultsNoStructuredContent: z.boolean().optional(),
-  actionsDiffObserve: z.boolean().optional(),
-  actionsNoObserve: z.boolean().optional(),
-  actionsCompactMetadata: z.boolean().optional(),
-}) satisfies z.ZodType<DaemonOptions>;
-
-// Fails at compile time when DaemonOptions gains a field that ide/status would
-// otherwise silently strip before startup-option reconciliation can inspect it.
-type DaemonOptionsSchemaCoversAllKeys =
-  Exclude<keyof DaemonOptions, keyof typeof daemonOptionsSchema.shape> extends never ? true : never;
-export const daemonOptionsSchemaCoversAllKeys: DaemonOptionsSchemaCoversAllKeys = true;
-
-/** Bound on remembered cancelled request ids (issue #6384); oldest are evicted first. */
-const MAX_CANCELLED_REQUEST_IDS = 256;
-
-/**
- * Let the daemon's deadline timer reject queue/forward work, unwind its promise
- * chain, and flush the terminal frame before our cancellation backstop. Two
- * seconds allow that deadline-handling latency plus the local socket round trip
- * (including request delivery before the daemon starts its budget). This is
- * headroom, not a hard latency guarantee under an event-loop stall. The proxy
- * wrappers add no fixed request timeout. Do not cap this at the socket idle
- * limit: a silent request above that limit already risks transport closure.
- */
-export const DAEMON_RESPONSE_GRACE_MS = 2_000;
-
-const socketIdentityStatusSchema = z.object({
-  reportedPidFilePath: z.string().min(1).optional(),
-  reportedSocketPath: z.string().min(1).optional(),
-  reportedSockets: z.record(z.string(), z.string().min(1)).optional(),
-  processStartedAt: z.number().finite().optional(),
-  dbPath: z.string().min(1).optional(),
-  pid: z.number().int().positive().optional(),
-  version: z.string().trim().min(1),
-  buildId: z.string().optional(),
-  entryScript: z.string().optional(),
-  releaseVersion: z.string().optional(),
-  startedAt: z.number().finite().optional(),
-  processGenerationToken: z.string().optional(),
-  processGenerationTokenUtc: z.string().optional(),
-  activeProvisioning: z.boolean().optional(),
-  structuredSessionNotFound: z.boolean().optional(),
-  structuredToolErrorCodes: z.boolean().optional(),
-  acceptanceCapabilityFingerprint: z.string().nullable().optional(),
-});
-
-const socketOptionsStatusSchema = z.object({
-  options: daemonOptionsSchema.optional(),
-  effectiveDebug: z.boolean().optional(),
-});
-
-function daemonLifecycleResponseError(response: DaemonResponse): Error | undefined {
-  if (isDaemonHandshakeFailure(response.handshakeFailure)) {
-    return new DaemonHandshakeMismatchError(
-      response.handshakeFailure,
-      response.error || "Daemon identity mismatch",
-    );
-  }
-  if (isDaemonShuttingDownFailure(response.daemonShuttingDown)) {
-    return new DaemonShuttingDownError(
-      response.daemonShuttingDown.requestMayHaveDispatched === true,
-    );
-  }
-  const overloadFailure = sanitizeMcpOverloadFailure(response.overloadFailure);
-  if (overloadFailure) {
-    return new McpOverloadError(
-      response.error || "Daemon rejected overloaded MCP work",
-      overloadFailure,
-    );
-  }
-  return undefined;
-}
-
-function daemonSessionResponseError(response: DaemonResponse): Error | undefined {
-  const boundSessionLoss = sanitizeBoundSessionLoss(response.boundSessionLoss);
-  if (boundSessionLoss) {
-    return new DaemonBoundSessionLostError(boundSessionLoss);
-  }
-  const transportFailure = sanitizeDeviceControlTransportFailure(response.transportFailure);
-  if (transportFailure) {
-    return new DeviceControlTransportError(
-      response.error || "Device-control transport failure",
-      transportFailure,
-    );
-  }
-  return undefined;
-}
-
-function daemonFallbackResponseError(response: DaemonResponse): Error {
-  const requestFailureCause = sanitizeDaemonRequestFailureCause(response.requestFailureCause);
-  const cause = requestFailureCause ? new Error(requestFailureCause.message) : undefined;
-  if (cause && requestFailureCause) {
-    cause.name = requestFailureCause.name;
-  }
-  return new ActionableError(response.error || "Unknown error from daemon", { cause });
-}
-
-const livenessOwnerHoldSchema = z.object({
-  state: z.enum(["live", "suspect", "lapsed"]),
-  remainingMs: z.number().finite().nonnegative(),
-  holdRemainingMs: z.number().finite().nonnegative(),
-});
-
-/**
- * The owner's hold a `liveness_owner_conflict` refusal reports (#10701), when well-formed. A
- * challenger waits it out instead of guessing the daemon's lease from its own configuration.
- */
-function livenessOwnerHoldFromResponse(response: DaemonResponse): LivenessOwnerHold | undefined {
-  const parsed = livenessOwnerHoldSchema.safeParse(response.result?.liveness);
-  return parsed.success ? parsed.data : undefined;
-}
-
-/**
- * The daemon's `releaseReason` on a session-not-found answer (#10730), as an error field, with its
- * `idle: true` for an idle-window release (#10832, #10972).
- */
-function releaseReasonField(response: DaemonResponse): { releaseReason?: string; idle?: true } {
-  if (typeof response.releaseReason !== "string" || response.releaseReason.length === 0) {
-    return {};
-  }
-  // Daemon and proxy versions always match, so the shared reason table reproduces daemon idle.
-  return releasedSessionNotFoundFields(response.releaseReason);
-}
-
-/** A typed refusal's retry intent from a failed response (#11244), as error fields. */
-function typedRefusalResponseFields(
-  response: DaemonResponse,
-): Pick<DaemonResponse, "retryable" | "retryAfterMs" | "nextAction" | "details"> {
-  return {
-    ...(typeof response.retryable === "boolean" ? { retryable: response.retryable } : {}),
-    ...(typeof response.retryAfterMs === "number" ? { retryAfterMs: response.retryAfterMs } : {}),
-    ...(typeof response.nextAction === "string" ? { nextAction: response.nextAction } : {}),
-    ...(response.details && typeof response.details === "object"
-      ? { details: response.details }
-      : {}),
-  };
-}
-
-/** A request frame's Tasks relay (#4668): present only when the proxy relays the extension. */
-function taskRelayField(tasks: TaskRelayFrame | undefined): Pick<DaemonRequest, "tasks"> {
-  return tasks === undefined ? {} : { tasks };
-}
-
-/** A relayed `tasks/*` request's JSON-RPC error (#4668), when the frame carried a well-formed one. */
-function relayedJsonRpcErrorField(response: DaemonResponse): Pick<DaemonResponse, "jsonRpcError"> {
-  return isRelayedJsonRpcError(response.jsonRpcError)
-    ? { jsonRpcError: response.jsonRpcError }
-    : {};
-}
-
-/** The error a failed daemon response rejects with, carrying its structured code and details. */
-export function daemonResponseError(response: DaemonResponse): Error {
-  const error =
-    daemonLifecycleResponseError(response) ??
-    daemonSessionResponseError(response) ??
-    daemonFallbackResponseError(response);
-  // Preserve both top-level codes and the existing typed failure envelopes.
-  const code = [
-    response.code,
-    response.handshakeFailure?.code,
-    response.daemonShuttingDown?.code,
-    response.overloadFailure?.code,
-    response.boundSessionLoss?.code,
-    response.transportFailure?.code,
-  ].find((value) => value !== undefined);
-  const daemonInstance = daemonInstanceFromError(response);
-  if (daemonInstance !== undefined) {
-    Object.assign(error, { daemonInstance });
-  }
-  if (code === undefined) {
-    return error;
-  }
-  const livenessOwnerHold =
-    code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
-      ? livenessOwnerHoldFromResponse(response)
-      : undefined;
-  return Object.assign(error, {
-    code,
-    ...relayedJsonRpcErrorField(response),
-    ...typedRefusalResponseFields(response),
-    ...(livenessOwnerHold ? { livenessOwnerHold } : {}),
-    ...releaseReasonField(response),
-  });
-}
-
-function toDaemonStatus(rawStatus: unknown, socketPath: string): DaemonStatus {
-  const identityStatus = socketIdentityStatusSchema.safeParse(rawStatus);
-  if (!identityStatus.success) {
-    throw new ActionableError(
-      "Daemon preflight failed: the socket owner returned no version identity; no device operation started. Restart the daemon from this client installation.",
-    );
-  }
-  const optionsStatus = socketOptionsStatusSchema.safeParse(rawStatus);
-  if (!optionsStatus.success) {
-    throw new ActionableError(
-      "Daemon preflight failed: the socket owner returned a valid identity but malformed startup options; no device operation started. Restart the daemon from this client installation.",
-    );
-  }
-  const { releaseVersion, ...identity } = identityStatus.data;
-  return {
-    running: true,
-    ...identity,
-    socketPath,
-    ...(optionsStatus.data.options ? { options: optionsStatus.data.options } : {}),
-    ...(optionsStatus.data.effectiveDebug !== undefined
-      ? { effectiveDebug: optionsStatus.data.effectiveDebug }
-      : {}),
-    ...(releaseVersion ? { assetVersion: releaseVersion } : {}),
-  };
-}
 
 /**
  * Options consulted ONLY to produce a helpful diagnostic hint on a failed
@@ -376,32 +117,7 @@ export class DaemonClient {
   private socketPath: string;
   private connectionTimeout: number;
   private timer: Timer;
-  private pendingRequests: Map<
-    string,
-    {
-      resolve: (value: DaemonResponse) => void;
-      reject: (error: Error) => void;
-      timeout: NodeJS.Timeout;
-      toolName: string;
-      /**
-       * Present only for a `tools/call` that asked for progress relay
-       * (`progressToken !== undefined`). Lets a matching
-       * `notifications/progress` frame reset THIS pending request's own
-       * timer below, bounded by `deadline`'s ceiling -- without this, the
-       * daemon-side deadline can be correctly extended while this client's
-       * own independent timer still fires at the original fixed timeout
-       * (issue #6222 review, P1). A request with no progressToken never has
-       * these set and its timer is never touched, matching today's behavior
-       * exactly.
-       */
-      progressToken?: string | number;
-      deadline?: ProgressExtendableDeadline;
-      requestTimeoutMs?: number;
-      removeAbortListener?: () => void;
-      /** Per-request context retained if the shared socket closes. */
-      disconnectCause: McpTimeoutError | DaemonDisconnectError;
-    }
-  > = new Map();
+  private pendingRequests: Map<string, PendingDaemonRequest> = new Map();
   /**
    * Ids of requests this client cancelled (and of the cancel frames it sent),
    * whose late daemon answers are expected and dropped quietly (issue #6384).
@@ -679,27 +395,30 @@ export class DaemonClient {
   }
 
   private handleInboundLine(line: string): void {
-    if (!line.trim() || this.inboundClosed) {
-      return;
-    }
-    let frame: unknown;
-    try {
-      frame = JSON.parse(line);
-    } catch (error) {
-      logger.error(`Error parsing daemon response: ${error}`);
-      return;
-    }
-    const notification = daemonNotificationSchema.safeParse(frame);
-    if (notification.success) {
-      this.handleNotification(notification.data);
-      return;
-    }
-    const response = daemonResponseSchema.safeParse(frame);
-    if (response.success) {
-      this.handleResponse(response.data);
-      return;
-    }
-    logger.warn("Dropped daemon frame: invalid response or notification envelope");
+    return handleInboundLine(
+      {
+        inboundClosed: this.inboundClosed,
+        handleResponse: this.handleResponse.bind(this),
+        extendPendingRequestOnProgress: this.extendPendingRequestOnProgress.bind(this),
+        notificationHandlers: this.notificationHandlers,
+        pendingRequests: this.pendingRequests,
+        timer: this.timer,
+        cancelledRequestIds: this.cancelledRequestIds,
+      },
+      line,
+    );
+  }
+
+  /** Handle a response from daemon; retained for subclass instrumentation. */
+  protected handleResponse(response: DaemonResponse): void {
+    handleResponse(
+      {
+        pendingRequests: this.pendingRequests,
+        timer: this.timer,
+        cancelledRequestIds: this.cancelledRequestIds,
+      },
+      response,
+    );
   }
 
   private handleInboundOverflow(head?: Buffer): void {
@@ -742,36 +461,6 @@ export class DaemonClient {
     logger.info("Daemon socket connection closed");
     for (const handler of this.connectionClosedHandlers) {
       handler();
-    }
-  }
-
-  /**
-   * Dispatch a daemon-pushed notification frame (issue #3223) to registered
-   * handlers. Best-effort: a throwing handler is logged and never tears down
-   * the socket or blocks sibling handlers.
-   */
-  private handleNotification(notification: DaemonNotification): void {
-    if (
-      notification.method === PROGRESS_NOTIFICATION_METHOD &&
-      notification.progressToken !== undefined
-    ) {
-      // Extend THIS client's own pending-request timer -- independent of,
-      // and in addition to, whatever the daemon does with its own internal
-      // deadline. Without this, the daemon can correctly keep working past
-      // the original timeout while this client's fixed local timer still
-      // fires and rejects the call out from under it (issue #6222 review,
-      // P1). Bounded by ProgressExtendableDeadline's own ceiling, so a
-      // request that stops progressing is still killed.
-      if (notification.requestId !== undefined) {
-        this.extendPendingRequestOnProgress(notification.requestId, notification.progressToken);
-      }
-    }
-    for (const handler of this.notificationHandlers) {
-      try {
-        handler(notification);
-      } catch (error) {
-        logger.warn(`Daemon notification handler failed for ${notification.method}: ${error}`);
-      }
     }
   }
 
@@ -942,49 +631,6 @@ export class DaemonClient {
         abortMode: "request",
       },
     );
-  }
-
-  /** Handle a response from daemon */
-  protected handleResponse(response: DaemonResponse): void {
-    if (response.id === null) {
-      if (this.pendingRequests.size !== 1) {
-        logger.warn(
-          `Received uncorrelatable daemon response with ${this.pendingRequests.size} pending requests; dropping response`,
-        );
-        return;
-      }
-      const error = new ActionableError(
-        response.error ?? "Daemon could not parse a socket request",
-      );
-      const pending = this.pendingRequests.values().next().value;
-      if (!pending) {
-        return;
-      }
-      this.timer.clearTimeout(pending.timeout);
-      pending.removeAbortListener?.();
-      pending.reject(error);
-      this.pendingRequests.clear();
-      return;
-    }
-    const pending = this.pendingRequests.get(response.id);
-    if (!pending && this.cancelledRequestIds.delete(response.id)) {
-      logger.debug(`Dropped daemon response for cancelled request ID: ${response.id}`);
-      return;
-    }
-    if (!pending) {
-      logger.warn(`Received response for unknown request ID: ${response.id}`);
-      return;
-    }
-
-    this.timer.clearTimeout(pending.timeout);
-    pending.removeAbortListener?.();
-    this.pendingRequests.delete(response.id);
-
-    if (response.success) {
-      pending.resolve(response);
-    } else {
-      pending.reject(daemonResponseError(response));
-    }
   }
 
   /** Read the actual socket owner's identity, including older version-only daemons. */
@@ -1357,60 +1003,3 @@ export class DaemonClient {
     this.connectionClosedHandlers.clear();
   }
 }
-
-/** Per-call options of {@link DaemonClientLike.callTool}. */
-export interface DaemonToolCallOptions {
-  /** The MCP Tasks extension relay for this call (#4668); absent when the client did not declare it. */
-  readonly tasks?: TaskRelayFrame;
-}
-
-export interface DaemonClientLike {
-  connect(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
-  close(): Promise<void>;
-  callTool(
-    toolName: string,
-    params: Record<string, any>,
-    progressToken?: string | number,
-    onRequestId?: (requestId: string) => void,
-    signal?: AbortSignal,
-    options?: DaemonToolCallOptions,
-  ): Promise<any>;
-  /**
-   * Relay an MCP Tasks extension request to the daemon (#4668). Optional: a client without it
-   * cannot reach the daemon's tasks, and the proxy answers those requests with an error.
-   */
-  relayTaskMethod?(
-    method: TaskRelayMethod,
-    params: Record<string, unknown>,
-    tasks: TaskRelayFrame,
-    options?: { signal?: AbortSignal },
-  ): Promise<any>;
-  readResource(
-    uri: string,
-    params?: Record<string, any>,
-    options?: { signal?: AbortSignal },
-  ): Promise<any>;
-  callDaemonMethod(
-    method: string,
-    params: Record<string, any>,
-    options?: DaemonMethodCallOptions,
-  ): Promise<any>;
-  /**
-   * Optional daemon-push capability (issue #3223). Clients that cannot surface
-   * server-pushed frames omit both members and the proxy skips notification
-   * wiring entirely — so a client must implement both or neither.
-   */
-  onNotification?(handler: (notification: DaemonNotification) => void): () => void;
-  subscribeToNotifications?(options?: { signal?: AbortSignal }): Promise<void>;
-  onConnectionClosed?(handler: () => void): () => void;
-}
-
-export interface DaemonClientFactoryOptions {
-  /**
-   * `null` bypasses the normal compatibility handshake for daemon-owned
-   * lifecycle RPCs that authenticate the target generation themselves.
-   */
-  clientIdentity?: { version: string; build: BuildIdentity } | null;
-}
-
-export type DaemonClientFactory = (options?: DaemonClientFactoryOptions) => DaemonClientLike;

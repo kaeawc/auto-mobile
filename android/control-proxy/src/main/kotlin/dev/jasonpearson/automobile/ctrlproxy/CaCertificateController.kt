@@ -153,85 +153,106 @@ internal class CaCertificateController(
     Log.d(TAG, "performRemoveCaCertificate")
     perfProvider.serial("removeCaCert")
 
-    var success = false
-    var resolvedAlias: String? = alias
-    var error: String? = null
+    RemoveCertificate(alias, certificate).run(requestId, startTime)
+  }
 
-    try {
-      withCaPolicyFailures(
-        onFailure = { e ->
-          error = "Failed to remove CA certificate: ${e.message}"
-          Log.e(TAG, "Error removing CA certificate", e)
-        },
-      ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-          error = "CA certificate removal requires API 21+"
-          return
-        }
+  private inner class RemoveCertificate(
+    private val alias: String?,
+    private val certificate: String?,
+  ) {
+    private var success = false
+    private var resolvedAlias: String? = alias
+    private var error: String? = null
 
-        val deviceOwnerError = validateDeviceOwnerStatus()
-        if (deviceOwnerError != null) {
-          error = deviceOwnerError
-          return
+    suspend fun run(requestId: String?, startTime: Long) {
+      try {
+        withCaPolicyFailures(
+          onFailure = { e ->
+            error = "Failed to remove CA certificate: ${e.message}"
+            Log.e(TAG, "Error removing CA certificate", e)
+          },
+        ) {
+          remove()
         }
-
-        perfProvider.startOperation("resolveCert")
-        val certBytes =
-          when {
-            !alias.isNullOrBlank() -> {
-              val stored = certificateStorage.readCaCertFromStorage(alias)
-              stored ?: certificate?.let { certificateStorage.decodeCertificateBytes(it) }
-            }
-            !certificate.isNullOrBlank() -> certificateStorage.decodeCertificateBytes(certificate)
-            else -> null
-          }
-        perfProvider.endOperation("resolveCert")
-
-        if (certBytes == null) {
-          error =
-            if (!alias.isNullOrBlank()) {
-              "No stored certificate found for alias: $alias"
-            } else {
-              "Certificate payload is required for removal"
-            }
-          return
-        }
-
-        if (resolvedAlias.isNullOrBlank()) {
-          resolvedAlias = certificateStorage.computeCertificateAlias(certBytes)
-        }
-
-        val wasInstalled = isCaCertInstalled(certBytes)
-        if (wasInstalled == false) {
-          error = "CA certificate is not installed"
-          return
-        }
-
-        perfProvider.startOperation("removeCert")
-        try {
-          devicePolicy.uninstallCaCert(certBytes)
-        } finally {
-          perfProvider.endOperation("removeCert")
-        }
-        val isInstalled = isCaCertInstalled(certBytes)
-        success = isInstalled == false
-        if (success) {
-          certificateStorage.deleteCaCertFromStorage(resolvedAlias)
-        } else {
-          error =
-            if (isInstalled == null) {
-              "Unable to confirm CA certificate removal"
-            } else {
-              "CA certificate still installed after uninstall"
-            }
-        }
+      } finally {
+        perfProvider.end()
+        val totalTime = timeProvider.currentTimeMillis() - startTime
+        broadcastCaCertResult(
+          CaCertificateResult(requestId, "remove", success, resolvedAlias, error, totalTime),
+        )
       }
-    } finally {
-      perfProvider.end()
-      val totalTime = timeProvider.currentTimeMillis() - startTime
-      broadcastCaCertResult(
-        CaCertificateResult(requestId, "remove", success, resolvedAlias, error, totalTime),
-      )
+    }
+
+    private fun remove() {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+        error = "CA certificate removal requires API 21+"
+        return
+      }
+
+      val deviceOwnerError = validateDeviceOwnerStatus()
+      if (deviceOwnerError != null) {
+        error = deviceOwnerError
+        return
+      }
+
+      val certBytes = resolveCertificate()
+
+      if (certBytes == null) {
+        error =
+          if (!alias.isNullOrBlank()) {
+            "No stored certificate found for alias: $alias"
+          } else {
+            "Certificate payload is required for removal"
+          }
+        return
+      }
+
+      val previousAlias = resolvedAlias
+      val certificateAlias =
+        if (previousAlias.isNullOrBlank()) certificateStorage.computeCertificateAlias(certBytes)
+        else previousAlias
+      resolvedAlias = certificateAlias
+
+      val wasInstalled = isCaCertInstalled(certBytes)
+      if (wasInstalled == false) {
+        error = "CA certificate is not installed"
+        return
+      }
+
+      perfProvider.startOperation("removeCert")
+      try {
+        devicePolicy.uninstallCaCert(certBytes)
+      } finally {
+        perfProvider.endOperation("removeCert")
+      }
+      val isInstalled = isCaCertInstalled(certBytes)
+      success = isInstalled == false
+      if (success) {
+        certificateStorage.deleteCaCertFromStorage(certificateAlias)
+      } else {
+        error =
+          if (isInstalled == null) {
+            "Unable to confirm CA certificate removal"
+          } else {
+            "CA certificate still installed after uninstall"
+          }
+      }
+    }
+
+    private fun resolveCertificate(): ByteArray? {
+      perfProvider.startOperation("resolveCert")
+      val certBytes =
+        when {
+          !alias.isNullOrBlank() -> {
+            val stored = certificateStorage.readCaCertFromStorage(alias)
+            stored ?: certificate?.let { certificateStorage.decodeCertificateBytes(it) }
+          }
+          !certificate.isNullOrBlank() -> certificateStorage.decodeCertificateBytes(certificate)
+          else -> null
+        }
+      perfProvider.endOperation("resolveCert")
+
+      return certBytes
     }
   }
 

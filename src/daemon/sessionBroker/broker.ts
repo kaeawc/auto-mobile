@@ -3,6 +3,7 @@ import {
   drainFailureOutcome,
   failedResult,
   failureFor,
+  preparationFailureError,
   sameProcess,
   unwrap,
 } from "./brokerSupport";
@@ -175,7 +176,7 @@ export class SessionBroker {
         livenessOwnerToken,
         fingerprint,
         admitted,
-        error,
+        preparationFailureError(error, signal),
         exportIdentity,
       );
     } finally {
@@ -224,8 +225,7 @@ export class SessionBroker {
             },
           };
     }
-    // Catalog/default resolution can fail before admission. Retain that terminal identity too:
-    // a changed host catalog must not turn its replay into a new native acquisition.
+    // Retain pre-admission failures: a catalog change must not give replay a new acquisition.
     // An independently committed receipt wins; never overwrite an acquisition from a sibling
     // caller. A persistence failure is an RPC error, not a claimed durable terminal result.
     const independentlyCommitted = await this.options.store.getRequest(config.requestId);

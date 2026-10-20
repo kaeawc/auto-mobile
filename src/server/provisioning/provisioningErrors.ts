@@ -15,6 +15,7 @@ import {
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DeviceLostError } from "../../models/DeviceLostError";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
+import { ActionableError } from "../../models/ActionableError";
 import {
   buildProvisionDeviceRecoveryEvidence,
   type ProvisionDeviceFailureBoundary,
@@ -269,12 +270,14 @@ function isDeadlineFailure(error: unknown): boolean {
       current instanceof DeviceBootTimeoutError ||
       current instanceof SimctlCommandTimeoutError ||
       (current instanceof RunnerReadinessError && current.deadlineExhausted) ||
-      (current instanceof DOMException &&
-        (current.name === "AbortError" || current.name === "TimeoutError"))
+      (current instanceof DOMException && current.name === "TimeoutError")
     ) {
       return true;
     }
-    if (!(current instanceof Error)) {
+    // Only plain contextual wrappers delegate classification to their cause.
+    // A platform/typed failure owns its classification, even if an unrelated
+    // earlier step left a timeout in its cause chain. Cancellation is not a deadline.
+    if (!(current instanceof ActionableError) || current.constructor !== ActionableError) {
       return false;
     }
     current = current.cause;

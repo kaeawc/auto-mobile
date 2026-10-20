@@ -892,7 +892,6 @@ test/features/prototype/prototypeAnchors.test.ts
 test/features/prototype/prototypeAppearance.test.ts
 test/features/prototype/prototypeAssetUploader.test.ts
 test/features/prototype/prototypeAssets.test.ts
-test/features/prototype/prototypeCapabilityGates.contract.test.ts
 test/features/prototype/prototypeCapabilityGates.test.ts
 test/features/prototype/prototypeCarousel.test.ts
 test/features/prototype/prototypeCheckEvents.test.ts

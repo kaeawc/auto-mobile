@@ -33,7 +33,6 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
   const testDevice: BootedDevice = {
     deviceId: "test-device-recovery",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
 
@@ -166,14 +165,12 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     fakeTimer.enableAutoAdvance();
     const fakeAdb = buildFakeAdb();
 
-    let releaseHealthCheck: (() => void) | null = null;
+    const healthCheck = Promise.withResolvers<void>();
     let healthCheckCallCount = 0;
     const manager: AndroidServiceRecoveryManager = {
       async isAccessibilityServiceHealthy(): Promise<boolean> {
         healthCheckCallCount++;
-        await new Promise<void>((resolve) => {
-          releaseHealthCheck = resolve;
-        });
+        await healthCheck.promise;
         return false;
       },
       async rebindIfUnhealthy(): Promise<boolean> {
@@ -205,7 +202,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     // No second recovery attempt started: the health probe was not called again.
     expect(healthCheckCallCount).toBe(1);
 
-    releaseHealthCheck?.();
+    healthCheck.resolve();
     await flushMicrotasks();
   });
 

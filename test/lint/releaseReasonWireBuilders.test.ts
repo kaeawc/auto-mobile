@@ -11,7 +11,7 @@ const root = join(import.meta.dir, "..", "..");
 const builderFiles = new Set(RELEASE_REASON_WIRE_BUILDERS.map((owner) => owner.split("#")[0]));
 // Parse each src file exactly once, outside timed test bodies; all rules share this inventory.
 const inventory = Object.freeze(
-  readdirSync(join(root, "src"), { recursive: true })
+  readdirSync(join(root, "src"), { recursive: true, encoding: "utf8" })
     .filter((file) => file.endsWith(".ts"))
     .flatMap((file) => {
       const relative = `src/${file.split(sep).join("/")}`;

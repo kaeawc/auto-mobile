@@ -3,7 +3,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { VideoSimCtl } from "./VideoSimCtl";
 import type { FfmpegClient } from "../../utils/media/FfmpegClient";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
-import type { RecordingFileProbe, RecordingFileRemover } from "./FfmpegVideoProcessingBackend";
+import type { RecordingFileProbe, RecordingFileRemover } from "./ffmpegRecordingFiles";
 import type { HostRecorderProcessControl } from "./hostRecorderTeardown";
 import type { RecordingCodecProbe } from "./recordingCodec";
 export type LiveScreenPixels = (

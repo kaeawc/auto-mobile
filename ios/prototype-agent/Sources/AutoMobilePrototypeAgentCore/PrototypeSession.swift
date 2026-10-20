@@ -1,7 +1,7 @@
 import Foundation
 
 /// Why a prototype went away; the `reason` in the terminal `dismissed` event's payload.
-enum PrototypeDismissReason: String {
+public enum PrototypeDismissReason: String, Sendable {
     /// The host dismiss control or a spec `dismiss` action.
     case user
     /// A `dismiss_prototype` request.
@@ -13,12 +13,16 @@ enum PrototypeDismissReason: String {
     case ttl
 }
 
-/// One `prototype_event` push, before the wall-clock timestamp is attached.
-struct PrototypeEvent: Equatable {
-    let id: String
-    let sequence: Int
+/// A prototype event with a semantic category and JSON snapshots for app-owned Codable payloads.
+/// The session creates it before the model attaches the wire timestamp.
+public struct PrototypeEvent: Equatable {
+    /// The prototype that emitted this event.
+    public let id: String
+    /// Monotonic event sequence for this prototype.
+    public let sequence: Int
     let kind: String
-    let name: String?
+    /// The authored event name, state key, or data path.
+    public let name: String?
     let payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
@@ -26,6 +30,7 @@ struct PrototypeEvent: Equatable {
     var resolvedContext: PrototypeResolvedEmitContext?
     var keys: [String]?
     var validity: [String: Bool]?
+    var embeddedWire: Data? = nil
 
     var context: [String: JSONValue]? { resolvedContext?.context }
     var contextTruncated: Bool? { resolvedContext?.contextTruncated }

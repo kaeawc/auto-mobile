@@ -76,6 +76,8 @@ final class PrototypeModel {
     var windowOrigin = CGPoint.zero
     /// The prototype window's size in points, for placing a sheet against the keyboard.
     var windowSize = CGSize.zero
+    /// Embedded content may occupy only part of the window; nil preserves window-hosted behavior.
+    var keyboardContainerFrame: CGRect?
     /// The software keyboard's frame in screen points, nil while hidden, and the duration its
     /// show or hide animates over (UIKit keyboard notifications).
     private(set) var keyboardFrame: CGRect?
@@ -98,8 +100,8 @@ final class PrototypeModel {
             keyboardFrame: keyboardFrame.map {
                 PrototypeRect(x: $0.minX, y: $0.minY, width: $0.width, height: $0.height)
             },
-            windowOriginY: windowOrigin.y,
-            windowHeight: windowSize.height
+            windowOriginY: keyboardContainerFrame.map { Double($0.minY) } ?? Double(windowOrigin.y),
+            windowHeight: keyboardContainerFrame.map { Double($0.height) } ?? Double(windowSize.height)
         )
     }
 

@@ -980,6 +980,13 @@ is not a stray simulator to shut down; release its session or binding first. War
 simulator hints exclude live-session and broker-held devices. An unreadable broker
 registry returns `discovery_incomplete` rather than labelling unknown owners external.
 
+The same classification applies to a binding's pre-create capacity check and to
+the boot-slot reservation made before replacing its device. A replacement's old
+device is excluded from the reservation's count; other held simulators still
+count and appear in `heldDevices`. Both arrays survive binding reconciliation,
+acquisition results and provisioning error payloads, including socket and MCP
+responses.
+
 ## Per-session settings
 
 Appearance configuration is per session (owner decision 2026-10-09, #10982).

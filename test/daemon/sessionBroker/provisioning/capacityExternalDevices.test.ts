@@ -112,7 +112,7 @@ describe("binding capacity_exhausted keeps externalDevices", () => {
     });
   });
 
-  test("the capacity probe's external devices reach the binding failure", async () => {
+  test("the capacity probe's external and held devices reach the binding failure", async () => {
     const { capacity, reconcile } = await setup();
     capacity.result = {
       kind: "exhausted",
@@ -120,13 +120,20 @@ describe("binding capacity_exhausted keeps externalDevices", () => {
       booted: 1,
       retryAfterMs: 3_000,
       externalDevices: EXTERNAL,
+      heldDevices: HELD,
     };
 
     const result = await reconcile();
 
     expect(result.outcome === "failed" ? result.failure : undefined).toMatchObject({
       code: "capacity_exhausted",
-      capacity: { limit: 1, booted: 1, retryAfterMs: 3_000, externalDevices: EXTERNAL },
+      capacity: {
+        limit: 1,
+        booted: 1,
+        retryAfterMs: 3_000,
+        externalDevices: EXTERNAL,
+        heldDevices: HELD,
+      },
     });
   });
 
@@ -134,7 +141,14 @@ describe("binding capacity_exhausted keeps externalDevices", () => {
     const { provisioner, reconcile } = await setup();
     provisioner.failWith = () =>
       new BootCapacityExhaustedError(
-        { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1_000, externalDevices: [] },
+        {
+          platform: "ios",
+          limit: 1,
+          booted: 1,
+          retryAfterMs: 1_000,
+          externalDevices: [],
+          heldDevices: [],
+        },
         "full",
       );
 
@@ -225,6 +239,8 @@ describe("externalDevices reaches the acquisition result and its client serializ
     });
     const wire = JSON.parse(JSON.stringify(result));
     expect(wire.failure.capacity.externalDevices).toEqual(EXTERNAL);
+    expect(wire.failure.capacity.heldDevices).toEqual(HELD);
     expect(wire.bindings[0].failure.capacity.externalDevices).toEqual(EXTERNAL);
+    expect(wire.bindings[0].failure.capacity.heldDevices).toEqual(HELD);
   });
 });

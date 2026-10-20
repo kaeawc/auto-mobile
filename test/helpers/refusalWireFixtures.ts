@@ -227,14 +227,22 @@ function shaped(error: unknown): RefusalWireResult {
   }
 }
 
-/** The error the boot admission gate throws for an Android boot refused at capacity. */
-function bootCapacityRefusal(platform: "android" | "ios" = "android"): unknown {
+/** The error the boot admission gate throws for a boot refused at capacity. */
+function bootCapacityRefusal(platform: "android" | "ios" = "android", heldOnly = false): unknown {
   const ios = platform === "ios";
   const decision = atCapacityDecision(2, { maxBooted: 2, source: "derived" }, 5_000, {
     noun: ios ? "simulator" : "emulator",
     envName: ios ? IOS_SIM_MAX_BOOTED_ENV : "AUTO_MOBILE_MAX_BOOTED",
-    externalDevices: [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
-    ...(ios ? { heldDevices: ["9A1B2C3D-0000-4000-8000-000000000002"] } : {}),
+    externalDevices: heldOnly
+      ? []
+      : [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    ...(ios
+      ? {
+          heldDevices: heldOnly
+            ? ["9A1B2C3D-0000-4000-8000-000000000001", "9A1B2C3D-0000-4000-8000-000000000002"]
+            : ["9A1B2C3D-0000-4000-8000-000000000002"],
+        }
+      : {}),
   });
   try {
     if (!decision) {
@@ -518,6 +526,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "capacity_exhausted.ios",
     "assertBootCapacityGranted via shapeToolCallError",
     () => shaped(bootCapacityRefusal("ios")),
+  ],
+  [
+    "capacity_exhausted.ios.held_only",
+    "assertBootCapacityGranted via shapeToolCallError",
+    () => shaped(bootCapacityRefusal("ios", true)),
   ],
   [
     "discovery_incomplete.ios",
@@ -945,6 +958,7 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     () => new BindingOwnershipLostError(SESSION),
   ],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
+  ["capacity_exhausted.ios.held_only", () => bootCapacityRefusal("ios", true) as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
   [
     "device_outside_broker_grant",

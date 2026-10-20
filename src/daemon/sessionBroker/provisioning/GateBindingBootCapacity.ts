@@ -107,13 +107,14 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
     error: unknown,
   ): Exclude<BindingCapacityCheck, { kind: "available" }> {
     if (error instanceof BootCapacityExhaustedError) {
-      const { externalDevices } = error.details;
+      const { externalDevices, heldDevices } = error.details;
       return {
         kind: "exhausted",
         limit: error.limit,
         booted: error.booted,
         retryAfterMs: error.retryAfterMs,
         ...(externalDevices && externalDevices.length > 0 ? { externalDevices } : {}),
+        ...(heldDevices && heldDevices.length > 0 ? { heldDevices } : {}),
       };
     }
     if (

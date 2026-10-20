@@ -223,7 +223,10 @@ export class IosSimCapacityGate
       signal: options.signal,
       sampleTimeoutMs: Math.min(options.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
       label: CAPACITY_LABEL,
-      sample: () => this.refresh({ fresh: true }),
+      sample: async () => {
+        await this.optionsOwnership?.refresh();
+        return this.refresh({ fresh: true });
+      },
       ledger: this.admittedBoots,
       decide: (report, window) =>
         this.decide(report, undefined, "hint", options.replacingDeviceId, window),

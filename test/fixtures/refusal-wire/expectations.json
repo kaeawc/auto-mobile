@@ -245,6 +245,19 @@
         "heldDevices": ["9A1B2C3D-0000-4000-8000-000000000002"]
       }
     },
+    "capacity_exhausted.ios.held_only": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 5000,
+        "heldDevices": [
+          "9A1B2C3D-0000-4000-8000-000000000001",
+          "9A1B2C3D-0000-4000-8000-000000000002"
+        ]
+      }
+    },
     "discovery_incomplete.ios": {
       "expected": "wait",
       "fields": {

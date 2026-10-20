@@ -323,10 +323,17 @@ describe("GateBindingBootCapacity", () => {
     expect(platforms).toEqual(["ios"]);
   });
 
-  test("the gate's refusal keeps its limit, count, wait hint and external devices", async () => {
+  test("the gate's refusal keeps its limit, count, wait hint and external and held devices", async () => {
     const capacity = new GateBindingBootCapacity(new FakeTimer(), async () => {
       throw new BootCapacityExhaustedError(
-        { platform: "ios", limit: 2, booted: 3, retryAfterMs: 5_000, externalDevices: ["UDID-1"] },
+        {
+          platform: "ios",
+          limit: 2,
+          booted: 3,
+          retryAfterMs: 5_000,
+          externalDevices: ["UDID-1"],
+          heldDevices: ["UDID-HELD"],
+        },
         "full",
       );
     });
@@ -337,6 +344,7 @@ describe("GateBindingBootCapacity", () => {
       booted: 3,
       retryAfterMs: 5_000,
       externalDevices: ["UDID-1"],
+      heldDevices: ["UDID-HELD"],
     });
   });
 

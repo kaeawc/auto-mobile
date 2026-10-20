@@ -111,6 +111,34 @@ describe("iOS simulator ownership", () => {
     expect(await gate.evaluateBoot()).not.toHaveProperty("heldDevices");
   });
 
+  test("reservation refreshes ownership before classifying a replacement refusal", async () => {
+    const ownership = new Ownership();
+    const { gate } = setup(2, ownership);
+    await expect(
+      gate.reserveBoot({ replacingDeviceId: "S1", timeoutMs: 1000 }),
+    ).rejects.toMatchObject({
+      details: { booted: 2, heldDevices: ["S2"], externalDevices: ["FOREIGN"] },
+    });
+    expect(ownership.refreshes).toBe(1);
+    ownership.held.clear();
+    await expect(
+      gate.reserveBoot({ replacingDeviceId: "S1", timeoutMs: 1000 }),
+    ).rejects.toMatchObject({
+      details: { booted: 2, externalDevices: ["S2", "FOREIGN"] },
+    });
+    expect(ownership.refreshes).toBe(2);
+  });
+
+  test("reservation fails closed when ownership cannot be refreshed", async () => {
+    const ownership: IosSimulatorOwnershipReader = {
+      refresh: () => Promise.reject(new BindingDiscoveryIncompleteError("unreadable")),
+      isAutoMobileOwned: () => false,
+    };
+    await expect(setup(3, ownership).gate.reserveBoot({ timeoutMs: 1000 })).rejects.toThrow(
+      "unreadable",
+    );
+  });
+
   test("without a reader all unadmitted devices retain their external classification", async () => {
     const { gate } = setup();
     expect(await gate.evaluateBoot()).toMatchObject({ externalDevices: ["S1", "S2", "FOREIGN"] });

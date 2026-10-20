@@ -1,3 +1,9 @@
+import {
+  BootReservationScope,
+  type BootCapacityReserver,
+  type BootReservationOptions,
+  type BootSlotReservation,
+} from "../../devices/bootAdmission/BootSlotReservation";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -14,6 +20,7 @@ import {
   type BootCapacityReporter,
   type BootCapacitySnapshot,
   type LedgerSampleWindow,
+  type LedgerAdmission,
   type RefusedCapacityDecision,
 } from "../bootAdmission/BootAdmissionGate";
 import { occupyingUdids, type FleetCostSource } from "./FleetCostCollector";
@@ -55,7 +62,7 @@ export interface CapacityAdmitOptions {
  * ask whether an AutoMobile-owned simulator may be booted now. Read-only: it
  * never boots, shuts down or reconfigures anything.
  */
-export interface SimulatorCapacityGate {
+export interface SimulatorCapacityGate extends BootCapacityReserver {
   evaluateBoot(request?: WarmDeviceRequest): Promise<CapacityDecision>;
   admitBoot(
     request: WarmDeviceRequest | undefined,
@@ -75,7 +82,7 @@ export interface CapacityGateOptions {
 const CAPACITY_LABEL = "iOS simulator capacity";
 
 export class IosSimCapacityGate
-  implements SimulatorCapacityGate, BootCapacityReporter, BootCapacityChecker
+  implements SimulatorCapacityGate, BootCapacityReporter, BootCapacityChecker, BootCapacityReserver
 {
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
@@ -92,6 +99,7 @@ export class IosSimCapacityGate
   private readonly bootsByUdid = new Map<string, { unreleased: number; succeeded: boolean }>();
   /** Boots admitted by `admitBoot` and not yet released. */
   private readonly admittedBoots: BootAdmissionLedger;
+  private readonly reservations = new BootReservationScope<CapacityAdmission>();
 
   constructor(
     private readonly fleet: FleetCostSource,
@@ -106,7 +114,11 @@ export class IosSimCapacityGate
 
   /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
   async refresh(options: { fresh?: boolean } = {}): Promise<FleetCostReport> {
-    const report = await (options.fresh ? this.fleet.collectFresh() : this.fleet.collect());
+    // A fresh run is bounded at the sample budget so one abandoned by a lost race cannot
+    // outlive it and stack under retries (#13801).
+    const report = await (options.fresh
+      ? this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS })
+      : this.fleet.collect());
     this.foldIntoPressureHistory(report);
     return report;
   }
@@ -167,6 +179,11 @@ export class IosSimCapacityGate
     request: WarmDeviceRequest | undefined,
     options: CapacityAdmitOptions,
   ): Promise<CapacityAdmission> {
+    options.signal?.throwIfAborted();
+    const reserved = this.reservations.take(options.bootUdid);
+    if (reserved) {
+      return reserved;
+    }
     return await admitBootNow<FleetCostReport, CapacityDecision>({
       timer: this.timer,
       platform: "ios",
@@ -180,7 +197,41 @@ export class IosSimCapacityGate
     });
   }
 
-  private recordAdmission(udid?: string): NonNullable<CapacityAdmission["releaseAdmission"]> {
+  async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
+    let admission: LedgerAdmission | undefined;
+    const result = await admitBootNow<FleetCostReport, CapacityDecision>({
+      timer: this.timer,
+      platform: "ios",
+      signal: options.signal,
+      sampleTimeoutMs: Math.min(options.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
+      label: CAPACITY_LABEL,
+      sample: () => this.refresh({ fresh: true }),
+      ledger: this.admittedBoots,
+      decide: (report, window) =>
+        this.decide(report, undefined, "hint", options.replacingDeviceId, window),
+      admit: () => {
+        admission = this.admittedBoots.admit(options.replacingDeviceId, true);
+        return admission.release;
+      },
+    });
+    assertCapacityGranted(result);
+    const held = admission!;
+    let release: NonNullable<CapacityAdmission["releaseAdmission"]> = held.release;
+    return this.reservations.hold(
+      (udid) => {
+        held.bind(udid);
+        release = this.recordAdmission(udid, held);
+        return { decision: result.decision, releaseAdmission: release };
+      },
+      () => release({ bootFailed: true }),
+      () => held.bind(),
+    );
+  }
+
+  private recordAdmission(
+    udid?: string,
+    reserved?: LedgerAdmission,
+  ): NonNullable<CapacityAdmission["releaseAdmission"]> {
     const boots = udid
       ? (this.bootsByUdid.get(udid) ?? { unreleased: 0, succeeded: false })
       : undefined;
@@ -189,7 +240,7 @@ export class IosSimCapacityGate
       boots.unreleased += 1;
       this.bootsByUdid.set(udid, boots);
     }
-    const admission = this.admittedBoots.admit(udid);
+    const admission = reserved ?? this.admittedBoots.admit(udid);
     let released = false;
     return (outcome) => {
       if (released) {
@@ -215,6 +266,10 @@ export class IosSimCapacityGate
    * A warm simulator is not a substitute here: the caller boots its own device.
    */
   async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
+    options.signal?.throwIfAborted();
+    if (this.reservations.hasPending()) {
+      return;
+    }
     return this.sampleInWindow(options, (report, window) => {
       assertCapacityGranted({
         decision: this.decide(report, undefined, "hint", undefined, window),
@@ -259,19 +314,23 @@ export class IosSimCapacityGate
     options.signal?.throwIfAborted();
     const window = this.admittedBoots.beginSample();
     try {
-      // The collector's run is shared with other callers, so losing the race never cancels it.
-      const report = await raceWithDeadline(() => this.fleet.collectFresh(), {
-        timer: this.timer,
-        timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
-        signal: options.signal,
-        label: `Collecting ${CAPACITY_LABEL}`,
-        timeoutError: () =>
-          new BootedDeviceDiscoveryIncompleteError("ios", {
-            code: "timeout",
-            message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
-            retryable: true,
-          }),
-      });
+      // The collector's run is shared with other callers, so losing the race never cancels it;
+      // the run's own commands carry the same budget so an abandoned one ends too (#13801).
+      const report = await raceWithDeadline(
+        () => this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS }),
+        {
+          timer: this.timer,
+          timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
+          signal: options.signal,
+          label: `Collecting ${CAPACITY_LABEL}`,
+          timeoutError: () =>
+            new BootedDeviceDiscoveryIncompleteError("ios", {
+              code: "timeout",
+              message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
+              retryable: true,
+            }),
+        },
+      );
       options.signal?.throwIfAborted();
       return judge(report, window);
     } finally {

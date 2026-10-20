@@ -1,3 +1,5 @@
+import type { DeviceInfo } from "../../../models/index";
+import { isAndroidEmulatorSerial } from "../../../utils/androidSerial";
 import { AndroidEmulatorUnavailableError } from "../../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { PlatformDeviceManager } from "../../../devices/deviceUtils";
@@ -8,7 +10,40 @@ import type { BindingPlatform } from "../registry/bindingRegistry";
 
 /** Configured devices (AVDs, simulators) of one platform; a failed listing is incomplete. */
 export class DeviceManagerBindingInventory implements BindingInventory {
-  constructor(private readonly deviceManager: Pick<PlatformDeviceManager, "listDeviceImages">) {}
+  constructor(
+    private readonly deviceManager: Pick<PlatformDeviceManager, "listDeviceImages"> &
+      Partial<Pick<PlatformDeviceManager, "getBootedDevicesDetailed">>,
+  ) {}
+
+  async runtimeDeviceId(
+    device: DeviceInfo,
+    options: { signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    if (device.deviceId) {
+      return device.deviceId;
+    }
+    try {
+      const discovery = await this.deviceManager.getBootedDevicesDetailed?.(device.platform, {
+        signal: options.signal,
+        bypassAndroidDeviceListCache: true,
+      });
+      options.signal?.throwIfAborted();
+      if (!discovery?.succeededPlatforms.has(device.platform)) {
+        return undefined;
+      }
+      return discovery.devices.find(
+        (runtime) =>
+          runtime.platform === device.platform &&
+          runtime.name === device.name &&
+          isAndroidEmulatorSerial(runtime.deviceId),
+      )?.deviceId;
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      // Unknown identity earns no freed-slot credit; reservation still requires proven capacity.
+      logger.warn(`[Bindings] cannot resolve replacement runtime: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
 
   async list(
     platform: BindingPlatform,

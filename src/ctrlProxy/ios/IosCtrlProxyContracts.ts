@@ -58,6 +58,14 @@ export const FORCE_RESTART_DRAIN_POLL_INTERVAL_MS = 50;
  */
 export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
+  /**
+   * Only runner exit during startup or an exhausted launch window permits setup retry.
+   * ensureIosReady passes the remaining setup budget as minimumHealthPollDurationMs;
+   * refreshHealthPollDeadline takes max(default deadline, now + that duration).
+   * Its launch timeout therefore occurs at/after the setup phase deadline, leaving
+   * no budget for a launch-timeout retry on that path. Other callers may retry it.
+   */
+  retryableStartupFailure?: boolean;
   /** Startup was cancelled while another recovery path may still be active. */
   recoveryInterrupted?: boolean;
 }
@@ -233,6 +241,8 @@ export interface IosCtrlProxyManagerOptions {
   steps?: IosCtrlProxyStepOverrides;
   deviceDetector?: IosDeviceDetector;
   appBundleGuard?: IosAppBundleGuard;
+  /** Consecutive missed health probes tolerated while the runner process stays alive. */
+  healthMissThreshold?: number;
   /** Builds the runner supervisor; a test wraps the default to drive it directly. */
   processSupervisorFactory?: (options: ProcessSupervisorOptions) => ProcessSupervisor;
 }

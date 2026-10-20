@@ -1,4 +1,7 @@
+import type { CtrlProxyIosSetupResult } from "./ios/IosCtrlProxyContracts";
 import type { BootedDevice, DeviceLockState } from "../models";
+import type { HostChildProcess } from "../utils/HostCommandExecutor";
+import type { CtrlProxyHealthCheckResult } from "./ios/IosCtrlProxyHealthClient";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
 import type { Timer } from "../utils/SystemTimer";
@@ -38,6 +41,12 @@ export interface ReadinessAndroidManager {
 }
 
 export interface ReadinessIosManager {
+  /** Fresh liveness evidence; a timeout alone does not prove the runner is dead. */
+  checkRunningWithReason?(): Promise<CtrlProxyHealthCheckResult>;
+  /** Only an observed child exit proves death; an absent tracked child is inconclusive. */
+  runnerSnapshot?(): {
+    xcTestProcess: Pick<HostChildProcess, "exitCode" | "signalCode"> | null;
+  };
   isInstalled(): Promise<boolean>;
   resetSetupState(): void;
   forceRestart(options?: {
@@ -50,7 +59,7 @@ export interface ReadinessIosManager {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     minimumHealthPollDurationMs?: number,
-  ): Promise<ProxySetupResult>;
+  ): Promise<CtrlProxyIosSetupResult>;
   getServicePort(): number;
 }
 
@@ -128,6 +137,9 @@ export interface AndroidFrameworkReadinessResult {
 
 export interface RunnerReadinessDependencies {
   timer: Timer;
+  /** Maximum iOS transient startup attempts, including the initial setup. */
+  iosSetupMaxAttempts?: number;
+  iosPostSetupRestartMinFailedProbes?: number;
   getAndroidFrameworkReadiness?(
     device: BootedDevice,
     signal: AbortSignal,

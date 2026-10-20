@@ -475,7 +475,7 @@ describe("resolveIosInstallBackend", () => {
     await backend.installApp("/tmp/Test.app");
     expect(await backend.listApps()).toEqual(apps);
     expect(simctl.getMethodCalls("installApp")).toEqual([
-      { appPath: "/tmp/Test.app", deviceId: simulatorUdid },
+      { appPath: "/tmp/Test.app", deviceId: simulatorUdid, options: { timeoutMs: 180_000 } },
     ]);
     expect(simctl.getMethodCalls("listAppsOrThrow")).toEqual([{ deviceId: simulatorUdid }]);
     expect(physicalCalls).toEqual([]);

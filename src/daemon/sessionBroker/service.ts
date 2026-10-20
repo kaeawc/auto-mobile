@@ -122,6 +122,7 @@ export async function openSessionBrokerService(
     const reset = options.config.reuseCleanDevices ? nativeIosBaselineReset() : undefined;
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
+      timer: options.timer,
       brokerDeviceAcquisition: options.acquisition,
       brokerExecutionRelease: options.release,
       registry: options.registry,

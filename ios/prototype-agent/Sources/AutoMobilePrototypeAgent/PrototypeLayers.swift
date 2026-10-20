@@ -1,466 +1,472 @@
-import SwiftUI
-import UIKit
+#if canImport(UIKit)
+    import SwiftUI
+    import UIKit
 
-/// Shared gate for the root view and controller; focused SwiftUI nodes can reach either chain.
-@MainActor
-private func performPrototypeAccessibilityEscape(_ model: PrototypeModel?) -> Bool {
-    guard let model else { return false }
-    if model.popTopmostStack() { return true }
-    guard model.hasEscape else { return false }
-    model.dismiss(reason: .user)
-    return true
-}
-
-/// The prototype window's root: the page's hosting view with the top layer's above it (see
-/// `PrototypeHostLayer`). Each lays out the whole window the same way and draws only its own layer,
-/// so their `.global` frames, and the hit rects reported from them, are both window coordinates.
-@MainActor
-final class PrototypeLayersViewController: UIViewController, UIGestureRecognizerDelegate {
-    private let model: PrototypeModel
-    private let page: UIHostingController<PrototypeRootView>
-    private let top: UIHostingController<PrototypeRootView>
-
-    init(model: PrototypeModel) {
-        self.model = model
-        page = UIHostingController(rootView: PrototypeRootView(model: model, layer: .page))
-        top = UIHostingController(rootView: PrototypeRootView(model: model, layer: .top))
-        super.init(nibName: nil, bundle: nil)
+    /// Shared gate for the root view and controller; focused SwiftUI nodes can reach either chain.
+    @MainActor
+    private func performPrototypeAccessibilityEscape(_ model: PrototypeModel?) -> Bool {
+        guard let model else { return false }
+        if model.popTopmostStack() { return true }
+        guard model.hasEscape else { return false }
+        model.dismiss(reason: .user)
+        return true
     }
 
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
+    /// The prototype window's root: the page's hosting view with the top layer's above it (see
+    /// `PrototypeHostLayer`). Each lays out the whole window the same way and draws only its own layer,
+    /// so their `.global` frames, and the hit rects reported from them, are both window coordinates.
+    @MainActor
+    final class PrototypeLayersViewController: UIViewController, UIGestureRecognizerDelegate {
+        private let model: PrototypeModel
+        private let page: UIHostingController<PrototypeRootView>
+        private let top: UIHostingController<PrototypeRootView>
 
-    override func loadView() {
-        view = PrototypeLayersView(model: model)
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .clear
-        for host in [page, top] {
-            // Only `PrototypeKeyboardLift` moves anything for the keyboard (#11042), and the window's
-            // insets reach the spec through the model, so neither host applies a safe area of its
-            // own. This is UIKit's switch: with only the root's `ignoresSafeArea`, a 300 pt sheet
-            // still moved 527 pt for a 334 pt lift on an iOS 26.5 simulator.
-            host.safeAreaRegions = SafeAreaRegions(PrototypeKeyboardLift.hostSafeAreaRegions)
-            addChild(host)
-            host.view.backgroundColor = .clear
-            host.view.frame = view.bounds
-            host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            view.addSubview(host.view)
-            host.didMove(toParent: self)
+        init(model: PrototypeModel) {
+            self.model = model
+            page = UIHostingController(rootView: PrototypeRootView(model: model, layer: .page))
+            top = UIHostingController(rootView: PrototypeRootView(model: model, layer: .top))
+            super.init(nibName: nil, bundle: nil)
         }
-        (view as? PrototypeLayersView)?.hosts = (page.view, top.view)
-        // One recognizer on the shared ancestor sees touches before authored hosting views;
-        // recognition cancels their touch stream. Single-touch gestures cannot recognize it.
-        let escape = UILongPressGestureRecognizer(target: self, action: #selector(escapeHeld(_:)))
-        escape.numberOfTouchesRequired = 2
-        escape.minimumPressDuration = PrototypeEscapeReveal.holdSeconds
-        escape.cancelsTouchesInView = true
-        escape.delaysTouchesBegan = false
-        escape.delaysTouchesEnded = false
-        escape.delegate = self
-        view.addGestureRecognizer(escape)
-    }
 
-    func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
-        model.hasEscape
-    }
+        @available(*, unavailable)
+        required init?(coder _: NSCoder) {
+            fatalError("init(coder:) is not supported")
+        }
 
-    func gestureRecognizer(
-        _: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
-    )
-        -> Bool
-    {
-        true
-    }
+        override func loadView() {
+            view = PrototypeLayersView(model: model)
+        }
 
-    @objc
-    private func escapeHeld(_ gesture: UILongPressGestureRecognizer) {
-        if gesture.state == .began { model.revealEscape() }
-    }
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .clear
+            for host in [page, top] {
+                // Only `PrototypeKeyboardLift` moves anything for the keyboard (#11042), and the window's
+                // insets reach the spec through the model, so neither host applies a safe area of its
+                // own. This is UIKit's switch: with only the root's `ignoresSafeArea`, a 300 pt sheet
+                // still moved 527 pt for a 334 pt lift on an iOS 26.5 simulator.
+                host.safeAreaRegions = SafeAreaRegions(PrototypeKeyboardLift.hostSafeAreaRegions)
+                addChild(host)
+                host.view.backgroundColor = .clear
+                host.view.frame = view.bounds
+                host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                view.addSubview(host.view)
+                host.didMove(toParent: self)
+            }
+            (view as? PrototypeLayersView)?.hosts = (page.view, top.view)
+            // One recognizer on the shared ancestor sees touches before authored hosting views;
+            // recognition cancels their touch stream. Single-touch gestures cannot recognize it.
+            let escape = UILongPressGestureRecognizer(target: self, action: #selector(escapeHeld(_:)))
+            escape.numberOfTouchesRequired = 2
+            escape.minimumPressDuration = PrototypeEscapeReveal.holdSeconds
+            escape.cancelsTouchesInView = true
+            escape.delaysTouchesBegan = false
+            escape.delaysTouchesEnded = false
+            escape.delegate = self
+            view.addGestureRecognizer(escape)
+        }
 
-    override func accessibilityPerformEscape() -> Bool {
-        performPrototypeAccessibilityEscape(model) || super.accessibilityPerformEscape()
-    }
+        func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
+            model.hasEscape
+        }
 
-    /// Sets the UIKit flags an open dialog needs: the page leaves the accessibility tree and the top
-    /// layer is modal, so the XCUITest snapshot lists only the dialog and the host dismiss control.
-    func apply(_ flags: PrototypeHostAccessibility) {
-        loadViewIfNeeded()
-        (view as? PrototypeLayersView)?.accessibilityIdentifier = flags.windowMarked
-            ? PrototypeHostChrome.windowMarkerIdentifier : nil
-        page.view.accessibilityElementsHidden = flags.pageElementsHidden
-        top.view.accessibilityViewIsModal = flags.topIsModal
-    }
-}
-
-/// Routes each touch to the hosting view that drew what is under it. Both views fill the window,
-/// so without this the top one would take every touch, including those meant for the page.
-@MainActor
-private final class PrototypeLayersView: UIView {
-    weak var model: PrototypeModel?
-    var hosts: (page: UIView, top: UIView)?
-
-    init(model: PrototypeModel) {
-        self.model = model
-        super.init(frame: .zero)
-        // Keep both hosts' children; apply(flags) marks only a chromeless fullscreen session.
-        isAccessibilityElement = false
-    }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override func accessibilityPerformEscape() -> Bool {
-        performPrototypeAccessibilityEscape(model) || super.accessibilityPerformEscape()
-    }
-
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let model, let hosts,
-              let owner = model.hitRects.layer(at: convert(point, to: nil))
-        else { return nil }
-        let target = owner == .top ? hosts.top : hosts.page
-        // Opacity-zero authored content may decline the accepted touch. Keep the fullscreen
-        // escape recognizer's ancestor in the touch chain; this path is not yet device-verified.
-        return target.hitTest(convert(point, to: target), with: event) ?? (model.hasEscape ? self : nil)
-    }
-}
-
-/// Lays out the shown spec by placement and records the touchable rects for the window. `layer`
-/// picks what this hosting view draws: the page (the spec's tree and anchor layer) or the top
-/// layer (open dialogs and snackbars and the host dismiss control).
-@MainActor
-struct PrototypeRootView: View {
-    let model: PrototypeModel
-    let layer: PrototypeHostLayer
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        // The model's one resolved mode, not this window's `colorScheme`: the window carries that
-        // mode as its UIKit override, so its own scheme no longer says what the device is set to.
-        let palette = PrototypePalette.make(theme: model.spec?.theme, dark: model.dark)
-        let chip = PrototypeHostChrome.closeChipColors(palette: palette)
-        // An open dialog makes the page behind it inert for accessibility, as it is for touches
-        // (#10899). VoiceOver honours this collapse; the XCUITest snapshot needs the UIKit flags
-        // `PrototypeLayersViewController.apply` sets on the page's hosting view.
-        let pageAccessibility = model.spec?.root.layerAccessibility(
-            state: model.state,
-            pages: model.pages,
-            stacks: model.stacks
+        func gestureRecognizer(
+            _: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
         )
-            ?? .container
-        ZStack {
-            if let spec = model.spec {
-                let chrome = PrototypeHostChrome(placementType: spec.window.placement.type, chrome: spec.window.chrome)
-                let opacity = Double(spec.window.opacity ?? 100) / 100
-                if chrome.reservesDismissBar {
-                    // Like Android's fullscreen window: the bar takes the top of the screen and the
-                    // spec and its dialogs are laid out and clipped below it, so the control never
-                    // covers authored content and a dialog scrim never covers the control. The page
-                    // layer keeps the bar's space empty; the top layer draws the bar.
-                    VStack(spacing: 0) {
-                        if layer == .top {
-                            dismissBar(chrome, palette: palette)
-                        } else {
-                            Color.clear.frame(height: chrome.dismissBarHeight(safeTop: model.safeInsets.top))
+            -> Bool
+        {
+            true
+        }
+
+        @objc
+        private func escapeHeld(_ gesture: UILongPressGestureRecognizer) {
+            if gesture.state == .began { model.revealEscape() }
+        }
+
+        override func accessibilityPerformEscape() -> Bool {
+            performPrototypeAccessibilityEscape(model) || super.accessibilityPerformEscape()
+        }
+
+        /// Sets the UIKit flags an open dialog needs: the page leaves the accessibility tree and the top
+        /// layer is modal, so the XCUITest snapshot lists only the dialog and the host dismiss control.
+        func apply(_ flags: PrototypeHostAccessibility) {
+            loadViewIfNeeded()
+            (view as? PrototypeLayersView)?.accessibilityIdentifier = flags.windowMarked
+                ? PrototypeHostChrome.windowMarkerIdentifier : nil
+            page.view.accessibilityElementsHidden = flags.pageElementsHidden
+            top.view.accessibilityViewIsModal = flags.topIsModal
+        }
+    }
+
+    /// Routes each touch to the hosting view that drew what is under it. Both views fill the window,
+    /// so without this the top one would take every touch, including those meant for the page.
+    @MainActor
+    private final class PrototypeLayersView: UIView {
+        weak var model: PrototypeModel?
+        var hosts: (page: UIView, top: UIView)?
+
+        init(model: PrototypeModel) {
+            self.model = model
+            super.init(frame: .zero)
+            // Keep both hosts' children; apply(flags) marks only a chromeless fullscreen session.
+            isAccessibilityElement = false
+        }
+
+        @available(*, unavailable)
+        required init?(coder _: NSCoder) {
+            fatalError("init(coder:) is not supported")
+        }
+
+        override func accessibilityPerformEscape() -> Bool {
+            performPrototypeAccessibilityEscape(model) || super.accessibilityPerformEscape()
+        }
+
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            guard let model, let hosts,
+                  let owner = model.hitRects.layer(at: convert(point, to: nil))
+            else { return nil }
+            let target = owner == .top ? hosts.top : hosts.page
+            // Opacity-zero authored content may decline the accepted touch. Keep the fullscreen
+            // escape recognizer's ancestor in the touch chain; this path is not yet device-verified.
+            return target.hitTest(convert(point, to: target), with: event) ?? (model.hasEscape ? self : nil)
+        }
+    }
+
+    /// Lays out the shown spec by placement and records the touchable rects for the window. `layer`
+    /// picks what this hosting view draws: the page (the spec's tree and anchor layer) or the top
+    /// layer (open dialogs and snackbars and the host dismiss control).
+    @MainActor
+    struct PrototypeRootView: View {
+        let model: PrototypeModel
+        let layer: PrototypeHostLayer
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            // The model's one resolved mode, not this window's `colorScheme`: the window carries that
+            // mode as its UIKit override, so its own scheme no longer says what the device is set to.
+            let palette = PrototypePalette.make(theme: model.spec?.theme, dark: model.dark)
+            let chip = PrototypeHostChrome.closeChipColors(palette: palette)
+            // An open dialog makes the page behind it inert for accessibility, as it is for touches
+            // (#10899). VoiceOver honours this collapse; the XCUITest snapshot needs the UIKit flags
+            // `PrototypeLayersViewController.apply` sets on the page's hosting view.
+            let pageAccessibility = model.spec?.root.layerAccessibility(
+                state: model.state,
+                pages: model.pages,
+                stacks: model.stacks
+            )
+                ?? .container
+            ZStack {
+                if let spec = model.spec {
+                    let chrome = PrototypeHostChrome(
+                        placementType: spec.window.placement.type,
+                        chrome: spec.window.chrome
+                    )
+                    let opacity = Double(spec.window.opacity ?? 100) / 100
+                    if chrome.reservesDismissBar {
+                        // Like Android's fullscreen window: the bar takes the top of the screen and the
+                        // spec and its dialogs are laid out and clipped below it, so the control never
+                        // covers authored content and a dialog scrim never covers the control. The page
+                        // layer keeps the bar's space empty; the top layer draws the bar.
+                        VStack(spacing: 0) {
+                            if layer == .top {
+                                dismissBar(chrome, palette: palette)
+                            } else {
+                                Color.clear.frame(height: chrome.dismissBarHeight(safeTop: model.safeInsets.top))
+                            }
+                            // The clear base fixes the content area to the space left under the bar;
+                            // the spec and the modal layer are laid out in it separately, so a dialog
+                            // taller than that area neither pushes the bar up nor moves the spec.
+                            Color.clear
+                                .overlay {
+                                    if layer == .page {
+                                        placed(spec, layer: pageAccessibility, palette: palette).opacity(opacity)
+                                    }
+                                }
+                                .overlay {
+                                    if layer == .page {
+                                        anchorLayer(spec).opacity(opacity)
+                                            .prototypeLayerAccessibility(pageAccessibility)
+                                    }
+                                }
+                                .overlay {
+                                    if layer == .top {
+                                        PrototypeModalLayer(model: model).opacity(opacity)
+                                    }
+                                }
+                                .clipped()
                         }
-                        // The clear base fixes the content area to the space left under the bar;
-                        // the spec and the modal layer are laid out in it separately, so a dialog
-                        // taller than that area neither pushes the bar up nor moves the spec.
-                        Color.clear
-                            .overlay {
-                                if layer == .page {
-                                    placed(spec, layer: pageAccessibility, palette: palette).opacity(opacity)
-                                }
-                            }
-                            .overlay {
-                                if layer == .page {
-                                    anchorLayer(spec).opacity(opacity).prototypeLayerAccessibility(pageAccessibility)
-                                }
-                            }
-                            .overlay {
-                                if layer == .top {
-                                    PrototypeModalLayer(model: model).opacity(opacity)
-                                }
-                            }
-                            .clipped()
-                    }
-                } else if layer == .page {
-                    placed(spec, layer: pageAccessibility, palette: palette).opacity(opacity)
-                    anchorLayer(spec).opacity(opacity).prototypeLayerAccessibility(pageAccessibility)
-                } else {
-                    PrototypeModalLayer(model: model).opacity(opacity)
-                    if chrome.escape {
-                        if model.escapeRevealed || model.assistiveEscapeVisible {
-                            dismissPill(glyph: Color(chip.glyph), fill: Color(chip.fill))
-                                .padding(.top, model.safeInsets.top + 8)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        }
+                    } else if layer == .page {
+                        placed(spec, layer: pageAccessibility, palette: palette).opacity(opacity)
+                        anchorLayer(spec).opacity(opacity).prototypeLayerAccessibility(pageAccessibility)
                     } else {
-                        dismissControl(glyph: Color(chip.glyph), fill: Color(chip.fill))
-                            .padding(.top, model.safeInsets.top)
-                            .padding(.trailing, max(model.safeInsets.right, 8))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        PrototypeModalLayer(model: model).opacity(opacity)
+                        if chrome.escape {
+                            if model.escapeRevealed || model.assistiveEscapeVisible {
+                                dismissPill(glyph: Color(chip.glyph), fill: Color(chip.fill))
+                                    .padding(.top, model.safeInsets.top + 8)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            }
+                        } else {
+                            dismissControl(glyph: Color(chip.glyph), fill: Color(chip.fill))
+                                .padding(.top, model.safeInsets.top)
+                                .padding(.trailing, max(model.safeInsets.right, 8))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        }
                     }
                 }
             }
+            // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
+            .environment(\.colorScheme, palette.dark ? .dark : .light)
+            .environment(\.prototypePalette, palette)
+            .environment(\.prototypeTypography, PrototypeTypography(theme: model.spec?.theme?.typography))
+            .environment(\.prototypeShapes, PrototypeShapes(theme: model.spec?.theme?.shapes))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Bars and cutouts are the spec's job (safeAreaPadding). A bottom sheet is raised by the
+            // keyboard frame itself (`keyboardLift`) and nothing else moves for the keyboard, as on
+            // Android: the hosts keep no safe area (`PrototypeKeyboardLift.hostSafeAreaRegions`), and
+            // this ignores every region too, so no second lift can stack on the sheet's (#11042).
+            .ignoresSafeArea()
+            // Observe edge drags alongside authored gestures without reserving a tappable strip.
+            .simultaneousGesture(DragGesture(minimumDistance: 10, coordinateSpace: .local).onEnded { value in
+                if value.startLocation.x <= 20,
+                   value.translation.width >= 60,
+                   abs(value.translation.height) < abs(value.translation.width)
+                {
+                    model.popTopmostStack()
+                }
+            })
         }
-        // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
-        .environment(\.colorScheme, palette.dark ? .dark : .light)
-        .environment(\.prototypePalette, palette)
-        .environment(\.prototypeTypography, PrototypeTypography(theme: model.spec?.theme?.typography))
-        .environment(\.prototypeShapes, PrototypeShapes(theme: model.spec?.theme?.shapes))
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Bars and cutouts are the spec's job (safeAreaPadding). A bottom sheet is raised by the
-        // keyboard frame itself (`keyboardLift`) and nothing else moves for the keyboard, as on
-        // Android: the hosts keep no safe area (`PrototypeKeyboardLift.hostSafeAreaRegions`), and
-        // this ignores every region too, so no second lift can stack on the sheet's (#11042).
-        .ignoresSafeArea()
-        // Observe edge drags alongside authored gestures without reserving a tappable strip.
-        .simultaneousGesture(DragGesture(minimumDistance: 10, coordinateSpace: .local).onEnded { value in
-            if value.startLocation.x <= 20,
-               value.translation.width >= 60,
-               abs(value.translation.height) < abs(value.translation.width)
-            {
-                model.popTopmostStack()
-            }
-        })
-    }
 
-    /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
-    private func anchorLayer(_ spec: PrototypeSpec) -> some View {
-        let placement = spec.window.placement
-        let motion = PrototypeMotion(specMotion: spec.motion, reduceMotion: reduceMotion)
-        return PrototypeAnchorLayer(
-            entries: spec.root.windowAnchorLayer(
-                state: model.state, pages: model.pages, stacks: model.stacks, retainExiting: motion.enabled
-            ),
-            model: model,
-            sheet: placement.type == "sheet"
-                ? PrototypeAnchorLayer.Sheet(edge: placement.edge, height: placement.height, lift: keyboardLift)
-                : nil
+        /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
+        private func anchorLayer(_ spec: PrototypeSpec) -> some View {
+            let placement = spec.window.placement
+            let motion = PrototypeMotion(specMotion: spec.motion, reduceMotion: reduceMotion)
+            return PrototypeAnchorLayer(
+                entries: spec.root.windowAnchorLayer(
+                    state: model.state, pages: model.pages, stacks: model.stacks, retainExiting: motion.enabled
+                ),
+                model: model,
+                sheet: placement.type == "sheet"
+                    ? PrototypeAnchorLayer.Sheet(edge: placement.edge, height: placement.height, lift: keyboardLift)
+                    : nil
+            )
+            .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
+        }
+
+        /// How far the bottom sheet is raised and how long the move takes: the keyboard's own duration,
+        /// or instant under spec `motion: "none"` or Reduce Motion.
+        private var keyboardLift: Double {
+            model.keyboardLift
+        }
+
+        private var keyboardLiftDuration: Double? {
+            PrototypeKeyboardLift.animationDuration(
+                keyboardDuration: model.keyboardDuration,
+                motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            )
+        }
+
+        @ViewBuilder
+        private func placed(
+            _ spec: PrototypeSpec,
+            layer: PrototypeLayerAccessibility,
+            palette: PrototypePalette
         )
-        .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
-    }
-
-    /// How far the bottom sheet is raised and how long the move takes: the keyboard's own duration,
-    /// or instant under spec `motion: "none"` or Reduce Motion.
-    private var keyboardLift: Double {
-        model.keyboardLift
-    }
-
-    private var keyboardLiftDuration: Double? {
-        PrototypeKeyboardLift.animationDuration(
-            keyboardDuration: model.keyboardDuration,
-            motion: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
-        )
-    }
-
-    @ViewBuilder
-    private func placed(
-        _ spec: PrototypeSpec,
-        layer: PrototypeLayerAccessibility,
-        palette: PrototypePalette
-    )
-        -> some View
-    {
-        let placement = spec.window.placement
-        // The boundary sits on the root itself, inside the placement's fill frames, so a lone
-        // node keeps its own accessibility frame (#10898).
-        let root = NodeView(node: spec.root, model: model).prototypeLayerAccessibility(layer)
-        // There is no window to move onto an anchored root: the anchor layer places it, and an
-        // empty sheet or floating slot must not catch touches meant for the app.
-        let rootAnchored = spec.root.anchor != nil
-        switch placement.type {
-        case "sheet" where rootAnchored, "floating" where rootAnchored:
-            EmptyView()
-        case "sheet":
-            let edge: Alignment = placement.edge == "top" ? .top : .bottom
-            root
-                .frame(maxWidth: .infinity)
-                .frame(height: placement.height ?? PrototypeSheetFrame.defaultHeight)
-                .reportFrame(key: "content", model: model)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge)
-                // The sheet's frame is reported from inside, so its touch rect follows the lift.
-                .padding(.bottom, keyboardLift)
-                .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
-        case "floating":
-            root
-                .offset(x: placement.offset?.x ?? 0, y: placement.offset?.y ?? 0)
-                .reportFrame(key: "content", model: model)
-                .padding(EdgeInsets(
-                    top: model.safeInsets.top, leading: model.safeInsets.left,
-                    bottom: model.safeInsets.bottom, trailing: model.safeInsets.right
-                ))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: swiftUIAlignment(placement.gravity))
-        default:
-            // Fullscreen blocks the app, like the Android full-screen window.
-            ZStack(alignment: .topLeading) {
-                palette.scrim(placement.scrim).map { Color($0) } ?? .clear
+            -> some View
+        {
+            let placement = spec.window.placement
+            // The boundary sits on the root itself, inside the placement's fill frames, so a lone
+            // node keeps its own accessibility frame (#10898).
+            let root = NodeView(node: spec.root, model: model).prototypeLayerAccessibility(layer)
+            // There is no window to move onto an anchored root: the anchor layer places it, and an
+            // empty sheet or floating slot must not catch touches meant for the app.
+            let rootAnchored = spec.root.anchor != nil
+            switch placement.type {
+            case "sheet" where rootAnchored, "floating" where rootAnchored:
+                EmptyView()
+            case "sheet":
+                let edge: Alignment = placement.edge == "top" ? .top : .bottom
                 root
+                    .frame(maxWidth: .infinity)
+                    .frame(height: placement.height ?? PrototypeSheetFrame.defaultHeight)
+                    .reportFrame(key: "content", model: model)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge)
+                    // The sheet's frame is reported from inside, so its touch rect follows the lift.
+                    .padding(.bottom, keyboardLift)
+                    .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
+            case "floating":
+                root
+                    .offset(x: placement.offset?.x ?? 0, y: placement.offset?.y ?? 0)
+                    .reportFrame(key: "content", model: model)
+                    .padding(EdgeInsets(
+                        top: model.safeInsets.top, leading: model.safeInsets.left,
+                        bottom: model.safeInsets.bottom, trailing: model.safeInsets.right
+                    ))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: swiftUIAlignment(placement.gravity))
+            default:
+                // Fullscreen blocks the app, like the Android full-screen window.
+                ZStack(alignment: .topLeading) {
+                    palette.scrim(placement.scrim).map { Color($0) } ?? .clear
+                    root
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .reportFrame(key: "content", model: model)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .contentShape(Rectangle())
-            .reportFrame(key: "content", model: model)
         }
-    }
 
-    /// Host-owned control the spec cannot remove (#9307).
-    private func dismissControl(glyph: Color, fill: Color) -> some View {
-        Button {
-            model.dismiss(reason: .user)
-        } label: {
-            Image(systemName: "xmark")
+        /// Host-owned control the spec cannot remove (#9307).
+        private func dismissControl(glyph: Color, fill: Color) -> some View {
+            Button {
+                model.dismiss(reason: .user)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(glyph)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(fill))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("automobile-prototype-dismiss")
+            .accessibilityLabel("Dismiss prototype")
+            .reportFrame(key: "dismiss", model: model)
+        }
+
+        /// Drawn above the modal layer without authored opacity, including under assistive technology.
+        private func dismissPill(glyph: Color, fill: Color) -> some View {
+            Button {
+                model.dismiss(reason: .user)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark")
+                    Text("Dismiss prototype")
+                }
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(glyph)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(fill))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .accessibilityIdentifier("automobile-prototype-dismiss")
-        .accessibilityLabel("Dismiss prototype")
-        .reportFrame(key: "dismiss", model: model)
-    }
-
-    /// Drawn above the modal layer without authored opacity, including under assistive technology.
-    private func dismissPill(glyph: Color, fill: Color) -> some View {
-        Button {
-            model.dismiss(reason: .user)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "xmark")
-                Text("Dismiss prototype")
+                .padding(.horizontal, 16)
+                .frame(minHeight: PrototypeHostChrome.controlSide)
+                .background(Capsule().fill(fill))
+                .contentShape(Capsule())
             }
-            .font(.system(size: 13, weight: .bold))
-            .foregroundColor(glyph)
-            .padding(.horizontal, 16)
-            .frame(minHeight: PrototypeHostChrome.controlSide)
-            .background(Capsule().fill(fill))
-            .contentShape(Capsule())
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("automobile-prototype-dismiss")
+            .accessibilityLabel("Dismiss prototype")
+            .reportFrame(key: "escape", model: model)
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("automobile-prototype-dismiss")
-        .accessibilityLabel("Dismiss prototype")
-        .reportFrame(key: "escape", model: model)
+
+        /// The fullscreen dismiss bar: it clears the status bar and cutout, holds only the control, and
+        /// is translucent and themed like the spec (Android's `prototypeDismissColors`, #10522). Its rect
+        /// is a hit rect, so a tap on the bar beside the control still never reaches the covered app.
+        private func dismissBar(_ chrome: PrototypeHostChrome, palette: PrototypePalette) -> some View {
+            let colors = PrototypeHostChrome.dismissBarColors(palette: palette)
+            let content = Color(colors.content)
+            return dismissControl(glyph: content, fill: content.opacity(0.12))
+                .padding(.top, model.safeInsets.top)
+                .padding(.leading, model.safeInsets.left)
+                .padding(.trailing, max(model.safeInsets.right, 8))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(height: chrome.dismissBarHeight(safeTop: model.safeInsets.top), alignment: .bottom)
+                .background(Color(colors.background))
+                .reportFrame(key: "dismissBar", model: model)
+        }
     }
 
-    /// The fullscreen dismiss bar: it clears the status bar and cutout, holds only the control, and
-    /// is translucent and themed like the spec (Android's `prototypeDismissColors`, #10522). Its rect
-    /// is a hit rect, so a tap on the bar beside the control still never reaches the covered app.
-    private func dismissBar(_ chrome: PrototypeHostChrome, palette: PrototypePalette) -> some View {
-        let colors = PrototypeHostChrome.dismissBarColors(palette: palette)
-        let content = Color(colors.content)
-        return dismissControl(glyph: content, fill: content.opacity(0.12))
-            .padding(.top, model.safeInsets.top)
-            .padding(.leading, model.safeInsets.left)
-            .padding(.trailing, max(model.safeInsets.right, 8))
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .frame(height: chrome.dismissBarHeight(safeTop: model.safeInsets.top), alignment: .bottom)
-            .background(Color(colors.background))
-            .reportFrame(key: "dismissBar", model: model)
-    }
-}
+    extension View {
+        /// Applies a layer's accessibility shape. The child behaviour is a value rather than a
+        /// branch, so the layer keeps its view identity (and scroll positions) when a dialog opens.
+        func prototypeLayerAccessibility(_ layer: PrototypeLayerAccessibility) -> some View {
+            accessibilityElement(children: layer == .collapsed ? .ignore : .contain)
+                .accessibilityHidden(layer == .collapsed)
+        }
 
-extension View {
-    /// Applies a layer's accessibility shape. The child behaviour is a value rather than a
-    /// branch, so the layer keeps its view identity (and scroll positions) when a dialog opens.
-    func prototypeLayerAccessibility(_ layer: PrototypeLayerAccessibility) -> some View {
-        accessibilityElement(children: layer == .collapsed ? .ignore : .contain)
-            .accessibilityHidden(layer == .collapsed)
+        /// Reports this view's window frame while it is on screen.
+        /// With `clip`, only the part of the frame inside it takes touches; `enabled: false` withdraws
+        /// the rect while the view stays on screen (an anchored node fading out with its ancestor).
+        @MainActor
+        func reportFrame(key: String, model: PrototypeModel, clip: CGRect? = nil, enabled: Bool = true) -> some View {
+            modifier(PrototypeFrameReporter(key: key, model: model, clip: clip, enabled: enabled))
+        }
     }
 
-    /// Reports this view's window frame while it is on screen.
-    /// With `clip`, only the part of the frame inside it takes touches; `enabled: false` withdraws
-    /// the rect while the view stays on screen (an anchored node fading out with its ancestor).
     @MainActor
-    func reportFrame(key: String, model: PrototypeModel, clip: CGRect? = nil, enabled: Bool = true) -> some View {
-        modifier(PrototypeFrameReporter(key: key, model: model, clip: clip, enabled: enabled))
-    }
-}
+    private struct PrototypeFrameReporter: ViewModifier {
+        private struct Configuration: Equatable {
+            let key: String
+            let clip: CGRect?
+            let enabled: Bool
+        }
 
-@MainActor
-private struct PrototypeFrameReporter: ViewModifier {
-    private struct Configuration: Equatable {
         let key: String
+        let model: PrototypeModel
         let clip: CGRect?
         let enabled: Bool
+        // Branches sharing a key still have distinct view lifetimes (#12207).
+        @State private var owner = PrototypeHitRectOwner()
+        @State private var frame: CGRect?
+
+        private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled) }
+
+        func body(content: Content) -> some View {
+            content
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    self.frame = frame
+                    report(frame, configuration: configuration)
+                }
+                .onChange(of: configuration) { old, now in
+                    if old.key != now.key { model.hitRects.withdraw(key: old.key, owner: owner) }
+                    // Use all new inputs, even when they change together without a geometry update.
+                    if let frame { report(frame, configuration: now) }
+                }
+                .onDisappear { model.hitRects.withdraw(key: key, owner: owner) }
+        }
+
+        private func report(_ frame: CGRect, configuration: Configuration) {
+            let touchable = configuration.clip.map { frame.intersection($0) } ?? frame
+            model.hitRects.report(
+                configuration.enabled && !touchable.isNull && !touchable.isEmpty ? touchable : nil,
+                key: configuration.key, owner: owner
+            )
+        }
     }
 
-    let key: String
-    let model: PrototypeModel
-    let clip: CGRect?
-    let enabled: Bool
-    // Branches sharing a key still have distinct view lifetimes (#12207).
-    @State private var owner = PrototypeHitRectOwner()
-    @State private var frame: CGRect?
+    /// Calls back after the next display frame, so a visual change made just before is on screen.
+    /// Falls back after 100 ms if no frame is delivered (backgrounded app, paused display link).
+    @MainActor
+    final class FrameWaiter: NSObject {
+        private var link: CADisplayLink?
+        private var completion: (() -> Void)?
 
-    private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled) }
+        static func nextFrame(_ completion: @escaping () -> Void) {
+            let waiter = FrameWaiter()
+            waiter.completion = completion
+            let link = CADisplayLink(target: waiter, selector: #selector(tick))
+            link.add(to: .main, forMode: .common)
+            waiter.link = link
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { waiter.finish() }
+        }
 
-    func body(content: Content) -> some View {
-        content
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-                self.frame = frame
-                report(frame, configuration: configuration)
-            }
-            .onChange(of: configuration) { old, now in
-                if old.key != now.key { model.hitRects.withdraw(key: old.key, owner: owner) }
-                // Use all new inputs, even when they change together without a geometry update.
-                if let frame { report(frame, configuration: now) }
-            }
-            .onDisappear { model.hitRects.withdraw(key: key, owner: owner) }
+        @objc
+        private func tick() {
+            finish()
+        }
+
+        private func finish() {
+            link?.invalidate()
+            link = nil
+            let done = completion
+            completion = nil
+            done?()
+        }
     }
 
-    private func report(_ frame: CGRect, configuration: Configuration) {
-        let touchable = configuration.clip.map { frame.intersection($0) } ?? frame
-        model.hitRects.report(
-            configuration.enabled && !touchable.isNull && !touchable.isEmpty ? touchable : nil,
-            key: configuration.key, owner: owner
-        )
+    extension SafeAreaRegions {
+        /// The UIKit regions for the agent's device-free `PrototypeHostSafeAreaRegions`.
+        init(_ regions: PrototypeHostSafeAreaRegions) {
+            self = []
+            if regions.contains(.container) { insert(.container) }
+            if regions.contains(.keyboard) { insert(.keyboard) }
+        }
     }
-}
-
-/// Calls back after the next display frame, so a visual change made just before is on screen.
-/// Falls back after 100 ms if no frame is delivered (backgrounded app, paused display link).
-@MainActor
-final class FrameWaiter: NSObject {
-    private var link: CADisplayLink?
-    private var completion: (() -> Void)?
-
-    static func nextFrame(_ completion: @escaping () -> Void) {
-        let waiter = FrameWaiter()
-        waiter.completion = completion
-        let link = CADisplayLink(target: waiter, selector: #selector(tick))
-        link.add(to: .main, forMode: .common)
-        waiter.link = link
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { waiter.finish() }
-    }
-
-    @objc
-    private func tick() {
-        finish()
-    }
-
-    private func finish() {
-        link?.invalidate()
-        link = nil
-        let done = completion
-        completion = nil
-        done?()
-    }
-}
-
-extension SafeAreaRegions {
-    /// The UIKit regions for the agent's device-free `PrototypeHostSafeAreaRegions`.
-    init(_ regions: PrototypeHostSafeAreaRegions) {
-        self = []
-        if regions.contains(.container) { insert(.container) }
-        if regions.contains(.keyboard) { insert(.keyboard) }
-    }
-}
+#endif

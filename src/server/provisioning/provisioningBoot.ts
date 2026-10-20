@@ -1,3 +1,6 @@
+import { currentBindingReconciler } from "../../daemon/sessionBroker/provisioning/exclusion";
+import type { InternalProvisionDeviceArgs } from "../../features/deviceLifecycle/core/contracts";
+import { toProvisionDeviceError } from "./provisioningErrors";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { DeviceResourceConfigurationResult } from "../../models/DeviceResourceConfiguration";
 import { PlatformDeviceManager } from "../../devices/deviceUtils";
@@ -291,6 +294,7 @@ export async function bootExactProvisionedDevice(
   );
   let boot: DeviceBootResult | undefined;
   let ownershipTransferred = false;
+  let awaitingReadiness = false;
   let readinessReservation: DeviceReadinessReservation | undefined;
   let resources: DeviceResourceConfigurationResult | undefined;
   try {
@@ -368,11 +372,13 @@ export async function bootExactProvisionedDevice(
           operationSignal,
         );
         operationSignal.throwIfAborted();
+        awaitingReadiness = true;
         await ensureProvisionDeviceReadiness(ctx, args, deps, boot!.device, requestedIdentity, {
           totalDeadlineMs: totalDeadlineMs,
           perf: perf,
           signal: operationSignal,
         });
+        awaitingReadiness = false;
         operationSignal.throwIfAborted();
         await validatePooledDeviceMapping(boot!.device, requestedIdentity, mappingOptions);
         publishWarmDeviceReady(boot!.source, boot!.device.deviceId);
@@ -398,7 +404,14 @@ export async function bootExactProvisionedDevice(
       resources,
     };
   } catch (error) {
-    if (!ownershipTransferred) {
+    settlementState.retainCreatedForRetry = retainCreatedForReadinessRetry(
+      args,
+      provisioned.created,
+      awaitingReadiness,
+      error,
+      operationSignal,
+    );
+    if (!ownershipTransferred && !settlementState.retainCreatedForRetry) {
       settlementState.unownedColdBootSettlement = cancelUnownedColdBootUnlessRetryable(
         boot ? { ...boot, provisioned: boot.provisioned || provisioned.created } : boot,
         error,
@@ -409,4 +422,26 @@ export async function bootExactProvisionedDevice(
   } finally {
     settlementState.readinessReservation = readinessReservation;
   }
+}
+
+/** Only the opted-in binding journal may keep a creation after a time-based readiness refusal. */
+function retainCreatedForReadinessRetry(
+  args: InternalProvisionDeviceArgs,
+  created: boolean,
+  awaitingReadiness: boolean,
+  error: unknown,
+  signal: AbortSignal,
+): boolean {
+  if (
+    currentBindingReconciler() === undefined ||
+    args.rollbackOnRetryableReadiness !== false ||
+    args.device.platform !== "ios" ||
+    !created ||
+    !awaitingReadiness ||
+    signal.aborted
+  ) {
+    return false;
+  }
+  const failure = toProvisionDeviceError(args, error);
+  return failure.retryable && failure.code === "timeout";
 }

@@ -76,6 +76,7 @@ test/daemon/appearanceSyncOff.test.ts
 test/daemon/appearanceSyncSchedulerResilience.test.ts
 test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
+test/daemon/auxiliarySocketOwner.test.ts
 test/daemon/boundSessionLossMessage.test.ts
 test/daemon/buildIdentity.test.ts
 test/daemon/canonicalPixels.property.test.ts
@@ -411,6 +412,7 @@ test/daemon/sessionBroker/provisioning/executionReleaseBusyRegistry.test.ts
 test/daemon/sessionBroker/provisioning/iosBindingDeviceUnexcludedWhileCreating.test.ts
 test/daemon/sessionBroker/provisioning/iosDeviceTypeNewest.test.ts
 test/daemon/sessionBroker/provisioning/managedExecutionDaemonRestart.test.ts
+test/daemon/sessionBroker/provisioning/managedExecutionReownTerminal.test.ts
 test/daemon/sessionBroker/provisioning/managedOwnershipRelease.test.ts
 test/daemon/sessionBroker/provisioning/ownExecutionRetainedSnapshot.test.ts
 test/daemon/sessionBroker/provisioning/reconciler.test.ts
@@ -492,6 +494,7 @@ test/daemon/socketPaths.test.ts
 test/daemon/socketRegistryCoverage.test.ts
 test/daemon/socketRequestAdmission.test.ts
 test/daemon/socketServer/BaseSocketServerFraming.test.ts
+test/daemon/socketServer/BaseSocketServerImport.test.ts
 test/daemon/socketServer/ConfigSocketServer.test.ts
 test/daemon/socketServer/ControlConnection.test.ts
 test/daemon/socketServer/LineFramer.test.ts

@@ -1,3 +1,4 @@
+import { AuxiliarySocketHeldError } from "../../src/daemon/AuxiliarySocketHeldError";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DaemonIdentity,
@@ -23,6 +24,7 @@ function identityHarness(
   persist: (record: PidFileData) => Promise<void> = async () => {},
   platform: NodeJS.Platform = process.platform,
   stat = () => ({ dev: 1, ino: 2 }),
+  reportStartupFailure: (message: string) => void = () => {},
 ) {
   const host: DaemonIdentityHost = {
     pidFileWritten: () => true,
@@ -44,7 +46,7 @@ function identityHarness(
     writeEarlyOwnerRecord: async () => {},
     persistPidFileData: persist,
   };
-  return new DaemonIdentity(host, { stat }, platform, () => ":memory:");
+  return new DaemonIdentity(host, { stat }, platform, () => ":memory:", reportStartupFailure);
 }
 
 class RefusedStream implements SocketServerLifecycle {
@@ -120,6 +122,88 @@ describe("auxiliary stream degradation", () => {
       }),
     ).rejects.toBe(error);
     expect(getUnavailableAuxiliarySockets()).toEqual([]);
+  });
+
+  test("held optional stream exposes holder identity through status and clears its singleton", async () => {
+    const error = new AuxiliarySocketHeldError("/fake/stream.sock", "Stream", {
+      holderPid: 741,
+      holderVersion: "0.0.old",
+      holderVerified: true,
+    });
+    const singleton = new SocketServerSingleton<SocketServerLifecycle>();
+    await identityHarness().startAuxiliarySocket("observation-stream", () =>
+      singleton.start(() => ({
+        isListening: () => false,
+        start: async () => {
+          throw error;
+        },
+        close: async () => {
+          throw new Error("must not close incumbent");
+        },
+      })),
+    );
+    expect(singleton.instance).toBeNull();
+    const server = createHarnessServer("/fake/control.sock", undefined, new FakeTimer());
+    const status = await server.dispatchLocalRequest({
+      id: "holder",
+      type: "daemon_request",
+      method: "ide/status",
+      params: {},
+    });
+    expect(toDaemonStatus(status, "/fake/control.sock").unavailableSockets).toEqual([
+      {
+        code: "AUXILIARY_SOCKET_UNAVAILABLE",
+        name: "observation-stream",
+        socketPath: "/fake/stream.sock",
+        ...error.holder,
+      },
+    ]);
+  });
+
+  test.each<AuxiliaryDaemonSocketName>([
+    "video-recording",
+    "device-gesture-recording",
+    "device-snapshot",
+    "appearance",
+  ])("fatal held endpoint %s emits the holder line before refusing startup", async (name) => {
+    const error = new AuxiliarySocketHeldError("/fake/config.sock", name, {
+      holderPid: 741,
+      holderVersion: "0.0.old",
+      holderVerified: true,
+    });
+    const output: string[] = [];
+    const identity = identityHarness(undefined, undefined, undefined, (line) => {
+      output.push(line);
+    });
+    await expect(
+      identity.startAuxiliarySocket(name, async () => {
+        throw error;
+      }),
+    ).rejects.toBe(error);
+    expect(output).toEqual([error.message]);
+    expect(output[0]).toContain("pid 741 (version 0.0.old; verified)");
+    expect(getUnavailableAuxiliarySockets()).toEqual([]);
+  });
+
+  test("a broken stderr writer preserves the original held-socket startup error", async () => {
+    const error = new AuxiliarySocketHeldError("/fake/config.sock", "appearance", {
+      holderVerified: false,
+    });
+    const pipeError = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+    const identity = identityHarness(undefined, undefined, undefined, () => {
+      throw pipeError;
+    });
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      await expect(
+        identity.startAuxiliarySocket("appearance", async () => {
+          throw error;
+        }),
+      ).rejects.toBe(error);
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining("broken pipe"), pipeError);
+    } finally {
+      debug.mockRestore();
+    }
   });
 
   test("other stream startup failures remain fatal", async () => {

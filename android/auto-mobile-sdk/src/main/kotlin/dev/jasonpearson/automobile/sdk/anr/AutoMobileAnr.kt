@@ -10,7 +10,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.RequiresApi
+import androidx.core.content.edit
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
@@ -101,6 +103,7 @@ object AutoMobileAnr {
     }
 
   /** Check if ANR detection is available on this device. */
+  @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.R)
   fun isAvailable(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
   /** Clears the retained application context during SDK shutdown or a failed initialization. */
@@ -471,11 +474,10 @@ object AutoMobileAnr {
     }
 
     private fun setLastReportedCursor(context: Context, cursor: AnrCursor) {
-      getPrefs(context)
-        .edit()
-        .putLong(KEY_LAST_REPORTED_TIMESTAMP, cursor.timestamp)
-        .putStringSet(KEY_LAST_REPORTED_IDS, cursor.idsAtTimestamp)
-        .apply()
+      getPrefs(context).edit {
+        putLong(KEY_LAST_REPORTED_TIMESTAMP, cursor.timestamp)
+        putStringSet(KEY_LAST_REPORTED_IDS, cursor.idsAtTimestamp)
+      }
     }
   }
 }

@@ -217,7 +217,7 @@ export interface BindingBootCapacity {
   ): Promise<BindingBootReservation>;
   check(
     platform: BindingPlatform,
-    options: { signal?: AbortSignal },
+    options: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<BindingCapacityCheck>;
 }
 

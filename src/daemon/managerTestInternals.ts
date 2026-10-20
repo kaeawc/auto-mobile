@@ -6,6 +6,7 @@ import type { IdentityRecoveryIO } from "./identityRecovery";
 export interface DaemonManagerSeams {
   exitRecordFileSystem: DaemonExitRecordFileSystem;
   currentBuildId: () => string;
+  nextLaunchNonce: () => string;
   portFreeProbe: (port: number) => Promise<boolean>;
   launchLogFileSystem: {
     openSync(path: string, flags: "w", mode: number): number;

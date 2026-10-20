@@ -1,3 +1,9 @@
+import { createDaemonPerformanceDemandProbe } from "./PerformanceDemandProbe";
+import {
+  alwaysSample,
+  PerformanceSamplingDemand,
+  resetSamplingBaselines,
+} from "./PerformanceSamplingDemand";
 import { PS_SNAPSHOT_ARGS } from "../../devices/bootAdmission/psSnapshot";
 import {
   collectIOSPerformanceMetrics,
@@ -63,6 +69,12 @@ export {
 } from "./PerformanceMonitorTypes";
 export { getLastStartupTimingMs, setLastTtiMs } from "./performanceStartupTiming";
 
+/**
+ * Samples registered devices only while subscribers or a five-minute observe
+ * perf-window lease need data. Production demand is wired by getPerformanceMonitor;
+ * direct construction defaults to always sampling for existing callers/tests.
+ * Demanded devices retain the 500ms graphics, 2s CPU and 10s memory tiers.
+ */
 export class PerformanceMonitor {
   static readonly TICK_INTERVAL_MS = 500;
   static readonly MEDIUM_INTERVAL_MS = 2000;
@@ -90,6 +102,7 @@ export class PerformanceMonitor {
   private readonly getTelemetryEmitter: () => PerformanceTelemetryEmitter;
   private readonly perfWindowBuffer: PerfWindowBuffer;
   private readonly frameMetricsStore: SdkFrameMetricsStore;
+  private readonly samplingDemand: PerformanceSamplingDemand;
   private monitoredDevices = new Map<string, MonitoredDevice>();
   private readonly pausedDeviceCounts = new Map<string, number>();
   private readonly activeAndroidSamples = new Map<
@@ -106,6 +119,7 @@ export class PerformanceMonitor {
       getTelemetryEmitter = () => TelemetryRecorder.getInstance(),
       perfWindowBuffer = getPerfWindowBuffer(),
       frameMetricsStore = getSdkFrameMetricsStore(),
+      demandProbe = alwaysSample,
     } = dependencies;
     this.timer = timer;
     this.adbClientFactory = adbClientFactory;
@@ -115,6 +129,7 @@ export class PerformanceMonitor {
     this.getTelemetryEmitter = getTelemetryEmitter;
     this.perfWindowBuffer = perfWindowBuffer;
     this.frameMetricsStore = frameMetricsStore;
+    this.samplingDemand = new PerformanceSamplingDemand(demandProbe);
   }
 
   /**
@@ -150,6 +165,7 @@ export class PerformanceMonitor {
       this.perfWindowBuffer.clear(deviceId);
       this.frameMetricsStore.clear(deviceId);
     }
+    this.samplingDemand.clear();
     this.monitoredDevices.clear();
     this.pausedDeviceCounts.clear();
     logger.info("[PerformanceMonitor] Stopped background monitoring");
@@ -200,6 +216,7 @@ export class PerformanceMonitor {
       return;
     }
 
+    this.samplingDemand.register(deviceId);
     this.monitoredDevices.set(deviceId, {
       deviceId,
       packageName,
@@ -226,10 +243,17 @@ export class PerformanceMonitor {
     );
   }
 
+  /** Refresh the observe window's five-minute sampling lease. Registration arms the timer. */
+  requestPerfWindow(deviceId: string, packageName: string, platform: "android" | "ios"): void {
+    this.startMonitoring(deviceId, packageName, platform);
+    this.samplingDemand.requestPerfWindow(deviceId, this.timer.now());
+  }
+
   /**
    * Stop monitoring a specific device.
    */
   stopMonitoring(deviceId: string): void {
+    this.samplingDemand.remove(deviceId);
     this.cancelActiveAndroidSample(deviceId, "Performance monitoring stopped for device");
     if (this.monitoredDevices.delete(deviceId)) {
       if (this.monitoredDevices.size === 0 && this.intervalHandle) {
@@ -253,24 +277,13 @@ export class PerformanceMonitor {
     ttiStore.delete(deviceId);
     const monitored = this.monitoredDevices.get(deviceId);
     if (monitored) {
-      this.monitoredDevices.set(deviceId, {
+      const fresh: MonitoredDevice = {
         ...monitored,
         monitoringGeneration: monitored.monitoringGeneration + 1,
-        lastFastTick: 0,
-        lastMediumTick: 0,
-        lastSlowTick: 0,
-        cachedCpu: null,
-        cachedMemory: null,
-        cachedMemoryBreakdown: null,
-        cachedFps: null,
-        cachedFrameTime: null,
-        cachedTouchLatency: null,
-        prevJankCounters: null,
-        cachedPid: null,
-        previousCpuSample: null,
-        gfxPrimed: false,
         previousMetricHealth: {},
-      });
+      };
+      resetSamplingBaselines(fresh);
+      this.monitoredDevices.set(deviceId, fresh);
     }
     this.perfWindowBuffer.clear(deviceId);
     this.frameMetricsStore.clear(deviceId);
@@ -375,6 +388,9 @@ export class PerformanceMonitor {
 
     for (const device of this.monitoredDevices.values()) {
       if (this.pausedDeviceCounts.has(device.deviceId)) {
+        continue;
+      }
+      if (!this.samplingDemand.shouldSample(device, now)) {
         continue;
       }
       promises.push(this.sampleDevice(device, now, server, resolveIOSProcess));
@@ -959,7 +975,9 @@ let monitorInstance: PerformanceMonitor | null = null;
  */
 export function getPerformanceMonitor(): PerformanceMonitor {
   if (!monitorInstance) {
-    monitorInstance = new PerformanceMonitor();
+    monitorInstance = new PerformanceMonitor(defaultTimer, {
+      demandProbe: createDaemonPerformanceDemandProbe(),
+    });
   }
   return monitorInstance;
 }

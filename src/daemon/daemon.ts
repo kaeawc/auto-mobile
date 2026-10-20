@@ -86,7 +86,7 @@ import { DaemonBroker } from "./daemonCore/DaemonBroker";
 import { DaemonSessions } from "./daemonCore/DaemonSessions";
 import { DaemonStartup, applyDaemonToolOutputOptions } from "./daemonCore/DaemonStartup";
 import { DaemonIdentity } from "./daemonCore/DaemonIdentity";
-import { DaemonStreams } from "./daemonCore/DaemonStreams";
+import { DaemonStreams, type DeviceSessionRoutingTargets } from "./daemonCore/DaemonStreams";
 import { DaemonMaintenance } from "./daemonCore/DaemonMaintenance";
 import { DaemonDisconnect } from "./daemonCore/DaemonDisconnect";
 import { DaemonShutdown } from "./daemonCore/DaemonShutdown";
@@ -95,7 +95,6 @@ import type {
   DaemonIdentityState,
   DaemonLifecycleState,
 } from "./daemonCore/DaemonCoreState";
-import type { DeviceSessionRoutingTargets } from "./daemonCore/DaemonStreams";
 import {
   createDatabaseHealthFailureRecovery,
   createObservationStreamHealth,
@@ -811,6 +810,7 @@ export class Daemon {
       initializeIosServices: (...args) => this.initializeIosServices(...args),
       restoreIncumbentOwnerRecord: (...args) => this.identity.restoreIncumbentOwnerRecord(...args),
       republishIdentity: (...args) => this.identity.republishIdentity(...args),
+      recordControlSocketIdentity: () => this.identity.recordControlSocketIdentity(),
       startAuxiliarySocket: (...args) => this.startAuxiliarySocket(...args),
       configureDeviceDataStreamServer: (...args) =>
         this.streams.configureDeviceDataStreamServer(...args),
@@ -1049,6 +1049,7 @@ export class Daemon {
   ) {
     return this.startup.startServicesAfterSocketBind(...args);
   }
+
   private startAuxiliarySocket(...args: Parameters<DaemonIdentity["startAuxiliarySocket"]>) {
     return this.identity.startAuxiliarySocket(...args);
   }

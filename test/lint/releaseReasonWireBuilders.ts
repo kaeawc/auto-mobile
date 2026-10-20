@@ -66,7 +66,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Returns an in-memory heartbeat not-found decision used to update proxy binding state.",
   ],
   [
-    "src/daemon/daemonMcpProxy.ts#DaemonMcpProxy.classifyRecoveryAttemptError",
+    "src/daemon/mcpProxy/ProxyLiveness.ts#ProxyLiveness.classifyRecoveryAttemptError",
     "Classifies a typed upstream refusal for the in-memory liveness recovery state machine.",
   ],
   [

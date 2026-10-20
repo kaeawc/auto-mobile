@@ -819,15 +819,15 @@ internal class TextInputController(
         focusImeNeighbor(findNextFocusableNode(root, checkNotNull(focusedNode)), "next")
       ImeActionStep.PREVIOUS ->
         focusImeNeighbor(findPreviousFocusableNode(root, checkNotNull(focusedNode)), "previous")
-      ImeActionStep.IME_ENTER -> {
-        // API 30+: Use ACTION_IME_ENTER for proper IME action handling
-        @Suppress("NewApi")
-        val actionId =
-          android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
-        val imeResult = checkNotNull(focusedNode).performAction(actionId)
-        Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
-        imeResult
-      }
+      ImeActionStep.IME_ENTER ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          // API 30+: Use ACTION_IME_ENTER for proper IME action handling
+          val actionId =
+            android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
+          val imeResult = checkNotNull(focusedNode).performAction(actionId)
+          Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
+          imeResult
+        } else sendImeEnter()
       ImeActionStep.KEYCODE_ENTER -> {
         sendImeEnter()
       }

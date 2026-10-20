@@ -290,12 +290,19 @@ class McpHttpClientStreamableTest {
 
     fun client(mcpSessionKey: String? = null) =
       if (mcpSessionKey == null) {
-        McpHttpClient(endpoint = "http://localhost/mcp", requestSender = sender)
+        McpHttpClient(
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            endpoint = "http://localhost/mcp",
+            requestSender = sender,
+          ),
+        )
       } else {
         McpHttpClient(
-          endpoint = "http://localhost/mcp",
-          requestSender = sender,
-          mcpSessionKey = mcpSessionKey,
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            endpoint = "http://localhost/mcp",
+            requestSender = sender,
+            mcpSessionKey = mcpSessionKey,
+          ),
         )
       }
 

@@ -119,11 +119,13 @@ private fun SidebarConnectionSections(options: LeftSidebarOptions) {
     )
 
     DaemonStatusSection(
-      dataSourceMode = dataSourceMode,
-      statusProvider = daemonStatusProvider,
-      providedSocketPath = daemonSocketPath,
-      refreshKey = connectedProcess,
-      modifier = Modifier.fillMaxWidth(),
+      dev.jasonpearson.automobile.desktop.core.shell.DaemonStatusOptions(
+        dataSourceMode = dataSourceMode,
+        statusProvider = daemonStatusProvider,
+        providedSocketPath = daemonSocketPath,
+        refreshKey = connectedProcess,
+        modifier = Modifier.fillMaxWidth(),
+      ),
     )
   }
 }

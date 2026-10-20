@@ -56,55 +56,50 @@ fun FailuresBadge(
 
 /** Collapsed view for Failures showing date range and all failure type counts with emojis. */
 @Composable
-fun FailuresCollapsedContent(
-  dateRangeLabel: String,
-  crashCount: Int,
-  anrCount: Int,
-  toolFailureCount: Int,
-  nonFatalCount: Int,
-  modifier: Modifier = Modifier,
-) {
-  Column(
-    modifier =
-      modifier.fillMaxHeight().padding(vertical = 8.dp).verticalScroll(rememberScrollState()),
-    horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.spacedBy(10.dp),
-  ) {
-    // Date range indicator
-    Text(
-      text = dateRangeLabel,
-      fontSize = 9.sp,
-      color = Color.Gray,
-      maxLines = 1,
-    )
+fun FailuresCollapsedContent(options: FailuresCollapsedState) {
+  with(options) {
+    Column(
+      modifier =
+        modifier.fillMaxHeight().padding(vertical = 8.dp).verticalScroll(rememberScrollState()),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      // Date range indicator
+      Text(
+        text = dateRangeLabel,
+        fontSize = 9.sp,
+        color = Color.Gray,
+        maxLines = 1,
+      )
 
-    // Crashes
-    FailureMetricItem(
-      count = crashCount,
-      emoji = FailureType.Crash.icon,
-      color = FailureType.Crash.color,
-    )
+      // Crashes
+      FailureMetricItem(
+        count = crashCount,
+        emoji = FailureType.Crash.icon,
+        color = FailureType.Crash.color,
+      )
 
-    // ANRs
-    FailureMetricItem(
-      count = anrCount,
-      emoji = FailureType.ANR.icon,
-      color = FailureType.ANR.color,
-    )
+      // ANRs
+      FailureMetricItem(
+        count = anrCount,
+        emoji = FailureType.ANR.icon,
+        color = FailureType.ANR.color,
+      )
 
-    // Tool Failures
-    FailureMetricItem(
-      count = toolFailureCount,
-      emoji = FailureType.ToolCallFailure.icon,
-      color = FailureType.ToolCallFailure.color,
-    )
+      // Tool Failures
+      FailureMetricItem(
+        count = toolFailureCount,
+        emoji = FailureType.ToolCallFailure.icon,
+        color = FailureType.ToolCallFailure.color,
+      )
 
-    // Non-Fatal
-    FailureMetricItem(
-      count = nonFatalCount,
-      emoji = FailureType.NonFatal.icon,
-      color = FailureType.NonFatal.color,
-    )
+      // Non-Fatal
+      FailureMetricItem(
+        count = nonFatalCount,
+        emoji = FailureType.NonFatal.icon,
+        color = FailureType.NonFatal.color,
+      )
+    }
   }
 }
 

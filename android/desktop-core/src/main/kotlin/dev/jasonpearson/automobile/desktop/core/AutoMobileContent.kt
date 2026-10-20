@@ -739,7 +739,11 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
                 ?: McpDaemonClient(process.socketPath ?: DaemonSocketPaths.socketPath())
             McpConnectionType.StreamableHttp -> {
               val port = process.port ?: 3000
-              McpHttpClient("http://localhost:$port/auto-mobile/streamable")
+              McpHttpClient(
+                dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+                  "http://localhost:$port/auto-mobile/streamable",
+                ),
+              )
             }
             McpConnectionType.Stdio -> {
               throw UnsupportedOperationException("Cannot connect to STDIO process externally")
@@ -881,13 +885,15 @@ fun AutoMobileContent(options: AutoMobileContentOptions = AutoMobileContentOptio
   // into the new context.
   val deviceControlSession =
     rememberDeviceControlSession(
-      scope = screenshotScope,
-      clientProvider = clientProvider,
-      inputAllocation = { inputAllocation },
-      platform = { controlPlatform.value },
-      nowMs = MONOTONIC_NOW_MS,
-      publishError = { message -> deviceControlTapError = message },
-      streamingEnabled = GestureStreamingConfig.enabled,
+      dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
+        scope = screenshotScope,
+        clientProvider = clientProvider,
+        inputAllocation = { inputAllocation },
+        platform = { controlPlatform.value },
+        nowMs = MONOTONIC_NOW_MS,
+        publishError = { message -> deviceControlTapError = message },
+        streamingEnabled = GestureStreamingConfig.enabled,
+      ),
     )
 
   // One coherent reset of the control context (issues #3347, #3348), run at every point that

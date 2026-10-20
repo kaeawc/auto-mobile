@@ -157,20 +157,22 @@ private fun NavigationFlowMap(
 ) {
   Box(modifier = Modifier.fillMaxSize()) {
     NavigationCanvasView(
-      screens = state.navigationGraph?.screens ?: emptyList(),
-      transitions = state.navigationGraph?.transitions ?: emptyList(),
-      onScreenSelected = { state.selectScreen(it, options.onHighlightCleared) },
-      externalHighlightedScreens = options.highlightedScreens,
-      currentReplayScreen = options.currentStepScreen,
-      screenshotLoader = options.screenshotLoader,
-      fogModeEnabled = state.fogModeEnabled,
-      currentObservedScreen = state.currentObservedScreen,
-      onFogModeToggled = { enabled ->
-        state.fogModeEnabled = enabled
-        options.settingsProvider.fogModeEnabled = enabled
-      },
-      fitToViewTrigger = state.fitToViewTrigger,
-      activeContext = options.activeContext,
+      dev.jasonpearson.automobile.desktop.core.navigation.NavigationCanvasOptions(
+        screens = state.navigationGraph?.screens ?: emptyList(),
+        transitions = state.navigationGraph?.transitions ?: emptyList(),
+        onScreenSelected = { state.selectScreen(it, options.onHighlightCleared) },
+        externalHighlightedScreens = options.highlightedScreens,
+        currentReplayScreen = options.currentStepScreen,
+        screenshotLoader = options.screenshotLoader,
+        fogModeEnabled = state.fogModeEnabled,
+        currentObservedScreen = state.currentObservedScreen,
+        onFogModeToggled = { enabled ->
+          state.fogModeEnabled = enabled
+          options.settingsProvider.fogModeEnabled = enabled
+        },
+        fitToViewTrigger = state.fitToViewTrigger,
+        activeContext = options.activeContext,
+      ),
     )
   }
 }

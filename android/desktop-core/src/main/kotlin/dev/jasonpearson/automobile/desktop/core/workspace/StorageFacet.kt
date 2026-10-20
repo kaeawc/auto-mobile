@@ -197,12 +197,14 @@ private fun ResolvedStorageFacet(
     // It is disposed when this branch leaves composition or the device changes.
     val stream =
       rememberReconnectingObservationStream(
-        deviceId = column.deviceId,
-        deviceSessionUuid = column.deviceSessionUuid,
-        requireDeviceSessionUuid = true,
-        streamFactory = { observationStreamFactory(column.deviceId) },
-        backoffDelay = backoffDelay,
-        socketAvailable = socketAvailable,
+        dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+          deviceId = column.deviceId,
+          deviceSessionUuid = column.deviceSessionUuid,
+          requireDeviceSessionUuid = true,
+          streamFactory = { observationStreamFactory(column.deviceId) },
+          backoffDelay = backoffDelay,
+          socketAvailable = socketAvailable,
+        ),
       )
     StorageDashboard(
       StorageDashboardOptions(

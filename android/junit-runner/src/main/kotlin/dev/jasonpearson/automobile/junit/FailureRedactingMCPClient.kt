@@ -41,8 +41,7 @@ internal class FailureRedactingMCPClient(
     try {
       delegate.callTool(toolName, parameters)
     } catch (e: Exception) {
-      println("Recovery MCP tool failure: " + SecretRedactor.redact(e.toString(), secretValues))
-      throw IllegalStateException(SecretRedactor.redact(e.message ?: e.toString(), secretValues))
+      throw redactedMcpToolFailure(e, secretValues)
     }
 
   override fun listAvailableTools(): List<AutoMobileAgent.MCPToolDefinition> =

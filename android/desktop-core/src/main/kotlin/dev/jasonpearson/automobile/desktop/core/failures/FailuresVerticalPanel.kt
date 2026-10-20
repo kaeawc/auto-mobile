@@ -58,11 +58,13 @@ fun FailuresVerticalPanel(options: FailuresVerticalPanelOptions) {
           resizeHandleOnLeft = true,
           collapsedContent = {
             FailuresCollapsedContent(
-              dateRangeLabel = dateRangeLabel,
-              crashCount = crashCount,
-              anrCount = anrCount,
-              toolFailureCount = toolFailureCount,
-              nonFatalCount = nonFatalCount,
+              dev.jasonpearson.automobile.desktop.core.failures.FailuresCollapsedState(
+                dateRangeLabel = dateRangeLabel,
+                crashCount = crashCount,
+                anrCount = anrCount,
+                toolFailureCount = toolFailureCount,
+                nonFatalCount = nonFatalCount,
+              ),
             )
           },
         ),

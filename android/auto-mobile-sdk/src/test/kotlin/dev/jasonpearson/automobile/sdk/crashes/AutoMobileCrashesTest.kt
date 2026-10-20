@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.crashes
 
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.TestFailureException
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -115,7 +116,7 @@ class AutoMobileCrashesTest {
     val original = Thread.UncaughtExceptionHandler { _, _ -> originalCalls.incrementAndGet() }
     Thread.setDefaultUncaughtExceptionHandler(original)
     AutoMobileCrashes.initialize(context)
-    AutoMobileCrashes.currentScreenProvider = { throw RuntimeException("boom") }
+    AutoMobileCrashes.currentScreenProvider = { throw TestFailureException("boom") }
 
     Thread.getDefaultUncaughtExceptionHandler()!!.uncaughtException(
       Thread.currentThread(),

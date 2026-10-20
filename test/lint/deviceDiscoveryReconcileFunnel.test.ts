@@ -96,10 +96,15 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "Bounded stale-disconnect rediscovery reads the injected pool port and preserves captured incarnation checks.",
     },
-    "src/devices/deviceUtils.ts": {
-      calls: 9,
+    "src/devices/deviceDiscoveryContracts.ts": {
+      calls: 2,
       reason:
-        "PlatformDeviceManager — declares and implements the discovery API. The ninth call is " +
+        "Discovery API declarations extracted from deviceUtils; these define the producer contract below the pool.",
+    },
+    "src/devices/deviceUtils.ts": {
+      calls: 7,
+      reason:
+        "PlatformDeviceManager implements the discovery API. The checked call is " +
         "the checked Android liveness guard before startDevice launches an AVD; it reads no pooled identity.",
     },
     "src/utils/android-cmdline-tools/EmulatorPortReservations.ts": {
@@ -236,7 +241,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "below the pool. resolveAndroidReadinessIdentity re-reads the AVD-name-aware listing so " +
         "provided/current readiness paths key the Window cache on the runtime (#7031).",
     },
-    "src/devices/deviceBootService.ts": {
+    "src/devices/deviceBootRevalidation.ts": {
       calls: 1,
       reason:
         "Cache-bypassing iOS simulator re-check once its UDID lifecycle lease settles (#9902); " +
@@ -253,7 +258,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "findLiveEmulatorSerial remains a full scan and reads no pool state; the pre-delete identity check now uses the bounded serial-targeted resolveAvdNameForSerial probe, a read-only confirmation rather than discovery.",
     },
-    "src/features/observe/ios/IOSCtrlProxyClient.ts": {
+    "src/features/observe/ios/IosCtrlProxyClientContracts.ts": {
       calls: 1,
       reason: "iOS only — simulator UDIDs are never reused, so there is no identity to reconcile.",
     },

@@ -433,20 +433,23 @@ private fun LayoutHierarchyPanel(
           onCollapse = { isHierarchyCollapsed = true },
         )
         HierarchyTreeView(
-          hierarchy = state.hierarchy,
-          selectedElementId = state.selectedElementId,
-          hoveredElementId = state.hoveredElementId,
-          onElementSelected = { state.selectElement(it) },
-          onElementHovered = { state.hoverElement(it) },
-          onElementDoubleClicked = { elementId ->
-            // Select the element
-            state.selectElement(elementId)
-            // Flash highlight in the device view
-            flashElementId = elementId
-            // Open the properties panel
-            isPropertiesCollapsed = false
-          },
-          parentMap = state.parentMap,
+          options =
+            HierarchyTreeOptions(
+              hierarchy = state.hierarchy,
+              selectedElementId = state.selectedElementId,
+              hoveredElementId = state.hoveredElementId,
+              onElementSelected = { state.selectElement(it) },
+              onElementHovered = { state.hoverElement(it) },
+              onElementDoubleClicked = { elementId ->
+                // Select the element
+                state.selectElement(elementId)
+                // Flash highlight in the device view
+                flashElementId = elementId
+                // Open the properties panel
+                isPropertiesCollapsed = false
+              },
+              parentMap = state.parentMap,
+            ),
           modifier = Modifier.fillMaxSize(),
         )
       }

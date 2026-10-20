@@ -88,20 +88,22 @@ internal abstract class DesktopDaemonSessionCompositionFixture(
     fun compose() {
       state =
         rememberDesktopDaemonSession(
-          socketPath = "in-memory",
-          panes = panes,
-          hostVisible = visible.value,
-          activeRecordings = recordings,
-          inputAllocationTimeoutMs = inputAllocationTimeoutMs,
-          bindRetryBackoff = bindRetryBackoff,
-          monotonicClockMs = clockMs,
-          sessionFactory = {
-            DesktopDaemonSession(
-              McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),
-            )
-          },
-          ioDispatcher = testDispatcher,
-          cleanupDispatcher = testDispatcher,
+          DesktopDaemonSessionOptions(
+            socketPath = "in-memory",
+            panes = panes,
+            hostVisible = visible.value,
+            activeRecordings = recordings,
+            inputAllocationTimeoutMs = inputAllocationTimeoutMs,
+            bindRetryBackoff = bindRetryBackoff,
+            monotonicClockMs = clockMs,
+            sessionFactory = {
+              DesktopDaemonSession(
+                McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),
+              )
+            },
+            ioDispatcher = testDispatcher,
+            cleanupDispatcher = testDispatcher,
+          ),
         )
     }
   }

@@ -20,9 +20,30 @@ if (!manager) {
 }
 const methods = manager.members.filter(ts.isMethodDeclaration);
 
+function collaboratorMethods(file: string, name: string): ts.MethodDeclaration[] {
+  const collaborator = ts.createSourceFile(
+    file,
+    readFileSync(new URL(`../../src/daemon/sessionManager/${file}`, import.meta.url), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const declaration = collaborator.statements.find(
+    (node): node is ts.ClassDeclaration => ts.isClassDeclaration(node) && node.name?.text === name,
+  );
+  if (!declaration) {
+    throw new Error(`${name} class not found`);
+  }
+  return declaration.members.filter(ts.isMethodDeclaration);
+}
+
+const admissionMethods = collaboratorMethods("admission.ts", "SessionAdmission");
+const recoveryMethods = collaboratorMethods("recoveryPublication.ts", "SessionRecoveryPublication");
+
 // Retained expireIfDue paths use this.getSession to preserve instance patches (#12581).
 // Counts must shrink with migrations; adding a reader requires an explicit expiry decision.
 const RETAINED_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  // Live facade wiring; the target remains checked in recoveryPublication.
+  createCollaboratorHost: 1,
   recoverPersistedRow: 1,
 };
 
@@ -46,7 +67,11 @@ function callsIn(method: ts.MethodDeclaration, onlyThis = false): string[] {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       if (ts.isPropertyAccessExpression(callee)) {
-        if (!onlyThis || callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
+        if (
+          !onlyThis ||
+          callee.expression.kind === ts.SyntaxKind.ThisKeyword ||
+          callee.expression.getText(method.getSourceFile()) === "this.host"
+        ) {
           calls.push(callee.name.text);
         }
       } else if (
@@ -68,7 +93,7 @@ function callsIn(method: ts.MethodDeclaration, onlyThis = false): string[] {
 }
 
 test("findSession contains no release or execution-cancellation call", () => {
-  const find = methods.find((method) => method.name.getText(source) === "findSession");
+  const find = admissionMethods.find((method) => method.name.getText() === "findSession");
   expect(find?.body).toBeDefined();
   if (!find?.body) {
     throw new Error("findSession body not found");
@@ -84,7 +109,8 @@ test("findSession contains no release or execution-cancellation call", () => {
 });
 
 test.each(["findSession", "expireIfDue"])("%s stays synchronous", (name) => {
-  const method = methods.find((method) => method.name.getText(source) === name);
+  const owners = name === "findSession" ? admissionMethods : methods;
+  const method = owners.find((method) => method.name.getText() === name);
   expect(method?.body).toBeDefined();
   expect(
     method?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ?? false,
@@ -94,9 +120,12 @@ test.each(["findSession", "expireIfDue"])("%s stays synchronous", (name) => {
 
 test("in-class getSession calls stay within the retained expiry reader inventory", () => {
   const actual = Object.fromEntries(
-    methods.flatMap((method) => {
+    [...methods, ...recoveryMethods].flatMap((method) => {
+      if (method.name.getText().includes("CollaboratorActions")) {
+        return [];
+      }
       const count = callsIn(method, true).filter((name) => name === "getSession").length;
-      return count ? [[method.name.getText(source), count]] : [];
+      return count ? [[method.name.getText(), count]] : [];
     }),
   );
   expect(actual).toEqual(RETAINED_EXPIRY_READERS);
@@ -180,6 +209,11 @@ const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 // findSession (a migrated site drops out, as the appearance sweep did). Counts may only shrink;
 // a new pure reader must call findSession, a new admission site needs an explicit entry here.
 const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  // These factories moved from SessionManager; retain each expiring call, including the row read.
+  "sessionManager/construction.ts#getSession": 1,
+  "sessionManager/wiring.ts#getSession": 1,
+  "sessionManager/wiring.ts#readSessionRow": 1,
+  "sessionManager/recoveryPublication.ts#recoverPersistedRow": 1,
   "sessionManager/recoveredTerminalReleaseIntents.ts#applyRecoveredTerminalReleaseIntents": 1,
   "setupTiming.ts#consumeSetupTiming": 1,
   "setupTiming.ts#storeSetupTiming": 1,
@@ -189,12 +223,12 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "adbServerResetQuarantine.ts#settleFailedAdbResetCohortPreparation": 1,
   "cli/runDaemonCommand.ts#recordLocalDaemonHeartbeat": 1,
   "cli/runDaemonCommand.ts#requireDaemonSession": 1,
-  "daemon.ts#captureDisconnectCleanup": 1,
-  "daemon.ts#getPersistedSession": 1,
-  "daemon.ts#getSession": 1,
-  "daemon.ts#isCapturedDisconnectTargetCurrent": 1,
-  "daemon.ts#verifyIosDevice": 1,
-  "daemon.ts#warmConfirmedManagedExecution": 1,
+  "daemonCore/disconnectTargets.ts#captureDisconnectCleanup": 1,
+  "daemonCore/persistedSessionReaders.ts#getPersistedSession": 1,
+  "daemonCore/persistedSessionReaders.ts#getSession": 1,
+  "daemonCore/disconnectTargets.ts#isCapturedDisconnectTargetCurrent": 1,
+  "daemonCore/managedExecutionWarmup.ts#verifyIosDevice": 1,
+  "daemonCore/managedExecutionWarmup.ts#warmConfirmedManagedExecution": 1,
   "daemonRequestHandlers.ts#grantedDeviceOf": 1,
   "daemonRequestHandlers.ts#handleReleaseSession": 1,
   "daemonRequestHandlers.ts#releaseSessionOwnerRefusal": 1,

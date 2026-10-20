@@ -67,13 +67,7 @@ fun PerformanceVerticalPanel(
         resizeHandleOnLeft = true,
         collapsedContent = {
           PerformanceSummary(
-            currentFps = currentFps,
-            currentFrameTimeMs = currentFrameTimeMs,
-            currentJankFrames = currentJankFrames,
-            currentMemoryMb = currentMemoryMb,
-            currentTouchLatencyMs = currentTouchLatencyMs,
-            currentRecompositionRate = currentRecompositionRate,
-            updateCounter = updateCounter,
+            options = PerformanceMetrics(options),
           )
         },
       ),

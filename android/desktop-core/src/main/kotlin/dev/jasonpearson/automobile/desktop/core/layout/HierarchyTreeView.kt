@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.components.SearchBarOptions
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.delay
 
@@ -96,8 +97,8 @@ fun HierarchyTreeView(options: HierarchyTreeOptions, modifier: Modifier = Modifi
     dev.jasonpearson.automobile.desktop.core.components.SearchBar(
       query = state.searchQuery,
       onQueryChange = { state.searchQuery = it },
-      placeholder = "Search views...",
       modifier = Modifier.fillMaxWidth().padding(8.dp),
+      options = SearchBarOptions(placeholder = "Search views..."),
     )
     if (flatNodes.isEmpty()) {
       EmptyHierarchy(options.hierarchy == null)

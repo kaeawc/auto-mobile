@@ -39,11 +39,16 @@ describe("control-socket server reads no ambient abort signal (#11817)", () => {
   // Slice c: session creation, rebind and acquisition take the caller's signal in their
   // options. The one remaining read is dispatchDeviceRestore's relay of the teardown-shielded
   // ambient signal into the device restorers, which resolve it themselves; tracked separately.
-  test("sessionManager.ts reads the ambient signal only in dispatchDeviceRestore", () => {
+  test("session manager reads the ambient signal only in the moved dispatchDeviceRestore", () => {
     const source = readFileSync(path.join(ROOT, SESSION_MANAGER), "utf8");
     const reads = source.match(new RegExp(AMBIENT_READ.source, "g")) ?? [];
-    expect(reads).toHaveLength(1);
-    const dispatch = source.slice(source.indexOf("private async dispatchDeviceRestore("));
+    expect(reads).toHaveLength(0);
+    const dispatchSource = readFileSync(
+      path.join(ROOT, "src/daemon/sessionManager/recoveryPublication.ts"),
+      "utf8",
+    );
+    expect(dispatchSource.match(new RegExp(AMBIENT_READ.source, "g")) ?? []).toHaveLength(1);
+    const dispatch = dispatchSource.slice(dispatchSource.indexOf("async dispatchDeviceRestore("));
     expect(AMBIENT_READ.test(dispatch.slice(0, dispatch.indexOf("\n  }\n")))).toBe(true);
   });
 

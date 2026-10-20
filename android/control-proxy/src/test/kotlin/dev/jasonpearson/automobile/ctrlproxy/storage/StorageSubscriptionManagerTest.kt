@@ -364,6 +364,7 @@ class StorageSubscriptionManagerTest {
         this.packageName = packageName
         flags = if (stopped) ApplicationInfo.FLAG_STOPPED else 0
       }
+    // Stub the exact legacy overload used by the stopped-package lookup on all API levels.
     @Suppress("DEPRECATION")
     every { packageManager.getApplicationInfo(eq(packageName), any<Int>()) } returns appInfo
     every { context.packageManager } returns packageManager
@@ -480,6 +481,7 @@ class StorageSubscriptionManagerTest {
   @Test
   fun `a package the runner cannot look up keeps the SDK message`() {
     val packageManager = mockk<PackageManager>(relaxed = true)
+    // Exercise NameNotFoundException from the production lookup's legacy overload.
     @Suppress("DEPRECATION")
     every { packageManager.getApplicationInfo(any<String>(), any<Int>()) } throws
       PackageManager.NameNotFoundException("com.example.app")

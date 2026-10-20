@@ -120,21 +120,24 @@ class DeviceScreenViewKeyboardTest {
     ) {
       DeviceScreenView(
         screenshotData = null,
-        screenWidth = 1080,
-        screenHeight = 2340,
-        hierarchy = root,
-        selectedElementId = null,
-        hoveredElementId = null,
-        onElementSelected = {},
-        onElementHovered = {},
-        elementMap = mapOf("root" to root),
-        controlMode = DeviceScreenControlMode.Control,
-        controlSnapshot = keyboardSnapshot(),
-        onControlTap = { _, _ -> true },
-        onControlKey = { _, stroke ->
-          observed.forwarded.add(stroke)
-          true
-        },
+        options =
+          DeviceScreenOptions(
+            screenWidth = 1080,
+            screenHeight = 2340,
+            hierarchy = root,
+            selectedElementId = null,
+            hoveredElementId = null,
+            onElementSelected = {},
+            onElementHovered = {},
+            elementMap = mapOf("root" to root),
+            controlMode = DeviceScreenControlMode.Control,
+            controlSnapshot = keyboardSnapshot(),
+            onControlTap = { _, _ -> true },
+            onControlKey = { _, stroke ->
+              observed.forwarded.add(stroke)
+              true
+            },
+          ),
       )
     }
   }
@@ -240,19 +243,22 @@ class DeviceScreenViewKeyboardTest {
           Box(Modifier.focusRequester(elsewhere).focusable())
           DeviceScreenView(
             screenshotData = null,
-            screenWidth = 1080,
-            screenHeight = 2340,
-            hierarchy = root,
-            selectedElementId = null,
-            hoveredElementId = null,
-            onElementSelected = {},
-            onElementHovered = {},
-            elementMap = mapOf("root" to root),
-            controlMode = DeviceScreenControlMode.Control,
-            controlSnapshot = keyboardSnapshot(),
-            onControlTap = { _, _ -> true },
-            onControlKey = { _, _ -> true },
-            onControlFocusChanged = { focusStates.add(it) },
+            options =
+              DeviceScreenOptions(
+                screenWidth = 1080,
+                screenHeight = 2340,
+                hierarchy = root,
+                selectedElementId = null,
+                hoveredElementId = null,
+                onElementSelected = {},
+                onElementHovered = {},
+                elementMap = mapOf("root" to root),
+                controlMode = DeviceScreenControlMode.Control,
+                controlSnapshot = keyboardSnapshot(),
+                onControlTap = { _, _ -> true },
+                onControlKey = { _, _ -> true },
+                onControlFocusChanged = { focusStates.add(it) },
+              ),
           )
         }
       }
@@ -290,21 +296,24 @@ class DeviceScreenViewKeyboardTest {
       }
       DeviceScreenView(
         screenshotData = null,
-        screenWidth = 1080,
-        screenHeight = 2340,
-        hierarchy = root,
-        selectedElementId = selectedElementId,
-        hoveredElementId = null,
-        onElementSelected = {},
-        onElementHovered = {},
-        elementMap = mapOf("root" to root),
-        controlMode = mode,
-        controlSnapshot = snapshot,
-        onControlTap = { _, _ -> true },
-        onControlKey = { _, stroke ->
-          observed.forwarded.add(stroke)
-          forwardsEverything
-        },
+        options =
+          DeviceScreenOptions(
+            screenWidth = 1080,
+            screenHeight = 2340,
+            hierarchy = root,
+            selectedElementId = selectedElementId,
+            hoveredElementId = null,
+            onElementSelected = {},
+            onElementHovered = {},
+            elementMap = mapOf("root" to root),
+            controlMode = mode,
+            controlSnapshot = snapshot,
+            onControlTap = { _, _ -> true },
+            onControlKey = { _, stroke ->
+              observed.forwarded.add(stroke)
+              forwardsEverything
+            },
+          ),
       )
     }
   }

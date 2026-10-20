@@ -13,7 +13,7 @@
             android:id="@+id/semantic_links_xml_description"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="This screen uses a TextView with ClickableSpan links."
+            android:text="@string/semantic_links_xml_description"
             android:textAppearance="?attr/textAppearanceBodyLarge" />
 
         <TextView
@@ -35,7 +35,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:text="Last activated: None"
+            android:text="@string/semantic_links_none_activated"
             android:textAppearance="?attr/textAppearanceTitleMedium" />
     </LinearLayout>
 </ScrollView>

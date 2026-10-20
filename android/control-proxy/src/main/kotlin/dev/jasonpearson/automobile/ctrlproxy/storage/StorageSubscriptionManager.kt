@@ -589,6 +589,7 @@ class StorageSubscriptionManager(
    */
   private fun isPackageStopped(packageName: String): Boolean =
     try {
+      // API 24–32 require this overload; keep the same lookup and exceptions on every API level.
       @Suppress("DEPRECATION")
       val flags = context.packageManager.getApplicationInfo(packageName, 0).flags
       flags and ApplicationInfo.FLAG_STOPPED != 0

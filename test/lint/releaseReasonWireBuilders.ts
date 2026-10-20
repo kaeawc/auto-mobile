@@ -26,7 +26,7 @@ export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/socketServer/notificationFanOut.ts#broadcastSessionReleased",
   "src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession",
   "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
-  "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
+  "src/daemon/daemonRequestHandlersParts/registration.ts#terminalSessionRegistrationRefusal",
 ];
 export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, string]> = [
   [
@@ -55,7 +55,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Parses the nested incoming release snapshot; its idle flag belongs to the containing refusal.",
   ],
   [
-    "src/daemon/daemonRequestHandlers.ts#persistedTerminalRelease",
+    "src/daemon/daemonRequestHandlersParts/registration.ts#persistedTerminalRelease",
     "Returns an in-memory persisted-release lookup for registration admission, not a wire answer.",
   ],
   [
@@ -79,8 +79,24 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Redacts the owner token from a typed upstream error while preserving its existing releaseReason and idle fields for the CLI serializer.",
   ],
   [
-    "src/daemon/sessionManager.ts",
+    "src/daemon/sessionManager/creationGuard.ts",
     "In-memory session state and persistence rows; wire builders serialize its release snapshots.",
+  ],
+  [
+    "src/daemon/sessionManager/admission.ts",
+    "In-memory admission refusals and release snapshots moved from SessionManager.",
+  ],
+  [
+    "src/daemon/sessionManager/releaseWrite.ts",
+    "Persists release snapshots moved from SessionManager; wire builders serialize them.",
+  ],
+  [
+    "src/daemon/sessionManager/releaseCommit.ts",
+    "Builds in-memory release snapshots moved from SessionManager.",
+  ],
+  [
+    "src/daemon/sessionManager/recoveryPublication.ts",
+    "Recovery outcomes and in-memory release snapshots moved from SessionManager.",
   ],
   [
     "src/daemon/sessionManager/forcedStuckRelease.ts",

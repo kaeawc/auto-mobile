@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.edit
 
 /**
  * Manages theme preferences for the slides module using SharedPreferences. Provides persistent
@@ -40,7 +41,7 @@ class SlidesThemeManager(context: Context) {
 
   /** Save theme preference to SharedPreferences. */
   private fun saveTheme(isDark: Boolean) {
-    sharedPrefs.edit().putBoolean(KEY_DARK_MODE, isDark).apply()
+    sharedPrefs.edit { putBoolean(KEY_DARK_MODE, isDark) }
   }
 
   companion object {

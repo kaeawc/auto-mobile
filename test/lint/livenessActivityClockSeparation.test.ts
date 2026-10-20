@@ -76,7 +76,7 @@ const LIVENESS_READS: ReadonlySet<string> = new Set([
 
 /** Liveness-only entry points, per file. Keys are `Class.method` or a module function name. */
 const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
-  "src/daemon/sessionManager.ts": ["SessionManager.forgiveDaemonStall"],
+  "src/daemon/sessionManager/activityClocks.ts": ["SessionActivityClocks.forgiveDaemonStall"],
   // The lease and policy moved out of SessionManager (#11797); it reaches SessionManager's own
   // helpers (`getSession`, `recordSessionActivity`, ...) through its `port`.
   "src/daemon/sessionLivenessLease.ts": [
@@ -89,7 +89,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "SessionLivenessController.adoptCliLivenessPolicy",
     "SessionLivenessController.restoreHeartbeatLivenessPolicy",
   ],
-  "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts": ["handleHeartbeat"],
   "src/daemon/daemonHttpIngress.ts": ["DaemonHttpIngress.handleHeartbeatHttpRequest"],
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
   "src/daemon/mcpProxy/ProxySessionOwnership.ts": [
@@ -173,8 +173,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isLateExecutionWhileEarlierWorkIsActive",
     // #11359: the wall-clock request deadline is converted onto the session clock before it is
     // compared with the session-clock restart deadline.
-    "SessionManager.waitForAbortedAssignment",
-    "SessionManager.waitForSharedAssignment",
+  ],
+  "src/daemon/sessionManager/acquisition.ts": [
+    "SessionAcquisition.waitForAbortedAssignment",
+    "SessionAcquisition.waitForSharedAssignment",
   ],
   // #11162: the release's deferral is a session-clock instant from the execution veto.
   "src/daemon/ownerDisconnectRelease.ts": [
@@ -234,7 +236,7 @@ interface Classified {
  * removing or adding a write forces this list to be updated.
  */
 const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
-  "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.forgiveDaemonStall": {
     writes: 2,
     reason:
       "#10662: stall forgiveness compensates for time the daemon itself lost. It shifts " +
@@ -258,19 +260,19 @@ const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
  */
 const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   // --- Session idle clocks (SessionManager) --------------------------------
-  "src/daemon/sessionManager.ts SessionManager.reclaimAndRefreshExistingSession": {
+  "src/daemon/sessionManager/admission.ts SessionAdmission.reclaimAndRefreshExistingSession": {
     writes: 4,
     reason:
       "Tool usage: getOrCreateSession resolving a session for a tool call refreshes " +
       "lastUsedAt/expiresAt, and restores both if the durable write fails.",
   },
-  "src/daemon/sessionManager.ts SessionManager.createSession": {
+  "src/daemon/sessionManager/creationGuard.ts SessionCreationGuard.createSession": {
     writes: 2,
     reason:
       "Tool usage: a session is created for a device acquisition (a tool call), and its " +
       "lastUsedAt/expiresAt start the idle window from that moment.",
   },
-  "src/daemon/sessionManager.ts SessionManager.recordToolCallEnded": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.recordToolCallEnded": {
     writes: 2,
     reason:
       "Tool usage: the end of a tool call restarts the idle window (owner decision 2026-10-08), " +
@@ -294,13 +296,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
         "Policy (#11176): a failed durable write of the managed-execution adoption restores the " +
         "previous expiresAt; the new deadline itself comes from rebaseIdleDeadlineOnLastActivity.",
     },
-  "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.forgiveDaemonStall": {
     writes: 2,
     reason:
       "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES " +
       "(#10662, #10835).",
   },
-  "src/daemon/sessionManager.ts SessionManager.startRehydratedOwnerWindows": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.startRehydratedOwnerWindows": {
     writes: 2,
     reason:
       "Startup (#11388): a rehydrated session's idle window starts when the daemon can hear " +
@@ -352,7 +354,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "A read projection (#11243): the sessionInfo answer reports the session's lastUsedAt and " +
       "expiresAt converted to wall-clock ms for the CLI; it stamps nothing.",
   },
-  "src/daemon/daemonRequestHandlers.ts handleTokenOwnedSessions": {
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts handleTokenOwnedSessions": {
     writes: 1,
     reason:
       "A read projection (#11117): the tokenOwnedSessions answer reports the session's lastUsedAt " +
@@ -840,7 +842,7 @@ interface FunctionRef {
 type PortIndex = ReadonlyMap<string, readonly FunctionRef[]>;
 
 /** Property names a collaborator stores its port under (`this.port`, `this.deps.port`, `this.pool`). */
-const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool"]);
+const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool", "host", "forwardersHost"]);
 
 /** Unwrap only forwarder results: `void` elsewhere still means retiring a clock. */
 function unwrapForwarder(expression: ts.Expression): ts.Expression {
@@ -931,6 +933,15 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
       return undefined;
     }
     if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+      // An inherited facade method belongs to its declaring base class and source file.
+      const method = checker.getSymbolAtLocation(owner.name)?.valueDeclaration;
+      const parent = method?.parent;
+      const targetModel =
+        parent &&
+        [...models.values()].find((candidate) => candidate.source === parent.getSourceFile());
+      if (parent && ts.isClassDeclaration(parent) && parent.name && targetModel) {
+        return { path: targetModel.path, key: `${parent.name.text}.${owner.name.text}` };
+      }
       return { path: model.path, key: `${unit.className}.${owner.name.text}` };
     }
     const declaration = checker
@@ -963,7 +974,9 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
           ? unit.node.body.statements[0]
           : undefined;
       const next =
-        statement && ts.isReturnStatement(statement) && statement.expression
+        statement &&
+        (ts.isReturnStatement(statement) || ts.isExpressionStatement(statement)) &&
+        statement.expression
           ? forwardedOwnerMethod(statement.expression)
           : undefined;
       target = next ? resolveTarget(model, unit, next) : undefined;
@@ -989,6 +1002,20 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
         ts.forEachChild(node, visit);
       };
       visit(unit.node);
+      // Facade methods also forward through typed collaborator fields, including a base class.
+      const statement =
+        ts.isMethodDeclaration(unit.node) && unit.node.body?.statements.length === 1
+          ? unit.node.body.statements[0]
+          : undefined;
+      const owner =
+        statement &&
+        (ts.isReturnStatement(statement) || ts.isExpressionStatement(statement)) &&
+        statement.expression
+          ? forwardedOwnerMethod(statement.expression)
+          : undefined;
+      if (owner) {
+        addForwarder(unit.key.slice(unit.className.length + 1), resolveTarget(model, unit, owner));
+      }
     }
   }
   return index;
@@ -1356,6 +1383,12 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       }
     }
     for (const path of [
+      // Facade wiring must be modeled even when it names no activity-clock field itself.
+      "src/daemon/sessionManager/forwarders.ts",
+      "src/daemon/sessionManager/wiring.ts",
+      "src/daemon/sessionManager/construction.ts",
+      "src/daemon/sessionManager/queries.ts",
+      "src/daemon/sessionManager/configuration.ts",
       ...Object.keys(NON_ACTIVITY_PATHS),
       ...Object.keys(DEADLINE_REDERIVATION_HELPERS),
       ...Object.keys(EXPIRY_JUDGEMENTS),
@@ -1473,11 +1506,36 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         models.get(sessionManagerPath)!,
         "SessionManager",
         new Set(DEADLINE_REDERIVATION_HELPERS[sessionManagerPath] ?? []),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/forwarders.ts")!,
+        "SessionManagerForwarders",
+        new Set(),
+        { models, ports },
       ),
       ...activityWritingMethods(
         models.get(controllerPath)!,
         "SessionLivenessController",
         new Set(DEADLINE_REDERIVATION_HELPERS[controllerPath] ?? []),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/admission.ts")!,
+        "SessionAdmission",
+        new Set(),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/creationGuard.ts")!,
+        "SessionCreationGuard",
+        new Set(),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/activityClocks.ts")!,
+        "SessionActivityClocks",
+        new Set(),
         { models, ports },
       ),
     ]);
@@ -1693,7 +1751,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         [owner.path, owner],
       ]);
       const ports = buildPortIndex(models);
-      expect(ports.get("drop")).toEqual([{ path: "owner.ts", key: "Owner.drop" }]);
+      expect(ports.get("drop")).toEqual([
+        { path: "owner.ts", key: "Owner.drop" },
+        { path: "owner.ts", key: "Owner.stamp" },
+      ]);
       // Without the port edge the walk ends at the keeper and sees nothing (the old blind spot).
       expect(livenessViolations(keeper, ["Keeper.beat"], new Set())).toEqual([]);
       const found = livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports });
@@ -1701,6 +1762,45 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         ["owner.ts", "Owner.stamp", "lastUsedAt"],
       ]);
     });
+
+    test.each(["return ", ""])(
+      "follows an inherited facade delegate (%s) through its typed collaborator",
+      (result) => {
+        const activity = parse(
+          "activity.ts",
+          "export class Activity { touch(session) { session.lastUsedAt = 5; } }",
+        );
+        const base = parse(
+          "base.ts",
+          `import { Activity } from "./activity";
+        export abstract class Base {
+          protected abstract readonly forwardersHost: { activity: Activity };
+          touch(session) { ${result}this.forwardersHost.activity.touch(session); }
+        }`,
+        );
+        const manager = parse(
+          "manager.ts",
+          `import { Base } from "./base";
+        export class Manager extends Base {
+          make() { return { touch: (session) => this.touch(session) }; }
+        }`,
+        );
+        const keeper = parse(
+          "keeper.ts",
+          "class Keeper { beat(session) { this.port.touch(session); } }",
+        );
+        const models = new Map(
+          [activity, base, manager, keeper].map((model) => [model.path, model]),
+        );
+        const ports = buildPortIndex(models);
+        expect(ports.get("touch")).toContainEqual({ path: "base.ts", key: "Base.touch" });
+        expect(
+          livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports }).map(
+            (violation) => `${violation.path} ${violation.via}:${violation.clock}`,
+          ),
+        ).toEqual(["activity.ts Activity.touch:lastUsedAt"]);
+      },
+    );
 
     test.each([
       ["pool receiver", "this.pool.drop(id)", "(id) => this.drop(id)"],

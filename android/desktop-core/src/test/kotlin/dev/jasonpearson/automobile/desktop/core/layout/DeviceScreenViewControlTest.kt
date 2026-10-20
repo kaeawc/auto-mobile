@@ -64,17 +64,20 @@ class DeviceScreenViewControlTest {
       MaterialTheme {
         DeviceScreenView(
           screenshotData = null,
-          screenWidth = 1080,
-          screenHeight = 2340,
-          hierarchy = root,
-          selectedElementId = null,
-          hoveredElementId = null,
-          onElementSelected = { selections.add(it) },
-          onElementHovered = {},
-          elementMap = mapOf("root" to root),
-          controlMode = DeviceScreenControlMode.Control,
-          controlSnapshot = snapshot(1080, 2340),
-          onControlTap = { _, point -> controlTaps.add(point) },
+          options =
+            DeviceScreenOptions(
+              screenWidth = 1080,
+              screenHeight = 2340,
+              hierarchy = root,
+              selectedElementId = null,
+              hoveredElementId = null,
+              onElementSelected = { selections.add(it) },
+              onElementHovered = {},
+              elementMap = mapOf("root" to root),
+              controlMode = DeviceScreenControlMode.Control,
+              controlSnapshot = snapshot(1080, 2340),
+              onControlTap = { _, point -> controlTaps.add(point) },
+            ),
         )
       }
     }
@@ -102,18 +105,22 @@ class DeviceScreenViewControlTest {
         MaterialTheme {
           DeviceScreenView(
             screenshotData = null,
-            screenWidth = 1080,
-            screenHeight = 2340,
-            hierarchy = root,
-            selectedElementId = null,
-            hoveredElementId = null,
-            onElementSelected = { selections.add(it) },
-            onElementHovered = {},
-            elementMap = mapOf("root" to root),
-            // controlMode defaults to Inspector; onControlTap and the snapshot are wired only to
-            // prove they stay inert.
-            controlSnapshot = snapshot(1080, 2340),
-            onControlTap = { _, point -> controlTaps.add(point) },
+            options =
+              DeviceScreenOptions(
+                screenWidth = 1080,
+                screenHeight = 2340,
+                hierarchy = root,
+                selectedElementId = null,
+                hoveredElementId = null,
+                onElementSelected = { selections.add(it) },
+                onElementHovered = {},
+                elementMap = mapOf("root" to root),
+                // controlMode defaults to Inspector; onControlTap and the snapshot are wired only
+                // to
+                // prove they stay inert.
+                controlSnapshot = snapshot(1080, 2340),
+                onControlTap = { _, point -> controlTaps.add(point) },
+              ),
           )
         }
       }
@@ -196,18 +203,21 @@ class DeviceScreenViewControlTest {
         MaterialTheme {
           DeviceScreenView(
             screenshotData = null,
-            screenWidth = 1080,
-            screenHeight = 2340,
-            hierarchy = root,
-            selectedElementId = null,
-            hoveredElementId = null,
-            onElementSelected = {},
-            onElementHovered = {},
-            elementMap = mapOf("root" to root),
-            controlMode = DeviceScreenControlMode.Control,
-            controlSnapshot = current,
-            onControlTap = { _, _ -> true },
-            onControlSwipe = { s, a, b, _ -> reported = Triple(s, a, b) },
+            options =
+              DeviceScreenOptions(
+                screenWidth = 1080,
+                screenHeight = 2340,
+                hierarchy = root,
+                selectedElementId = null,
+                hoveredElementId = null,
+                onElementSelected = {},
+                onElementHovered = {},
+                elementMap = mapOf("root" to root),
+                controlMode = DeviceScreenControlMode.Control,
+                controlSnapshot = current,
+                onControlTap = { _, _ -> true },
+                onControlSwipe = { s, a, b, _ -> reported = Triple(s, a, b) },
+              ),
           )
         }
       }
@@ -266,20 +276,23 @@ class DeviceScreenViewControlTest {
         MaterialTheme {
           DeviceScreenView(
             screenshotData = null,
-            screenWidth = 1080,
-            screenHeight = 2340,
-            hierarchy = root,
-            selectedElementId = null,
-            hoveredElementId = null,
-            onElementSelected = {},
-            onElementHovered = {},
-            elementMap = mapOf("root" to root),
-            controlMode = mode,
-            controlSnapshot = snapshot(1080, 2340),
-            onControlTap = { _, point ->
-              probed = point
-              true
-            },
+            options =
+              DeviceScreenOptions(
+                screenWidth = 1080,
+                screenHeight = 2340,
+                hierarchy = root,
+                selectedElementId = null,
+                hoveredElementId = null,
+                onElementSelected = {},
+                onElementHovered = {},
+                elementMap = mapOf("root" to root),
+                controlMode = mode,
+                controlSnapshot = snapshot(1080, 2340),
+                onControlTap = { _, point ->
+                  probed = point
+                  true
+                },
+              ),
           )
         }
       }
@@ -355,20 +368,23 @@ class DeviceScreenViewControlTest {
         MaterialTheme {
           DeviceScreenView(
             screenshotData = null,
-            screenWidth = 1080,
-            screenHeight = 2340,
-            hierarchy = root,
-            selectedElementId = null,
-            hoveredElementId = null,
-            onElementSelected = {},
-            onElementHovered = {},
-            elementMap = mapOf("root" to root),
-            controlMode = mode,
-            controlSnapshot = snapshot(1080, 2340),
-            onControlTap = { _, point ->
-              fineGrained = point
-              true
-            },
+            options =
+              DeviceScreenOptions(
+                screenWidth = 1080,
+                screenHeight = 2340,
+                hierarchy = root,
+                selectedElementId = null,
+                hoveredElementId = null,
+                onElementSelected = {},
+                onElementHovered = {},
+                elementMap = mapOf("root" to root),
+                controlMode = mode,
+                controlSnapshot = snapshot(1080, 2340),
+                onControlTap = { _, point ->
+                  fineGrained = point
+                  true
+                },
+              ),
           )
         }
       }
@@ -458,21 +474,24 @@ class DeviceScreenViewControlTest {
   ) {
     DeviceScreenView(
       screenshotData = null,
-      screenWidth = 1080,
-      screenHeight = 2340,
-      hierarchy = root,
-      selectedElementId = null,
-      hoveredElementId = null,
-      onElementSelected = {},
-      onElementHovered = {},
-      elementMap = mapOf("root" to root),
-      controlMode = mode,
-      controlSnapshot = snapshot(1080, 2340, sequence = 42L),
-      onControlTap = { _, point ->
-        onTap(point)
-        true
-      },
-      onControlSwipe = onSwipe,
+      options =
+        DeviceScreenOptions(
+          screenWidth = 1080,
+          screenHeight = 2340,
+          hierarchy = root,
+          selectedElementId = null,
+          hoveredElementId = null,
+          onElementSelected = {},
+          onElementHovered = {},
+          elementMap = mapOf("root" to root),
+          controlMode = mode,
+          controlSnapshot = snapshot(1080, 2340, sequence = 42L),
+          onControlTap = { _, point ->
+            onTap(point)
+            true
+          },
+          onControlSwipe = onSwipe,
+        ),
     )
   }
 
@@ -507,22 +526,26 @@ class DeviceScreenViewControlTest {
         MaterialTheme {
           DeviceScreenView(
             screenshotData = null,
-            // The view's OWN geometry inputs are fixed at the pre-change 1080x2340 screen in every
-            // case, so any difference in the result comes from the snapshot alone.
-            screenWidth = 1080,
-            screenHeight = 2340,
-            hierarchy = root,
-            selectedElementId = null,
-            hoveredElementId = null,
-            onElementSelected = {},
-            onElementHovered = {},
-            elementMap = mapOf("root" to root),
-            controlMode = DeviceScreenControlMode.Control,
-            controlSnapshot = snapshot(deviceWidth, deviceHeight),
-            onControlTap = { _, point ->
-              tap = point
-              true
-            },
+            options =
+              DeviceScreenOptions(
+                // The view's OWN geometry inputs are fixed at the pre-change 1080x2340 screen in
+                // every
+                // case, so any difference in the result comes from the snapshot alone.
+                screenWidth = 1080,
+                screenHeight = 2340,
+                hierarchy = root,
+                selectedElementId = null,
+                hoveredElementId = null,
+                onElementSelected = {},
+                onElementHovered = {},
+                elementMap = mapOf("root" to root),
+                controlMode = DeviceScreenControlMode.Control,
+                controlSnapshot = snapshot(deviceWidth, deviceHeight),
+                onControlTap = { _, point ->
+                  tap = point
+                  true
+                },
+              ),
           )
         }
       }
@@ -564,17 +587,20 @@ class DeviceScreenViewControlTest {
       MaterialTheme {
         DeviceScreenView(
           screenshotData = null,
-          screenWidth = 1080,
-          screenHeight = 2340,
-          hierarchy = root,
-          selectedElementId = null,
-          hoveredElementId = null,
-          onElementSelected = {},
-          onElementHovered = {},
-          elementMap = mapOf("root" to root),
-          controlMode = DeviceScreenControlMode.Control,
-          controlSnapshot = null,
-          onControlTap = { _, point -> controlTaps.add(point) },
+          options =
+            DeviceScreenOptions(
+              screenWidth = 1080,
+              screenHeight = 2340,
+              hierarchy = root,
+              selectedElementId = null,
+              hoveredElementId = null,
+              onElementSelected = {},
+              onElementHovered = {},
+              elementMap = mapOf("root" to root),
+              controlMode = DeviceScreenControlMode.Control,
+              controlSnapshot = null,
+              onControlTap = { _, point -> controlTaps.add(point) },
+            ),
         )
       }
     }
@@ -595,17 +621,20 @@ class DeviceScreenViewControlTest {
       MaterialTheme {
         DeviceScreenView(
           screenshotData = null,
-          screenWidth = 1080,
-          screenHeight = 2340,
-          hierarchy = root,
-          selectedElementId = null,
-          hoveredElementId = null,
-          onElementSelected = {},
-          onElementHovered = {},
-          elementMap = mapOf("root" to root),
-          controlMode = DeviceScreenControlMode.Control,
-          controlSnapshot = snapshot(720, 1560, sequence = 42L),
-          onControlTap = { snapshot, point -> reported.add(snapshot to point) },
+          options =
+            DeviceScreenOptions(
+              screenWidth = 1080,
+              screenHeight = 2340,
+              hierarchy = root,
+              selectedElementId = null,
+              hoveredElementId = null,
+              onElementSelected = {},
+              onElementHovered = {},
+              elementMap = mapOf("root" to root),
+              controlMode = DeviceScreenControlMode.Control,
+              controlSnapshot = snapshot(720, 1560, sequence = 42L),
+              onControlTap = { snapshot, point -> reported.add(snapshot to point) },
+            ),
         )
       }
     }

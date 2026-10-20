@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
+import dev.jasonpearson.automobile.desktop.core.components.SearchBarOptions
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.launch
@@ -293,11 +294,14 @@ internal fun TelemetrySearchToolbar(
         SearchBar(
           query = searchQuery,
           onQueryChange = { searchQuery = it },
-          placeholder = "Filter events...",
-          showRegexToggle = true,
-          isRegexEnabled = isRegexEnabled,
-          onRegexToggle = { isRegexEnabled = !isRegexEnabled },
           modifier = Modifier.weight(1f),
+          options =
+            SearchBarOptions(
+              placeholder = "Filter events...",
+              showRegexToggle = true,
+              isRegexEnabled = isRegexEnabled,
+              onRegexToggle = { isRegexEnabled = !isRegexEnabled },
+            ),
         )
         // Severity toggle chips
         EventSeverity.entries.forEach { sev ->

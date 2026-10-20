@@ -5,6 +5,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
+import androidx.core.content.pm.PackageInfoCompat
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.InstalledPackageRecord
 import dev.jasonpearson.automobile.protocol.InstalledPackagesResult
@@ -96,7 +97,7 @@ internal class PackageController(
             PackageManager.PackageInfoFlags.of(0L),
           )
       } else {
-        @Suppress("DEPRECATION") packageManager().getInstalledPackages(0)
+        legacyGetInstalledPackages(packageManager())
       }
     // Launchability comes from ONE batched MAIN/LAUNCHER query rather than a
     // per-package getLaunchIntentForPackage, which would accept MAIN/INFO and
@@ -108,9 +109,7 @@ internal class PackageController(
         (info.applicationInfo?.flags ?: 0) and
           (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
       if (!includeSystem && isSystem) continue
-      val versionCode =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
-        else @Suppress("DEPRECATION") info.versionCode.toLong()
+      val versionCode = PackageInfoCompat.getLongVersionCode(info)
       // The same batched MAIN/LAUNCHER query that establishes launchability also carries the
       // label shown by launchers. Its helper falls back safely when an app disappears mid-list.
       val label =
@@ -198,7 +197,7 @@ internal class PackageController(
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         packageManager().getInstallSourceInfo(packageName).installingPackageName
       } else {
-        @Suppress("DEPRECATION") packageManager().getInstallerPackageName(packageName)
+        legacyGetInstallerPackageName(packageManager(), packageName)
       }
     } catch (e: CancellationException) {
       throw e
@@ -229,7 +228,7 @@ internal class PackageController(
             PackageManager.PackageInfoFlags.of(flags.toLong()),
           )
       } else {
-        @Suppress("DEPRECATION") packageManager().getPackageInfo(packageName, flags)
+        legacyGetPackageInfo(packageManager(), packageName, flags)
       }
 
     val appInfo = info.applicationInfo
@@ -237,9 +236,7 @@ internal class PackageController(
       (appInfo?.flags ?: 0) and
         (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
     val applicationLabel = appInfo?.let { packageManager().getApplicationLabel(it).toString() }
-    val versionCode =
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
-      else @Suppress("DEPRECATION") info.versionCode.toLong()
+    val versionCode = PackageInfoCompat.getLongVersionCode(info)
     val installerPackage = installerPackage(packageName)
     val allowBackup = appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
     val requested = info.requestedPermissions?.toList().orEmpty()
@@ -396,6 +393,26 @@ private inline fun <T> withPackageFailures(onFailure: (Exception) -> T, block: (
   } catch (e: java.io.IOException) {
     onFailure(e)
   }
+
+// The int-flags overload is required below API 33.
+@Suppress("DEPRECATION")
+private fun legacyGetInstalledPackages(packageManager: PackageManager): List<PackageInfo> =
+  packageManager.getInstalledPackages(0)
+
+// InstallSourceInfo is unavailable below API 30.
+@Suppress("DEPRECATION")
+private fun legacyGetInstallerPackageName(
+  packageManager: PackageManager,
+  packageName: String,
+): String? = packageManager.getInstallerPackageName(packageName)
+
+// The int-flags overload is required below API 33.
+@Suppress("DEPRECATION")
+private fun legacyGetPackageInfo(
+  packageManager: PackageManager,
+  packageName: String,
+  flags: Int,
+): PackageInfo = packageManager.getPackageInfo(packageName, flags)
 
 private fun failedPackageInfo(
   requestId: String?,

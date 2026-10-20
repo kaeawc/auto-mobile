@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import android.os.Build
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
@@ -70,11 +69,6 @@ internal class CaCertificateController(
           Log.e(TAG, "Error installing CA certificate", e)
         },
       ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-          error = "CA certificate install requires API 21+"
-          return
-        }
-
         val deviceOwnerError = validateDeviceOwnerStatus()
         if (deviceOwnerError != null) {
           error = deviceOwnerError
@@ -184,11 +178,6 @@ internal class CaCertificateController(
     }
 
     private fun remove() {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-        error = "CA certificate removal requires API 21+"
-        return
-      }
-
       val deviceOwnerError = validateDeviceOwnerStatus()
       if (deviceOwnerError != null) {
         error = deviceOwnerError

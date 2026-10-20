@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import {
   EXEMPT_RELEASE_REASON_HOLDERS,
@@ -15,7 +16,7 @@ const inventory = Object.freeze(
     .filter((file) => file.endsWith(".ts"))
     .flatMap((file) => {
       const relative = `src/${file.split(sep).join("/")}`;
-      return scanReleaseReasonSerialisations(relative, readFileSync(join(root, relative), "utf8"), {
+      return scanReleaseReasonSerialisations(relative, readGuardFile(join(root, relative)), {
         hostsWireBuilder: builderFiles.has(relative),
       });
     }),

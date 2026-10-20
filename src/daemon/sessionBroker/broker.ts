@@ -368,6 +368,19 @@ export class SessionBroker {
       this.options.owner,
       prepared.sessionId,
     );
+    if (this.stopping) {
+      try {
+        // The first shutdown snapshot can precede this activation commit. Mark it before
+        // returning, even while shutdown is still joining recovery or other preparations.
+        await this.options.store.relinquishForRestart(config.requestId, this.options.owner);
+      } catch (error) {
+        // Activation already committed; a failed handoff must not fail or destroy its grant.
+        logger.warn(
+          `Session request ${config.requestId} could not be kept for restart: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
     // Activation committed: the session now belongs to the request identity. A caller abort from
     // here on hands it back for a replay of that identity instead of destroying it; the session's
     // own liveness policy releases it if the caller never returns. Abandonment is separate and
@@ -605,20 +618,46 @@ export class SessionBroker {
   }
 
   async close(): Promise<void> {
+    await this.markRestartHandoff();
+    await Promise.allSettled([...this.preparationOwners.keys()]);
+    // Retry after joining preparations in case the first snapshot or an inline mark failed;
+    // the store makes each mark idempotent.
+    await this.markRestartHandoff();
+    const requests = await this.options.store.listRecoverableRequests();
+    // Only a release the consumer already began is finished here.
+    await Promise.allSettled(
+      requests
+        .filter(
+          (request) =>
+            sameProcess(request.owner, this.options.owner) &&
+            request.sessionId &&
+            request.state === "releasing",
+        )
+        .map((request) => this.release(request.sessionId!)),
+    );
+    await this.joinReleases();
+  }
+
+  /**
+   * Stop admission/recovery and commit handoff before joining native work (#13799).
+   * Abandonment also rejects as stopping from this first mark, before close() joins work.
+   */
+  async markRestartHandoff(): Promise<void> {
     this.stopping = true;
     for (const preparation of this.preparationOwners.values()) {
       preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
-    await Promise.allSettled([...this.preparationOwners.keys()]);
-    const requests = (await this.options.store.listRecoverableRequests()).filter(
-      (request) => sameProcess(request.owner, this.options.owner) && request.sessionId,
-    );
+    const requests = await this.options.store.listRecoverableRequests();
     // Shutdown is not the consumer's release (#12451): an active session keeps its device for the
-    // restarted provider, which adopts it once the same session UUID is re-owned natively. Only a
-    // release the consumer already began is finished here.
+    // restarted provider, which adopts it once the same session UUID is re-owned natively.
     await Promise.allSettled(
       requests
-        .filter((request) => request.state === "active")
+        .filter(
+          (request) =>
+            sameProcess(request.owner, this.options.owner) &&
+            request.sessionId &&
+            request.state === "active",
+        )
         .map((request) =>
           this.options.store
             .relinquishForRestart(request.requestId, this.options.owner)
@@ -631,17 +670,14 @@ export class SessionBroker {
             }),
         ),
     );
-    await Promise.allSettled(
-      requests
-        .filter((request) => request.state === "releasing")
-        .map((request) => this.release(request.sessionId!)),
-    );
-    await this.joinReleases();
   }
 
   /** Full bounded snapshot, not a repeatedly scanned prefix that can starve later cleanup. */
   async recover(): Promise<void> {
     for (const request of await this.options.store.listRecoverableRequests()) {
+      if (this.stopping) {
+        return;
+      }
       try {
         await this.recoverOneRequest(request);
       } catch (error) {
@@ -651,7 +687,13 @@ export class SessionBroker {
         );
       }
     }
+    if (this.stopping) {
+      return;
+    }
     for (const resource of await this.options.store.listResources()) {
+      if (this.stopping) {
+        return;
+      }
       if (
         resource.state === "destroying" &&
         (!resource.requestId || !this.hasPendingPreparation(resource.requestId))

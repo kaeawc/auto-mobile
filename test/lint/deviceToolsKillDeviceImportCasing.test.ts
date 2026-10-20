@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readGuardFile } from "./astGuard";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
 import { join } from "node:path";
 import { parseSync } from "oxc-parser";
 
@@ -69,11 +70,11 @@ describe("deviceTools.killDevice import casing (issue #6060)", () => {
   // Reading and parsing the suite (the parser's first use in the process) is setup, not the
   // casing check: do it once here.
   let pollutingSuite: AstNode;
+  afterAll(() => {
+    pollutingSuite = { type: "Program" };
+  });
   beforeAll(() => {
-    const { program } = parseSync(
-      POLLUTING_SUITE,
-      readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"),
-    );
+    const { program } = parseSync(POLLUTING_SUITE, readGuardFile(join(ROOT, POLLUTING_SUITE)));
     if (!isAstNode(program)) {
       throw new TypeError("Parser did not return an AST program");
     }

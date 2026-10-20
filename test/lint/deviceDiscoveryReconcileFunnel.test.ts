@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative, sep } from "node:path";
 import { blankComments } from "./blankComments";
 
@@ -303,7 +304,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   function walk(dir: string, files: string[] = []): string[] {
     // withFileTypes, not a statSync per entry: one syscall for the whole
     // directory instead of one per file across ~1000 files in src/.
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(dir)) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full, files);
@@ -329,7 +330,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     if (cached !== undefined) {
       return cached;
     }
-    const source = blankComments(readFileSync(join(ROOT, file), "utf8"));
+    const source = blankComments(readGuardFile(join(ROOT, file)));
     strippedSources.set(file, source);
     return source;
   }
@@ -372,7 +373,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     }
     const counts = new Map<string, number>();
     for (const file of walk(SRC)) {
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       if (!source.includes(DISCOVERY_PREFIX)) {
         continue;
       }
@@ -395,9 +396,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   });
 
   test("System UI ANR reboot uses its bounded image lookup without booted discovery", () => {
-    const source = blankComments(
-      readFileSync(join(ROOT, "src/server/deviceToolsSystemUiAnr.ts"), "utf8"),
-    );
+    const source = blankComments(readGuardFile(join(ROOT, "src/server/deviceToolsSystemUiAnr.ts")));
     expect(source, "src/server/deviceToolsSystemUiAnr.ts").not.toMatch(DISCOVERY_CALL);
   });
 

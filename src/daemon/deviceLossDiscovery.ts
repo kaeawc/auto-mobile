@@ -7,7 +7,7 @@ import {
   interruptVideoRecording,
   type listActiveVideoRecordings,
   stopVideoRecordingUnattended,
-} from "../server/videoRecordingManager";
+} from "./videoRecordingManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { errorMessage } from "../utils/describeUnknownError";

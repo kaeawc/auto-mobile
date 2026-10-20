@@ -19,7 +19,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { logger } from "../../src/utils/logger";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";

@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRecorderService";
 import { afterEach, expect, spyOn, test } from "bun:test";

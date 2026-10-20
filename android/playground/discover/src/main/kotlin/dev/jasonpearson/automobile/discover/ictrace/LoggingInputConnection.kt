@@ -1,11 +1,13 @@
 package dev.jasonpearson.automobile.discover.ictrace
 
+import android.os.Build
 import android.view.KeyEvent
 import android.view.inputmethod.CompletionInfo
 import android.view.inputmethod.CorrectionInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.TextAttribute
+import androidx.annotation.RequiresApi
 
 // Narrow operation interfaces intentionally override the wrapper via delegation. Keeping the
 // wrapper superclass preserves forwarding for unlogged APIs, including Java default methods.
@@ -33,16 +35,19 @@ private constructor(private val target: InputConnectionWrapper, trace: InputConn
 interface TextInputOperations {
   fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean
 
+  @RequiresApi(Build.VERSION_CODES.TIRAMISU)
   fun commitText(text: CharSequence, newCursorPosition: Int, textAttribute: TextAttribute?): Boolean
 
   fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean
 
+  @RequiresApi(Build.VERSION_CODES.TIRAMISU)
   fun setComposingText(
     text: CharSequence,
     newCursorPosition: Int,
     textAttribute: TextAttribute?,
   ): Boolean
 
+  @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
   fun replaceText(
     start: Int,
     end: Int,
@@ -121,6 +126,9 @@ private class LoggingTextInputConnection(
     return result
   }
 
+  // The framework only invokes these overloads on the API levels that introduced them.
+  // Keep forwarding intact, including the absence of a legacy fallback.
+  @RequiresApi(Build.VERSION_CODES.TIRAMISU)
   override fun commitText(
     text: CharSequence,
     newCursorPosition: Int,
@@ -145,6 +153,7 @@ private class LoggingTextInputConnection(
     return result
   }
 
+  @RequiresApi(Build.VERSION_CODES.TIRAMISU)
   override fun setComposingText(
     text: CharSequence,
     newCursorPosition: Int,
@@ -159,6 +168,7 @@ private class LoggingTextInputConnection(
     return result
   }
 
+  @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
   override fun replaceText(
     start: Int,
     end: Int,

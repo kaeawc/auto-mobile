@@ -6,7 +6,9 @@ import android.util.Log
 import android.view.View
 import android.widget.FrameLayout
 
-internal class HighlightOverlayView(
+internal class HighlightOverlayView
+@JvmOverloads
+constructor(
   context: Context,
   private val drawer: OverlayDrawer? = null,
 ) : FrameLayout(context) {

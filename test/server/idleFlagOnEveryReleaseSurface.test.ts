@@ -239,7 +239,7 @@ const surfaces: Surface[] = [
   {
     name: "terminal registration refusal",
     builders: [
-      "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
+      "src/daemon/daemonRequestHandlersParts/registration.ts#terminalSessionRegistrationRefusal",
       "src/daemon/types.ts#releasedSessionNotFoundFields",
     ],
     reasonKey: "reason",

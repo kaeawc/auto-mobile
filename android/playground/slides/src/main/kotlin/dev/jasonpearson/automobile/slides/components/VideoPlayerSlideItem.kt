@@ -100,7 +100,7 @@ fun VideoPlayerSlideItem(
 
 /** Simplified video player for preview purposes. */
 @Composable
-private fun VideoPlayerPreview(caption: String? = null, modifier: Modifier = Modifier) {
+private fun VideoPlayerPreview(modifier: Modifier = Modifier, caption: String? = null) {
   Column(
     modifier = modifier.fillMaxSize().padding(24.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp),

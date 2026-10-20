@@ -1,6 +1,6 @@
 import { createExecResult } from "../../../src/utils/execResult";
 import type { ExecResult } from "../../../src/models";
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, mock, describe, expect, spyOn, test } from "bun:test";
 import {
   executeAndroidInputText,
   INPUT_TEXT_CONSUME_MARGIN_MS,
@@ -27,9 +27,13 @@ const drainMs = (chars: number) =>
 
 describe("tracked Android input text", () => {
   const settlementMs = INPUT_TEXT_SETTLEMENT_BASE_MS + 5 * INPUT_TEXT_SETTLEMENT_PER_CHAR_MS;
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  afterEach(() => warn.mockClear());
-  afterAll(() => warn.mockRestore());
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  beforeEach(() => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    mock.restore();
+  });
 
   function start(
     chunks?: string[],
@@ -479,9 +483,11 @@ describe("tracked Android input text", () => {
 
   test("password dispatch keeps the wrapper and payload out of real AdbClient logs/errors", async () => {
     const timer = new FakeTimer();
-    const spies = (["debug", "info", "error"] as const).map((level) =>
-      spyOn(logger, level).mockImplementation(() => {}),
-    );
+    const spies = [
+      spyOn(logger, "debug").mockImplementation(() => {}),
+      spyOn(logger, "info").mockImplementation(() => {}),
+      spyOn(logger, "error").mockImplementation(() => {}),
+    ];
     const secret = "private-payload'$";
     const adb = new AdbClient(
       null,

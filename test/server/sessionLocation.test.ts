@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -23,6 +23,10 @@ import {
   createSessionLocationWriteAdmission,
 } from "../../src/server/sessionLocation";
 import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const deviceId = "emulator-5554";
 const points = [

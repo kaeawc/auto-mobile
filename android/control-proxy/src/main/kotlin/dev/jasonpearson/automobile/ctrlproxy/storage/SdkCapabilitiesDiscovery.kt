@@ -2,10 +2,10 @@ package dev.jasonpearson.automobile.ctrlproxy.storage
 
 import android.content.Context
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
 import android.os.Process
 import android.util.Log
+import androidx.core.net.toUri
 import dev.jasonpearson.automobile.protocol.SdkCapabilitiesState
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -81,7 +81,7 @@ private fun readOwnUser(context: Context, authority: String): SdkCapabilitiesSta
     return unavailableSdkCapabilities("BRIDGE_NOT_INSTALLED")
   }
   return parseSnapshot(
-    context.contentResolver.call(Uri.parse("content://$authority"), "snapshot", null, null),
+    context.contentResolver.call("content://$authority".toUri(), "snapshot", null, null),
   )
 }
 
@@ -99,7 +99,7 @@ private fun readOtherUser(context: Context, authority: String, userId: Int): Sdk
   // signal that the bridge is absent in that user.
   val client =
     context.contentResolver.acquireUnstableContentProviderClient(
-      Uri.parse("content://$userId@$authority"),
+      "content://$userId@$authority".toUri(),
     ) ?: return unavailableSdkCapabilities("BRIDGE_NOT_INSTALLED")
   return client.use { parseSnapshot(it.call("snapshot", null, null)) }
 }

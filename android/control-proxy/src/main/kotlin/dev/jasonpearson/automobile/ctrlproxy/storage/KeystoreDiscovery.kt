@@ -1,8 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.storage
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
+import androidx.core.net.toUri
 import dev.jasonpearson.automobile.protocol.KeystoreDiscoveryState
 import kotlinx.serialization.json.Json
 
@@ -21,7 +21,7 @@ internal fun discoverKeystore(context: Context, packageName: String): KeystoreDi
         )
       } else {
         val result =
-          context.contentResolver.call(Uri.parse("content://$authority"), "discover", null, null)
+          context.contentResolver.call("content://$authority".toUri(), "discover", null, null)
         val payload = result?.getString("result")
         if (payload == null) {
           Log.w("KeystoreDiscovery", "Keystore provider returned no envelope")

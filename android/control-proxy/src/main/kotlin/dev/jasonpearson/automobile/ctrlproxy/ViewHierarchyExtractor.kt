@@ -10,6 +10,7 @@ import android.util.SparseArray
 import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import androidx.core.util.size
 import dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
@@ -89,7 +90,7 @@ internal constructor(
       return selected
     }
     val overlays =
-      (0 until windowsByDisplay.size()).flatMap { index ->
+      (0 until windowsByDisplay.size).flatMap { index ->
         windowsByDisplay.valueAt(index).filter { window ->
           window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
             window.root?.let { root ->
@@ -114,10 +115,10 @@ internal constructor(
     if (windowsByDisplay[Display.DEFAULT_DISPLAY].orEmpty().any { it.isFocused || it.isActive }) {
       return Display.DEFAULT_DISPLAY
     }
-    for (index in 0 until windowsByDisplay.size()) {
+    for (index in 0 until windowsByDisplay.size) {
       if (windowsByDisplay.valueAt(index).any { it.isFocused }) return windowsByDisplay.keyAt(index)
     }
-    for (index in 0 until windowsByDisplay.size()) {
+    for (index in 0 until windowsByDisplay.size) {
       if (windowsByDisplay.valueAt(index).any { it.isActive }) return windowsByDisplay.keyAt(index)
     }
     return Display.DEFAULT_DISPLAY

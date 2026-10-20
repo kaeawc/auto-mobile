@@ -565,7 +565,10 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
         }),
       );
       keep(
-        spyOn(manager, "isRunnerStillOwnedWithinShutdownDeadline").mockImplementation(async () => {
+        spyOn(
+          manager.testHooks.shutdownOwnership,
+          "isRunnerStillOwnedWithinShutdownDeadline",
+        ).mockImplementation(async () => {
           events.push("runner-ownership");
           return false;
         }),

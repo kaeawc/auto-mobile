@@ -347,7 +347,7 @@ export class SessionBroker {
     // the existing journal confirms that device's absence.
     while (admission.kind === "evict") {
       const destroyed = await this.destroy(admission.resource).catch((error: unknown) => {
-        if (!isRetryableCleanReleaseError(error)) {
+        if (classifyCleanReleaseError(error) !== "retryable") {
           throw error;
         }
         // The durable destroying row retains capacity until recovery confirms absence.

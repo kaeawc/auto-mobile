@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { ObserveResult } from "../../models/ObserveResult";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -14,6 +15,95 @@ export type SnapshotReferenceCaptureResult =
   | { status: "captured"; reference: SnapshotReference }
   | { status: "unavailable"; missing: string[] };
 
+// These capture-only fields are documented by the observation diff as nondeterministic between
+// captures of one unchanged Android screen. They cannot establish that a coordinate was retargeted.
+const VOLATILE_TAP_LAYOUT_FIELDS = new Set([
+  "extras",
+  "view-id",
+  "occlusionState",
+  "occludedBy",
+  "occludedByViewId",
+]);
+
+function withoutVolatileTapLayoutFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(withoutVolatileTapLayoutFields);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !VOLATILE_TAP_LAYOUT_FIELDS.has(key))
+      .map(([key, child]) => [key, withoutVolatileTapLayoutFields(child)]),
+  );
+}
+
+function hasTruncatedTapLayout(observation: ObserveResult): boolean {
+  return Boolean(
+    observation.truncationReasons?.length || observation.viewHierarchy?.truncationReasons?.length,
+  );
+}
+
+function tapTargetingLayout(observation: ObserveResult) {
+  const rotation = observation.rotation ?? observation.viewHierarchy?.rotation;
+  if (
+    !Number.isInteger(rotation) ||
+    !observation.viewHierarchy ||
+    hasTruncatedTapLayout(observation)
+  ) {
+    return null;
+  }
+
+  const hierarchy = observation.viewHierarchy;
+  return {
+    screenSize: {
+      width: observation.screenSize?.width,
+      height: observation.screenSize?.height,
+    },
+    rotation,
+    systemInsets: observation.systemInsets,
+    insets: observation.insets,
+    activeWindow: {
+      appId: observation.activeWindow?.appId,
+      activityName: observation.activeWindow?.activityName,
+    },
+    screenIdentity: observation.screenIdentity
+      ? {
+          platform: observation.screenIdentity.platform,
+          source: observation.screenIdentity.source,
+          key: observation.screenIdentity.key,
+        }
+      : undefined,
+    hierarchy: {
+      tree: withoutVolatileTapLayoutFields(hierarchy.hierarchy),
+      windows: withoutVolatileTapLayoutFields(hierarchy.windows),
+      packageName: hierarchy.packageName,
+      foregroundActivity: hierarchy.foregroundActivity,
+      screenWidth: hierarchy.screenWidth,
+      screenHeight: hierarchy.screenHeight,
+      pixelWidth: hierarchy.pixelWidth,
+      pixelHeight: hierarchy.pixelHeight,
+      nativeScale: hierarchy.nativeScale,
+      rotation: hierarchy.rotation,
+      systemInsets: hierarchy.systemInsets,
+      insets: hierarchy.insets,
+    },
+  };
+}
+
+export function hasSameTapTargetingLayout(
+  previous: ObserveResult,
+  refreshed: ObserveResult,
+): boolean {
+  const previousLayout = tapTargetingLayout(previous);
+  const refreshedLayout = tapTargetingLayout(refreshed);
+  return (
+    previousLayout !== null &&
+    refreshedLayout !== null &&
+    isDeepStrictEqual(previousLayout, refreshedLayout)
+  );
+}
 interface SnapshotGeometry {
   deviceId: string;
   incarnation: string | undefined;
@@ -143,9 +233,28 @@ function hasConflictingField(
   return entry[key] !== current[key];
 }
 
-/** Process-local, bounded references to observed full-screen geometry. */
+/** Keep the existing unknown-window tolerance while comparing the shared targeting projection. */
+function hasSameSnapshotLayout(
+  captured: NonNullable<ReturnType<typeof tapTargetingLayout>>,
+  current: NonNullable<ReturnType<typeof tapTargetingLayout>>,
+): boolean {
+  // Older/bootstrap captures can omit optional activity/window metadata. Geometry already
+  // rejects conflicting known facts; absence alone must not invalidate an otherwise equal tree.
+  if (!captured.activeWindow.activityName || !current.activeWindow.activityName) {
+    current.activeWindow.activityName = captured.activeWindow.activityName;
+  }
+  if (captured.hierarchy.windows === undefined || current.hierarchy.windows === undefined) {
+    current.hierarchy.windows = captured.hierarchy.windows;
+  }
+  return isDeepStrictEqual(captured, current);
+}
+
+/** Process-local, bounded references to observed geometry and tap-targeting layout. */
 export class SnapshotReferenceStore {
-  private readonly entries = new Map<string, SnapshotGeometry & SnapshotReference>();
+  private readonly entries = new Map<
+    string,
+    SnapshotGeometry & SnapshotReference & { layout: ReturnType<typeof tapTargetingLayout> }
+  >();
 
   constructor(
     private readonly timer: Pick<Timer, "now"> = defaultTimer,
@@ -162,7 +271,11 @@ export class SnapshotReferenceStore {
       this.entries.delete(this.entries.keys().next().value!);
     }
     const reference = { snapshotId: this.ids.next(), expiresAt: this.timer.now() + LIFETIME_MS };
-    this.entries.set(reference.snapshotId, { ...captured, ...reference });
+    this.entries.set(reference.snapshotId, {
+      ...captured,
+      ...reference,
+      layout: structuredClone(tapTargetingLayout(observation)),
+    });
     return { status: "captured", reference };
   }
 
@@ -190,6 +303,13 @@ export class SnapshotReferenceStore {
       if (hasConflictingField(entry, current, key)) {
         return `Snapshot reference is stale (${key} changed); re-observe.`;
       }
+    }
+    const currentLayout = tapTargetingLayout(observation);
+    if (entry.layout === null || currentLayout === null) {
+      return "Snapshot tap-targeting layout is unavailable; re-observe.";
+    }
+    if (!hasSameSnapshotLayout(entry.layout, currentLayout)) {
+      return "Snapshot reference is stale (tap-targeting layout changed); re-observe.";
     }
     return undefined;
   }

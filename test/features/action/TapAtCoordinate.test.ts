@@ -624,6 +624,67 @@ describe("TapAtCoordinate", () => {
       expect(sent).toEqual(["epoch:1"]);
     });
 
+    test.each([false, true])(
+      "explicit snapshot refresh rejects changed layout=%s without unsafe redispatch",
+      async (changed) => {
+        const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+        const captured = observation(100, 200, "epoch:1", 0, { bounds: "[0,0][50,50]" });
+        const refreshed = observation(100, 200, "epoch:2", 0, {
+          bounds: changed ? "[0,0][90,90]" : "[0,0][50,50]",
+        });
+        const capture = references.capture(iosDevice.deviceId, captured);
+        if (capture.status !== "captured") {
+          throw new Error("Snapshot reference unavailable");
+        }
+        const { tapAt, sent } = createIosTapAt(["epoch:2"], [captured, refreshed], references);
+
+        const result = await tapAt.execute({
+          x: 10,
+          y: 20,
+          snapshotId: capture.reference.snapshotId,
+        });
+
+        expect(result.success).toBe(!changed);
+        if (changed) {
+          expect(result.error).toContain(
+            "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+          );
+        }
+        expect(sent).toEqual(changed ? ["epoch:1"] : ["epoch:1", "epoch:2"]);
+      },
+    );
+
+    test("explicit snapshot retry still requires equal layout when optional activity becomes known", async () => {
+      const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const captured = {
+        ...observation(100, 200, "epoch:1"),
+        activeWindow: { appId: "com.example", activityName: "", layoutSeqSum: 1 },
+      };
+      const refreshed = {
+        ...observation(100, 200, "epoch:2"),
+        activeWindow: { ...captured.activeWindow, activityName: ".Main" },
+      };
+      const capture = references.capture(iosDevice.deviceId, captured);
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      // Missing optional metadata remains non-conflicting in the shared reference store.
+      expect(
+        references.staleReason(capture.reference.snapshotId, iosDevice.deviceId, refreshed),
+      ).toBeUndefined();
+      const { tapAt, sent } = createIosTapAt(["epoch:2"], [captured, refreshed], references);
+      const result = await tapAt.execute({
+        x: 10,
+        y: 20,
+        snapshotId: capture.reference.snapshotId,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        "screen layout changed since the last observation. Observe again",
+      );
+      expect(sent).toEqual(["epoch:1"]);
+    });
+
     test("retries only once when the fresh layout is unchanged", async () => {
       const twice = createIosTapAt(
         [],
@@ -1007,6 +1068,42 @@ describe("TapAtCoordinate", () => {
         error: expect.stringContaining("expired"),
       });
       expect(androidDispatches).toEqual([]);
+    },
+  );
+
+  test.each([androidDevice, iosDevice])(
+    "snapshot layout changes reject before dispatch and re-observing restores taps on $platform",
+    async (device) => {
+      const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const captured = observation(100, 200, "epoch:1", 0, { bounds: "[0,0][50,50]" });
+      const capture = references.capture(device.deviceId, captured);
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      const h = createTapAt(device, 100, 200, undefined, undefined, references);
+      h.observeScreen.setObserveResult(captured);
+      const options = { x: 10, y: 20, snapshotId: capture.reference.snapshotId };
+      expect((await h.tapAt.execute(options)).success).toBe(true);
+
+      const changed = observation(100, 200, "epoch:2", 0, { bounds: "[0,0][90,90]" });
+      h.observeScreen.setObserveResult(changed);
+      expect(await h.tapAt.execute(options)).toMatchObject({
+        success: false,
+        error: expect.stringContaining(
+          "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+        ),
+      });
+      const dispatches = device.platform === "ios" ? h.iosDispatches : h.androidDispatches;
+      expect(dispatches).toHaveLength(1);
+
+      const fresh = references.capture(device.deviceId, changed);
+      if (fresh.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      expect(
+        (await h.tapAt.execute({ ...options, snapshotId: fresh.reference.snapshotId })).success,
+      ).toBe(true);
+      expect(dispatches).toHaveLength(2);
     },
   );
 

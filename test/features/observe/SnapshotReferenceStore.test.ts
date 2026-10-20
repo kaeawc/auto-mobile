@@ -8,6 +8,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { setDeviceIncarnationResolver } from "../../../src/utils/deviceIncarnation";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { observation } from "../../helpers/tapAtCoordinate";
 import { loadIosFractionalObserve } from "../../fixtures/observe/observeFixture";
 
 const captured: ObserveResult = {
@@ -311,6 +312,56 @@ describe("SnapshotReferenceStore", () => {
         viewHierarchy: { ...ios.viewHierarchy!, nativeScale: 2 },
       }),
     ).toContain("nativeScale");
+  });
+
+  test("captures targeting layout by value and ignores volatile capture fields", () => {
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const original = observation(100, 200, "epoch:1", 0, {
+      bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+      "view-id": "first",
+      extras: { timestamp: 1 },
+    });
+    const ref = captureReference(store, "device-1", original);
+    const identical = {
+      ...observation(100, 200, "epoch:2", 0, {
+        bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+        "view-id": "second",
+        extras: { timestamp: 2 },
+      }),
+      observationId: "second",
+      updatedAt: 2,
+    };
+    expect(store.staleReason(ref.snapshotId, "device-1", identical)).toBeUndefined();
+    // Mutation after capture must not rewrite the stored targeting layout.
+    original.systemInsets.top = 1;
+    expect(store.staleReason(ref.snapshotId, "device-1", original)).toContain(
+      "tap-targeting layout changed",
+    );
+    original.systemInsets.top = 0;
+    original.viewHierarchy!.hierarchy.node!.bounds!.right = 90;
+    expect(store.staleReason(ref.snapshotId, "device-1", original)).toBe(
+      "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+    );
+  });
+
+  test("rejects a real screen change with the same geometry and runner epoch", () => {
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const original = observation(100, 200, `${androidEpoch}:1:abc`, 0, { text: "Home" });
+    const ref = captureReference(store, "device-1", original);
+    const changed = observation(100, 200, `${androidEpoch}:2:def`, 0, { text: "Settings" });
+    expect(store.staleReason(ref.snapshotId, "device-1", changed)).toBe(
+      "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+    );
+  });
+
+  test.each(["captured", "current"])("fails closed when the %s layout is truncated", (which) => {
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const complete = observation(100, 200);
+    const truncated = { ...complete, truncationReasons: ["maxNodes"] };
+    const ref = captureReference(store, "device-1", which === "captured" ? truncated : complete);
+    expect(
+      store.staleReason(ref.snapshotId, "device-1", which === "current" ? truncated : complete),
+    ).toBe("Snapshot tap-targeting layout is unavailable; re-observe.");
   });
 
   test("expires at the deadline and bounds capacity", () => {

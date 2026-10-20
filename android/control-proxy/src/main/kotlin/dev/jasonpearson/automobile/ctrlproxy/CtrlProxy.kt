@@ -3201,6 +3201,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           textInputController.forgetRememberedInsert()
         AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ->
           textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)
+        else -> Unit
       }
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
         lastWindowClassName = event.className?.toString()

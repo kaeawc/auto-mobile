@@ -2,7 +2,6 @@
 1027	src/ctrlProxy/CtrlProxyManager.ts
 1288	src/daemon/daemon.ts
 1728	src/daemon/daemonRequestHandlers.ts
-1262	src/daemon/deviceDataStreamSocketServer.ts
 1013	src/daemon/devicePool.ts
 1222	src/daemon/sessionBroker/provisioning/reconciler.ts
 1048	src/daemon/sessionDeviceStateRestore.ts

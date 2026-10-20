@@ -9,7 +9,7 @@
 1344	src/daemon/sessionBroker/provisioning/executionRelease.ts
 1222	src/daemon/sessionBroker/provisioning/reconciler.ts
 1048	src/daemon/sessionDeviceStateRestore.ts
-5519	src/daemon/sessionManager.ts
+2900	src/daemon/sessionManager.ts
 1180	src/daemon/videoStreamSocketServer.ts
 1401	src/db/navigationRetention.ts
 1390	src/devices/deviceBootService.ts

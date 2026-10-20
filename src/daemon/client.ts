@@ -527,17 +527,16 @@ export class DaemonClient {
     }
     const targetMs = Math.max(pending.sentAtMs + timeoutMs, pending.deadline?.value ?? 0);
     const remainingMs = targetMs - this.timer.now();
-    if (remainingMs <= 0) {
-      return;
+    if (remainingMs > 0) {
+      pending.requestTimeoutMs = timeoutMs;
+      this.timer.clearTimeout(pending.timeout);
+      pending.timeout = this.scheduleRequestTimeout(
+        requestId,
+        pending.toolName,
+        remainingMs,
+        pending.reject,
+      );
     }
-    pending.requestTimeoutMs = timeoutMs;
-    this.timer.clearTimeout(pending.timeout);
-    pending.timeout = this.scheduleRequestTimeout(
-      requestId,
-      pending.toolName,
-      remainingMs,
-      pending.reject,
-    );
   }
 
   /**

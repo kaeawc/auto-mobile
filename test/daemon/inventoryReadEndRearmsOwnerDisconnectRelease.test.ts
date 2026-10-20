@@ -90,7 +90,7 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
     const devicePool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    Object.assign(devicePool, { deviceManager });
+    devicePool.testHooks.deviceManager = deviceManager;
     await devicePool.initializeWithDevices([DEVICE]);
     await devicePool.bindOrReuseDeviceSession({
       sessionId: SESSION,

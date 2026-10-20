@@ -860,6 +860,7 @@ test/features/performance/DisplayedTimeMetricsCollector.test.ts
 test/features/performance/PerfWindowBuffer.test.ts
 test/features/performance/PerformanceAudit.refreshRate.test.ts
 test/features/performance/PerformanceAudit.ttff.test.ts
+test/features/performance/PerformanceMonitor.cost.test.ts
 test/features/performance/SdkFrameMetricsStore.test.ts
 test/features/preferences/AndroidPreferencesXmlFile.test.ts
 test/features/preferences/AndroidSharedPreferencesMutationCoordinator.test.ts

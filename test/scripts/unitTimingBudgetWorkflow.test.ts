@@ -47,10 +47,11 @@ describe("unit timing validator workflow budgets", () => {
         expect(Number.isInteger(laneCap) && laneCap >= wall).toBe(true);
         priorSeconds += laneCap;
       }
-      // The combined main job has no artifact download; reserve two minutes.
-      // Standalone/prepush jobs reserve three. Include the unit lane's full
-      // configured allowance, rather than assuming it finishes quickly.
-      const margin = priorLanes.length > 0 ? 120 : 180;
+      // Coverage setup builds and globally installs the package; also reserve
+      // post-lane probes, merging and badge work. Other combined jobs reserve
+      // two minutes, standalone/prepush jobs three.
+      const margin =
+        file === "merge.yml" && id === "ts-code-coverage" ? 480 : priorLanes.length > 0 ? 120 : 180;
       expect(Number.isInteger(budget) && budget > 0).toBe(true);
       expect(budget + priorSeconds + margin).toBeLessThan(Number(job["timeout-minutes"]) * 60);
       // Direct CI gates must reuse the completed lane, avoiding an unaccounted
@@ -126,6 +127,12 @@ test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict
   expect(
     mergeJobs["node-unit-tests"].steps?.some((s) => s.run?.includes("validate-bun-test-timings")),
   ).toBe(false);
+  const windows = mergeJobs["node-unit-tests"];
+  expect(
+    windows.steps?.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"],
+  ).toBeUndefined();
+  expect(windows.steps?.some((s) => s.env?.AUTOMOBILE_UNIT_JUNIT_DIR)).toBe(false);
+  expect(coverage["timeout-minutes"]).toBe(45);
   expect(coverage["runs-on"]).toBe("ubuntu-latest");
   expect(coverage.permissions).toEqual({ actions: "write", contents: "read" });
   expect(coverageSteps.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"]).toBe(
@@ -139,7 +146,9 @@ test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720",
     AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560",
   });
-  expect(timing).toBeGreaterThan(lane);
+  const badge = coverageSteps.findIndex((s) => s.name === "Upload Coverage Badge");
+  expect(badge).toBeGreaterThan(lane);
+  expect(timing).toBeGreaterThan(badge);
   expect(coverageSteps[timing].if).toBeUndefined();
   expect(coverageSteps[timing].env).toEqual({
     AUTOMOBILE_TEST_MODE: "true",

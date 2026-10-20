@@ -58,8 +58,8 @@ number="${key%%-*}"
 chunk="${key##*-}"
 shards_dir="${coverage_dir%/*}"
 printf 'start %s\n' "$number" >> "$shards_dir/events"
-# Infra-exit simulation (make_infra_timeout): the unit shard supervisor runs each
-# attempt through the portable watchdog, so a stubbed `timeout` is never used.
+# Infra-exit simulation (make_infra_timeout): coverage, like unit shards, runs
+# every attempt through the portable watchdog; simulate infra exits in Bun.
 # A chunk that exits 124/137 is what a killed attempt looks like to it.
 if [[ "${STUB_INFRA_EXIT_ONCE:-0}" == 1 ]]; then
   count_file="$BATS_TEST_TMPDIR/attempt-shard-$number"

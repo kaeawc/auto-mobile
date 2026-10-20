@@ -646,6 +646,7 @@ launch_unit_shard() {
 
 # Runs in the background shell launched above; reads the launcher's dynamic locals.
 run_unit_shard_attempt() {
+  local shard_pgid_file="${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}"
   if [[ "$shard_mode" == coverage ]]; then
     export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${shard}/${worker_count}"
   fi
@@ -697,7 +698,10 @@ run_unit_shard_attempt() {
       "$shard_budget"
     shard_status=0
     set +e
-    run_with_timeout "$shard_budget" \
+    # Bash 3.2 can leak a nested temporary export to children despite the
+    # watchdog's unset. Clear the inherited binding before passing it anew.
+    unset AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE
+    AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$shard_pgid_file" run_with_timeout "$shard_budget" \
       ${shard_args[@]+"${shard_args[@]}"} \
       ${shard_files[@]+"${shard_files[@]}"}
     shard_status=$?
@@ -1036,7 +1040,6 @@ run_unit_shards() {
   local coverage_chunks=()
   local shard_portable_timeout=1
   if [[ "$shard_mode" == coverage ]]; then
-    shard_portable_timeout="${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}"
     shard_start=1
     shard_root="$coverage_root/shards"
   fi
@@ -1123,8 +1126,8 @@ run_unit_shards() {
 
   if [[ "$shard_mode" == coverage ]]; then
     # The shard count is explicit configuration (AUTOMOBILE_COVERAGE_SHARDS) and
-    # shapes the partition, so it is never reduced; hold host slots for it so the
-    # coverage lane is accounted like any other unit lane.
+    # shapes the partition, so it is never reduced; acquire the available host
+    # slots to account for coverage like any other unit lane.
     if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then cap_unit_workers "$coverage_shards"; fi
     worker_count="$coverage_shards"
   else

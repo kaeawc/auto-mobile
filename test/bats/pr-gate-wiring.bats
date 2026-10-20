@@ -240,7 +240,7 @@ wiring_requires_yq() {
 
 @test "merge TypeScript coverage has headroom for infra retry and timing rechecks" {
   wiring_requires_yq
-  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" == 40' .github/workflows/merge.yml
+  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" == 45' .github/workflows/merge.yml
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }

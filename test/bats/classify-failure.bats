@@ -1045,3 +1045,12 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   [ "$status" -eq 0 ]
   [[ "$output" == *"UNKNOWN"* ]]
 }
+
+@test "coverage first samples without rerunnable identities require investigation" {
+  runner_shutdown_fixture "TypeScript Code Coverage"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+    FAKE_RUNNER_LOG=$'Test exceeded 100ms: fixture (150.00ms)\nFAIL: fixture | FAIL (not re-runnable; first sample stands) | first sample: 150.00ms | re-run samples: none | median: not computed' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INVESTIGATE — instrumented first sample has no plain isolated recheck"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}

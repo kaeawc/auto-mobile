@@ -47,6 +47,7 @@ TypeScript Code Coverage|*recheck produced [0-9]* of [0-9]* isolated samples*|IN
 Node TypeScript Build and Test (ubuntu-latest)|*recheck produced [0-9]* of [0-9]* isolated samples*|INVESTIGATE|incomplete isolated recheck is unverified; investigate the process failure before rerunning
 Node Unit Timing Budget*|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 Node Unit Tests (ubuntu-latest)|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required (budget step of the ubuntu unit leg), rerun
+TypeScript Code Coverage|*FAIL (not re-runnable; first sample stands)*|INVESTIGATE|instrumented first sample has no plain isolated recheck; investigate the missing rerunnable test identity before rerunning
 TypeScript Code Coverage|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, post-merge Ubuntu coverage unit gate, rerun
 Node TypeScript Build and Test (ubuntu-latest)|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, required job (budget step of the Linux unit run, #10893), rerun
 Node Unit Timing Budget*|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun

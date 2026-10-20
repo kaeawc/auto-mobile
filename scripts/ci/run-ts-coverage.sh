@@ -54,7 +54,7 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
     [[ -f "${manifest}" ]] || continue
     planned="$(< "${manifest}")"
     for ((chunk = 1; chunk <= planned; chunk += 1)); do
-      if [[ ! -f "${manifest%.chunks}-chunk-${chunk}.log" ]]; then
+      if [[ ! -f "${manifest%.chunks}-chunk-${chunk}.log" || ! -f "${manifest%.chunks}-chunk-${chunk}.xml" ]]; then
         tolerated=0
       fi
     done
@@ -64,7 +64,7 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
       saw_write_failed=1
     fi
     log_is_clean "${unit_log}"
-    if [[ "${log_clean}" -eq 0 ]]; then
+    if [[ "${log_clean}" -eq 0 || ! -f "${unit_log%.log}.xml" ]]; then
       tolerated=0
       break
     fi
@@ -74,9 +74,7 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
       unit_dir="${unit_log%.log}"
       bash scripts/ci/verify-ts-coverage-output.sh "${unit_dir}"
       coverage_lcov_files+=("${unit_dir}/lcov.info")
-      if [[ -f "${unit_dir}.xml" ]]; then
-        coverage_junit_files+=("${unit_dir}.xml")
-      fi
+      coverage_junit_files+=("${unit_dir}.xml")
     done
     echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
     tail -n 80 "${log_file}"
@@ -117,6 +115,6 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
 fi
 # Every watchdog, interrupted-chunk and failed-chunk line, not just the last
 # shard's: with several shards each can fail for a different reason.
-{ grep -hE 'wall-clock budget|^WATCHDOG:|^INTERRUPTED:|^FAIL: coverage' "${log_file}" || true; } |
+{ grep -hE 'wall-clock budget|^WATCHDOG:|^INTERRUPTED:|^FAIL: coverage|^RUNNER-CONTENDED:|^RUNNER-STARVED-SUSPECTED:' "${log_file}" || true; } |
   sed 's/^/::error::coverage: /' >&2
 exit "${status}"

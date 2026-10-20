@@ -6,36 +6,11 @@
     <ID>ComplexCondition:AutoMobileSDK.kt:AutoMobileSDK$!_isEnabled || name.isBlank() || context == null || navigationOnlyMode</ID>
     <ID>ComplexCondition:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$identity == null || identity != cached.identity || needsWritableConnection || needsExactReadOnlyConnection</ID>
     <ID>ComplexCondition:TapGestureClassifier.kt:TapGestureClassifier$hadDown &amp;&amp; dx * dx + dy * dy &lt; slopPx * slopPx &amp;&amp; duration &gt;= 0 &amp;&amp; duration &lt; timeoutMs</ID>
-    <ID>CyclomaticComplexMethod:AutoMobileCrashes.kt:AutoMobileCrashes$private fun broadcastCrash</ID>
-    <ID>CyclomaticComplexMethod:AutoMobileNetwork.kt:AutoMobileNetwork$fun recordRequest</ID>
-    <ID>CyclomaticComplexMethod:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$override fun intercept: Response</ID>
-    <ID>CyclomaticComplexMethod:DatabaseInspectorProvider.kt:DatabaseInspectorProvider$@JvmSynthetic internal fun callWithCapabilities: Bundle</ID>
-    <ID>CyclomaticComplexMethod:DatabaseInspectorProvider.kt:DatabaseInspectorProvider$internal fun handleExecuteSQL: JSONObject</ID>
-    <ID>CyclomaticComplexMethod:EventBatchReplay.kt:internal fun replayEventBatches</ID>
-    <ID>CyclomaticComplexMethod:EventPersistence.kt:FileEventPersistence$internal fun serializeEvents: String</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun openDatabase: SQLiteDatabase</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun readPragmaValueEnd: Int?</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun requireSingleStatement</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun scanSqlTokens</ID>
-    <ID>CyclomaticComplexMethod:SdkCapabilityJson.kt:fun decodeSdkCapabilitySnapshot: SdkCapabilitySnapshotResult</ID>
-    <ID>CyclomaticComplexMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$internal fun broadcastBatch</ID>
-    <ID>CyclomaticComplexMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
-    <ID>CyclomaticComplexMethod:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$override fun call: Bundle</ID>
     <ID>EmptyFunctionBlock:AutoMobileClickTracker.kt:AutoMobileClickTracker.&lt;no name provided&gt;${}</ID>
     <ID>EmptyFunctionBlock:AutoMobileLog.kt:AutoMobileLog${}</ID>
     <ID>InstanceOfCheckForException:DatabaseInspectorProvider.kt:DatabaseInspectorProvider$e is DatabaseError.SqlError</ID>
     <ID>InstanceOfCheckForException:SdkEventBuffer.kt:SdkEventBuffer$error is UnsentEventBatchesException</ID>
     <ID>LargeClass:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver : DatabaseDriver</ID>
-    <ID>LongMethod:AutoMobileCrashes.kt:AutoMobileCrashes$private fun broadcastCrash</ID>
-    <ID>LongMethod:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$override fun intercept: Response</ID>
-    <ID>LongMethod:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$private fun handleErrorSimulation: Response</ID>
-    <ID>LongMethod:AutoMobileSDK.kt:AutoMobileSDK$@RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) fun initialize</ID>
-    <ID>LongMethod:AutoMobileSDK.kt:AutoMobileSDK$fun shutdown</ID>
-    <ID>LongMethod:EventPersistence.kt:FileEventPersistence$@Suppress("CyclomaticComplexMethod") private fun deserializeEvent: SdkEvent?</ID>
-    <ID>LongMethod:EventPersistence.kt:FileEventPersistence$internal fun serializeEvents: String</ID>
-    <ID>LongMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$internal fun broadcastBatch</ID>
-    <ID>LongMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
-    <ID>LongMethod:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$override fun call: Bundle</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:AutoMobileNetwork$fun startCapture: NetworkCaptureSession?</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:NetworkCaptureSession</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:NetworkCaptureSession$fun complete</ID>

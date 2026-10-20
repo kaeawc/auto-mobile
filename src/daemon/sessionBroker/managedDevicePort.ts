@@ -294,22 +294,29 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     return result;
   }
 
-  async destroy(resource: BrokerResourceRecord): Promise<DestructionProgress> {
+  async destroy(
+    resource: BrokerResourceRecord,
+    signal?: AbortSignal,
+  ): Promise<DestructionProgress> {
+    signal?.throwIfAborted();
     this.assertResource(resource, "destroying");
     const profile = nativeProfile(resource);
     const requestedSpec = this.requestedSpec(profile);
     const key = this.key(resource);
 
-    if ((await this.redriveOpenJournal(key)) === "pending") {
+    if ((await this.redriveOpenJournal(key, signal)) === "pending") {
       return "pending";
     }
 
+    signal?.throwIfAborted();
     const current = await this.destroyableAssignment(key, profile, requestedSpec);
     if (typeof current === "string") {
       return current;
     }
+    signal?.throwIfAborted();
     const drained = await this.drainAssignment(key, current, profile, requestedSpec);
-    return typeof drained === "string" ? drained : this.deleteAssignment(key, drained);
+    signal?.throwIfAborted();
+    return typeof drained === "string" ? drained : this.deleteAssignment(key, drained, signal);
   }
 
   private async destroyableAssignment(
@@ -358,11 +365,13 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   private async deleteAssignment(
     key: BindingKey,
     assignment: BindingAssignmentRecord,
+    signal?: AbortSignal,
   ): Promise<DestructionProgress> {
     if (assignment.stableDeviceId === null) {
       return this.confirmNoBinding(key);
     }
     const stableDeviceId = assignment.stableDeviceId;
+    signal?.throwIfAborted();
     const opened = await this.dependencies.registry.openBindingJournal(key, {
       kind: "replace",
       phase: "deleting",
@@ -388,7 +397,9 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (opened.kind !== "opened" && opened.kind !== "journal_open") {
       return "pending";
     }
-    const redriven = await this.dependencies.bindingJournal.redriveBinding(key);
+    signal?.throwIfAborted();
+    const redriven = await this.dependencies.bindingJournal.redriveBinding(key, { signal });
+    signal?.throwIfAborted();
     if (redriven.kind === "blocked" || (await this.hasOpenJournal(key))) {
       return "pending";
     }
@@ -511,11 +522,16 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     );
   }
 
-  private async redriveOpenJournal(key: BindingKey): Promise<"clear" | "pending"> {
+  private async redriveOpenJournal(
+    key: BindingKey,
+    signal?: AbortSignal,
+  ): Promise<"clear" | "pending"> {
     if (!(await this.hasOpenJournal(key))) {
       return "clear";
     }
-    const result = await this.dependencies.bindingJournal.redriveBinding(key);
+    signal?.throwIfAborted();
+    const result = await this.dependencies.bindingJournal.redriveBinding(key, { signal });
+    signal?.throwIfAborted();
     return result.kind === "clear" && !(await this.hasOpenJournal(key)) ? "clear" : "pending";
   }
 

@@ -1,6 +1,6 @@
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test, beforeEach } from "bun:test";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -18,6 +18,16 @@ import {
   observationOf,
 } from "../../helpers/prototypeWindowCapture";
 
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+
+let managerInstanceSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyManager, "getInstance">>;
+beforeEach(() => {
+  managerInstanceSpy = spyOn(AndroidCtrlProxyManager, "getInstance");
+});
+
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
 // prototype; see test/helpers/prototypeWindowCapture.ts. "Settings" is in both
 // windows, "YouTube" is prototype-only and "Screenshot" is app-only.
@@ -26,10 +36,8 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   timer.enableAutoAdvance();
   const service = new FakeCtrlProxy(timer);
   service.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
-  spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
-    FakeCtrlProxyManager.withAvailability(true),
-  );
+  clientSpy.mockReturnValue(service);
+  managerInstanceSpy.mockReturnValue(FakeCtrlProxyManager.withAvailability(true));
   const command = new DragAndDrop(
     { name: "Fake Android", deviceId: "fake-android", platform: "android" },
     new FakeAdbExecutor(),

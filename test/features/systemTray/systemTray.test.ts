@@ -48,6 +48,9 @@ import type {
 } from "../../../src/models";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { wireCapture } from "../../helpers/wireCapture";
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
+import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon";
 
 isolateToolRegistry();
 
@@ -1033,6 +1036,23 @@ describe("Android systemTray open", () => {
 // ============================================================================
 
 const IOS_SPRINGBOARD_PACKAGE = "com.apple.springboard";
+
+const ios27NotificationCenterHierarchy = wireCapture(
+  JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/ios-notification-center/ios27-notification-center-hierarchy.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ),
+);
+const capturedIosHomeIconHierarchy = convertIosHierarchy({
+  packageName: IOS_SPRINGBOARD_PACKAGE,
+  updatedAt: 0,
+  hierarchy: springBoardPhotosIcon,
+});
 
 class FakeIosClient implements SystemTrayIosClient {
   swipeCalls: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> = [];
@@ -4296,6 +4316,43 @@ describe("systemTray automatic terminal evidence", () => {
 describe("iOS systemTray open", () => {
   afterEach(() => {
     resetSystemTrayDependencies();
+  });
+
+  describe("captured iOS 27 Notification Center", () => {
+    const test = warmedTests(() => {
+      resetSystemTrayDependencies();
+      ToolRegistry.clearTools();
+    });
+    test("opens the captured iOS 27 Notification Center after the swipe", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(() =>
+        createIosObservation(
+          client.swipeCalls.length === 0
+            ? capturedIosHomeIconHierarchy
+            : ios27NotificationCenterHierarchy,
+        ),
+      );
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      registerInteractionTools();
+      const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(iosDevice, {
+        action: "open",
+        platform: "ios",
+        awaitTimeoutMs: 2000,
+      });
+      const payload = toolJson(response);
+      expect(payload.success).toBe(true);
+      expect(payload.message).toBe("Opened system tray");
+      expect(payload.skipped).toBe(false);
+      expect(client.swipeCalls).toHaveLength(1);
+      expect(client.swipeCalls[0].y1).toBe(5);
+    });
   });
 
   test("opens notification center via swipe down", async () => {

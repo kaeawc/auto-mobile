@@ -1,7 +1,7 @@
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test, beforeEach } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
@@ -9,6 +9,11 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { androidControlObservation } from "../../helpers/androidDisabledControlCapture";
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
 
 const disabledWarning = "The matched element is disabled; the tap may have no effect.";
 
@@ -22,7 +27,7 @@ function createCommand(state: "disabled" | "enabled", talkBackUnknown = false) {
   timer.enableAutoAdvance();
   const adb = new FakeAdbExecutor();
   const service = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
+  clientSpy.mockReturnValue(service);
   const detector = new FakeAccessibilityDetector();
   detector.setDefaultResult(talkBackUnknown ? null : false);
   const command = new TapOnElement(
@@ -35,9 +40,7 @@ function createCommand(state: "disabled" | "enabled", talkBackUnknown = false) {
     },
   );
   // Exercise real resolution and dispatch; replace only the surrounding observation loop.
-  spyOn(command, "observedInteraction").mockImplementation(
-    runBlockWith(() => recordObservationRead(observation)),
-  );
+  command.observedInteraction = runBlockWith(() => recordObservationRead(observation));
   return { command, service, adb, observation, node };
 }
 

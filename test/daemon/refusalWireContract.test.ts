@@ -520,6 +520,7 @@ function readFields(payload: WirePayload): RefusalFields {
     ...(typeof retryAfterMs === "number" && retryAfterMs > 0 ? { retryAfterMs } : {}),
     ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
+    ...(payload.heldDevices ? { heldDevices: payload.heldDevices } : {}),
   };
 }
 
@@ -954,6 +955,12 @@ describe("refusal wire contract", () => {
     const rows = Object.values(expectations.codes).map((row) => row.fields);
     expect(rows.some((fields) => fields.retryAfterMs !== undefined)).toBe(true);
     expect(rows.some((fields) => fields.externalDevices !== undefined)).toBe(true);
+    expect(rows.some((fields) => fields.heldDevices !== undefined)).toBe(true);
+    expect(
+      rows.some(
+        (fields) => fields.heldDevices?.length === 2 && fields.externalDevices === undefined,
+      ),
+    ).toBe(true);
     expect(rows.some((fields) => fields.acquireNewSession)).toBe(true);
   });
 

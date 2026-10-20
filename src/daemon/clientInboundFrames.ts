@@ -11,11 +11,13 @@ import {
   DaemonResponse,
   daemonResponseSchema,
   PROGRESS_NOTIFICATION_METHOD,
+  REQUEST_BUDGET_NOTIFICATION_METHOD,
 } from "./types";
 interface ClientInboundFramesContext {
   handleResponse: (response: DaemonResponse) => void;
   inboundClosed: boolean;
   extendPendingRequestOnProgress: (requestId: string, progressToken: string | number) => void;
+  extendPendingRequestBudget: (requestId: string, timeoutMs: number) => void;
   notificationHandlers: Set<(notification: DaemonNotification) => void>;
   pendingRequests: Map<string, PendingDaemonRequest>;
   timer: Timer;
@@ -54,10 +56,19 @@ export function handleInboundLine(context: ClientInboundFramesContext, line: str
 export function handleNotification(
   context: Pick<
     ClientInboundFramesContext,
-    "extendPendingRequestOnProgress" | "notificationHandlers"
+    "extendPendingRequestOnProgress" | "extendPendingRequestBudget" | "notificationHandlers"
   >,
   notification: DaemonNotification,
 ): void {
+  if (
+    notification.method === REQUEST_BUDGET_NOTIFICATION_METHOD &&
+    notification.requestId !== undefined &&
+    typeof notification.timeoutMs === "number"
+  ) {
+    context.extendPendingRequestBudget(notification.requestId, notification.timeoutMs);
+    // Internal plumbing for this client's own timer; not for notification handlers.
+    return;
+  }
   if (
     notification.method === PROGRESS_NOTIFICATION_METHOD &&
     notification.progressToken !== undefined
@@ -145,6 +156,8 @@ export interface PendingDaemonRequest {
   progressToken?: string | number;
   deadline?: ProgressExtendableDeadline;
   requestTimeoutMs?: number;
+  /** Clock reading when the request was sent; the daemon's budget is measured from here. */
+  sentAtMs?: number;
   removeAbortListener?: () => void;
   /** Per-request context retained if the shared socket closes. */
   disconnectCause: McpTimeoutError | DaemonDisconnectError;

@@ -95,18 +95,17 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
         }),
       daemonManager: warmManager,
       autoStartDaemon: false,
+      daemonAvailabilityProbe: async () => true,
       timer: warmTimer,
       heartbeatTimeoutMs: LEASE_MS,
       heartbeatIntervalMs: INTERVAL_MS,
     });
-    const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     try {
       await warmProxy.callTool("getAndroid", {});
       await warmProxy.callTool("getApple", {});
       await warmTimer.advanceTimeAsync(INTERVAL_MS * 2);
     } finally {
       await warmProxy.close();
-      available.mockRestore();
     }
   });
 

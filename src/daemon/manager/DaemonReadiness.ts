@@ -1,3 +1,5 @@
+import { toDaemonStatus } from "../clientResponseDecoding";
+import { recordedProcessGenerationToken } from "../processGenerationFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { existsSync } from "node:fs";
@@ -43,6 +45,23 @@ export class DaemonReadiness {
     signal?: AbortSignal,
     shouldContinueWaiting: () => boolean = () => true,
     maxProbeDurationMs?: number,
+    launchedProcess?: { pid: number | undefined; launchNonce?: string },
+  ): Promise<boolean> {
+    return launchedProcess
+      ? this.waitForLaunchedProcessReady(
+          launchedProcess.pid,
+          timeout,
+          signal ?? new AbortController().signal,
+          launchedProcess.launchNonce,
+        )
+      : this.waitForObservedDaemonReady(timeout, signal, shouldContinueWaiting, maxProbeDurationMs);
+  }
+
+  private async waitForObservedDaemonReady(
+    timeout: number,
+    signal: AbortSignal | undefined,
+    shouldContinueWaiting: () => boolean,
+    maxProbeDurationMs: number | undefined,
   ): Promise<boolean> {
     const startTime = this.host.timer.now();
     const deadline = startTime + timeout;
@@ -455,7 +474,11 @@ export class DaemonReadiness {
     );
   }
 
-  async verifyDaemonConnection(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+  async verifyDaemonConnection(
+    timeoutMs: number,
+    signal?: AbortSignal,
+    expected?: DaemonStatus,
+  ): Promise<boolean> {
     const deadline = this.host.timer.now() + timeoutMs;
 
     // Retry the connect probe before declaring the socket unready. A single failed
@@ -468,10 +491,9 @@ export class DaemonReadiness {
       if (remainingTimeoutMs === 0 || signal?.aborted) {
         return false;
       }
-      const client = this.host.createClient();
+      const client = this.host.createClient(expected ? { clientIdentity: null } : undefined);
       try {
-        await this.connectReadinessProbe(client, remainingTimeoutMs, signal);
-        return true;
+        return await this.connectReadinessProbe(client, remainingTimeoutMs, signal, expected);
       } catch (error) {
         // Safe: a failed probe only retries within the original deadline; it never removes files.
         logger.debug(
@@ -502,39 +524,108 @@ export class DaemonReadiness {
     client: DaemonClientLike,
     timeoutMs: number,
     signal?: AbortSignal,
-  ): Promise<void> {
+    expected?: DaemonStatus,
+  ): Promise<boolean> {
     const probeAbort = new AbortController();
     const forwardAbort = () => probeAbort.abort();
     signal?.addEventListener("abort", forwardAbort, { once: true });
     try {
-      await raceWithDeadline(client.connect(timeoutMs, probeAbort.signal), {
-        timer: this.host.timer,
-        timeoutMs,
-        label: "Daemon readiness probe",
-        timeoutError: () => new Error(`Daemon readiness probe timed out after ${timeoutMs}ms`),
-        onTimeout: () => probeAbort.abort(),
-      });
+      return await raceWithDeadline(
+        (async () => {
+          const deadline = this.host.timer.now() + timeoutMs;
+          await client.connect(timeoutMs, probeAbort.signal);
+          if (!expected) {
+            return true;
+          }
+          const remaining = this.host.remainingTime(deadline);
+          if (remaining === 0 || probeAbort.signal.aborted) {
+            return false;
+          }
+          const response = await client.callDaemonMethod(
+            "ide/status",
+            {},
+            {
+              timeoutMs: remaining,
+              signal: probeAbort.signal,
+              abortMode: "request",
+            },
+          );
+          const responder = toDaemonStatus(response, this.host.socketPath);
+          const mismatch = readinessIdentityMismatch(expected, responder);
+          if (mismatch) {
+            logger.debug(`Launched daemon readiness identity mismatch: ${mismatch}`);
+          }
+          return mismatch === undefined;
+        })(),
+        {
+          timer: this.host.timer,
+          timeoutMs,
+          label: "Daemon readiness probe",
+          timeoutError: () => new Error(`Daemon readiness probe timed out after ${timeoutMs}ms`),
+          onTimeout: () => probeAbort.abort(),
+        },
+      );
     } finally {
       probeAbort.abort();
       signal?.removeEventListener("abort", forwardAbort);
     }
   }
 
+  /** Poll the spawned child's identity, never a predecessor's connect-only probe. */
+  async waitForLaunchedProcessReady(
+    pid: number | undefined,
+    timeoutMs: number,
+    signal: AbortSignal,
+    launchNonce?: string,
+  ): Promise<boolean> {
+    const startTime = this.host.timer.now();
+    const deadline = startTime + timeoutMs;
+    let polls = 0;
+    while (!signal.aborted && this.host.remainingTime(deadline) > 0) {
+      polls++;
+      if (
+        await this.isLaunchedProcessReady(
+          pid,
+          Math.min(1000, this.host.remainingTime(deadline)),
+          signal,
+          launchNonce,
+        )
+      ) {
+        stderrLog(
+          `Launched daemon readiness succeeded after ${this.host.timer.now() - startTime}ms (${polls} polls)`,
+        );
+        return true;
+      }
+      await this.host.sleepUnlessAborted(Math.min(100, this.host.remainingTime(deadline)), signal);
+    }
+    stderrLog(
+      `Launched daemon readiness ${signal.aborted ? "abandoned" : "timed out"} after ${this.host.timer.now() - startTime}ms (${polls} polls)`,
+    );
+    return false;
+  }
+
   async isLaunchedProcessReady(
     pid: number | undefined,
     timeoutMs: number,
     signal: AbortSignal,
+    launchNonce?: string,
   ): Promise<boolean> {
     if (pid === undefined) {
+      logger.debug("Launched daemon readiness identity mismatch: spawned pid missing");
       return false;
     }
 
     const status = await this.host.lifecycleStatus();
-    return (
-      status.running === true &&
-      status.pid === pid &&
-      (await this.host.verifyDaemonConnection(timeoutMs, signal))
-    );
+    const identityMatches =
+      launchNonce === undefined ? status.pid === pid : status.launchNonce === launchNonce;
+    if (!status.running || !identityMatches) {
+      const mismatch = launchNonce === undefined ? "spawned pid" : "launch nonce";
+      logger.debug(
+        `Launched daemon readiness identity mismatch: ${status.running ? mismatch : "not running"}`,
+      );
+      return false;
+    }
+    return this.verifyDaemonConnection(timeoutMs, signal, status);
   }
 }
 
@@ -588,3 +679,23 @@ const PEER_DAEMON_ISOLATED_NAMESPACE_GRACE_MS = 2000;
  * reacts within one poll without hammering the process table.
  */
 const LIVENESS_WATCHDOG_INTERVAL_MS = 100;
+
+/** Compare the PID record with the answering socket before declaring this launch ready. */
+function readinessIdentityMismatch(
+  expected: DaemonStatus,
+  responder: DaemonStatus,
+): string | undefined {
+  if (responder.pid !== expected.pid) {
+    return "pid";
+  }
+  if (expected.startedAt === undefined || responder.startedAt !== expected.startedAt) {
+    return "startedAt";
+  }
+  if (recordedProcessGenerationToken(responder) !== recordedProcessGenerationToken(expected)) {
+    return "generation token";
+  }
+  if (expected.launchNonce !== undefined && responder.launchNonce !== expected.launchNonce) {
+    return "launch nonce";
+  }
+  return undefined;
+}

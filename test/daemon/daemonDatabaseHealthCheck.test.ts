@@ -1,3 +1,8 @@
+import {
+  AuxiliarySocketBindConflict,
+  degradeAuxiliarySocket,
+  markAuxiliarySocketAvailable,
+} from "../../src/daemon/auxiliarySocketAvailability";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -78,6 +83,7 @@ describe("Daemon database health check", () => {
   let cleanup: { internals: Daemon["testHooks"]; timer: FakeTimer } | null = null;
 
   afterEach(() => {
+    markAuxiliarySocketAvailable("observation-stream");
     const healthCheck = cleanup?.internals.healthCheck();
     if (healthCheck) {
       void healthCheck.stop();
@@ -108,6 +114,43 @@ describe("Daemon database health check", () => {
     };
     return { timer, probe, exits, internals, tick };
   }
+
+  test("degraded observation stream still probes the wedged DB and triggers self-exit", async () => {
+    const h = timeoutHarness();
+    h.internals.setObservationStreamHealth({ isHealthy: () => false, recover: async () => {} });
+    degradeAuxiliarySocket(
+      "observation-stream",
+      new AuxiliarySocketBindConflict("/fake/stream.sock", "Stream"),
+    );
+    for (let i = 0; i < 3; i++) {
+      await h.tick();
+    }
+    expect(h.probe.checkCalls).toBe(3);
+    expect(h.exits).toEqual([{ code: 1, detail: "Database health probe timed out after 1000ms" }]);
+  });
+
+  test("recovery reports an observation stream that remains degraded accurately", async () => {
+    const h = timeoutHarness();
+    h.internals.setObservationStreamHealth({ isHealthy: () => false, recover: async () => {} });
+    degradeAuxiliarySocket(
+      "observation-stream",
+      new AuxiliarySocketBindConflict("/fake/stream.sock", "Stream"),
+    );
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await h.internals.attemptRecovery("socket");
+      expect(warn).toHaveBeenCalledWith(
+        "Observation stream socket server remains unavailable after recovery",
+      );
+      expect(info).not.toHaveBeenCalledWith(
+        "Observation stream socket server restarted successfully",
+      );
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+    }
+  });
 
   test("three on-time typed timeouts exit once with the timeout detail", async () => {
     const h = timeoutHarness();

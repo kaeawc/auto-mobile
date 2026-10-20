@@ -400,16 +400,18 @@ class DesktopWireFixtureCompositionTest {
     @Composable
     private fun host(): DesktopDaemonSessionState =
       rememberDesktopDaemonSession(
-        socketPath = "in-memory",
-        panes = panes,
-        hostVisible = visible.value,
-        bindRetryBackoff = { BIND_ERROR_RETRY_MAX_DELAY_MS },
-        sessionFactory = {
-          val uuid = fixture.sessions.getValue("desktop-${++minted}")
-          DesktopDaemonSession(McpDaemonClient(transport, sessionUuid = uuid))
-        },
-        ioDispatcher = testDispatcher,
-        cleanupDispatcher = testDispatcher,
+        DesktopDaemonSessionOptions(
+          socketPath = "in-memory",
+          panes = panes,
+          hostVisible = visible.value,
+          bindRetryBackoff = { BIND_ERROR_RETRY_MAX_DELAY_MS },
+          sessionFactory = {
+            val uuid = fixture.sessions.getValue("desktop-${++minted}")
+            DesktopDaemonSession(McpDaemonClient(transport, sessionUuid = uuid))
+          },
+          ioDispatcher = testDispatcher,
+          cleanupDispatcher = testDispatcher,
+        ),
       )
   }
 

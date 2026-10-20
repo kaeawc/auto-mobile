@@ -5,6 +5,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS
+import dev.jasonpearson.automobile.desktop.core.LiveVideoFrameOptions
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
@@ -59,9 +60,11 @@ fun LayoutFacet(
   streamingEnabled: Boolean = true,
   videoSourceFactory: (deviceId: String) -> VideoStreamSource = {
     VideoStreamClient(
-      quality = VideoStreamQuality.High,
-      fps = INSPECTOR_PANE_FPS,
-      sessionUuidProvider = sessionUuidProvider,
+      VideoStreamClient.Options(
+        quality = VideoStreamQuality.High,
+        fps = INSPECTOR_PANE_FPS,
+        sessionUuidProvider = sessionUuidProvider,
+      ),
     )
   },
 ) {
@@ -81,16 +84,18 @@ fun LayoutFacet(
   val heartbeatMs by videoSource.heartbeatMs.collectAsState()
   val liveFrame =
     rememberLiveVideoFrame(
-      videoSource,
-      column.deviceId,
-      autoReconnect = true,
-      streamingEnabled = streamingEnabled,
-      stallReconnectMs =
-        if (heartbeatMs != null || column.platform == Platform.Android) {
-          LIVE_STALL_RECONNECT_MS
-        } else {
-          null
-        },
+      LiveVideoFrameOptions(
+        videoSource,
+        column.deviceId,
+        autoReconnect = true,
+        streamingEnabled = streamingEnabled,
+        stallReconnectMs =
+          if (heartbeatMs != null || column.platform == Platform.Android) {
+            LIVE_STALL_RECONNECT_MS
+          } else {
+            null
+          },
+      ),
     )
   observation.stream?.let { activeStream ->
     LayoutInspectorDashboard(

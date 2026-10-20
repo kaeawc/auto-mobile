@@ -2,141 +2,14 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:DeviceScreenView.kt:!hasInitialFit &amp;&amp; viewportWidth &gt; 0 &amp;&amp; viewportHeight &gt; 0 &amp;&amp; frameWidthPx &gt; 0</ID>
-    <ID>ComplexCondition:DeviceScreenView.kt:showTapTargetIssues &amp;&amp; hierarchy != null &amp;&amp; screenWidth &gt; 0 &amp;&amp; screenHeight &gt; 0</ID>
     <ID>CyclomaticComplexMethod:AutoMobileContent.kt:@Composable fun AutoMobileContent</ID>
-    <ID>CyclomaticComplexMethod:CommandPalette.kt:@Composable fun CommandPalette</ID>
-    <ID>CyclomaticComplexMethod:DeviceControlsDashboard.kt:@Composable fun DeviceControlsDashboard</ID>
-    <ID>CyclomaticComplexMethod:DeviceScreenView.kt:@Composable fun DeviceScreenView</ID>
-    <ID>CyclomaticComplexMethod:DeviceScreenView.kt:private suspend fun PointerInputScope.deviceScreenDragGestures</ID>
-    <ID>CyclomaticComplexMethod:DevicesSection.kt:@Composable private fun BootedDeviceRow</ID>
-    <ID>CyclomaticComplexMethod:DiagnosticsDashboard.kt:@Composable fun DiagnosticsDashboard</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@Composable fun FailuresDashboard</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@Composable private fun FailureBarChart</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@Composable private fun FailureListView</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@OptIn(ExperimentalLayoutApi::class) @Composable internal fun FailureDetailView</ID>
-    <ID>CyclomaticComplexMethod:FailuresDataSource.kt:FailureGroupDto$fun toModel: FailureGroup</ID>
-    <ID>CyclomaticComplexMethod:GlobalSearchOverlay.kt:@Composable fun GlobalSearchOverlay</ID>
-    <ID>CyclomaticComplexMethod:KeyValueInspector.kt:@Composable fun KeyValueInspector</ID>
-    <ID>CyclomaticComplexMethod:LogsPanel.kt:@Composable fun LogsPanel</ID>
-    <ID>CyclomaticComplexMethod:NavigationFacet.kt:@Composable fun NavigationFacet</ID>
-    <ID>CyclomaticComplexMethod:OfflineNavigationBrowser.kt:@Composable private fun AppGraphStep</ID>
-    <ID>CyclomaticComplexMethod:PerformanceSummary.kt:@Composable fun PerformanceSummary</ID>
-    <ID>CyclomaticComplexMethod:PickerModels.kt:fun buildPickerDevices: List&lt;PickerDevice&gt;</ID>
-    <ID>CyclomaticComplexMethod:SnapshotsDashboard.kt:@Composable fun SnapshotsDashboard</ID>
-    <ID>CyclomaticComplexMethod:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$private suspend fun handleMessage: Boolean</ID>
-    <ID>CyclomaticComplexMethod:WorkspaceShell.kt:@Composable fun WorkspaceShell</ID>
-    <ID>InjectDispatcher:DeviceControlsDashboard.kt:IO</ID>
-    <ID>InjectDispatcher:DiagnosticsDashboard.kt:IO</ID>
-    <ID>InjectDispatcher:NavigationFacet.kt:IO</ID>
-    <ID>InjectDispatcher:OfflineNavigationBrowser.kt:IO</ID>
-    <ID>InjectDispatcher:SnapshotsDashboard.kt:IO</ID>
-    <ID>InjectDispatcher:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$IO</ID>
-    <ID>InjectDispatcher:WorkspaceShell.kt:IO</ID>
-    <ID>LargeClass:McpDaemonClient.kt:McpDaemonClient : AutoMobileClient</ID>
     <ID>LongMethod:AutoMobileContent.kt:@Composable fun AutoMobileContent</ID>
-    <ID>LongMethod:CenterContentTabs.kt:@Composable fun CenterTabStrip</ID>
-    <ID>LongMethod:CommandPalette.kt:@Composable fun CommandPalette</ID>
-    <ID>LongMethod:DeviceControlsDashboard.kt:@Composable fun DeviceControlsDashboard</ID>
-    <ID>LongMethod:DeviceScreenView.kt:@Composable fun DeviceScreenView</ID>
-    <ID>LongMethod:DeviceScreenView.kt:private suspend fun PointerInputScope.deviceScreenDragGestures</ID>
-    <ID>LongMethod:DevicesSection.kt:@Composable internal fun DevicesSection</ID>
-    <ID>LongMethod:DevicesSection.kt:@Composable private fun BootedDeviceRow</ID>
-    <ID>LongMethod:DevicesSection.kt:@Composable private fun DeviceImageRow</ID>
-    <ID>LongMethod:DiagnosticsDashboard.kt:@Composable fun DiagnosticsDashboard</ID>
-    <ID>LongMethod:DiagnosticsDashboard.kt:private fun runSystemChecks: List&lt;DiagnosticCheck&gt;</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable fun FailuresDashboard</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun EventTrendsSection</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun FailureBarChart</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun FailureListView</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun ToolCallDetailsSection</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@OptIn(ExperimentalLayoutApi::class) @Composable internal fun FailureDetailView</ID>
-    <ID>LongMethod:FailuresDataSource.kt:FailureGroupDto$fun toModel: FailureGroup</ID>
-    <ID>LongMethod:FailuresDataSource.kt:internal fun createMockFailureGroups: List&lt;FailureGroup&gt;</ID>
-    <ID>LongMethod:GlobalSearchOverlay.kt:@Composable fun GlobalSearchOverlay</ID>
-    <ID>LongMethod:KeyValueInspector.kt:@Composable fun KeyValueInspector</ID>
-    <ID>LongMethod:LogsPanel.kt:@Composable fun LogsPanel</ID>
-    <ID>LongMethod:LogsPanel.kt:@Composable private fun LogsFilterBar</ID>
-    <ID>LongMethod:McpDaemonClient.kt:McpDaemonClient$private fun sendRequest: DaemonResponse</ID>
-    <ID>LongMethod:NavigationFacet.kt:@Composable fun NavigationFacet</ID>
-    <ID>LongMethod:OfflineNavigationBrowser.kt:@Composable private fun AppGraphStep</ID>
-    <ID>LongMethod:PerformanceSummary.kt:@Composable fun PerformanceSummary</ID>
-    <ID>LongMethod:PickerModels.kt:fun buildPickerDevices: List&lt;PickerDevice&gt;</ID>
-    <ID>LongMethod:SearchBar.kt:@Composable fun SearchBar</ID>
-    <ID>LongMethod:SnapshotsDashboard.kt:@Composable fun SnapshotsDashboard</ID>
-    <ID>LongMethod:TimelineCanvas.kt:@Composable fun TimelineCanvas</ID>
-    <ID>LongMethod:WorkspaceShell.kt:@Composable fun WorkspaceShell</ID>
-    <ID>LongMethod:WorkspaceShell.kt:@Composable private fun StreamArea</ID>
-    <ID>LongMethod:WorkspaceShell.kt:@Composable private fun TopBar</ID>
-    <ID>LongParameterList:CenterContentTabs.kt:@Composable fun CenterTabStrip</ID>
-    <ID>LongParameterList:CommandPalette.kt:fun buildDefaultCommands: List&lt;Command&gt;</ID>
-    <ID>LongParameterList:DeviceControlsDashboard.kt:@Composable fun DeviceControlsDashboard</ID>
-    <ID>LongParameterList:DeviceKeyboardEventTranslator.kt:DeviceKeyboardEventTranslator$fun translate: DeviceKeyStroke</ID>
-    <ID>LongParameterList:DeviceScreenView.kt:@Composable fun DeviceScreenView</ID>
-    <ID>LongParameterList:DeviceScreenView.kt:private fun handleDeviceScreenKeyEvent: Boolean</ID>
-    <ID>LongParameterList:DevicesSection.kt:@Composable internal fun DevicesSection</ID>
-    <ID>LongParameterList:DevicesSection.kt:@Composable private fun BootedDeviceRow</ID>
-    <ID>LongParameterList:FailuresDashboard.kt:@Composable fun FailuresDashboard</ID>
-    <ID>LongParameterList:FailuresDashboard.kt:@Composable private fun FailureListView</ID>
-    <ID>LongParameterList:FailuresDashboard.kt:@Composable private fun StatBox</ID>
-    <ID>LongParameterList:KeyValueInspector.kt:@Composable fun KeyValueInspector</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun applyHierarchyUpdate</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun applyHierarchyUpdateImmediate</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun updateHierarchy</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun updateScreenshot</ID>
-    <ID>LongParameterList:LogsPanel.kt:@Composable fun LogsPanel</ID>
-    <ID>LongParameterList:LogsPanel.kt:@Composable private fun LogsFilterBar</ID>
-    <ID>LongParameterList:LogsPanel.kt:fun filterLogs: List&lt;TelemetryDisplayEvent.Log&gt;</ID>
-    <ID>LongParameterList:McpDaemonClient.kt:McpDaemonClient</ID>
-    <ID>LongParameterList:NavigationFacet.kt:@Composable fun NavigationFacet</ID>
-    <ID>LongParameterList:PaneToggleToolbar.kt:@Composable fun PaneToggleToolbar</ID>
-    <ID>LongParameterList:PerformanceSummary.kt:@Composable fun PerformanceSummary</ID>
-    <ID>LongParameterList:RightInspectorPanel.kt:@Composable fun RightInspectorPanel</ID>
-    <ID>LongParameterList:SearchBar.kt:@Composable fun SearchBar</ID>
-    <ID>LongParameterList:TwoDeviceCompareView.kt:@Composable fun TwoDeviceCompareView</ID>
-    <ID>LongParameterList:TwoDeviceCompareView.kt:@Composable private fun CompareSide</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable fun WorkspaceShell</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun DeviceColumnView</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun DockedFacet</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun HealthSheetOverlay</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun PaneMainContent</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun StreamArea</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun TopBar</ID>
-    <ID>RedundantSuspendModifier:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$suspend</ID>
-    <ID>SwallowedException:DeviceModels.kt:DeviceResourceParser$e: Exception</ID>
-    <ID>SwallowedException:DeviceScreenView.kt:e: Exception</ID>
-    <ID>SwallowedException:DiagnosticsDashboard.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:AppListDataSource.kt:RealAppListDataSource$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DeviceControlsDashboard.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DeviceModels.kt:DeviceResourceParser$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DeviceScreenView.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DiagnosticsDashboard.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:FailuresDashboard.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FailuresDataSource.kt:McpFailuresDataSource$e: Exception</ID>
     <ID>TooGenericExceptionCaught:FailuresViewModel.kt:FailuresViewModel$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FileSettingsProvider.kt:FileSettingsProvider$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient.McpGestureInputStream$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:McpResourceClient.kt:DaemonMcpResourceClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:NavigationFacet.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:NavigationViewModel.kt:NavigationViewModel$e: Exception</ID>
     <ID>TooGenericExceptionCaught:OfflineNavigationBrowser.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:RealNavigationDataSource.kt:RealNavigationDataSource$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SnapshotsDashboard.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:StreamingFailuresDataSource.kt:StreamingFailuresDataSource$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:WorkspaceShell.kt:error: Exception</ID>
-    <ID>TooManyFunctions:FailuresDashboard.kt:dev.jasonpearson.automobile.desktop.core.failures.FailuresDashboard.kt</ID>
-    <ID>TooManyFunctions:InputAllocatingClient.kt:InputAllocatingClient : AutoMobileClient</ID>
-    <ID>TooManyFunctions:LayoutInspectorState.kt:LayoutInspectorState</ID>
-    <ID>TooManyFunctions:LogsPanel.kt:dev.jasonpearson.automobile.desktop.core.telemetry.LogsPanel.kt</ID>
-    <ID>TooManyFunctions:McpDaemonClient.kt:McpDaemonClient : AutoMobileClient</ID>
-    <ID>TooManyFunctions:TelemetryPushSocketClient.kt:TelemetryPushSocketClient : TelemetryPushClient</ID>
-    <ID>TooManyFunctions:WorkspaceShell.kt:dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell.kt</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.fileName!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.lineNumber!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:selectedFailure!!</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -210,7 +210,7 @@ async function makeScratchDirectory(): Promise<string> {
 
 describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
   test("catch-convention is scoped to src/**; casts are hard errors in src and test", () => {
-    expectScopedRule("auto-mobile/catch-convention", ["src/**/*.ts"], "warn");
+    expectScopedRule("auto-mobile/catch-convention", ["src/**/*.ts"], "deny");
     // Fully burned down, so enforced directly by oxlint (printed as "deny").
     expectScopedRule("auto-mobile/no-unknown-cast", ["src/**/*.ts", "test/**/*.ts"], "deny");
   });
@@ -224,7 +224,7 @@ describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
       const override = scopedRuleOverride(rule);
       expect(override?.files).toEqual(["src/**/*.ts"]);
       expect(Array.isArray(override?.rules?.[rule])).toBe(true);
-      expect((override?.rules?.[rule] as unknown[])[0]).toBe("warn");
+      expect((override?.rules?.[rule] as unknown[])[0]).toBe("deny");
     }
   });
 

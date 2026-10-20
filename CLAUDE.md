@@ -196,10 +196,10 @@ bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 
 Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
-exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
-because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `max-classes-per-file`, `auto-mobile/max-class-lines`
-(1000 non-blank lines), and `auto-mobile/catch-convention`.
+exit non-zero). `complexity`, `max-depth`, `max-params`, `max-lines-per-function`,
+`max-classes-per-file`, `auto-mobile/max-class-lines` (1000 non-blank lines), and
+`auto-mobile/catch-convention` are fully burned down and are `error` too, so the ratchet's
+violation counts no longer cover them.
 `typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
 burned down and are `error` in `.oxlintrc.json`, but they need type information and
 the fast stage is not type-aware, so they are enforced by the ratchet stage

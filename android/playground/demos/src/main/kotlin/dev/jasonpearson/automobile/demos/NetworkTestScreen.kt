@@ -23,8 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -67,7 +67,7 @@ fun NetworkTestScreen(
   TrackRecomposition(id = "screen.demo.network.test", composableName = "NetworkTestScreen") {
     val scope = rememberCoroutineScope()
     val results = remember { mutableStateListOf<NetworkResult>() }
-    val randomSeed = remember { mutableStateOf(1) }
+    val randomSeed = remember { mutableIntStateOf(1) }
 
     val client = remember {
       OkHttpClient.Builder()

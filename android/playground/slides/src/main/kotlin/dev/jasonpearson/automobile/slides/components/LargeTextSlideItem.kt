@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,8 +32,8 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun LargeTextSlideItem(
   title: String,
-  subtitle: String? = null,
   modifier: Modifier = Modifier,
+  subtitle: String? = null,
   titleColor: Color = MaterialTheme.colorScheme.onBackground,
   subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
@@ -102,7 +103,7 @@ private fun AutoResizingText(
     }
 
   val initialFontSize = if (isLandscape) maxFontSize else 48f
-  var fontSizeValue by remember { mutableStateOf(initialFontSize) }
+  var fontSizeValue by remember { mutableFloatStateOf(initialFontSize) }
   var readyToDraw by remember { mutableStateOf(false) }
 
   Text(

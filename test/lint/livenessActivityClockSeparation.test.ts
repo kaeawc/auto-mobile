@@ -89,7 +89,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "SessionLivenessController.adoptCliLivenessPolicy",
     "SessionLivenessController.restoreHeartbeatLivenessPolicy",
   ],
-  "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts": ["handleHeartbeat"],
   "src/daemon/daemonHttpIngress.ts": ["DaemonHttpIngress.handleHeartbeatHttpRequest"],
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
   "src/daemon/mcpProxy/ProxySessionOwnership.ts": [
@@ -354,7 +354,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "A read projection (#11243): the sessionInfo answer reports the session's lastUsedAt and " +
       "expiresAt converted to wall-clock ms for the CLI; it stamps nothing.",
   },
-  "src/daemon/daemonRequestHandlers.ts handleTokenOwnedSessions": {
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts handleTokenOwnedSessions": {
     writes: 1,
     reason:
       "A read projection (#11117): the tokenOwnedSessions answer reports the session's lastUsedAt " +
@@ -842,7 +842,7 @@ interface FunctionRef {
 type PortIndex = ReadonlyMap<string, readonly FunctionRef[]>;
 
 /** Property names a collaborator stores its port under (`this.port`, `this.deps.port`, `this.pool`). */
-const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool", "host"]);
+const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool", "host", "forwardersHost"]);
 
 /** Unwrap only forwarder results: `void` elsewhere still means retiring a clock. */
 function unwrapForwarder(expression: ts.Expression): ts.Expression {
@@ -933,6 +933,15 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
       return undefined;
     }
     if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+      // An inherited facade method belongs to its declaring base class and source file.
+      const method = checker.getSymbolAtLocation(owner.name)?.valueDeclaration;
+      const parent = method?.parent;
+      const targetModel =
+        parent &&
+        [...models.values()].find((candidate) => candidate.source === parent.getSourceFile());
+      if (parent && ts.isClassDeclaration(parent) && parent.name && targetModel) {
+        return { path: targetModel.path, key: `${parent.name.text}.${owner.name.text}` };
+      }
       return { path: model.path, key: `${unit.className}.${owner.name.text}` };
     }
     const declaration = checker
@@ -965,7 +974,9 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
           ? unit.node.body.statements[0]
           : undefined;
       const next =
-        statement && ts.isReturnStatement(statement) && statement.expression
+        statement &&
+        (ts.isReturnStatement(statement) || ts.isExpressionStatement(statement)) &&
+        statement.expression
           ? forwardedOwnerMethod(statement.expression)
           : undefined;
       target = next ? resolveTarget(model, unit, next) : undefined;
@@ -991,6 +1002,20 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
         ts.forEachChild(node, visit);
       };
       visit(unit.node);
+      // Facade methods also forward through typed collaborator fields, including a base class.
+      const statement =
+        ts.isMethodDeclaration(unit.node) && unit.node.body?.statements.length === 1
+          ? unit.node.body.statements[0]
+          : undefined;
+      const owner =
+        statement &&
+        (ts.isReturnStatement(statement) || ts.isExpressionStatement(statement)) &&
+        statement.expression
+          ? forwardedOwnerMethod(statement.expression)
+          : undefined;
+      if (owner) {
+        addForwarder(unit.key.slice(unit.className.length + 1), resolveTarget(model, unit, owner));
+      }
     }
   }
   return index;
@@ -1358,6 +1383,12 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       }
     }
     for (const path of [
+      // Facade wiring must be modeled even when it names no activity-clock field itself.
+      "src/daemon/sessionManager/forwarders.ts",
+      "src/daemon/sessionManager/wiring.ts",
+      "src/daemon/sessionManager/construction.ts",
+      "src/daemon/sessionManager/queries.ts",
+      "src/daemon/sessionManager/configuration.ts",
       ...Object.keys(NON_ACTIVITY_PATHS),
       ...Object.keys(DEADLINE_REDERIVATION_HELPERS),
       ...Object.keys(EXPIRY_JUDGEMENTS),
@@ -1475,6 +1506,13 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         models.get(sessionManagerPath)!,
         "SessionManager",
         new Set(DEADLINE_REDERIVATION_HELPERS[sessionManagerPath] ?? []),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/forwarders.ts")!,
+        "SessionManagerForwarders",
+        new Set(),
+        { models, ports },
       ),
       ...activityWritingMethods(
         models.get(controllerPath)!,
@@ -1713,7 +1751,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         [owner.path, owner],
       ]);
       const ports = buildPortIndex(models);
-      expect(ports.get("drop")).toEqual([{ path: "owner.ts", key: "Owner.drop" }]);
+      expect(ports.get("drop")).toEqual([
+        { path: "owner.ts", key: "Owner.drop" },
+        { path: "owner.ts", key: "Owner.stamp" },
+      ]);
       // Without the port edge the walk ends at the keeper and sees nothing (the old blind spot).
       expect(livenessViolations(keeper, ["Keeper.beat"], new Set())).toEqual([]);
       const found = livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports });
@@ -1721,6 +1762,45 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         ["owner.ts", "Owner.stamp", "lastUsedAt"],
       ]);
     });
+
+    test.each(["return ", ""])(
+      "follows an inherited facade delegate (%s) through its typed collaborator",
+      (result) => {
+        const activity = parse(
+          "activity.ts",
+          "export class Activity { touch(session) { session.lastUsedAt = 5; } }",
+        );
+        const base = parse(
+          "base.ts",
+          `import { Activity } from "./activity";
+        export abstract class Base {
+          protected abstract readonly forwardersHost: { activity: Activity };
+          touch(session) { ${result}this.forwardersHost.activity.touch(session); }
+        }`,
+        );
+        const manager = parse(
+          "manager.ts",
+          `import { Base } from "./base";
+        export class Manager extends Base {
+          make() { return { touch: (session) => this.touch(session) }; }
+        }`,
+        );
+        const keeper = parse(
+          "keeper.ts",
+          "class Keeper { beat(session) { this.port.touch(session); } }",
+        );
+        const models = new Map(
+          [activity, base, manager, keeper].map((model) => [model.path, model]),
+        );
+        const ports = buildPortIndex(models);
+        expect(ports.get("touch")).toContainEqual({ path: "base.ts", key: "Base.touch" });
+        expect(
+          livenessViolations(keeper, ["Keeper.beat"], new Set(), { models, ports }).map(
+            (violation) => `${violation.path} ${violation.via}:${violation.clock}`,
+          ),
+        ).toEqual(["activity.ts Activity.touch:lastUsedAt"]);
+      },
+    );
 
     test.each([
       ["pool receiver", "this.pool.drop(id)", "(id) => this.drop(id)"],

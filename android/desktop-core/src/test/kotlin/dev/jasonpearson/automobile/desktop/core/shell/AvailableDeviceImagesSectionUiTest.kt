@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.DeviceFilterState
 import dev.jasonpearson.automobile.desktop.core.loadDeviceFilter
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceIdentity
@@ -107,7 +108,7 @@ class AvailableDeviceImagesSectionUiTest {
   fun `persisted platform filters restore and chips save without user home writes`() =
     runComposeUiTest {
       val filterFile = temporaryFolder.root.resolve("device-filter.json")
-      saveDeviceFilter(filterFile, 34, 35, true, 16, 26, true, false)
+      saveDeviceFilter(filterFile, DeviceFilterState(34, 35, true, 16, 26, true, false))
       setContent {
         MaterialTheme {
           Column(Modifier.width(320.dp).verticalScroll(rememberScrollState())) {
@@ -140,7 +141,10 @@ class AvailableDeviceImagesSectionUiTest {
   @Test
   fun `iOS version endpoints restore and save exact versions across collapse`() = runComposeUiTest {
     val filterFile = temporaryFolder.root.resolve("device-filter.json")
-    saveDeviceFilter(filterFile, 28, 35, false, 16, 26, true, true, "17.2", "26.0")
+    saveDeviceFilter(
+      filterFile,
+      DeviceFilterState(28, 35, false, 16, 26, true, true, "17.2", "26.0"),
+    )
     setContent {
       MaterialTheme {
         Column(Modifier.width(320.dp).verticalScroll(rememberScrollState())) {

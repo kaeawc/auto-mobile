@@ -6,6 +6,13 @@ import {
 import type { DaemonRequest } from "./types";
 import type { Timer } from "../utils/SystemTimer";
 
+let socketRequestOrder = 0;
+
+/** Order admissions and inventory flights without depending on clock resolution. */
+export function nextSocketRequestOrder(): number {
+  return ++socketRequestOrder;
+}
+
 interface PendingRequest {
   lane: string | undefined;
   run: () => Promise<void>;
@@ -31,12 +38,20 @@ interface QueueWait {
  * - A laned request starts as soon as no earlier barrier is pending or running and
  *   no earlier request in the same lane is pending or running. Requests in
  *   different lanes run concurrently; requests in one lane keep arrival order.
+ * - Host-inventory reads may overlap within their lane to join shared discovery;
+ *   they still wait for barriers and hold back later barriers.
  */
 export class SocketRequestAdmissionQueue {
   private readonly pending: PendingRequest[] = [];
   private readonly runningLanes = new Set<string>();
   private runningCount = 0;
   private barrierRunning = false;
+  private barrierCompletionOrder = 0;
+
+  /** Inventory admitted after this barrier must use discovery started after it. */
+  get lastBarrierCompletionOrder(): number {
+    return this.barrierCompletionOrder;
+  }
 
   /** Requests admitted to the socket that have not started yet. */
   get pendingCount(): number {
@@ -122,12 +137,13 @@ export class SocketRequestAdmissionQueue {
     this.runningCount++;
     if (entry.lane === undefined) {
       this.barrierRunning = true;
-    } else {
+    } else if (entry.lane !== "host:inventory") {
       this.runningLanes.add(entry.lane);
     }
     void entry.run().finally(() => {
       this.runningCount--;
       if (entry.lane === undefined) {
+        this.barrierCompletionOrder = nextSocketRequestOrder();
         this.barrierRunning = false;
       } else {
         this.runningLanes.delete(entry.lane);

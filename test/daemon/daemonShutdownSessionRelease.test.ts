@@ -1,3 +1,4 @@
+import { FakeDaemonHttpTokenStore } from "../../src/daemon/daemonHttpToken";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
@@ -1291,14 +1292,21 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("cleans up daemon pid/socket files only after the logger has flushed and closed (issue #6194)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
+    const tokenStore = new FakeDaemonHttpTokenStore();
+    tokenStore.write("stale-token");
     const daemon = new Daemon(
       {},
       {
+        httpTokenStore: tokenStore,
         installedAppsRepository: new FakeInstalledAppsRepository(),
         timer,
         deviceSessionRepository: repository,
       },
     );
+    daemon.testHooks.prepareHttpToken();
+    daemon.testHooks.publishHttpToken();
+    expect(tokenStore.read()).toBeDefined();
+    expect(tokenStore.read()).not.toBe("stale-token");
     const events: string[] = [];
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
       events.push("closeDatabase");
@@ -1315,6 +1323,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
 
     try {
       await daemon.stop();
+      expect(tokenStore.read()).toBeUndefined();
 
       // The pid record is this daemon's ONLY externally-observable liveness
       // signal, and the process keeps holding its inherited launch-log fd

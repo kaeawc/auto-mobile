@@ -416,7 +416,8 @@ class PrototypeAssetStore(
 }
 
 /** Cheap magic-number check so a mislabeled payload fails here rather than at decode time. */
-internal fun matchesSignature(mimeType: String, bytes: ByteArray): Boolean =
+@InternalAutoMobilePrototypeApi
+fun matchesSignature(mimeType: String, bytes: ByteArray): Boolean =
   when (mimeType) {
     "image/png" -> bytes.startsWith(PNG_SIGNATURE)
     "image/jpeg" -> bytes.startsWith(JPEG_SIGNATURE)
@@ -427,7 +428,8 @@ internal fun matchesSignature(mimeType: String, bytes: ByteArray): Boolean =
     else -> false
   }
 
-internal fun isFontMimeType(mimeType: String) = mimeType == "font/ttf" || mimeType == "font/otf"
+@InternalAutoMobilePrototypeApi
+fun isFontMimeType(mimeType: String) = mimeType == "font/ttf" || mimeType == "font/otf"
 
 private val SFNT_SIGNATURES =
   listOf(

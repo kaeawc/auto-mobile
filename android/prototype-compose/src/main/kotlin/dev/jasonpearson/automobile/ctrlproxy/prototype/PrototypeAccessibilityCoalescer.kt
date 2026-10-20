@@ -3,7 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import android.view.accessibility.AccessibilityEvent
 
 /** Leading and trailing subtree invalidations, driven on the view thread. */
-internal class PrototypeAccessibilityCoalescer(
+@InternalAutoMobilePrototypeApi
+class PrototypeAccessibilityCoalescer(
   private val nowMs: () -> Long,
   private val intervalMs: Long = 250,
 ) {
@@ -45,7 +46,8 @@ internal class PrototypeAccessibilityCoalescer(
   }
 }
 
-internal fun isCoalescibleAccessibilityEvent(eventType: Int, contentChangeTypes: Int): Boolean =
+@InternalAutoMobilePrototypeApi
+fun isCoalescibleAccessibilityEvent(eventType: Int, contentChangeTypes: Int): Boolean =
   eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED ||
     (eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
       contentChangeTypes and AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE.inv() == 0)

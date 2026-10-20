@@ -87,6 +87,13 @@ androidComponents {
   }
 }
 
+kotlin {
+  compilerOptions {
+    // CtrlProxy is the renderer's own host and builds on its unstable internals.
+    optIn.add("dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi")
+  }
+}
+
 dependencies {
   implementation(libs.androidx.core)
   implementation(libs.androidx.window)
@@ -96,6 +103,9 @@ dependencies {
 
   // Protocol module for type-safe WebSocket messages
   implementation(projects.protocol)
+
+  // Embeddable prototype renderer; CtrlProxy adds the overlay host around it.
+  implementation(projects.prototypeCompose)
 
   // Compose BOM
   implementation(platform(libs.compose.bom))

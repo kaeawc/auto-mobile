@@ -23,7 +23,8 @@ interface PrototypeBackCallbackRegistrar {
  * nothing is ever registered. Both routes end in the same [onBack] target; the controller makes a
  * repeated dismissal a no-op.
  */
-internal class PrototypeBackBinding(
+@InternalAutoMobilePrototypeApi
+class PrototypeBackBinding(
   private val sdkInt: Int,
   private val registrar: PrototypeBackCallbackRegistrar,
   private val onBack: () -> Unit,
@@ -46,7 +47,8 @@ internal class PrototypeBackBinding(
 }
 
 /** Never registers; used below API 33 where [PROTOTYPE_BACK_CALLBACK_MIN_SDK] gates the binding. */
-internal object NoPrototypeBackCallbackRegistrar : PrototypeBackCallbackRegistrar {
+@InternalAutoMobilePrototypeApi
+object NoPrototypeBackCallbackRegistrar : PrototypeBackCallbackRegistrar {
   override fun register(onBack: () -> Unit) = false
 
   override fun unregister() = Unit
@@ -60,8 +62,8 @@ internal object NoPrototypeBackCallbackRegistrar : PrototypeBackCallbackRegistra
  * open. Not verified on a device.
  */
 @SuppressLint("NewApi")
-internal class AndroidPrototypeBackRegistrar(private val view: View) :
-  PrototypeBackCallbackRegistrar {
+@InternalAutoMobilePrototypeApi
+class AndroidPrototypeBackRegistrar(private val view: View) : PrototypeBackCallbackRegistrar {
   private var registration: Pair<OnBackInvokedDispatcher, OnBackInvokedCallback>? = null
 
   override fun register(onBack: () -> Unit): Boolean {

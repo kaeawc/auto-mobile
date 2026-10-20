@@ -22,6 +22,7 @@ export const PROTOTYPE_REQUEST_ERROR_CODES = [
   "timeout",
   "too_large",
   "connection_refused",
+  "blocked_destination",
   "cancelled",
   "invalid_url",
   "invalid_request",

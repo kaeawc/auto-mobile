@@ -239,6 +239,29 @@ failure is a logged skip. The per-shard `.wall` record still excludes the end pr
 The owner decided on 2026-10-08 to run tier C files in shared processes and
 keep everything else isolated.
 
+On 2026-10-20 (#13568 / #13854), the owner also allowed spy-only files into
+Tier C when the classifier proves **every** spy is restored. The original
+section 2 table and measurements above predate that decision. Other signals
+still force isolation. Spies must be installed directly in a test or
+`beforeEach` callback; `beforeAll`, module/describe bodies and helper-installed
+spies remain isolated, even with a restore hook.
+
+The AST proof accepts an immediate `.mockRestore()`, a `using` declaration,
+or a matching lexical variable/static field/array handle restored
+unconditionally in the same test or a covering `afterEach`/`afterAll`.
+Known `mockImplementation`/return-value chains preserve the handle. A covering
+unconditional `mock.restore()`, `restoreAllMocks()` or `jest.restoreAllMocks()`
+teardown also qualifies. Sibling/child describe hooks, conditional cleanup,
+shadowed or overwritten handles, and unknown data/control flow do not prove a
+restore. This is a bounded structural proof, not full exception-path analysis;
+use `try/finally` for cleanup that must survive a failed assertion. There is no
+blanket restore preload: it breaks suites that deliberately retain spies.
+
+`bun scripts/test/classify-shared-safe.ts --explain` prints
+`file:line:reason` for files blocked only by unproven spies. Supply a unit path
+to inspect its unproven sites even when other signals also block it. `--check`
+reports these sites if a listed file loses its restore proof.
+
 - **The list.** `test/shared-process-allowlist.txt` holds the shared files.
   `bun scripts/test/classify-shared-safe.ts` generates it from the section 2
   signals plus one more, `moduleState`, which is described below. Fast Validation runs

@@ -60,7 +60,7 @@ import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";
 import { DefaultSimulatorAppPresenter, type SimulatorAppPresenter } from "./SimulatorAppPresenter";
 import { SimctlCommandTimeoutError } from "./SimctlCommandTimeoutError";
 import {
-  SimCtlSimulatorDeviceTypeProfiles,
+  simulatorProfiles,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
 import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDisplays";
@@ -246,7 +246,7 @@ export class SimCtlClient implements SimCtl {
     this.platform = platform;
     this.spawnProcess = spawnProcess;
     this.fileSystem = fileSystem;
-    this.deviceTypeProfiles = deviceTypeProfiles ?? new SimCtlSimulatorDeviceTypeProfiles(this);
+    this.deviceTypeProfiles = deviceTypeProfiles ?? simulatorProfiles(this, this.plist, timer);
     this.simulatorAppPresenter = this.resolveSimulatorAppPresenter(simulatorAppPresenter);
     this.idGenerator = this.resolveIdGenerator(idGenerator);
     this.bootOptions = {

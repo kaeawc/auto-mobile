@@ -245,12 +245,17 @@ describe("SimulatorIosDeviceBackend uninstall cancellation (issue #10077)", () =
 describe("resolveIosLaunchBackend", () => {
   test("passes launch arguments through simulator and physical backends", async () => {
     const launchArguments = ["--automobile-mutation-token", "test-token"];
-    const simulatorCalls: Array<{ bundleId: string; options?: { launchArguments?: string[] } }> =
-      [];
+    const simulatorCalls: Array<{
+      bundleId: string;
+      options?: { foregroundIfRunning?: boolean; launchArguments?: string[] };
+    }> = [];
     const launcher = new FakeDeviceAppLauncher();
     const deps = {
       simctl: {
-        launchApp: async (id: string, options?: { launchArguments?: string[] }) => {
+        launchApp: async (
+          id: string,
+          options?: { foregroundIfRunning?: boolean; launchArguments?: string[] },
+        ) => {
           simulatorCalls.push({ bundleId: id, options });
           return { success: true };
         },

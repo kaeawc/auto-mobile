@@ -22,7 +22,8 @@ describe("test log sink override", () => {
       process.env.AUTOMOBILE_LOG_SINK = "both";
       process.env.AUTOMOBILE_LOG_FORMAT = "text";
       try {
-        mod = await import("../../src/utils/logger.ts?test-sink-override");
+        const loggerModule = "../../src/utils/logger.ts?test-sink-override";
+        mod = await import(loggerModule);
         logFile = join(logDir, `${mod.resolveProcessLogPrefix(process.argv, process.pid)}.log`);
         testOverrides.logSinksDisabled = undefined;
         mod.logger.info("warm-up-record");

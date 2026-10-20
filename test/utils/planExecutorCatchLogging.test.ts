@@ -1,3 +1,4 @@
+import { DefaultPlanStepExecutor } from "../../src/utils/plan/PlanStepExecutor";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
@@ -142,7 +143,7 @@ describe("PlanExecutor result boundary warnings", () => {
       const error = new Error(`${boundary} failed`);
       const failure =
         boundary === "step"
-          ? spyOn(executor, "executeStep").mockRejectedValue(error)
+          ? spyOn(DefaultPlanStepExecutor.prototype, "executeStep").mockRejectedValue(error)
           : spyOn(executor.planDeviceTrackExecutor, "executeDeviceTrack").mockRejectedValue(error);
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {

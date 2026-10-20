@@ -3,6 +3,7 @@ import {
   SharpBackend,
   type SharpPipeline,
   type SharpPort,
+  type SharpRawResult,
 } from "../../../../src/utils/image/backend/SharpBackend";
 import type { ImagePipeline } from "../../../../src/utils/image/backend/ImageBackend";
 
@@ -20,6 +21,13 @@ async function makeSourcePng(width = 8, height = 8): Promise<Buffer> {
 const PNG_MAGIC = "89504e47";
 
 function makeRecordingSharpFactory(events: string[]): SharpPort {
+  function toBuffer(): Promise<Buffer>;
+  function toBuffer(options: { resolveWithObject: true }): Promise<SharpRawResult>;
+  async function toBuffer(options?: { resolveWithObject: true }): Promise<Buffer | SharpRawResult> {
+    events.push("toBuffer");
+    const data = Buffer.from("encoded");
+    return options?.resolveWithObject ? { data, info: { width: 1, height: 1 } } : data;
+  }
   const image: SharpPipeline = {
     resize(options) {
       events.push(`resize:${JSON.stringify(options)}`);
@@ -57,10 +65,7 @@ function makeRecordingSharpFactory(events: string[]): SharpPort {
       events.push("metadata");
       return {};
     },
-    async toBuffer() {
-      events.push("toBuffer");
-      return Buffer.from("encoded");
-    },
+    toBuffer,
   };
 
   return (source: Buffer) => {

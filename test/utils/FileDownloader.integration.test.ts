@@ -60,7 +60,7 @@ describe("FakeFileDownloader", function () {
 
     expect(downloader.downloadedUrls).toEqual([url]);
     expect(downloader.downloadedDestinations).toEqual([destination]);
-    expect(await fs.readFile(destination)).toEqual(downloader.payload);
+    expect(await fs.readFile(destination)).toEqual(Buffer.from(downloader.payload));
   });
 
   test("should throw configured error", async function () {

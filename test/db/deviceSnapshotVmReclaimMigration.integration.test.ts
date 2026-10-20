@@ -19,7 +19,7 @@ function provider(): MigrationProvider {
   };
 }
 
-async function columnNames(db: Kysely<unknown>): Promise<string[]> {
+async function columnNames<T>(db: Kysely<T>): Promise<string[]> {
   const result = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('device_snapshots')
   `.execute(db);
@@ -27,10 +27,21 @@ async function columnNames(db: Kysely<unknown>): Promise<string[]> {
 }
 
 describe("device snapshot VM reclaim migration (#6490)", () => {
-  let db: Kysely<unknown>;
+  type SnapshotSchema = {
+    device_snapshots: {
+      snapshot_name: string;
+      platform: string;
+      snapshot_type: string;
+      size_bytes: number;
+      size_unknown?: number;
+      pending_reclaim?: number;
+      pending_reclaim_reason?: string | null;
+    };
+  };
+  let db: Kysely<SnapshotSchema>;
 
   beforeEach(async () => {
-    db = new Kysely<unknown>({
+    db = new Kysely<SnapshotSchema>({
       dialect: new BunSqliteDialect({ database: new BunDatabase(":memory:") }),
     });
     await db.schema
@@ -56,21 +67,21 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
 
   test("existing non-vm rows stay sized and not pending, so nothing is retroactively flagged", async () => {
     await db
-      .insertInto("device_snapshots" as never)
+      .insertInto("device_snapshots")
       .values({
         snapshot_name: "legacy",
         platform: "android",
         snapshot_type: "full",
         size_bytes: 4096,
-      } as never)
+      })
       .execute();
 
     await runMigrations(db, { provider: provider(), env: {} });
 
     const row = await db
-      .selectFrom("device_snapshots" as never)
+      .selectFrom("device_snapshots")
       .selectAll()
-      .where("snapshot_name" as never, "=", "legacy")
+      .where("snapshot_name", "=", "legacy")
       .executeTakeFirst();
 
     expect(row).toMatchObject({
@@ -89,22 +100,22 @@ describe("device snapshot VM reclaim migration (#6490)", () => {
     // the budget forever while the archive reported zero unsized records
     // (#6891 review).
     await db
-      .insertInto("device_snapshots" as never)
+      .insertInto("device_snapshots")
       .values({
         snapshot_name: "legacy-vm",
         platform: "android",
         snapshot_type: "vm",
         size_bytes: 0,
-      } as never)
+      })
       .execute();
 
     await runMigrations(db, { provider: provider(), env: {} });
 
     expect(
       await db
-        .selectFrom("device_snapshots" as never)
+        .selectFrom("device_snapshots")
         .selectAll()
-        .where("snapshot_name" as never, "=", "legacy-vm")
+        .where("snapshot_name", "=", "legacy-vm")
         .executeTakeFirst(),
     ).toMatchObject({ size_bytes: 0, size_unknown: 1, pending_reclaim: 0 });
   });

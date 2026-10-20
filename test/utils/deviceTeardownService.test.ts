@@ -405,7 +405,7 @@ describe("DeviceTeardownService", () => {
         throw new Error("delete deadline elapsed");
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
     };
     const teardown = service.teardown(request, workflow);
     await expect(teardown).resolves.toEqual({ status: "failed", phase: "destroy" });

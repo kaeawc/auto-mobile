@@ -1,5 +1,4 @@
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
+import { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
 import { SURVIVING_PROCESS_RECHECK_INTERVAL_MS } from "../../src/devices/coldBootProcessTermination";
 import { DeviceBootService } from "../../src/devices/deviceBootService";
@@ -33,11 +32,14 @@ type FakeEmulator = ChildProcess & { exitCode: number | null; signalCode: NodeJS
 
 /** A process that only exits when the test says so; records every signal it is sent. */
 function fakeEmulator(): { process: FakeEmulator; signals: string[]; exit: () => void } {
-  const process = new EventEmitter() as FakeEmulator;
+  const process = new (class extends ChildProcess {
+    override readonly pid = PID;
+    override exitCode: number | null = null;
+    override signalCode: NodeJS.Signals | null = null;
+  })();
   const signals: string[] = [];
   process.exitCode = null;
   process.signalCode = null;
-  process.pid = PID;
   process.kill = (signal?: NodeJS.Signals | number) => {
     signals.push(String(signal ?? "SIGTERM"));
     return true;

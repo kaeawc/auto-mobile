@@ -222,6 +222,9 @@ describe("WorkProfileMonitor", () => {
       if (commandCount > 1) {
         return Promise.resolve(packageListResult());
       }
+      if (timeoutMs === undefined) {
+        throw new Error("Expected ADB command timeout");
+      }
       return new Promise<ExecResult>((_resolve, reject) => {
         timer.setTimeout(() => reject(new Error("ADB command timed out")), timeoutMs);
       });

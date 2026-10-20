@@ -43,13 +43,14 @@ describe("fileLock primitive", () => {
     writeFileSync(lockPath, raw);
     const realStat = fs.statSync;
     let sampled = false;
-    const stat = spyOn(fs, "statSync").mockImplementation((path, options) => {
+    const statReader: { statSync(path: fs.PathLike): fs.Stats } = fs;
+    const stat = spyOn(statReader, "statSync").mockImplementation((path) => {
       if (path === lockPath && !sampled) {
         sampled = true;
         // Exercise publication even after the initial-sample optimisation is added.
         throw Object.assign(new Error("sample unavailable"), { code: "EACCES" });
       }
-      return realStat(path, options);
+      return realStat(path);
     });
     const realWrite = fs.writeFileSync;
     const realUnlink = fs.unlinkSync;

@@ -4704,7 +4704,13 @@ describe("CtrlProxyManager", function () {
       const entries = (await fs.readdir(scratchRoot, { withFileTypes: true })).filter((entry) =>
         names.has(entry.name),
       );
-      const readdirSpy = spyOn(fs, "readdir").mockResolvedValue(entries);
+      const directoryReader: {
+        readdir(
+          path: string,
+          options: { withFileTypes: true },
+        ): Promise<import("node:fs").Dirent[]>;
+      } = fs;
+      const readdirSpy = spyOn(directoryReader, "readdir").mockResolvedValue(entries);
 
       try {
         await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
@@ -4723,12 +4729,15 @@ describe("CtrlProxyManager", function () {
       const second = await makeAgedDir("auto-mobile-prefetch-second", 2 * HOUR_MS);
       const originalStat = fs.stat;
       let statCount = 0;
-      const statSpy = spyOn(fs, "stat").mockImplementation(async (target, options) => {
+      const statReader: {
+        stat(path: import("node:fs").PathLike): Promise<import("node:fs").Stats>;
+      } = fs;
+      const statSpy = spyOn(statReader, "stat").mockImplementation(async (target) => {
         statCount++;
         if (statCount === 1) {
           sweepTimer.advanceTime(STALE_PREFETCH_SWEEP_DEADLINE_MS);
         }
-        return originalStat(target, options);
+        return originalStat(target);
       });
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 

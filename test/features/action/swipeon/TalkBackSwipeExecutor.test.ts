@@ -1,5 +1,5 @@
 import { buildElement } from "../../../helpers/elementBuilder";
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { beforeEach, describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import {
   TalkBackSwipeExecutor,
   scrollActionForFingerDirection,
@@ -18,6 +18,10 @@ import type { AdbExecutor } from "../../../../src/utils/android-cmdline-tools/in
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice, Element } from "../../../../src/models";
 import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const ANDROID_DEVICE: BootedDevice = {
   name: "test-device",

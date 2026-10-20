@@ -1,6 +1,6 @@
 import { buildElement } from "../../helpers/elementBuilder";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNavigationExecutor";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -11,6 +11,10 @@ import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector
 import { HierarchyTalkBackDriver } from "./HierarchyTalkBackDriver";
 import { notificationHierarchy, notificationRows } from "./capturedNotificationTargets";
 import type { Element } from "../../../src/models/Element";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const device = { name: "test-device", platform: "android" as const, deviceId: "emulator-5554" };
 
@@ -292,11 +296,12 @@ describe("TalkBack selected target safety", () => {
       const { driver, executor, strategy } = harness();
       const rows = notificationRows.slice(1, 3);
       driver.setElements(rows, 1);
+      const traversal = spyOn(driver, "requestTraversalOrder");
       spyOn(executor, "navigateToElement").mockImplementation(
         async (_device, _selector, options) => {
           options?.onFocusObserved?.(rows[1], rows);
           if (failure === "throw") {
-            spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("unavailable"));
+            traversal.mockRejectedValue(new Error("unavailable"));
           } else {
             driver.queueTraversalResult({
               elements: [],
@@ -323,12 +328,13 @@ describe("TalkBack selected target safety", () => {
       const rows = notificationRows.slice(2, 3);
       const live = shiftedRows()[1];
       driver.setElements(rows, 0);
+      const traversal = spyOn(driver, "requestTraversalOrder");
       spyOn(executor, "navigateToElement").mockImplementation(
         async (_device, _selector, options) => {
           driver.setElements([live], 0);
           options?.onFocusObserved?.(live, rows);
           if (failure === "throw") {
-            spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("unavailable"));
+            traversal.mockRejectedValue(new Error("unavailable"));
           } else {
             driver.queueTraversalResult({
               elements: [],

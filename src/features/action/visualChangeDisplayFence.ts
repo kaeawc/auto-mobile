@@ -9,6 +9,7 @@ import type {
 import type { Window } from "../observe/interfaces/Window";
 import { PredictionAnalyzer } from "../observe/PredictionAnalyzer";
 import { type StaleDisplayDetails } from "../observe/StaleDisplayError";
+import type { ActionClockSkewProvider } from "./ActionClockSkewCache";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -58,6 +59,7 @@ export function resolveDisplayFence(options?: DisplayFenceOption): DisplayFence 
 }
 
 export interface DisplayFenceDependencies {
+  actionClockSkewCache?: ActionClockSkewProvider;
   /** Collaborator overrides; default to the real device-backed implementations. */
   observeScreen?: ObserveScreen;
   awaitIdle?: AwaitIdle;

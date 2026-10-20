@@ -59,14 +59,7 @@ class ConveyorUpdateControllerTest {
     val gateway = FakeSoftwareUpdateGateway(probeError = CancellationException("cancelled"))
     val controller = ConveyorUpdateController(gateway)
 
-    var rethrown = false
-    try {
-      controller.checkForUpdate()
-    } catch (cancellation: CancellationException) {
-      rethrown = true
-    }
-
-    assertTrue(rethrown)
+    kotlin.test.assertFailsWith<CancellationException> { controller.checkForUpdate() }
     assertIs<UpdateStatus.Idle>(controller.status.value)
   }
 

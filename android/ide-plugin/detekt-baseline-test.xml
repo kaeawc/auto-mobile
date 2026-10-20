@@ -2,6 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>EmptyFunctionBlock:TestPlanDocumentListenerTest.kt:TestPlanDocumentListenerTest.FakeDocument${}</ID>
   </CurrentIssues>
 </SmellBaseline>

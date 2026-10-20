@@ -40,9 +40,11 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   db = new Kysely<unknown>({
-    dialect: new BunSqliteDialect({ database: new BunDatabase(new Uint8Array(template)) }),
+    dialect: new BunSqliteDialect({ database: BunDatabase.deserialize(new Uint8Array(template)) }),
   });
-  repo = new VideoRecordingRepository(db.withTables<Database>());
+  repo = new VideoRecordingRepository(
+    db.withTables<{ [Table in keyof Database]: Database[Table] }>(),
+  );
 });
 afterEach(async () => {
   await db.destroy();

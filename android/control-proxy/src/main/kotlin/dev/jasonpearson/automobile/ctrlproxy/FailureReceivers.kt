@@ -169,6 +169,10 @@ internal class CrashReceiver(
       }
     }
 
+    return parseLegacyCrash(intent)
+  }
+
+  private fun parseLegacyCrash(intent: Intent): CrashReport? {
     // Fallback to legacy extras for backward compatibility
     val exceptionClass =
       intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_CLASS) ?: return null

@@ -106,6 +106,7 @@ export async function readGestures(segments: CaptureSegment[]): Promise<GestureE
     timer,
     density: 1,
     touchNode: {
+      kind: "touch",
       path: "/dev/input/event1",
       name: "virtio_input_multi_touch_1",
       axisXMin: CAPTURE_AXES.xMin,

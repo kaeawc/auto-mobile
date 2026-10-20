@@ -155,7 +155,7 @@ test("a service skip without a canonical envelope cannot become found", async ()
   ).toEqual({ kind: "unavailable", reason: "invalid-response" });
 });
 
-test.each([
+test.each<Record<string, string | undefined>>([
   {},
   { AUTOMOBILE_ATTESTATION_APP_ID: "123" },
   { ...validEnv, AUTOMOBILE_ATTESTATION_SERVICE_URL: "http://unsafe.test" },

@@ -546,7 +546,11 @@ describe("ScreenshotJobTracker", () => {
   });
 
   test("queueAfterPending remains cancellable before its runner starts", async () => {
-    let resolveFirst: (result: { success: boolean; path?: string }) => void = () => {};
+    let resolveFirst: (result: {
+      success: boolean;
+      path?: string;
+      error?: string;
+    }) => void = () => {};
     const first = ScreenshotJobTracker.startJob(
       "device-cancel-queue",
       (signal) =>

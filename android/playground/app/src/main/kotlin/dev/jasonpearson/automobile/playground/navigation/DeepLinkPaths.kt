@@ -1,0 +1,31 @@
+package dev.jasonpearson.automobile.playground.navigation
+
+// Base deep link scheme and host
+internal const val SCHEME = "automobile"
+internal const val HOST = "playground"
+
+// Deep link paths for different destinations
+internal const val PATH_ONBOARDING = "/onboarding"
+internal const val PATH_LOGIN = "/login"
+internal const val PATH_HOME = "/home"
+internal const val PATH_MEDIA = "/media"
+internal const val PATH_TAP = "/tap"
+internal const val PATH_LONG_PRESS = "/long_press"
+internal const val PATH_SWIPE = "/swipe"
+internal const val PATH_TEXT = "/text"
+internal const val PATH_CHAT = "/chat"
+internal const val PATH_VIDEO = "/video"
+internal const val PATH_SLIDES = "/slides"
+internal const val PATH_VIDEO_PLAYER = "/video_player"
+internal const val PATH_SETTINGS = "/settings"
+internal const val PATH_DEMOS = "/demos"
+internal const val PATH_DEMO_UX_START = "/demos/ux/start"
+internal const val PATH_DEMO_UX_DETAILS = "/demos/ux/details"
+internal const val PATH_DEMO_UX_SUMMARY = "/demos/ux/summary"
+internal const val PATH_DEMO_STARTUP = "/demos/perf/startup"
+internal const val PATH_DEMO_PERF_LIST = "/demos/perf/list"
+internal const val PATH_DEMO_PERF_DETAIL = "/demos/perf/detail"
+internal const val PATH_DEMO_A11Y_CONTRAST = "/demos/a11y/contrast"
+internal const val PATH_DEMO_A11Y_TAP_TARGETS = "/demos/a11y/tap_targets"
+internal const val PATH_DEMO_BUG_REPRO = "/demos/bugs/repro"
+internal const val PATH_DEMO_POINTER_PROBE = "/demos/input/pointer_probe"

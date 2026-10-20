@@ -117,52 +117,7 @@ internal class InteractionEventController(
       return
     }
 
-    val source =
-      try {
-        event.source
-      } catch (_: IllegalStateException) {
-        null
-      }
-    val bounds = source?.let {
-      try {
-        val rect = Rect()
-        it.getBoundsInScreen(rect)
-        ElementBounds(rect)
-      } catch (_: IllegalStateException) {
-        null
-      }
-    }
-    // Build element from source node, falling back to event-level data
-    val element =
-      if (source != null) {
-        InteractionElement(
-          text = source.text?.toString(),
-          contentDescription = source.contentDescription?.toString(),
-          resourceId = source.viewIdResourceName,
-          className = source.className?.toString(),
-          bounds = bounds,
-        )
-      } else {
-        // Fallback: extract what we can from the AccessibilityEvent itself
-        val eventText = event.text.joinToString("") { it.toString() }.takeIf { it.isNotEmpty() }
-        val eventDesc = event.contentDescription?.toString()
-        val eventClass = event.className?.toString()
-        if (eventText != null || eventDesc != null || eventClass != null) {
-          InteractionElement(
-            text = eventText,
-            contentDescription = eventDesc,
-            resourceId = null,
-            className = eventClass,
-            bounds = null,
-          )
-        } else null
-      }
-    try {
-      source?.recycle()
-    } catch (_: IllegalStateException) {
-      /* already recycled */
-
-    }
+    val element = interactionElement(event)
 
     val textValue =
       if (type == "inputText") {
@@ -286,4 +241,59 @@ internal class InteractionEventController(
       interactionEventFrame(interaction.timestamp, jsonCompact.encodeToString(interaction)),
     )
   }
+}
+
+private fun interactionElement(event: AccessibilityEvent): InteractionElement? {
+  val source =
+    try {
+      event.source
+    } catch (_: IllegalStateException) {
+      null
+    }
+  val bounds = source?.let {
+    try {
+      val rect = Rect()
+      it.getBoundsInScreen(rect)
+      ElementBounds(rect)
+    } catch (_: IllegalStateException) {
+      null
+    }
+  }
+  // Build element from source node, falling back to event-level data
+  val element =
+    if (source != null) {
+      InteractionElement(
+        text = source.text?.toString(),
+        contentDescription = source.contentDescription?.toString(),
+        resourceId = source.viewIdResourceName,
+        className = source.className?.toString(),
+        bounds = bounds,
+      )
+    } else {
+      eventInteractionElement(event)
+    }
+  try {
+    source?.recycle()
+  } catch (_: IllegalStateException) {
+    /* already recycled */
+
+  }
+
+  return element
+}
+
+private fun eventInteractionElement(event: AccessibilityEvent): InteractionElement? {
+  // Fallback: extract what we can from the AccessibilityEvent itself
+  val eventText = event.text.joinToString("") { it.toString() }.takeIf { it.isNotEmpty() }
+  val eventDesc = event.contentDescription?.toString()
+  val eventClass = event.className?.toString()
+  return if (eventText != null || eventDesc != null || eventClass != null) {
+    InteractionElement(
+      text = eventText,
+      contentDescription = eventDesc,
+      resourceId = null,
+      className = eventClass,
+      bounds = null,
+    )
+  } else null
 }

@@ -215,9 +215,9 @@ describe("navigateTo edge fallback (#10031)", () => {
 
   test("a transition with no recorded action but a shallower target is replayed as Back", async () => {
     await go("Home");
-    await manager.recordBackStack({ depth: 1, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth: 1 });
     await go("Settings");
-    await manager.recordBackStack({ depth: 2, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth: 2 });
     await go("Home");
     await go("Settings");
     backDestination = "Home";

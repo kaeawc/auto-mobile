@@ -2,24 +2,14 @@ import type { ViewHierarchyResult } from "../models";
 import { NodeCryptoService } from "./crypto";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
-
-/**
- * The SystemUI status bar: clock, notification icons, signal and battery. It changes on its own
- * (a minute tick, an incoming notification icon) and is not part of any app screen, so a tap on a
- * still screen must not read it as a screen change (#13561). Only the status bar is dropped; the
- * notification shade and other SystemUI windows are separate subtrees and still count.
- */
-const STATUS_BAR_RESOURCE_IDS = new Set([
-  "com.android.systemui:id/status_bar_container",
-  "com.android.systemui:id/status_bar_launch_animation_container",
-  "com.android.systemui:id/status_bar",
-]);
+import { STATUS_BAR_ROOT_IDS } from "./androidStatusBar";
 
 /** `JSON.stringify` replacer that omits status-bar subtrees; other nodes serialize unchanged. */
-function omitStatusBar(_key: string, value: unknown): unknown {
-  if (typeof value === "object" && value !== null && "resource-id" in value) {
+function omitStatusBar(key: string, value: unknown): unknown {
+  // The root itself is never dropped: a replacer result of undefined there is no serialization.
+  if (key !== "" && typeof value === "object" && value !== null && "resource-id" in value) {
     const resourceId = value["resource-id"];
-    if (typeof resourceId === "string" && STATUS_BAR_RESOURCE_IDS.has(resourceId)) {
+    if (typeof resourceId === "string" && STATUS_BAR_ROOT_IDS.has(resourceId)) {
       return undefined;
     }
   }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { hierarchyChanged, hierarchyFingerprint } from "../../src/utils/hierarchyFingerprint";
 import type { ViewHierarchyResult } from "../../src/models";
+import { STATUS_BAR_ROOT_IDS } from "../../src/utils/androidStatusBar";
 import { observeResultFromJsonText } from "../helpers/observeFixture";
 
 /**
@@ -13,12 +14,17 @@ const FIXTURE = "test/fixtures/android-settings/open-by-default-radio-rows.obser
 
 type Json = Record<string, unknown>;
 
+// Parsed once: the capture is large, and each test edits its own clone.
+let parsed: ViewHierarchyResult | undefined;
+
 function loadHierarchy(): ViewHierarchyResult {
-  const { viewHierarchy } = observeResultFromJsonText(readFileSync(FIXTURE, "utf8"), FIXTURE);
-  if (!viewHierarchy) {
+  if (!parsed) {
+    parsed = observeResultFromJsonText(readFileSync(FIXTURE, "utf8"), FIXTURE).viewHierarchy;
+  }
+  if (!parsed) {
     throw new Error(`${FIXTURE} has no view hierarchy`);
   }
-  return structuredClone(viewHierarchy);
+  return structuredClone(parsed);
 }
 
 function isRecord(value: unknown): value is Json {
@@ -96,5 +102,41 @@ describe("hierarchyFingerprint ignores the SystemUI status bar (#13561)", () => 
 
     expect(hierarchyFingerprint(stripped)).toBe(hierarchyFingerprint(hierarchy));
     expect(hierarchyFingerprint(hierarchy)).not.toBeNull();
+  });
+
+  test.each([...STATUS_BAR_ROOT_IDS])("%s is dropped from the fingerprint", (resourceId) => {
+    const before = loadHierarchy();
+    const after = loadHierarchy();
+    forEachNode(after.hierarchy, (node) => {
+      if (node["resource-id"] === resourceId) {
+        node["content-desc"] = "edited while ignored";
+      }
+    });
+
+    expect(hierarchyChanged(before, after)).toBe(false);
+  });
+
+  test("removing the status-bar window entirely still counts as a change", () => {
+    const before = loadHierarchy();
+    const after = loadHierarchy();
+    forEachNode(after.hierarchy, (node) => {
+      if (node["resource-id"] === "com.android.systemui:id/status_bar_container") {
+        node["resource-id"] = "com.example:id/replaced";
+      }
+    });
+
+    expect(hierarchyChanged(before, after)).toBe(true);
+  });
+
+  test("a change in another SystemUI subtree (e.g. the shade) still counts", () => {
+    const before = loadHierarchy();
+    const after = loadHierarchy();
+    forEachNode(after.hierarchy, (node) => {
+      if (node["resource-id"] === "com.android.systemui:id/status_bar_container") {
+        node["resource-id"] = "com.android.systemui:id/notification_stack_scroller";
+      }
+    });
+
+    expect(hierarchyChanged(before, after)).toBe(true);
   });
 });

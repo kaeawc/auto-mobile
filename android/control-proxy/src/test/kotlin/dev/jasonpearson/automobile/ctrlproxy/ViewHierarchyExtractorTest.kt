@@ -127,14 +127,20 @@ class ViewHierarchyExtractorTest {
             ),
           ),
           null,
-          disableAllFiltering = true,
-          displayId = 2,
+          options =
+            HierarchyExtractionOptions(
+              disableAllFiltering = true,
+              displayId = 2,
+            ),
         )
       assertEquals(2 to expected, calls.last())
       assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, frame.prototypeHiddenReason)
     }
     val single =
-      extractor.extractFromActiveWindow(fakeNode("app.example", text = "Root"), displayId = 3)
+      extractor.extractFromActiveWindow(
+        fakeNode("app.example", text = "Root"),
+        options = HierarchyExtractionOptions(displayId = 3),
+      )
     assertEquals(3 to null, calls.last())
     assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, single?.prototypeHiddenReason)
   }
@@ -229,9 +235,12 @@ class ViewHierarchyExtractorTest {
       extractor.extractFromAllWindows(
         selected,
         null,
-        disableAllFiltering = true,
-        displayId = 2,
-        panelUniqueId = "panel-cover",
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            displayId = 2,
+            panelUniqueId = "panel-cover",
+          ),
       )
     val serialized = json.encodeToString(ViewHierarchy.serializer(), hierarchy)
     assertTrue(serialized.contains("Cover"))
@@ -253,7 +262,11 @@ class ViewHierarchyExtractorTest {
       )
 
     val hierarchy =
-      extractor.extractFromAllWindows(listOf(app, overlay), null, disableAllFiltering = true)
+      extractor.extractFromAllWindows(
+        listOf(app, overlay),
+        null,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
 
     assertEquals(
       mapOf(1 to "app.main", 2 to "dev.jasonpearson.automobile.ctrlproxy"),
@@ -358,7 +371,11 @@ class ViewHierarchyExtractorTest {
         .getMethod("setSealed", Boolean::class.javaPrimitiveType)
         .invoke(node, true)
 
-      val result = extractor.extractFromActiveWindow(node, disableAllFiltering = true)
+      val result =
+        extractor.extractFromActiveWindow(
+          node,
+          options = HierarchyExtractionOptions(disableAllFiltering = true),
+        )
       assertNull(result!!.error)
       val rawNode = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
       assertEquals(
@@ -515,7 +532,11 @@ class ViewHierarchyExtractorTest {
         state = NodeState(bounds = Rect(0, 0, 0, 0), children = listOf(child)),
       )
 
-    val result = extractor.extractFromActiveWindow(parent, disableAllFiltering = true)
+    val result =
+      extractor.extractFromActiveWindow(
+        parent,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
 
     assertNotNull(result!!.hierarchy)
     assertTrue(result.hierarchy!!.node.toString().contains("Visible child"))
@@ -531,7 +552,11 @@ class ViewHierarchyExtractorTest {
         state = NodeState(bounds = Rect(0, 0, 0, 0), children = listOf(child)),
       )
 
-    val result = extractor.extractFromActiveWindow(parent, disableAllFiltering = true)
+    val result =
+      extractor.extractFromActiveWindow(
+        parent,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
 
     assertNull(result!!.hierarchy)
     parent.recycle()
@@ -561,8 +586,11 @@ class ViewHierarchyExtractorTest {
         val result =
           extractor.extractFromActiveWindow(
             root,
-            screenDimensions = dimensions,
-            disableAllFiltering = true,
+            options =
+              HierarchyExtractionOptions(
+                screenDimensions = dimensions,
+                disableAllFiltering = true,
+              ),
           )
         val hierarchy = result!!.hierarchy!!.node.toString()
         assertTrue(hierarchy.contains("Visible row"))
@@ -2312,7 +2340,12 @@ class ViewHierarchyExtractorTest {
         fakeWindow(id = 322, layer = 1, root = dialogRoot, state = WindowState(active = true)),
       )
 
-    val result = extractor.extractFromAllWindows(windows, appRoot, occlusionEnabled = false)
+    val result =
+      extractor.extractFromAllWindows(
+        windows,
+        appRoot,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
 
     assertEquals(true, result.notificationPermissionDetected)
     assertEquals("com.google.android.contacts", result.packageName)
@@ -2334,7 +2367,11 @@ class ViewHierarchyExtractorTest {
         fakeWindow(id = 322, layer = 1, root = dialogRoot),
       )
     val bystanderResult =
-      extractor.extractFromAllWindows(bystander, appRoot, occlusionEnabled = false)
+      extractor.extractFromAllWindows(
+        bystander,
+        appRoot,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
     assertEquals(false, bystanderResult.notificationPermissionDetected)
   }
 
@@ -2422,7 +2459,12 @@ class ViewHierarchyExtractorTest {
         ),
       )
 
-    val result = extractor.extractFromAllWindows(windows, appARoot, occlusionEnabled = false)
+    val result =
+      extractor.extractFromAllWindows(
+        windows,
+        appARoot,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
 
     assertEquals(false, result.notificationPermissionDetected)
     assertEquals("com.google.android.contacts", result.packageName)
@@ -2466,7 +2508,12 @@ class ViewHierarchyExtractorTest {
         ),
       )
 
-    val result = extractor.extractFromAllWindows(windows, null, occlusionEnabled = false)
+    val result =
+      extractor.extractFromAllWindows(
+        windows,
+        null,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
 
     assertEquals(true, result.ctrlProxyIncomplete)
     // All three causes hold; active-window withholding takes precedence.
@@ -2492,7 +2539,10 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals(true, result.ctrlProxyIncomplete)
     assertEquals("active_window_null_root", result.ctrlProxyIncompleteReason)
@@ -2513,7 +2563,10 @@ class ViewHierarchyExtractorTest {
           fakeWindow(2, 0, null, state = WindowState(focused = true)),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals(true, result.ctrlProxyIncomplete)
     assertEquals("app_window_null_root", result.ctrlProxyIncompleteReason)
@@ -2534,7 +2587,10 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals("example.overlay", result.packageName)
     assertEquals(true, result.ctrlProxyIncomplete)
@@ -2548,7 +2604,10 @@ class ViewHierarchyExtractorTest {
       extractor.extractFromAllWindows(
         listOf(fakeWindow(1, 0, app, state = WindowState(focused = true, active = true))),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertNotNull(result.hierarchy)
     assertNull(result.ctrlProxyIncomplete)
@@ -2574,7 +2633,10 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals("com.android.systemui", result.packageName)
     assertNotNull(result.hierarchy)
@@ -2604,8 +2666,11 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         appRoot,
-        disableAllFiltering = true,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            occlusionEnabled = false,
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     val app = roots[0] as kotlinx.serialization.json.JsonObject
@@ -2634,8 +2699,11 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         app,
-        disableAllFiltering = true,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            occlusionEnabled = false,
+          ),
       )
     val encoded =
       json.encodeToJsonElement(ViewHierarchy.serializer(), result)
@@ -2663,7 +2731,12 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `fallback root retains matching window metadata`() {
     val app = fakeNode(packageName = "example.app", text = "Fallback")
-    val result = extractor.extractFromAllWindows(emptyList(), app, disableAllFiltering = true)
+    val result =
+      extractor.extractFromAllWindows(
+        emptyList(),
+        app,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
     val root = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
     val encoded =
       json.encodeToJsonElement(ViewHierarchy.serializer(), result)
@@ -2687,8 +2760,11 @@ class ViewHierarchyExtractorTest {
       extractor.extractFromAllWindows(
         windows,
         activeRoot,
-        disableAllFiltering = true,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            occlusionEnabled = false,
+          ),
       )
     val encoded =
       json.encodeToJsonElement(ViewHierarchy.serializer(), result)
@@ -2714,8 +2790,11 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         null,
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     val imeOutput = roots[1] as kotlinx.serialization.json.JsonObject
@@ -2747,8 +2826,11 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         budgetTree("Fallback", 2),
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     assertEquals("example.app", result.packageName)
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
@@ -2791,8 +2873,11 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         budgetTree("Fallback", 2),
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     assertEquals(3, countWireNodes(result.hierarchy!!.node!!))
     assertEquals(7, result.windows!!.single().id)
@@ -2810,8 +2895,11 @@ class ViewHierarchyExtractorTest {
           fakeWindow(3, 2, budgetTree("Last", 5)),
         ),
         null,
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     assertEquals(6, countWireNodes(roots[1]))
@@ -2833,7 +2921,10 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     val verbose = Json { encodeDefaults = true }
     val encoded =
@@ -2860,12 +2951,7 @@ class ViewHierarchyExtractorTest {
                 enabled = true,
                 children =
                   listOf(
-                    fakeNode(
-                      packageName = "example.app",
-                      text = "One",
-                      resourceId = "one",
-                      state = NodeState(enabled = true),
-                    ),
+                    fakeNode("example.app", "One", "one", NodeState(enabled = true)),
                     fakeNode(
                       packageName = "example.app",
                       text = "Two",
@@ -2879,9 +2965,13 @@ class ViewHierarchyExtractorTest {
           extractor.extractFromAllWindows(
             listOf(fakeWindow(1, 0, root, state = WindowState(focused = true))),
             if (provideFallback) root else null,
-            disableAllFiltering = true,
-            snapshotOptions =
-              if (limited) HierarchySnapshotOptions(maxNodes = 2) else HierarchySnapshotOptions(),
+            options =
+              HierarchyExtractionOptions(
+                disableAllFiltering = true,
+                snapshotOptions =
+                  if (limited) HierarchySnapshotOptions(maxNodes = 2)
+                  else HierarchySnapshotOptions(),
+              ),
           )
         val children = if (limited) childOne else "[$childOne,$childTwo]"
         val reasons = if (limited) ",\"truncationReasons\":[\"max_nodes\"]" else ""
@@ -2914,7 +3004,10 @@ class ViewHierarchyExtractorTest {
           fakeWindow(2, 1, budgetTree("Small", 0)),
         ),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     val children =
@@ -2933,7 +3026,10 @@ class ViewHierarchyExtractorTest {
       extractor.extractFromAllWindows(
         listOf(fakeWindow(1, 0, budgetTree("App", 256), state = WindowState(focused = true))),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     assertEquals(257, countWireNodes(result.hierarchy!!.node!!))
     assertNull(result.windows!!.single().truncationReasons)
@@ -2956,7 +3052,10 @@ class ViewHierarchyExtractorTest {
       extractor.extractFromAllWindows(
         listOf(fakeWindow(1, 0, root, state = WindowState(focused = true))),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     assertEquals(515, countWireNodes(result.hierarchy!!.node!!))
     assertEquals(listOf("max_children"), result.windows!!.single().truncationReasons)
@@ -2972,8 +3071,11 @@ class ViewHierarchyExtractorTest {
           fakeWindow(2, 1, budgetTree("Small", 0)),
         ),
         null,
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxDepth = 0),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxDepth = 0),
+          ),
       )
     assertEquals(listOf("max_depth"), result.windows!!.first { it.id == 1 }.truncationReasons)
     assertNull(result.windows.first { it.id == 2 }.truncationReasons)
@@ -2993,8 +3095,11 @@ class ViewHierarchyExtractorTest {
           ),
         ),
         budgetTree("Fallback", 0),
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(isCancelled = { true }),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(isCancelled = { true }),
+          ),
       )
     assertNull(result.hierarchy)
     assertEquals(listOf("cancelled"), result.truncationReasons)

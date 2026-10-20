@@ -1,8 +1,13 @@
+import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
 import { AndroidEmulatorUnavailableError } from "../../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { describe, expect, test } from "bun:test";
 import { DeviceManagerBindingInventory } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
-import { GateBindingBootCapacity } from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
+import {
+  BOOT_CAPACITY_CHECK_TIMEOUT_MS,
+  GateBindingBootCapacity,
+} from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
+import { DEFAULT_SAMPLE_TIMEOUT_MS } from "../../../../src/devices/bootAdmission/BootAdmissionGate";
 import { PoolBindingDeviceClaims } from "../../../../src/daemon/sessionBroker/provisioning/PoolBindingDeviceClaims";
 import {
   ToolBindingProvisioner,
@@ -354,12 +359,25 @@ describe("GateBindingBootCapacity", () => {
     });
   });
 
-  test("a check that never answers is unknown after 5 s, with no real wait", async () => {
+  test("a sample as slow as the gate's own 15 s budget is still answered, not unknown (#13801)", async () => {
+    const timer = new FakeTimer();
+    const capacity = new GateBindingBootCapacity(
+      timer,
+      () => new Promise<void>((resolve) => timer.setTimeout(resolve, DEFAULT_SAMPLE_TIMEOUT_MS)),
+    );
+
+    const check = capacity.check("ios", {});
+    await timer.advanceTimersByTimeAsync(DEFAULT_SAMPLE_TIMEOUT_MS);
+
+    expect(await check).toEqual({ kind: "available" });
+  });
+
+  test("a check that never answers is unknown just after the gate's sample budget, with no real wait", async () => {
     const timer = new FakeTimer();
     const capacity = new GateBindingBootCapacity(timer, () => new Promise<void>(() => {}));
 
     const check = capacity.check("ios", {});
-    await timer.advanceTimersByTimeAsync(4_999);
+    await timer.advanceTimersByTimeAsync(BOOT_CAPACITY_CHECK_TIMEOUT_MS - 1);
     let settled = false;
     void check.then(() => {
       settled = true;
@@ -370,7 +388,7 @@ describe("GateBindingBootCapacity", () => {
 
     expect(await check).toEqual({
       kind: "unknown",
-      message: "Timed out after 5000ms checking ios boot capacity.",
+      message: `Timed out after ${BOOT_CAPACITY_CHECK_TIMEOUT_MS}ms checking ios boot capacity.`,
     });
   });
 
@@ -393,4 +411,51 @@ describe("GateBindingBootCapacity", () => {
       "cancelled",
     );
   });
+});
+
+test("late reservation after adapter timeout is released", async () => {
+  const timer = new FakeTimer();
+  let complete:
+    | ((
+        reservation: import("../../../../src/devices/bootAdmission/BootSlotReservation").BootSlotReservation,
+      ) => void)
+    | undefined;
+  let released = 0;
+  const capacity = new GateBindingBootCapacity(
+    timer,
+    async () => {},
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const result = capacity.reserve("ios", { timeoutMs: 60_000 });
+  timer.advanceTime(BOOT_CAPACITY_CHECK_TIMEOUT_MS);
+  expect(await result).toMatchObject({ kind: "unknown" });
+  complete?.({
+    run: (operation) => operation(),
+    markReplacedDeviceGone: () => {},
+    release: () => {
+      released += 1;
+    },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(released).toBe(1);
+});
+
+test("replacement runtime lookup matches an AVD to its emulator serial, excluding physical devices", async () => {
+  const manager = new FakeDeviceUtils();
+  manager.setBootedDevices("android", [
+    { platform: "android", name: "binding-avd", deviceId: "physical-serial" },
+    { platform: "android", name: "other-avd", deviceId: "emulator-5554" },
+    { platform: "android", name: "binding-avd", deviceId: "emulator-5556" },
+  ]);
+  const inventory = new DeviceManagerBindingInventory(manager);
+  expect(
+    await inventory.runtimeDeviceId(
+      { platform: "android", name: "binding-avd", isRunning: true },
+      {},
+    ),
+  ).toBe("emulator-5556");
 });

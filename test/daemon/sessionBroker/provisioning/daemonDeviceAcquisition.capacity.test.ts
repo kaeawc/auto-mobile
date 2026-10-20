@@ -6,7 +6,10 @@ import { DaemonState } from "../../../../src/daemon/daemonState";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../../src/devices/virtualDeviceLifecycleCoordinator";
 import { AndroidBootAdmissionGate } from "../../../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import type { AndroidCapacitySample } from "../../../../src/features/bootAdmission/AndroidCapacitySource";
-import { assertBootCapacityAvailable } from "../../../../src/features/bootAdmission/sharedBootAdmissionGates";
+import {
+  assertBootCapacityAvailable,
+  reserveBootCapacity,
+} from "../../../../src/features/bootAdmission/sharedBootAdmissionGates";
 import type { DeviceInfo } from "../../../../src/models/index";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import type { Platform } from "../../../../src/models/Platform";
@@ -77,6 +80,7 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
   let registry: FakeBindingRegistry;
   let sample: AndroidCapacitySample;
   let created: string[];
+  let reserveCapacity: typeof reserveBootCapacity;
   let checkBootCapacity: (platform: Platform, signal?: AbortSignal) => Promise<void>;
   let restorePipelineOverrides: (() => void) | undefined;
 
@@ -105,6 +109,8 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
     const gate = new AndroidBootAdmissionGate({ sample: async () => sample }, timer, {
       env: { AUTOMOBILE_ANDROID_MAX_BOOTED: "1" },
     });
+    reserveCapacity = (platform, options) =>
+      reserveBootCapacity(platform, options, { android: gate });
     checkBootCapacity = (platform, signal) =>
       assertBootCapacityAvailable(platform, { signal }, { android: gate, ios: undefined });
     const resourceObserver = new FakeDeviceResourceObserver();
@@ -222,6 +228,7 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
         androidImageCatalog: { listInstalledPackages: async () => [RUNTIME] },
         androidProfileCatalog: { listProfileIds: async () => ["pixel_8", "pixel_9"] },
         checkBootCapacity,
+        reserveBootCapacity: reserveCapacity,
       },
     });
     const config = buildBrokerProvisionRequest({

@@ -43,13 +43,15 @@ fun EventInspectorContent(
   val textColor = SharedTheme.globalColors.text.normal
 
   TelemetryDetailPanel(
-    event = event,
-    timeFormat = timeFormat,
-    textColor = textColor,
-    onClose = onClose,
-    onOpenSource = onOpenSource,
-    screenshotLoader = screenshotLoader,
-    modifier = modifier,
+    dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDetailOptions(
+      event = event,
+      timeFormat = timeFormat,
+      textColor = textColor,
+      onClose = onClose,
+      onOpenSource = onOpenSource,
+      screenshotLoader = screenshotLoader,
+      modifier = modifier,
+    ),
   )
 }
 

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.UnixDomainSocketAddress
@@ -13,6 +14,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.math.min
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -97,9 +99,10 @@ class DaemonNotificationClient(
   private val json: Json = DaemonJson,
   private val initialBackoffMs: Long = 1_000,
   private val maxBackoffMs: Long = 30_000,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : DaemonNotificationSource {
 
-  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
   private val _notifications =
     MutableSharedFlow<ListChangedKind>(
@@ -148,7 +151,7 @@ class DaemonNotificationClient(
       _state.value = NotificationSubscriptionState.Connecting
       try {
         if (!Files.exists(Path.of(socketPathValue))) {
-          throw IllegalStateException("Daemon socket not found at $socketPathValue")
+          throw IOException("Daemon socket not found at $socketPathValue")
         }
 
         SocketChannel.open(UnixDomainSocketAddress.of(socketPathValue)).use { socket ->
@@ -172,9 +175,12 @@ class DaemonNotificationClient(
           _state.value = NotificationSubscriptionState.Subscribed
           readNotifications(reader)
         }
-      } catch (e: Exception) {
+      } catch (e: IOException) {
         if (!shouldReconnect) return
         LOG.debug("Daemon notification connection failed: ${e.message}")
+      } catch (e: kotlinx.serialization.SerializationException) {
+        if (!shouldReconnect) return
+        LOG.debug("Daemon notification response invalid: ${e.message}")
       } finally {
         channel = null
       }
@@ -198,7 +204,7 @@ class DaemonNotificationClient(
     writer.newLine()
     writer.flush()
 
-    val line = reader.readLine() ?: throw IllegalStateException("Daemon closed during subscribe")
+    val line = reader.readLine() ?: throw IOException("Daemon closed during subscribe")
     val response = json.decodeFromString(serializer<DaemonFrame>(), line)
 
     if (response.success != true) {
@@ -237,7 +243,7 @@ class DaemonNotificationClient(
   private fun decodeFrame(line: String): DaemonFrame? =
     try {
       json.decodeFromString(serializer<DaemonFrame>(), line)
-    } catch (e: Exception) {
+    } catch (e: kotlinx.serialization.SerializationException) {
       // An unmodelled frame is not a reason to drop the subscription.
       LOG.debug("Ignoring unparseable daemon frame: ${e.message}")
       null
@@ -246,7 +252,7 @@ class DaemonNotificationClient(
   private fun closeChannel() {
     try {
       channel?.close()
-    } catch (e: Exception) {
+    } catch (e: IOException) {
       LOG.debug("Closing the daemon notification socket failed: ${e.message}")
     }
     channel = null

@@ -475,7 +475,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 2,
     reason: "Output-schema field declarations (zod), not clock values.",
   },
-  "src/daemon/cli/runDaemonCommand.ts parseAcceptanceSessionRestartScope": {
+  "src/daemon/cli/daemonCommandArguments.ts parseAcceptanceSessionRestartScope": {
     writes: 1,
     reason: "Acceptance-harness restart scope expiry parsed from CLI flags, not a session clock.",
   },

@@ -803,6 +803,7 @@ test/features/iosSimFleet/capacityCheckFreshListing.test.ts
 test/features/iosSimFleet/capacityCheckSampleBounds.test.ts
 test/features/iosSimFleet/capacityHostSnapshotFailure.test.ts
 test/features/iosSimFleet/failedBootUdidExternal.test.ts
+test/features/iosSimFleet/inFlightBootRssSizing.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts

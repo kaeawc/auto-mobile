@@ -1278,7 +1278,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       host =
         object : ScreenshotController.Host {
           override fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback) {
-            this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+              this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
+            }
           }
 
           override fun rotationProvenance() = this@CtrlProxy.rotationProvenance

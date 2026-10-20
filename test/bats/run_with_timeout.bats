@@ -106,3 +106,26 @@ EOF
   # RSS descending; optional sampler failures do not replace timeout status.
   [ "$(sed -n '/macOS CPU\/RSS/{n;p;}' "$snapshot")" = '2 3 200 large' ]
 }
+
+@test "fractional portable deadlines still bound a long command" {
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0.1 \
+    AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$BATS_TEST_TMPDIR/snapshot" \
+    bash -c 'source scripts/ios/run_with_timeout.sh; run_with_timeout 0.1 sleep 5'
+  [[ "$status" -eq 124 ]]
+}
+
+@test "fractional portable deadline preserves an early command exit status" {
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    bash -c 'source scripts/ios/run_with_timeout.sh; run_with_timeout 1.5 bash -c "exit 7"'
+  [[ "$status" -eq 7 ]]
+}
+
+@test "watchdog coordination variable is private to the timeout wrapper" {
+  run env AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$BATS_TEST_TMPDIR/pgid" \
+    bash -c '
+      source scripts/ios/run_with_timeout.sh
+      run_with_timeout 5 bash -c "test -z \"\${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE+x}\""
+    '
+  [[ "$status" -eq 0 ]]
+}

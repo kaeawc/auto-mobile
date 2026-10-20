@@ -117,6 +117,9 @@ enum PrototypeHttpHeaderCheck {
     static func problem(in headers: [String: String]) -> PrototypeRequestError? {
         var seen = Set<String>()
         for name in headers.keys.sorted() {
+            if PrototypeRequestValidator.isForbiddenHeader(name) {
+                return .init(.invalidRequest, "Forbidden request header: \(name)")
+            }
             if !seen.insert(name.lowercased()).inserted {
                 return .init(.invalidRequest, "Header \(name) is given twice (names are case-insensitive)")
             }

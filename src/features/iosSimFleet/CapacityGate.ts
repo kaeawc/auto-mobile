@@ -106,7 +106,11 @@ export class IosSimCapacityGate
 
   /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
   async refresh(options: { fresh?: boolean } = {}): Promise<FleetCostReport> {
-    const report = await (options.fresh ? this.fleet.collectFresh() : this.fleet.collect());
+    // A fresh run is bounded at the sample budget so one abandoned by a lost race cannot
+    // outlive it and stack under retries (#13801).
+    const report = await (options.fresh
+      ? this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS })
+      : this.fleet.collect());
     this.foldIntoPressureHistory(report);
     return report;
   }
@@ -259,19 +263,23 @@ export class IosSimCapacityGate
     options.signal?.throwIfAborted();
     const window = this.admittedBoots.beginSample();
     try {
-      // The collector's run is shared with other callers, so losing the race never cancels it.
-      const report = await raceWithDeadline(() => this.fleet.collectFresh(), {
-        timer: this.timer,
-        timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
-        signal: options.signal,
-        label: `Collecting ${CAPACITY_LABEL}`,
-        timeoutError: () =>
-          new BootedDeviceDiscoveryIncompleteError("ios", {
-            code: "timeout",
-            message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
-            retryable: true,
-          }),
-      });
+      // The collector's run is shared with other callers, so losing the race never cancels it;
+      // the run's own commands carry the same budget so an abandoned one ends too (#13801).
+      const report = await raceWithDeadline(
+        () => this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS }),
+        {
+          timer: this.timer,
+          timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
+          signal: options.signal,
+          label: `Collecting ${CAPACITY_LABEL}`,
+          timeoutError: () =>
+            new BootedDeviceDiscoveryIncompleteError("ios", {
+              code: "timeout",
+              message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
+              retryable: true,
+            }),
+        },
+      );
       options.signal?.throwIfAborted();
       return judge(report, window);
     } finally {

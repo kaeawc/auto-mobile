@@ -794,7 +794,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
           return firstHealthPoll;
         }
         return createExecResult(
-          curlCalls >= 5 ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          curlCalls >= 6 ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
           "",
         );
       });
@@ -819,7 +819,8 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         await expect(defaultStart).rejects.toThrow("CtrlProxy failed to start within timeout");
       });
 
-      expect(curlCalls).toBe(4);
+      // The cold-launch floor survives removal of the caller's longer budget.
+      expect(curlCalls).toBe(5);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
     });
 
@@ -1265,21 +1266,86 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       expect(fakeTimer.getPendingIntervals()[0]).toBe(30000);
     });
 
-    test("xctest process supervisor treats a live launcher with a dead health endpoint as unhealthy", async function () {
-      const supervisor = createSupervisorProbe();
+    test("live runner restarts only after three consecutive missed probes and success resets the count", async () => {
+      const probe = createSupervisorProbe();
+      let restarts = 0;
       const manager = IOSCtrlProxyManager.createForTestingWithOptions({
         device: testDevice,
         timer: fakeTimer,
         processExecutor: fakeExecutor,
-        processSupervisorFactory: supervisor.factory,
+        processSupervisorFactory: probe.factory,
+        steps: {
+          startInternal: async () => {
+            restarts++;
+          },
+        },
       });
       manager.testHooks.setState({ xcTestProcessId: 12345 });
       fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
       fakeExecutor.setCommandResponse("kill -0 12345", createExecResult("", ""));
+      const supervisor = probe.supervisor;
+      await supervisor.start();
+      for (let miss = 1; miss < 3; miss++) {
+        fakeTimer.advanceTime(30_000);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(supervisor.isRestartPending()).toBe(false);
+        expect(manager.getXcTestProcessId()).toBe(12345);
+      }
+      fakeExecutor.setCommandResponse(
+        "curl -s",
+        createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
+      );
+      fakeTimer.advanceTime(30_000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      for (let miss = 1; miss <= 3; miss++) {
+        fakeTimer.advanceTime(30_000);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(supervisor.isRestartPending()).toBe(miss === 3);
+      }
+      // Preserve ownership until the normal restart path retires the live runner.
+      expect(manager.getXcTestProcessId()).toBe(12345);
+      expect(restarts).toBe(0);
+      fakeTimer.advanceTime(2_000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(restarts).toBe(1);
+      supervisor.stop();
+    });
 
-      const alive = await supervisor.supervisor.isAlive();
+    test("a dead tracked runner bypasses the live-process miss allowance", async () => {
+      const probe = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: probe.factory,
+      });
+      manager.testHooks.setState({ xcTestProcessId: 12345 });
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      fakeExecutor.setCommandError("kill -0 12345", new Error("no such process"));
+      await probe.supervisor.start();
+      fakeTimer.advanceTime(30_000);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(probe.supervisor.isRestartPending()).toBe(true);
+      expect(manager.getXcTestProcessId()).toBeNull();
+      probe.supervisor.stop();
+    });
 
-      expect(alive).toBe(false);
+    test("the health miss threshold is injectable and a replacement PID starts with no misses", async () => {
+      const probe = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: probe.factory,
+        healthMissThreshold: 2,
+      });
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      manager.testHooks.setState({ xcTestProcessId: 12345 });
+      expect(await probe.supervisor.isAlive()).toBe(true);
+      manager.testHooks.setState({ xcTestProcessId: 23456 });
+      expect(await probe.supervisor.isAlive()).toBe(true);
+      expect(await probe.supervisor.isAlive()).toBe(false);
     });
 
     test("xctest process supervisor restarts once when health is down and the tracked PID is missing", async function () {

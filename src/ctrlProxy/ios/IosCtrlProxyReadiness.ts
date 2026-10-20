@@ -88,9 +88,9 @@ export class IosCtrlProxyReadiness {
    * terminated and startup fails with an actionable error inside the deadline.
    *
    * Only a runner this manager tracks is bounded this way; an adopted external
-   * runner keeps the whole deadline, as before. Without a caller extension the
-   * shared deadline is the default window, which is shorter than the first
-   * launch window, so behavior is unchanged.
+   * runner keeps the whole deadline, as before. The first tracked launch raises
+   * the shared default deadline to cover its full cold-launch window. Subsequent
+   * launches never extend the shared budget.
    *
    * Returns true once startup completed; false when the shared deadline ended
    * without a relaunch, leaving the caller's existing timeout handling in charge.
@@ -112,6 +112,7 @@ export class IosCtrlProxyReadiness {
       const launchDeadlineMs = bounded
         ? this.state.timer.now() + launchWindowMs
         : Number.POSITIVE_INFINITY;
+      this.extendFirstLaunchDeadline(sharedStart, launchWindowsMs.length === 1, launchDeadlineMs);
       if (
         await this.state.steps.waitForHealthEndpoint(sharedStart, perf, delayMs, launchDeadlineMs)
       ) {
@@ -138,6 +139,25 @@ export class IosCtrlProxyReadiness {
       }
       await this.relaunchUnresponsiveRunner(sharedStart, perf);
     }
+  }
+
+  private extendFirstLaunchDeadline(
+    sharedStart: SharedCtrlProxyStart,
+    firstLaunch: boolean,
+    launchDeadlineMs: number,
+  ): void {
+    if (!firstLaunch || this.state.xcTestProcessId === null) {
+      return;
+    }
+    // Preserve this floor when a joining caller later adds/removes its budget.
+    sharedStart.defaultHealthPollDeadlineMs = Math.max(
+      sharedStart.defaultHealthPollDeadlineMs ?? 0,
+      launchDeadlineMs,
+    );
+    sharedStart.healthPollDeadlineMs = Math.max(
+      sharedStart.healthPollDeadlineMs ?? 0,
+      launchDeadlineMs,
+    );
   }
 
   /**

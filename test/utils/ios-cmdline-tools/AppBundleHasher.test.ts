@@ -100,6 +100,18 @@ describe("hashAppBundle", () => {
     });
   }
 
+  for (const { label, extra } of skipArtifacts) {
+    test(`includes ${label} when hashing a signed runner`, async () => {
+      const original = await hashAppBundle(ROOT, bundle(ROOT, baseFiles), {
+        includeSigningMetadata: true,
+      });
+      const changed = await hashAppBundle(ROOT, bundle(ROOT, { ...baseFiles, ...extra }), {
+        includeSigningMetadata: true,
+      });
+      expect(changed).not.toBe(original);
+    });
+  }
+
   test("ignores all skip-list artifacts at once", async () => {
     const withAll = {
       ...baseFiles,

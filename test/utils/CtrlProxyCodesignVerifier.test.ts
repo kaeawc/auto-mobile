@@ -5,6 +5,7 @@ import {
   type CodesignExec,
   type CodesignExecOutput,
 } from "../../src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
+import { FakeTimer } from "../fakes/FakeTimer";
 import * as path from "path";
 
 /** Records every invocation and replays scripted outputs keyed by the tool + first flag. */
@@ -53,6 +54,43 @@ describe("DefaultCtrlProxyCodesignVerifier", function () {
     // The app path is passed as one literal argument, never interpolated.
     expect(calls[0].args).toContain(APP);
   });
+
+  test("bounds all three exec calls with the configured timeoutMs", async () => {
+    const timeouts: number[] = [];
+    const exec: CodesignExec = async (_file, _args, options) => {
+      timeouts.push(options?.timeoutMs);
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    await new DefaultCtrlProxyCodesignVerifier(exec, new FakeTimer()).verifyAppBundle(APP);
+    expect(timeouts).toEqual([15_000, 15_000, 15_000]);
+  });
+
+  test.each(["--verify", "-dvv", "--assess"])(
+    "bounds a hung %s command with FakeTimer",
+    async (flag) => {
+      const timer = new FakeTimer();
+      const exec: CodesignExec = async (_file, args) =>
+        args[0] === flag
+          ? new Promise<CodesignExecOutput>(() => {})
+          : { code: 0, stdout: "", stderr: "" };
+      const checking = new DefaultCtrlProxyCodesignVerifier(exec, timer).verifyAppBundle(APP);
+      // Drain preceding successful commands before inspecting the hung command's deadline.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(timer.getPendingTimeouts()).toEqual([15_000]);
+      const failure = checking.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      timer.advanceTime(15_000);
+      const error = await failure;
+      if (!(error instanceof Error)) {
+        throw new Error("Hung command did not reject with a timeout error");
+      }
+      expect(error.message).toContain(`${flag} timed out after 15000ms`);
+      expect(timer.now()).toBe(15_000);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
 
   test("reports verify failure with detail and non-notarized when codesign/spctl exit non-zero", async function () {
     const { exec } = scriptedExec({

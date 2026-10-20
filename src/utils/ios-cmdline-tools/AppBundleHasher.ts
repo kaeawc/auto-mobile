@@ -35,6 +35,7 @@ const collectPaths = async (
   current: string,
   deps: AppBundleHasherDependencies,
   output: string[],
+  includeSigningMetadata: boolean,
 ): Promise<void> => {
   const entries = await deps.readDir(current);
   entries.sort();
@@ -42,11 +43,11 @@ const collectPaths = async (
     const fullPath = join(current, entry);
     const stats = await deps.stat(fullPath);
     const relPath = relative(root, fullPath).replace(/\\/g, "/");
-    if (shouldSkipPath(relPath)) {
+    if (!includeSigningMetadata && shouldSkipPath(relPath)) {
       continue;
     }
     if (stats.isDirectory()) {
-      await collectPaths(root, fullPath, deps, output);
+      await collectPaths(root, fullPath, deps, output, includeSigningMetadata);
     } else if (stats.isFile()) {
       output.push(relPath);
     }
@@ -56,10 +57,11 @@ const collectPaths = async (
 export const hashAppBundle = async (
   bundlePath: string,
   deps: AppBundleHasherDependencies = defaultDependencies,
+  options: { includeSigningMetadata?: boolean } = {},
 ): Promise<string> => {
   const hash = createHash("sha256");
   const files: string[] = [];
-  await collectPaths(bundlePath, bundlePath, deps, files);
+  await collectPaths(bundlePath, bundlePath, deps, files, options.includeSigningMetadata ?? false);
   files.sort();
   for (const relativePath of files) {
     const fullPath = join(bundlePath, relativePath);

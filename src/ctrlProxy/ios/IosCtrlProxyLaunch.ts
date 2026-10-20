@@ -30,8 +30,13 @@ interface IosCtrlProxyLaunchHost {
   isProcessRunning(pid: number): Promise<boolean>;
 }
 
+/** Tolerate brief host starvation without replacing a live XCTest runner. */
+export const IOS_CTRL_PROXY_CONSECUTIVE_HEALTH_MISS_THRESHOLD = 3;
+
 /** Launches local or remote XCTest runners and supervises their process events. */
 export class IosCtrlProxyLaunch {
+  private consecutiveHealthMisses = 0;
+  private supervisedPid: number | null = null;
   constructor(
     private readonly state: Pick<
       IosCtrlProxyRuntime,
@@ -57,6 +62,7 @@ export class IosCtrlProxyLaunch {
       | "retainRunnerTrackingOnSupervisorExit"
     >,
     private readonly host: IosCtrlProxyLaunchHost,
+    private readonly healthMissThreshold = IOS_CTRL_PROXY_CONSECUTIVE_HEALTH_MISS_THRESHOLD,
   ) {}
 
   private requiresRemoteDeviceTunnelRestart(port: number | undefined): port is number {
@@ -569,11 +575,17 @@ export class IosCtrlProxyLaunch {
   }
 
   async isSupervisedCtrlProxyProcessAlive(): Promise<boolean> {
+    if (this.supervisedPid !== this.state.xcTestProcessId) {
+      this.supervisedPid = this.state.xcTestProcessId;
+      this.consecutiveHealthMisses = 0;
+    }
     const isHealthy = await this.host.checkHealthEndpoint();
     if (isHealthy) {
+      this.consecutiveHealthMisses = 0;
       return true;
     }
     if (!this.state.xcTestProcessId) {
+      this.consecutiveHealthMisses = 0;
       logger.warn("[IOSCtrlProxy] XCTest process is not tracked, health endpoint not responding");
       return false;
     }
@@ -582,13 +594,22 @@ export class IosCtrlProxyLaunch {
       ? await this.state.steps.isOwnRunnerProcessAlive()
       : await this.host.isProcessRunning(this.state.xcTestProcessId);
     if (processRunning) {
+      this.consecutiveHealthMisses++;
+      if (this.consecutiveHealthMisses < this.healthMissThreshold) {
+        logger.warn(
+          `[IOSCtrlProxy] Live XCTest runner missed health probe ${this.consecutiveHealthMisses}/${this.healthMissThreshold}; retaining it`,
+        );
+        return true;
+      }
+      this.consecutiveHealthMisses = 0;
       logger.warn(
-        "[IOSCtrlProxy] XCTest process is alive but its health endpoint is unavailable; treating the runner as unhealthy",
+        `[IOSCtrlProxy] Live XCTest runner missed ${this.healthMissThreshold} consecutive health probes; treating the runner as unhealthy`,
       );
       // The supervisor's onExit would otherwise untrack this still-alive runner, and
       // the restart it schedules would then launch a second one beside it (#10234).
       this.state.retainRunnerTrackingOnSupervisorExit = true;
     } else {
+      this.consecutiveHealthMisses = 0;
       logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
     }
     return false;

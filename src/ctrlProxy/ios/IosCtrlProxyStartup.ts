@@ -255,11 +255,9 @@ export class IosCtrlProxyStartup {
     // coming up, which then triggers a kill+respawn livelock (#2834).
     const delayMs = 500;
     const defaultHealthPollDurationMs = this.host.resolveHealthPollMaxAttempts() * delayMs;
-    sharedStart.defaultHealthPollDeadlineMs = this.state.timer.now() + defaultHealthPollDurationMs;
+    const healthPollStartedAt = this.state.timer.now();
+    sharedStart.defaultHealthPollDeadlineMs = healthPollStartedAt + defaultHealthPollDurationMs;
     this.host.refreshHealthPollDeadline(sharedStart);
-    const timeoutSeconds = Math.round(
-      ((sharedStart.healthPollDeadlineMs ?? 0) - this.state.timer.now()) / 1000,
-    );
 
     if (
       await this.host.waitForHealthRestartingUnresponsiveRunner(
@@ -272,6 +270,10 @@ export class IosCtrlProxyStartup {
       return;
     }
 
+    // The tracked first launch may have raised the shared deadline above the default.
+    const timeoutSeconds = Math.round(
+      ((sharedStart.healthPollDeadlineMs ?? 0) - healthPollStartedAt) / 1000,
+    );
     if (
       await this.recoverDeferredRunner(
         sharedStart,

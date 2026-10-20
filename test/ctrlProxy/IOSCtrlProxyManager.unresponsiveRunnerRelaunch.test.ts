@@ -204,14 +204,39 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     expect(harness.terminated).toEqual([]);
   });
 
-  test("keeps the single default window when no caller extends the deadline", async () => {
+  test("default cold launch answers at 45s inside the real 60s first-launch window", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness((_index, elapsed) => elapsed >= 45_000);
+    harness.timer.enableAutoAdvance();
+    await harness.manager.start();
+    expect(harness.launches).toHaveLength(1);
+    expect(harness.terminated).toEqual([]);
+    // Includes the existing 500ms WebSocket initialization wait.
+    expect(harness.timer.now() - harness.launches[0]).toBe(45_500);
+  });
+
+  test("a subsequent launch stops at the shared deadline without extending its window", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness(() => false);
+    harness.timer.enableAutoAdvance();
+    await expect(harness.manager.start({ minimumHealthPollDurationMs: 75_000 })).rejects.toThrow(
+      "CtrlProxy failed to start within timeout",
+    );
+    expect(harness.launches).toHaveLength(2);
+    expect(harness.launches[1] - harness.launches[0]).toBe(60_000);
+    expect(harness.timer.now() - harness.launches[0]).toBe(75_000);
+  });
+
+  test("gives a frozen first launch exactly twice the default window without a caller extension", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
     const harness = createHarness(() => false);
     harness.timer.enableAutoAdvance();
 
     await expect(harness.manager.start()).rejects.toThrow(
-      "CtrlProxy failed to start within timeout",
+      "CtrlProxy failed to start within timeout (60s)",
     );
 
     expect(harness.launches).toHaveLength(1);
+    expect(harness.timer.now() - harness.launches[0]).toBe(60_000);
   });
 });

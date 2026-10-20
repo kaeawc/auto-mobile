@@ -139,7 +139,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
       throw McpConnectionException("MCP HTTP server error $statusCode")
     }
 
-    if (!expectResponse) {
+    if (!expectResponse && statusCode != 401) {
       return JsonRpcResponse(jsonrpc = "2.0")
     }
 
@@ -171,6 +171,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
     request: JsonRpcRequest,
     includeSession: Boolean,
     deadline: StatusRequestDeadline?,
+    retryAuthentication: Boolean = true,
   ): HttpResponse<String> {
     val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
     // The MCP streamable-HTTP transport answers 406 unless Accept lists both forms.
@@ -191,14 +192,17 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
     val response =
       if (timeoutMs == null) {
         retryWithBackoffBlocking(retryPolicy, isRetryable = ::isRetryableError) {
-          sendHttpRequest(httpRequest)
+          sendAuthenticatedRequest(httpRequest)
         }
       } else {
         // A health probe has one end-to-end hang ceiling. Retrying its individually timed requests
         // would turn a 5s deadline into an unbounded series of 5s waits.
-        sendHttpRequest(httpRequest)
+        sendAuthenticatedRequest(httpRequest)
       }
 
+    if (response.statusCode() == 401 && retryAuthentication) {
+      return exchange(request, includeSession, deadline, retryAuthentication = false)
+    }
     response.headers().firstValue(SESSION_HEADER).ifPresent { header ->
       if (header.isNotBlank()) {
         sessionId = header
@@ -240,9 +244,16 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
     initialized = false
   }
 
-  /** True for the daemon's `{"error":"Session not found"}` and the SDK's JSON-RPC -32001 form. */
-  private fun sendHttpRequest(request: HttpRequest): HttpResponse<String> =
-    requestSender?.send(request) ?: httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+  private fun sendAuthenticatedRequest(request: HttpRequest): HttpResponse<String> {
+    val builder =
+      HttpRequest.newBuilder(request) { name, _ ->
+        !name.equals("Authorization", ignoreCase = true)
+      }
+    options.tokenProvider.read()?.let { builder.header("Authorization", "Bearer $it") }
+    val authenticated = builder.build()
+    return requestSender?.send(authenticated)
+      ?: httpClient.send(authenticated, HttpResponse.BodyHandlers.ofString())
+  }
 
   companion object {
     /** Must match `MCP_SESSION_KEY_HEADER` in src/daemon/mcpSessionKey.ts. */

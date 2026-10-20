@@ -78,6 +78,8 @@ export interface DaemonStartupHost extends Pick<
   | "setVideoRecordingManagerDependencies"
 > {
   enterDaemonProcess: DaemonStartup["enterDaemonProcess"];
+  prepareHttpToken: () => void;
+  publishHttpToken: () => void;
   startHttpIngress: DaemonStartup["startHttpIngress"];
   bindControlSocket: DaemonStartup["bindControlSocket"];
   startServicesAfterSocketBind: DaemonStartup["startServicesAfterSocketBind"];
@@ -320,6 +322,8 @@ export class DaemonStartup {
       },
       writeEarlyOwnerRecord: () => this.host.writeEarlyOwnerRecord(),
       openTerminalReleaseJournal: (owner) => createDaemonTerminalReleaseJournal(owner),
+      prepareHttpToken: () => this.host.prepareHttpToken(),
+      publishHttpToken: () => this.host.publishHttpToken(),
       startHttpIngress: () => this.host.startHttpIngress(),
       sweepStaleAppearanceConfigs: async (rehydration) => {
         await sweepStaleAppearanceConfigs(rehydration, this.host.services.sessionManager(), {
@@ -445,7 +449,9 @@ export class DaemonStartup {
       }
 
       this.host.services.sessionManager().assertDaemonCollaboratorsAttached();
+      this.host.startHost().prepareHttpToken();
       await this.host.startHost().startHttpIngress();
+      this.host.startHost().publishHttpToken();
 
       // Initialize the device pool BEFORE the socket server so connecting clients see it.
       // Wait up to 5 seconds - emulators should already be running

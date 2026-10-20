@@ -10,6 +10,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { createExecResult } from "../../../src/utils/execResult";
+import { wrapCommandError } from "../../../src/utils/CommandError";
 import type { BootedDevice } from "../../../src/models";
 
 const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
@@ -296,8 +297,20 @@ describe("ADB post-dispatch transport loss", () => {
     expect(h.timer.getSleepHistory()).toEqual([200, 500, 1000]);
   });
 
-  test("unknown dispatch cannot inherit pre-dispatch retry permission from message text", async () => {
-    const original = Object.assign(new Error("cannot connect to adb"), { code: 255, stderr: "" });
+  test("exit 255 preserves pre-dispatch retries for a non-safe command", async () => {
+    const original = Object.assign(new Error("cannot connect to adb"), {
+      code: 255,
+      stdout: "",
+      stderr: "",
+    });
+    const h = harness(Infinity, original);
+    expect(await rejected(h.client.execute(["shell", "input tap 1 2"]))).toBe(original);
+    expect(h.calls()).toBe(4);
+    expect(h.timer.getSleepHistory()).toEqual([200, 500, 1000]);
+  });
+
+  test("message-less exit 255 with empty streams dispatches a non-safe command once", async () => {
+    const original = Object.assign(new Error(""), { code: 255, stdout: "", stderr: "" });
     const h = harness(Infinity, original);
     expect(await rejected(h.client.execute(["shell", "input tap 1 2"]))).toMatchObject({
       code: "device_transport_unavailable",
@@ -306,6 +319,27 @@ describe("ADB post-dispatch transport loss", () => {
     expect(h.calls()).toBe(1);
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
+
+  test.each<{ command: string; attempts: number; delays: number[] }>([
+    { command: "input tap 1 2", attempts: 1, delays: [] },
+    { command: "getprop foo", attempts: 4, delays: [200, 500, 1000] },
+  ])(
+    "exit 255 with remote stdout preserves the original error and retries for $command",
+    async ({ command, attempts, delays }) => {
+      const original = wrapCommandError(
+        Object.assign(new Error("Command failed: adb shell"), {
+          code: 255,
+          stdout: Buffer.from("Unknown command: bar\n"),
+          stderr: Buffer.from(""),
+        }),
+        { command: "adb", args: ["-s", device.deviceId, "shell", command] },
+      );
+      const h = harness(Infinity, original);
+      expect(await rejected(h.client.execute(["shell", command]))).toBe(original);
+      expect(h.calls()).toBe(attempts);
+      expect(h.timer.getSleepHistory()).toEqual(delays);
+    },
+  );
 
   test.each(["error: closed", "protocol fault", ""])(
     "types transport stderr %s with exit 255",

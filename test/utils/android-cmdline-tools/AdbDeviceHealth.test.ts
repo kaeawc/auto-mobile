@@ -23,12 +23,40 @@ describe("isAdbPostDispatchTransportError", () => {
     expect(isAdbPostDispatchTransportError(stderr, 255, "emulator-5554")).toBe(true);
   });
 
-  test("exit 255 needs empty or entirely transport stderr", () => {
+  test("bare exit 255 needs empty stdout and stderr", () => {
     expect(isAdbPostDispatchTransportError("", 255, "emulator-5554")).toBe(true);
     expect(isAdbPostDispatchTransportError(" \n", 255, "emulator-5554")).toBe(true);
     expect(isAdbPostDispatchTransportError("", 1, "emulator-5554")).toBe(false);
     expect(isAdbPostDispatchTransportError("", undefined, "emulator-5554")).toBe(false);
+    expect(isAdbPostDispatchTransportError("", 255, "emulator-5554", undefined, " \n")).toBe(true);
   });
+
+  test("exit 255 with a remote error on stdout is not transport loss", () => {
+    expect(
+      isAdbPostDispatchTransportError(
+        "",
+        255,
+        "emulator-5554",
+        undefined,
+        "Unknown command: bar\n",
+      ),
+    ).toBe(false);
+  });
+
+  test.each(["connection terminated: read failed", "error: closed", "protocol fault"])(
+    "explicit transport stderr still matches after remote stdout: %s",
+    (stderr) => {
+      expect(
+        isAdbPostDispatchTransportError(
+          stderr,
+          255,
+          "emulator-5554",
+          undefined,
+          "partial output\n",
+        ),
+      ).toBe(true);
+    },
+  );
 
   // Synthetic adversarial envelopes, not additional captured adb wordings.
   test.each([

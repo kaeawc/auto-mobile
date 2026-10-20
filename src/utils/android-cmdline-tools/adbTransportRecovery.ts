@@ -1,6 +1,7 @@
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { adbFailureOutput } from "./adbFailureOutput";
+import { isPreDispatchError } from "./adbCommandRetryPolicy";
 import { DeviceLostError, deviceLostErrorFromAbortSignal } from "../../models/DeviceLostError";
 import { sequenceBackoff, type BackoffPolicy } from "../Backoff";
 import { type Timer } from "../SystemTimer";
@@ -40,7 +41,7 @@ function isOwnPostDispatchTransportFailure(
   deviceId?: string,
   transportId?: string,
 ): boolean {
-  if (!deviceId) {
+  if (!deviceId || (error instanceof Error && isPreDispatchError(error))) {
     return false;
   }
   let current = error;
@@ -58,12 +59,8 @@ function isOwnPostDispatchTransportFailure(
     }
     current = current.cause;
   }
-  return isAdbPostDispatchTransportError(
-    adbFailureOutput(error).stderr,
-    exitCode,
-    deviceId,
-    transportId,
-  );
+  const { stdout, stderr } = adbFailureOutput(error);
+  return isAdbPostDispatchTransportError(stderr, exitCode, deviceId, transportId, stdout);
 }
 
 interface TransportRecoveryOptions {

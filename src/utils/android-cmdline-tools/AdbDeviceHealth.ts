@@ -58,20 +58,27 @@ export function isAdbDeviceOfflineError(error: unknown): boolean {
   return /\bdevice(?:\s+is)?\s+offline\b/i.test(errorMessage(error));
 }
 
-/** Match only complete adb stderr diagnostics, never argv or remote stdout. */
+/**
+ * Match complete transport diagnostics in stderr, never argv or stdout wording.
+ * With shell protocol v2, remote stderr shares the stream with adb's stderr,
+ * so wording matches are best-effort. Keep explicit wording independent of
+ * stdout: a command can emit output before its transport is lost.
+ */
 export function isAdbPostDispatchTransportError(
   stderr: string,
   exitCode: number | undefined,
   expectedDeviceId: string,
   expectedTransportId?: string,
+  stdout = "",
 ): boolean {
   const lines = stderr
     .trim()
     .split(/\r?\n/)
     .filter((line) => line.trim());
   if (lines.length === 0) {
-    // adb shell uses 255 for a lost transport without a diagnostic as well.
-    return exitCode === 255;
+    // adb shell also propagates remote exit -1 as 255; remote handlers may
+    // report their command error only on stdout. Bare 255 needs both empty.
+    return exitCode === 255 && stdout.trim() === "";
   }
   return lines.every((line) => {
     let diagnostic = line.trim().replace(/^adb:\s*/i, "");

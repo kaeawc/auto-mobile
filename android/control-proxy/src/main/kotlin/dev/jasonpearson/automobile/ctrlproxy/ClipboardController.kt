@@ -65,29 +65,39 @@ internal class ClipboardController(
       Log.d(TAG, "Clipboard total time: ${totalTime}ms")
 
       // Broadcast clipboard result
-      broadcastClipboardResult(requestId, action, success, resultText, error, totalTime)
+      broadcastClipboardResult(
+        ClipboardFrameResult(requestId, action, success, resultText, error, totalTime),
+      )
     } catch (e: CancellationException) {
       throw e
     } catch (e: java.io.IOException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing clipboard operation", e)
-      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+      broadcastClipboardResult(
+        ClipboardFrameResult(requestId, action, false, null, e.message, errorTime - startTime),
+      )
     } catch (e: IllegalArgumentException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing clipboard operation", e)
-      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+      broadcastClipboardResult(
+        ClipboardFrameResult(requestId, action, false, null, e.message, errorTime - startTime),
+      )
     } catch (e: IllegalStateException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing clipboard operation", e)
-      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+      broadcastClipboardResult(
+        ClipboardFrameResult(requestId, action, false, null, e.message, errorTime - startTime),
+      )
     } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing clipboard operation", e)
-      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+      broadcastClipboardResult(
+        ClipboardFrameResult(requestId, action, false, null, e.message, errorTime - startTime),
+      )
     }
   }
 
@@ -213,22 +223,15 @@ internal class ClipboardController(
   }
 
   /** Broadcast clipboard result to WebSocket clients */
-  private suspend fun broadcastClipboardResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    text: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastClipboardResult(outcome: ClipboardFrameResult) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping clipboard result broadcast")
       return
     }
 
-    resultBroadcaster.guard(requestId, "clipboard_result") {
+    resultBroadcaster.guard(outcome.requestId, "clipboard_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        clipboardResultFrame(requestId, action, success, text, error, totalTimeMs, perfTiming)
+        clipboardResultFrame(outcome, perfTiming)
       }
       Log.d(TAG, "Broadcasted clipboard result to ${responseSender.connectionCount()} clients")
     }

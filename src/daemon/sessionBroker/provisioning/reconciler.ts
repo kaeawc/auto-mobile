@@ -1,17 +1,25 @@
-import { BROKER_DEVICE_NAME_PREFIX, isProductBrokerDevice } from "../persistedIdentity";
+import { BindingDeviceCreation } from "./BindingDeviceCreation";
+import {
+  bindingDeviceNameSuffix,
+  casFailure,
+  claimFailure,
+  encodeManagedSpecFingerprint,
+  expectationOf,
+  failure,
+  provisionFailure,
+  type ReadyResult,
+  type ReconcileContext,
+} from "./reconcilerSupport";
+import { isProductBrokerDevice } from "../persistedIdentity";
 import { BindingJournalRemovalRegistryTimeout } from "../registry/bindingJournal";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import {
-  ProvisionDeviceError,
-  type AndroidDeviceSpecification,
-  type ResolvedExactDeviceSpecification,
+import type {
+  AndroidDeviceSpecification,
+  ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
-import type { BindingResourceBudget, BindingResourceAdmission } from "./resourceBudget";
-import { budgetRefusal } from "./resourceBudget";
+import type { BindingResourceBudget } from "./resourceBudget";
 import type { DeviceInfo } from "../../../models/index";
-import { OCCUPYING_SIMULATOR_STATES } from "../../../features/iosSimFleet/FleetCostCollector";
-import { BootCapacityExhaustedError } from "../../../models/BootCapacityExhaustedError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import {
@@ -31,18 +39,15 @@ import {
 import { logger } from "../../../utils/logger";
 import { stableStringify } from "../../../utils/stableStringify";
 import type { Timer } from "../../../utils/SystemTimer";
-import {
-  bindingMatches,
-  type BindingAssignmentRecord,
-  type BindingBindingExpectation,
-  type BindingCasFailure,
-  type BindingExecOwner,
-  type BindingExecOwnerLiveness,
-  type BindingJournalEntry,
-  type BindingJournalOwner,
-  type BindingKey,
-  type BindingPlatform,
-  type BindingRegistry,
+import type {
+  BindingAssignmentRecord,
+  BindingExecOwner,
+  BindingExecOwnerLiveness,
+  BindingJournalEntry,
+  BindingJournalOwner,
+  BindingKey,
+  BindingPlatform,
+  BindingRegistry,
 } from "../registry/bindingRegistry";
 import {
   type BindingRequestedSpec,
@@ -54,11 +59,9 @@ import {
   type ManagedSpecResolver,
   type BindingSpecFingerprint,
 } from "./DefaultManagedSpecResolver";
-import {
-  ReconcileAbort,
-  type BindingReconcileFailureCode,
-  type BindingReconcileFailure,
-} from "./ReconcileAbort";
+import { ReconcileAbort, type BindingReconcileFailure } from "./ReconcileAbort";
+
+export { bindingDeviceName, encodeManagedSpecFingerprint, failure } from "./reconcilerSupport";
 
 export type BindingDisposition = "reused" | "adopted" | "created" | "replaced";
 
@@ -287,48 +290,6 @@ export interface BindingReconcileRequest {
   owner?: Omit<BindingExecOwner, "sessionUuid">;
 }
 
-const FAILURE_RETRYABILITY: Readonly<Record<BindingReconcileFailureCode, boolean>> = {
-  spec_unsupported: false,
-  runtime_incompatible: false,
-  scope_not_valid: false,
-  discovery_incomplete: true,
-  binding_in_use: true,
-  binding_settling: true,
-  device_busy: true,
-  reconcile_in_progress: true,
-  cleanup_pending: true,
-  capacity_exhausted: true,
-  binding_budget_exhausted: true,
-  concurrent_modification: true,
-  readiness_incomplete: true,
-  stale_session: true,
-  provision_failed: false,
-  timeout: true,
-  cancelled: true,
-};
-
-const FAILURE_NEXT_ACTION: Readonly<Record<BindingReconcileFailureCode, string>> = {
-  spec_unsupported: "Fix the requested spec; nothing was changed.",
-  runtime_incompatible: "Request a model/runtime pair the host supports; nothing was changed.",
-  scope_not_valid: "Use the current runner incarnation; this scope no longer accepts work.",
-  discovery_incomplete: "Retry once device discovery completes; nothing destructive was done.",
-  binding_in_use: "Wait for the binding's live execution to end, then retry.",
-  binding_settling: "Wait for the previous execution's released work to settle, then retry.",
-  device_busy: "Wait for the device's live session or foreign claim to end, then retry.",
-  reconcile_in_progress: "Another reconciliation of this binding is in progress; retry later.",
-  cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
-  binding_budget_exhausted:
-    "Free unused broker resources or raise limits.totalDeviceCap in the broker host configuration, then retry.",
-  capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",
-  concurrent_modification: "The binding changed concurrently; retry to converge on its new state.",
-  readiness_incomplete: "Retry; the device did not reach automation readiness.",
-  stale_session:
-    "Retry; an earlier execution's session on the binding device could not be released.",
-  provision_failed: "Inspect the provision failure code; retry if it is retryable.",
-  timeout: "Retry with a longer preparation timeout.",
-  cancelled: "The preparation was cancelled; retry when needed.",
-};
-
 export interface BindingReconcileEvidence {
   /** Assignment as read before any mutation (null when the scope was not valid). */
   initial: { generation: number; stableDeviceId: string | null; state: string } | null;
@@ -376,170 +337,11 @@ export type BindingReconcileResult =
       evidence: BindingReconcileEvidence;
     };
 
-// ---------------------------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------------------------
-
-/**
- * `ambroker-<8 hex of scope key>-<binding>-g<generation>-<attempt nonce>`, valid as an AVD and
- * simulator name. The per-attempt nonce keeps two concurrent attempts on the same binding (another
- * daemon, or a retry while the first attempt still runs) from creating the same AVD name, whose
- * name is its stable id, so one attempt's cleanup can never delete the other's device.
- */
-export function bindingDeviceName(key: BindingKey, generation: number, nonce: string): string {
-  const safeNonce = nonce
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .slice(0, 8);
-  if (safeNonce.length === 0) {
-    throw new Error(`Binding device name nonce '${nonce}' has no usable characters`);
-  }
-  return `${BROKER_DEVICE_NAME_PREFIX}${bindingDeviceNameSuffix(key)}${generation}-${safeNonce}`;
-}
-
-function bindingDeviceNameSuffix(key: BindingKey): string {
-  return `${key.scopeKey.slice(0, 8)}-${key.bindingIndex}-g`;
-}
-
-/** The registry column form of a fingerprint: `v<version>:<hash>`. */
-export function encodeManagedSpecFingerprint(fingerprint: BindingSpecFingerprint): string {
-  return `v${fingerprint.version}:${fingerprint.hash}`;
-}
-
 export { deviceStableId };
-
-export function failure(
-  code: BindingReconcileFailureCode,
-  message: string,
-  extra: Partial<
-    Pick<BindingReconcileFailure, "provision" | "capacity" | "budget" | "retryable">
-  > = {},
-): BindingReconcileFailure {
-  return {
-    code,
-    retryable: extra.retryable ?? FAILURE_RETRYABILITY[code],
-    message,
-    nextAction: FAILURE_NEXT_ACTION[code],
-    ...(extra.provision ? { provision: extra.provision } : {}),
-    ...(extra.capacity ? { capacity: extra.capacity } : {}),
-    ...(extra.budget ? { budget: extra.budget } : {}),
-  };
-}
-
-function casFailure(result: BindingCasFailure, step: string): BindingReconcileFailure {
-  switch (result.kind) {
-    case "scope_not_valid":
-      return failure("scope_not_valid", `Binding scope is no longer valid (${step}).`);
-    case "binding_missing":
-      return failure("concurrent_modification", `Binding disappeared during ${step}.`);
-    case "stale_binding":
-      return failure(
-        "concurrent_modification",
-        `Binding binding changed during ${step} (now generation ${result.current.generation}).`,
-      );
-    case "device_assigned_elsewhere":
-      return failure(
-        "concurrent_modification",
-        `Device is already assigned to binding ${result.holder.bindingIndex} of another scope (${step}).`,
-      );
-  }
-}
-
-/** A refused execution claim or fence, as a reconcile failure. */
-function claimFailure(
-  result:
-    | BindingCasFailure
-    | { kind: "binding_in_use"; owner: BindingExecOwner }
-    | { kind: "binding_not_ready" },
-  step: string,
-): BindingReconcileFailure {
-  switch (result.kind) {
-    case "binding_in_use":
-      return failure(
-        "binding_in_use",
-        `Binding is held by live session ${result.owner.sessionUuid} (${step}).`,
-      );
-    case "binding_not_ready":
-      return failure("concurrent_modification", `Binding stopped being ready during ${step}.`);
-    default:
-      return casFailure(result, step);
-  }
-}
-
-function externalDevicesField(devices: readonly string[] | undefined): {
-  externalDevices?: string[];
-} {
-  return devices && devices.length > 0 ? { externalDevices: [...devices] } : {};
-}
-
-/** Map a provision-path error into a typed reconcile failure. */
-function provisionFailure(error: unknown): BindingReconcileFailure {
-  if (error instanceof BootCapacityExhaustedError) {
-    return failure("capacity_exhausted", error.message, {
-      capacity: {
-        limit: error.limit,
-        booted: error.booted,
-        retryAfterMs: error.retryAfterMs,
-        ...externalDevicesField(error.details.externalDevices),
-      },
-    });
-  }
-  if (error instanceof ProvisionDeviceError) {
-    if (error.code === "discovery_incomplete") {
-      return failure("discovery_incomplete", error.message);
-    }
-    if (error.code === "runtime_incompatible") {
-      return failure("runtime_incompatible", error.message);
-    }
-    const capacity = error.diagnostics.capacity;
-    if (error.code === "capacity_exhausted" && capacity) {
-      return failure("capacity_exhausted", error.message, {
-        capacity: {
-          limit: capacity.limit,
-          booted: capacity.booted,
-          retryAfterMs: error.diagnostics.retryAfterMs ?? 0,
-          ...externalDevicesField(capacity.externalDevices),
-        },
-      });
-    }
-    return failure("provision_failed", error.message, {
-      retryable: error.retryable,
-      provision: { code: error.code, retryable: error.retryable },
-    });
-  }
-  return failure("provision_failed", errorMessage(error), { retryable: false });
-}
-
-/**
- * Whether the device counts toward its platform's boot limit, by the gates' own definition: a
- * simulator that is booting or shutting down holds its binding although it is not listed as running.
- */
-function holdsBootBinding(device: DeviceInfo): boolean {
-  return (
-    device.isRunning ||
-    (device.platform === "ios" &&
-      device.state !== undefined &&
-      OCCUPYING_SIMULATOR_STATES.has(device.state))
-  );
-}
 
 function bindingId(key: BindingKey): string {
   return `${key.scopeKey}#${key.bindingIndex}`;
 }
-
-function expectationOf(assignment: BindingAssignmentRecord): BindingBindingExpectation {
-  return { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId };
-}
-
-interface ReconcileContext {
-  request: BindingReconcileRequest;
-  resolvedSpec: BindingResolvedSpec;
-  fingerprint: BindingSpecFingerprint;
-  evidence: BindingReconcileEvidence;
-  creatabilityChecked?: boolean;
-}
-
-type ReadyResult = Extract<BindingReconcileResult, { outcome: "ready" }>;
 
 // ---------------------------------------------------------------------------------------------
 // Reconciler
@@ -551,6 +353,8 @@ export class BindingReconciler {
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
   private readonly idGenerator: IdGenerator;
   private readonly reservations: Pick<InFlightBindingReservations, "add" | "delete">;
+
+  private readonly creation: BindingDeviceCreation;
 
   readonly journal: BindingJournal;
 
@@ -572,6 +376,27 @@ export class BindingReconciler {
       ...(deps.journal?.inFlight ? { inFlight: deps.journal.inFlight } : {}),
       ...(deps.journal?.backoff !== undefined ? { backoff: deps.journal.backoff } : {}),
     });
+    this.creation = new BindingDeviceCreation(
+      {
+        registry: deps.registry,
+        provisioner: deps.provisioner,
+        resolver: deps.resolver,
+        claims: deps.claims,
+        capacity: deps.capacity,
+        resourceBudget: deps.resourceBudget,
+        idGenerator: this.idGenerator,
+        journal: this.journal,
+      },
+      {
+        checkBudget: (request) => this.checkBudget(request),
+        isAutomationReady: (provisioned) => this.isAutomationReady(provisioned),
+        releaseSession: (sessionUuid) => this.releaseSession(sessionUuid),
+        readyOrReleaseOnBusy: (provisioned, publish) =>
+          this.readyOrReleaseOnBusy(provisioned, publish),
+        claimAndReady: (context, disposition, assignment, provisioned, reservation) =>
+          this.claimAndReady(context, disposition, assignment, provisioned, reservation),
+      },
+    );
   }
 
   async reconcile(request: BindingReconcileRequest): Promise<BindingReconcileResult> {
@@ -1205,12 +1030,6 @@ export class BindingReconciler {
     return spec;
   }
 
-  /**
-   * Create a device under the binding's next generated name and commit it, journaled so an
-   * interruption at any boundary converges: `creating` (provision issued) → `created` (device
-   * exists) → `committed` together with the binding. `replacing` continues a replacement entry that
-   * already verified the old device's absence.
-   */
   private async createAndCommit(
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
@@ -1218,245 +1037,7 @@ export class BindingReconciler {
     replacing?: BindingJournalEntry,
     options: { capacityAsserted?: boolean } = {},
   ): Promise<ReadyResult> {
-    const { request } = context;
-    if (replacing === undefined) {
-      try {
-        this.checkBudget(request);
-        await this.assertCreatable(context);
-        if (!options.capacityAsserted) {
-          await this.assertBootCapacity(request);
-        }
-      } catch (error) {
-        // No provisioning or journal entry exists yet; preserve the original refusal unchanged.
-        await this.removeNeverBoundBinding(context, assignment, "pre-provision refusal");
-        throw error;
-      }
-    } else {
-      this.checkBudget(request);
-      // A replacement asserted capacity before deleting, counting the binding its old device frees;
-      // asking again here could refuse after deletion while that device is still being counted.
-      if (!options.capacityAsserted) {
-        await this.assertBootCapacity(request);
-      }
-    }
-    const name = bindingDeviceName(request.key, assignment.generation + 1, this.idGenerator.next());
-    context.evidence.createdName = name;
-    let entry = replacing
-      ? await this.advanceToCreating(context, replacing, name)
-      : await this.openCreateEntry(context, assignment, name);
-    this.journal.inFlight.add(entry.id);
-    try {
-      if (replacing === undefined && this.deps.resourceBudget) {
-        await this.admitFreshCreation(context, assignment, entry);
-      }
-      let provisioned: BindingProvisionedDevice;
-      try {
-        provisioned = await this.deps.provisioner.provision({
-          platform: request.platform,
-          name,
-          // "Any model" creates the model the resolver chose (and recorded).
-          spec: {
-            ...provisionableSpec(request.requestedSpec),
-            deviceType: context.resolvedSpec.deviceType,
-          },
-          mode: "create",
-          deadlineMs: request.deadlineMs,
-          signal: request.signal,
-        });
-      } catch (error) {
-        // The provision path rolls back its own partial creation; settle the entry on proof of
-        // absence, or leave it open for redrive when a leftover may exist.
-        const settled = await this.settleFailedCreate(context, entry);
-        if (replacing === undefined) {
-          await this.removeFailedUnboundBinding(context, assignment, settled);
-        }
-        throw new ReconcileAbort(provisionFailure(error));
-      }
-      return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
-        if (provisioned.created && !this.isAutomationReady(provisioned)) {
-          this.journal.markRemovalIntended(entry);
-        }
-        entry = await this.recordCreated(context, entry, provisioned, release);
-        if (!this.isAutomationReady(provisioned)) {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
-            release,
-            failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
-          );
-        }
-        const committed = await this.journal.advance(entry, {
-          expectedPhase: "created",
-          phase: "committed",
-          assignment: {
-            kind: "commit",
-            expected: entry.binding,
-            next: {
-              stableDeviceId: provisioned.device.stableId,
-              deviceName: provisioned.device.name,
-              requestedSpec: request.requestedSpec,
-              resolvedSpec: context.resolvedSpec,
-              specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-              state: "ready",
-            },
-          },
-        });
-        if (committed.kind === "journal_conflict") {
-          // Another driver took the entry over; it owns the device's fate now.
-          await this.releaseSession(provisioned.sessionUuid);
-          throw new ReconcileAbort(
-            failure("concurrent_modification", "The binding's journal entry was taken over."),
-          );
-        }
-        if (committed.kind !== "advanced") {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
-            release,
-            claimFailure(committed, "create commit"),
-          );
-        }
-        this.noteJournal(context, committed.entry);
-        return await this.claimAndReady(
-          context,
-          disposition,
-          committed.assignment!,
-          provisioned,
-          undefined,
-        );
-      });
-    } finally {
-      this.journal.inFlight.delete(entry.id);
-    }
-  }
-
-  private async openCreateEntry(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    name: string,
-  ): Promise<BindingJournalEntry> {
-    const { request } = context;
-    const opened = await this.deps.registry.openBindingJournal(request.key, {
-      kind: "create",
-      phase: "creating",
-      owner: this.journal.owner,
-      target: this.journalTarget(context, assignment, name),
-      assignment: { kind: "state", expected: expectationOf(assignment), state: "provisioning" },
-    });
-    if (opened.kind === "journal_open") {
-      throw new ReconcileAbort(
-        failure(
-          "reconcile_in_progress",
-          `Binding ${request.key.bindingIndex} has unfinished work.`,
-        ),
-      );
-    }
-    if (opened.kind !== "opened") {
-      throw new ReconcileAbort(claimFailure(opened, "create"));
-    }
-    this.noteJournal(context, opened.entry);
-    return opened.entry;
-  }
-
-  private async advanceToCreating(
-    context: ReconcileContext,
-    entry: BindingJournalEntry,
-    name: string,
-  ): Promise<BindingJournalEntry> {
-    const advanced = await this.journal.advance(entry, {
-      expectedPhase: "deleted",
-      phase: "creating",
-      target: { newName: name },
-    });
-    if (advanced.kind !== "advanced") {
-      throw new ReconcileAbort(
-        failure("concurrent_modification", `Replacement journal changed: ${advanced.kind}.`),
-      );
-    }
-    this.noteJournal(context, advanced.entry);
-    return advanced.entry;
-  }
-
-  private async recordCreated(
-    context: ReconcileContext,
-    entry: BindingJournalEntry,
-    provisioned: BindingProvisionedDevice,
-    release: () => Promise<void>,
-  ): Promise<BindingJournalEntry> {
-    const recorded = await this.journal
-      .advance(entry, {
-        expectedPhase: "creating",
-        phase: "created",
-        target: {
-          newStableId: provisioned.device.stableId,
-          newName: provisioned.device.name,
-          ...(provisioned.created && !this.isAutomationReady(provisioned)
-            ? { removalRequested: true }
-            : {}),
-        },
-      })
-      .catch(async (error: unknown) => {
-        logger.warn(`[Bindings] recording created device failed: ${errorMessage(error)}`, error);
-        await release();
-        throw error;
-      });
-    if (recorded.kind !== "advanced") {
-      // Another driver took the entry over and will settle the device by its recorded name.
-      await release();
-      throw new ReconcileAbort(
-        failure("concurrent_modification", "The binding's journal entry was taken over."),
-      );
-    }
-    this.noteJournal(context, recorded.entry);
-    return recorded.entry;
-  }
-
-  /** Reserve total-resource capacity before any native creation. */
-  private async admitFreshCreation(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    entry: BindingJournalEntry,
-  ): Promise<void> {
-    let admission: BindingResourceAdmission;
-    try {
-      admission = await this.deps.resourceBudget!.admitCreation({
-        journalEntryId: entry.id,
-        deadlineMs: context.request.deadlineMs,
-        signal: context.request.signal,
-      });
-      // Admission can consume the remaining preparation time even when it finds room.
-      this.checkBudget(context.request);
-    } catch (error) {
-      const settled = await this.settleFailedCreate(context, entry, true);
-      await this.removeFailedUnboundBinding(context, assignment, settled);
-      // Cancellation retains its identity for the reconciler's existing handling.
-      throw error;
-    }
-    if (admission.kind === "admitted") {
-      return;
-    }
-    // Native creation has not been called: absence is already proven, including when discovery
-    // itself is incomplete. Close directly rather than rediscovering a device that never existed.
-    const settled = await this.settleFailedCreate(context, entry, true);
-    await this.removeFailedUnboundBinding(context, assignment, settled);
-    if (admission.kind === "unknown") {
-      throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
-    }
-    const { message, budget } = budgetRefusal(admission);
-    throw new ReconcileAbort(failure("binding_budget_exhausted", message, { budget }));
-  }
-
-  private async removeFailedUnboundBinding(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    settled: BindingJournalEntry | undefined,
-  ): Promise<void> {
-    if (settled?.phase !== "rolled_back") {
-      return;
-    }
-    await this.removeNeverBoundBinding(context, assignment, `failed creation entry ${settled.id}`);
+    return this.creation.createAndCommit(context, assignment, disposition, replacing, options);
   }
 
   private async withEmptyBindingCleanup<T>(
@@ -1464,183 +1045,8 @@ export class BindingReconciler {
     assignment: BindingAssignmentRecord,
     operation: () => Promise<T>,
   ): Promise<T> {
-    try {
-      return await operation();
-    } catch (error) {
-      // removeNeverBoundBinding logs cleanup failures and preserves the original refusal.
-      await this.removeNeverBoundBinding(context, assignment, "empty-binding discovery refusal");
-      throw error;
-    }
+    return this.creation.withEmptyBindingCleanup(context, assignment, operation);
   }
-
-  private async removeNeverBoundBinding(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    reason: string,
-  ): Promise<void> {
-    if (assignment.generation !== 0 || assignment.stableDeviceId !== null) {
-      return;
-    }
-    try {
-      await this.deps.registry.removeUnboundBinding(context.request.key, {
-        generation: assignment.generation,
-        stableDeviceId: null,
-      });
-    } catch (error) {
-      logger.warn(
-        `[Bindings] removing never-bound binding after ${reason} failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
-
-  /** Roll back on proven absence; otherwise discover leftovers and retain cleanup for redrive. */
-  private async settleFailedCreate(
-    context: ReconcileContext,
-    entry: BindingJournalEntry,
-    absenceProven = false,
-  ): Promise<BindingJournalEntry | undefined> {
-    try {
-      if (absenceProven) {
-        const settled = (await this.journal.close(entry, "rolled_back")).entry;
-        this.noteJournal(context, settled);
-        return settled;
-      }
-      const settled = await this.journal.settleCreation(entry, {
-        adopt: false,
-        deadlineMs: context.request.deadlineMs,
-      });
-      this.noteJournal(context, settled.entry);
-      return settled.entry;
-    } catch (error) {
-      logger.warn(
-        `[Bindings] settling failed creation entry ${entry.id} failed; redrive will retry: ` +
-          errorMessage(error),
-        error,
-      );
-    }
-  }
-
-  /**
-   * A device this attempt created but could not publish: release its session and remove it, unless
-   * the registry says a binding (any scope) or the free pool now holds that stable id.
-   */
-  private async discardUncommitted(
-    context: ReconcileContext,
-    provisioned: BindingProvisionedDevice,
-    entry: BindingJournalEntry,
-    release: () => Promise<void>,
-    reason: BindingReconcileFailure,
-  ): Promise<never> {
-    try {
-      if (provisioned.created) {
-        this.journal.markRemovalIntended(entry);
-        entry = await this.journal.requestRemoval(entry, {
-          deadlineMs: context.request.deadlineMs,
-          signal: context.request.signal,
-        });
-      }
-    } finally {
-      await release();
-    }
-    try {
-      await this.cleanupUncommitted(context, provisioned, entry);
-    } catch (error) {
-      if (error instanceof BindingJournalRemovalRegistryTimeout) {
-        logger.warn(`[Bindings] uncommitted cleanup deferred: ${errorMessage(error)}`, error);
-        context.evidence.uncommittedCleanup = {
-          stableId: provisioned.device.stableId,
-          removed: false,
-          message: error.message,
-        };
-      } else if (classifySqliteError(error) !== "retryable") {
-        logger.warn(`[Bindings] uncommitted cleanup failed: ${errorMessage(error)}`, error);
-        throw error;
-      }
-      // The durable entry stays open for redrive; preserve the failure that required cleanup.
-      logger.debug(`[Bindings] uncommitted cleanup deferred: ${errorMessage(error)}`);
-    }
-    throw new ReconcileAbort(reason);
-  }
-
-  private async cleanupUncommitted(
-    context: ReconcileContext,
-    provisioned: BindingProvisionedDevice,
-    entry: BindingJournalEntry,
-  ): Promise<void> {
-    if (!provisioned.created) {
-      this.noteJournal(
-        context,
-        (
-          await this.journal.removalRegistryStage(
-            () => this.journal.close(entry, "rolled_back"),
-            context.request.deadlineMs,
-          )
-        ).entry,
-      );
-      return;
-    }
-    this.noteJournal(context, entry);
-    if (!entry.target.removalRequested) {
-      context.evidence.uncommittedCleanup = {
-        stableId: provisioned.device.stableId,
-        removed: false,
-        message: "Removal deferred to journal redrive or its current driver.",
-      };
-      // The first flag write was attempted; memory fences adoption until a later redrive.
-      return;
-    }
-    // Losing a compare-and-set never licenses deleting the device the winner committed.
-    const holder = await this.journal.removalRegistryStage(
-      () =>
-        this.deps.registry.findDeviceHolder(context.request.platform, provisioned.device.stableId),
-      context.request.deadlineMs,
-    );
-    if (holder) {
-      const heldBy =
-        holder.kind === "binding"
-          ? `binding ${holder.assignment.bindingIndex} of scope ${holder.assignment.scopeKey}`
-          : "the managed free pool";
-      context.evidence.uncommittedCleanup = {
-        stableId: provisioned.device.stableId,
-        removed: false,
-        message: `kept: held by ${heldBy}`,
-      };
-      logger.warn(
-        `[Bindings] not discarding '${provisioned.device.stableId}': it is held by ${heldBy}`,
-      );
-      this.noteJournal(
-        context,
-        (
-          await this.journal.removalRegistryStage(
-            () => this.journal.close(entry, "rolled_back"),
-            context.request.deadlineMs,
-          )
-        ).entry,
-      );
-      return;
-    }
-    const settled = await this.journal.settleCreation(entry, {
-      adopt: false,
-      deadlineMs: context.request.deadlineMs,
-    });
-    this.noteJournal(context, settled.entry);
-    const removed = settled.kind === "settled";
-    context.evidence.uncommittedCleanup = {
-      stableId: provisioned.device.stableId,
-      removed,
-      ...(settled.kind === "blocked" ? { message: settled.message } : {}),
-    };
-    if (!removed) {
-      // The entry stays open with the device's exact identity, so a redrive removes it later.
-      logger.warn(
-        `[Bindings] uncommitted device '${provisioned.device.stableId}' was not removed: ` +
-          (settled.kind === "blocked" ? settled.message : "unknown"),
-      );
-    }
-  }
-
-  // --- replace ---------------------------------------------------------------------------------
 
   private async replaceAssigned(
     context: ReconcileContext,
@@ -1648,158 +1054,11 @@ export class BindingReconciler {
     device: DeviceInfo,
     inventoryComplete: boolean,
   ): Promise<ReadyResult> {
-    const { request, evidence } = context;
-    const oldId = assignment.stableDeviceId!;
-    // The slow catalog read must not sit between the claim checks and the journal open.
-    await this.assertCreatable(context);
-    await this.assertReplaceable(request, assignment, device, inventoryComplete);
-    // Journal the accepted deletion together with `replacing`: from here on, an interruption is
-    // redriven against this exact device and binding.
-    const opened = await this.deps.registry.openBindingJournal(request.key, {
-      kind: "replace",
-      phase: "deleting",
-      owner: this.journal.owner,
-      target: this.journalTarget(context, assignment, null),
-      assignment: { kind: "state", expected: expectationOf(assignment), state: "replacing" },
-    });
-    if (opened.kind === "journal_open") {
-      throw new ReconcileAbort(
-        failure(
-          "reconcile_in_progress",
-          `Binding ${request.key.bindingIndex} has unfinished work.`,
-        ),
-      );
-    }
-    if (opened.kind !== "opened") {
-      // A live execution (or another attempt's reservation) claimed the device after our checks.
-      throw new ReconcileAbort(claimFailure(opened, "replace"));
-    }
-    this.noteJournal(context, opened.entry);
-    this.journal.inFlight.add(opened.entry.id);
-    let deletedEntry: BindingJournalEntry;
-    let emptied: BindingAssignmentRecord;
-    try {
-      const deletion = await this.journal.driveDeletion(opened.entry, {
-        device,
-        deadlineMs: request.deadlineMs,
-        signal: request.signal,
-      });
-      this.noteJournal(context, deletion.entry);
-      if (deletion.kind !== "deleted") {
-        if (deletion.kind === "blocked") {
-          evidence.deletion = deletion.evidence;
-          throw new ReconcileAbort(failure(deletion.reason, deletion.message));
-        }
-        throw new ReconcileAbort(
-          failure(
-            "concurrent_modification",
-            `Device '${oldId}' is no longer this binding's device.`,
-          ),
-        );
-      }
-      evidence.deletion = deletion.evidence;
-      evidence.deletedStableId = oldId;
-      deletedEntry = deletion.entry;
-      emptied = deletion.assignment;
-    } finally {
-      this.journal.inFlight.delete(opened.entry.id);
-    }
-    return await this.createAndCommit(context, emptied, "replaced", deletedEntry, {
-      capacityAsserted: true,
-    });
+    return this.creation.replaceAssigned(context, assignment, device, inventoryComplete);
   }
 
-  private journalTarget(
-    context: ReconcileContext,
-    assignment: BindingAssignmentRecord,
-    newName: string | null,
-  ) {
-    return {
-      oldStableId: assignment.stableDeviceId,
-      oldName: assignment.deviceName,
-      // The old device lives on the binding's platform (the entry's); a cross-platform replacement
-      // records the platform it creates on (#11232).
-      ...(assignment.platform !== context.request.platform
-        ? { newPlatform: context.request.platform }
-        : {}),
-      newName,
-      newStableId: null,
-      requestedSpec: context.request.requestedSpec,
-      resolvedSpec: context.resolvedSpec,
-      specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-    };
-  }
-
-  private noteJournal(context: ReconcileContext, entry: BindingJournalEntry): void {
-    context.evidence.journal = { entryId: entry.id, kind: entry.kind, phase: entry.phase };
-  }
-
-  /**
-   * Every precondition for destroying the binding's device: complete discovery, no live claim, boot
-   * capacity for the replacement, and the registry still naming this exact binding as its holder.
-   */
-  private async assertReplaceable(
-    request: BindingReconcileRequest,
-    assignment: BindingAssignmentRecord,
-    device: DeviceInfo,
-    inventoryComplete: boolean,
-  ): Promise<void> {
-    const oldId = assignment.stableDeviceId!;
-    if (!inventoryComplete) {
-      throw new ReconcileAbort(
-        failure("discovery_incomplete", "Replacement requires complete device discovery."),
-      );
-    }
-    const claim = await this.deps.claims.describe(device);
-    if (claim.kind !== "free") {
-      throw new ReconcileAbort(
-        failure(
-          claim.kind === "held" ? "device_busy" : "discovery_incomplete",
-          `Device '${oldId}' cannot be replaced: ${claim.reason}`,
-        ),
-      );
-    }
-    // Fail before deleting: only a device holding a boot binding of the platform being booted frees one.
-    const freedBootBindings =
-      assignment.platform === request.platform && holdsBootBinding(device) ? 1 : 0;
-    await this.assertBootCapacity(request, freedBootBindings);
-    this.checkBudget(request);
-    const holder = await this.deps.registry.findDeviceHolder(assignment.platform, oldId);
-    if (
-      holder?.kind !== "binding" ||
-      holder.assignment.scopeKey !== request.key.scopeKey ||
-      holder.assignment.bindingIndex !== request.key.bindingIndex ||
-      !bindingMatches(holder.assignment, expectationOf(assignment))
-    ) {
-      throw new ReconcileAbort(
-        failure("concurrent_modification", `Device '${oldId}' is no longer this binding's device.`),
-      );
-    }
-  }
-
-  // --- shared steps ----------------------------------------------------------------------------
-
-  /** Successful creation checks are shared by all steps of this reconcile only. */
   private async assertCreatable(context: ReconcileContext): Promise<void> {
-    if (context.creatabilityChecked) {
-      return;
-    }
-    const { request } = context;
-    const result = await this.deps.resolver.checkCreatable?.(
-      request.platform,
-      // Creation paths retain resolve()'s exact spec; only reuse/adopt can widen this type.
-      context.resolvedSpec as ResolvedExactDeviceSpecification,
-      { signal: request.signal },
-    );
-    // Cancellation or expiry while discovery was pending wins over its result.
-    this.checkBudget(request);
-    if (result?.kind === "unsupported") {
-      throw new ReconcileAbort(failure(result.code, result.message));
-    }
-    if (result?.kind === "unresolved") {
-      throw new ReconcileAbort(failure("discovery_incomplete", result.message));
-    }
-    context.creatabilityChecked = true;
+    return this.creation.assertCreatable(context);
   }
 
   /** Sessions this daemon holds on `device` (none when the claims port cannot tell). */
@@ -1919,41 +1178,6 @@ export class BindingReconciler {
       provisioned.readiness.mode === "automation" &&
       provisioned.readiness.status === "automation_ready"
     );
-  }
-
-  /**
-   * Fail immediately at the boot limit before creating a device (and before deleting the one it
-   * replaces). `freedBootBindings` counts binding-holding devices the caller is about to delete; an
-   * unknown count is never free capacity. Booting a device that already exists is not checked
-   * here: the provision path owns that decision and its own-target exemption.
-   */
-  private async assertBootCapacity(
-    request: BindingReconcileRequest,
-    freedBootBindings = 0,
-  ): Promise<void> {
-    if (!this.deps.capacity) {
-      return;
-    }
-    const check = await this.deps.capacity.check(request.platform, { signal: request.signal });
-    if (check.kind === "unknown") {
-      throw new ReconcileAbort(failure("discovery_incomplete", check.message));
-    }
-    if (check.kind === "exhausted" && check.booted - freedBootBindings >= check.limit) {
-      throw new ReconcileAbort(
-        failure(
-          "capacity_exhausted",
-          `${check.booted} ${request.platform} device(s) booted; limit is ${check.limit}.`,
-          {
-            capacity: {
-              limit: check.limit,
-              booted: check.booted,
-              retryAfterMs: check.retryAfterMs,
-              ...externalDevicesField(check.externalDevices),
-            },
-          },
-        ),
-      );
-    }
   }
 
   private async releaseSession(sessionUuid: string): Promise<void> {

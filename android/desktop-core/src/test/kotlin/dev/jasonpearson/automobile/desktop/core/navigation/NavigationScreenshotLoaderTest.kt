@@ -330,7 +330,7 @@ class FakeImageBitmap(
   override val hasAlpha
     get() = true
 
-  override fun prepareToDraw() {}
+  override fun prepareToDraw() = Unit
 
   override fun readPixels(
     buffer: IntArray,
@@ -340,7 +340,7 @@ class FakeImageBitmap(
     height: Int,
     bufferOffset: Int,
     stride: Int,
-  ) {}
+  ) = Unit
 }
 
 /**

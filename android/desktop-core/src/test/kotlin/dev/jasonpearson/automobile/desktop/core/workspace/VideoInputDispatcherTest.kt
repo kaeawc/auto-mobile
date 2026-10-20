@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.control.TestSnapshotSpec
 import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
 import dev.jasonpearson.automobile.desktop.core.daemon.DEVICE_OWNED_BY_OTHER_SESSION_CODE
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
@@ -311,7 +312,7 @@ class VideoInputDispatcherTest {
     scope
       .dispatcher(client, testScheduler)
       .swipe(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DevicePoint(x = 100, y = 100, inBounds = true),
         DevicePoint(x = 102, y = 101, inBounds = true),
         gestureDurationMs = 120,
@@ -329,7 +330,7 @@ class VideoInputDispatcherTest {
     scope
       .dispatcher(client, testScheduler)
       .swipe(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DevicePoint(x = 100, y = 100, inBounds = true),
         DevicePoint(x = 700, y = 1500, inBounds = true),
         gestureDurationMs = 90,
@@ -380,7 +381,7 @@ class VideoInputDispatcherTest {
     val handle =
       scope
         .dispatcher(FakeAutoMobileClient(), testScheduler)
-        .beginGestureStream(testSnapshot(), inBounds)
+        .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds)
     assertNull(handle, "with the flag off the pane falls back to the atomic swipe")
     scope.cancel()
   }
@@ -393,7 +394,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -430,7 +431,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -480,7 +481,8 @@ class VideoInputDispatcherTest {
               onDeviceHeldElsewhere = { reports++ },
             ),
         )
-      val handle = assertNotNull(dispatcher.beginGestureStream(testSnapshot(), inBounds))
+      val handle =
+        assertNotNull(dispatcher.beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds))
       handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
       handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
       advanceUntilIdle()
@@ -500,13 +502,13 @@ class VideoInputDispatcherTest {
     assertNotNull(
         scope
           .streamingDispatcher(clientA, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     assertNotNull(
         scope
           .streamingDispatcher(clientB, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     advanceUntilIdle()
@@ -532,7 +534,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds),
+          .beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))

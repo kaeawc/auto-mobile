@@ -127,7 +127,7 @@ function fixture() {
   return { files, writes, logs, calls, exits, deps, client, timer };
 }
 test("parses every session command and call options", () => {
-  for (const op of ["up", "serve", "tools", "resources", "status", "close"]) {
+  for (const op of ["up", "serve", "tools", "resources", "status", "close"] as const) {
     expect(parsed([op, "--dir", dir]).op).toBe(op);
   }
   for (const op of ["read", "subscribe"]) {

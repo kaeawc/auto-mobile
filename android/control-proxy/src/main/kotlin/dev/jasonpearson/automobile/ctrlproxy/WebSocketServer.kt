@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import android.os.Build
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
@@ -16,8 +15,6 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
-import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
@@ -33,46 +30,14 @@ import kotlinx.serialization.json.JsonPrimitive
  * commands. Designed to work with adb port forwarding for MCP server communication.
  *
  * Inbound messages are decoded into the sealed [ProtocolRequest] hierarchy and dispatched through
- * the injected [messageHandler]. Callers that only broadcast (e.g. lifecycle tests) may omit it, in
- * which case inbound messages are ignored.
+ * the injected [WebSocketServerOptions.messageHandler]. Callers that only broadcast (e.g. lifecycle
+ * tests) may omit it, in which case inbound messages are ignored.
  */
 class WebSocketServer(
   private val port: Int = 8765,
   private val scope: CoroutineScope,
   private val perfProvider: PerfProvider = PerfProvider.instance,
-  /** Type-safe handler that receives decoded requests. When null, inbound messages are ignored. */
-  private val messageHandler: WebSocketMessageHandler? = null,
-  private val onPermanentStartFailure: () -> Unit = {},
-  private val portAvailable: (Int) -> Boolean = { candidatePort ->
-    if (candidatePort != 0) {
-      ServerSocket().use { it.bind(InetSocketAddress("127.0.0.1", candidatePort)) }
-    }
-    true
-  },
-  private val onRetryLockAcquired: () -> Unit = {},
-  /** Test seam for a new request arriving as a prior terminal frame finishes enqueueing. */
-  private val onCorrelatedRoutingStep: () -> Unit = {},
-  private val sendFrame: suspend (DefaultWebSocketSession, String) -> Unit =
-    { connection, message ->
-      connection.send(Frame.Text(message))
-    },
-  private val sdkInt: () -> Int = { Build.VERSION.SDK_INT },
-  private val sendTimeoutMs: Long = OUTBOUND_SEND_TIMEOUT_MS,
-  /** Non-blocking queue cleanup, invoked after ownership removal outside the connections lock. */
-  private val onClientDisconnected: (ConnectedClient) -> Unit = {},
-  /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
-  private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
-  /**
-   * Called once a client is registered, so state held back while no host was attached can go out.
-   */
-  private val onClientConnected: () -> Unit = {},
-  /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
-  private val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
-  /**
-   * A host's `prototype_response` (#12528) answers a `prototype_request` this device sent. It is
-   * not a protocol request, so it is routed here before decoding rather than to [messageHandler].
-   */
-  private val onPrototypeResponse: (String) -> Unit = {},
+  private val options: WebSocketServerOptions = WebSocketServerOptions(),
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -209,52 +174,52 @@ class WebSocketServer(
      */
     internal fun correlationRequestId(response: WebSocketResponse): String? =
       when (response) {
-        is ErrorResponse -> response.requestId
-        is ScreenshotResult -> response.requestId
-        is ScreenshotErrorResult -> response.requestId
-        is SwipeResult -> response.requestId
-        is TapCoordinatesResult -> response.requestId
-        is DragResult -> response.requestId
-        is PinchResult -> response.requestId
-        is SetTextResult -> response.requestId
-        is CommitTextResult -> response.requestId
-        is InsertTextResult -> response.requestId
-        is InsertTextStateResult -> response.requestId
-        is CancelImeCommitResult -> response.requestId
-        is SetKeyboardProfileResult -> response.requestId
-        is SetNetworkMockRulesResult -> response.requestId
-        is KeyboardProfileCatalogResult -> response.requestId
-        is ImeActionResult -> response.requestId
-        is SelectAllResult -> response.requestId
-        is ActionResult -> response.requestId
-        is ClipboardResult -> response.requestId
-        is SettingsGetResult -> response.requestId
-        is SettingsPutResult -> response.requestId
-        is SettingsListResult -> response.requestId
-        is CaCertResult -> response.requestId
-        is DeviceOwnerStatusResult -> response.requestId
-        is PermissionResult -> response.requestId
-        is GlobalActionResult -> response.requestId
-        is FrameContextValidationResult -> response.requestId
-        is DeviceInfoResult -> response.requestId
-        is CurrentFocusResult -> response.requestId
-        is TraversalOrderResult -> response.requestId
-        is HighlightResponse -> response.requestId
-        is PrototypeResult -> response.requestId
-        is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
-        is dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult -> response.requestId
-        is PreferenceFilesResult -> response.requestId
-        is PreferencesResult -> response.requestId
-        is SubscribeStorageResult -> response.requestId
-        is UnsubscribeStorageResult -> response.requestId
-        is GetPreferenceResult -> response.requestId
-        is SetPreferenceResult -> response.requestId
-        is RemovePreferenceResult -> response.requestId
-        is ClearPreferencesResult -> response.requestId
-        is InstalledPackagesResult -> response.requestId
-        is PackageInfoResult -> response.requestId
-        is LaunchIntentResult -> response.requestId
-        is HierarchyUpdateEvent -> response.requestId
+        is ErrorResponse,
+        is ScreenshotResult,
+        is ScreenshotErrorResult,
+        is SwipeResult,
+        is TapCoordinatesResult,
+        is DragResult,
+        is PinchResult,
+        is SetTextResult,
+        is CommitTextResult,
+        is InsertTextResult,
+        is InsertTextStateResult,
+        is CancelImeCommitResult -> ResponseCorrelation.interactionRequestId(response)
+        is SetKeyboardProfileResult,
+        is SetNetworkMockRulesResult,
+        is KeyboardProfileCatalogResult,
+        is ImeActionResult,
+        is SelectAllResult,
+        is ActionResult,
+        is ClipboardResult,
+        is SettingsGetResult,
+        is SettingsPutResult,
+        is SettingsListResult,
+        is CaCertResult,
+        is DeviceOwnerStatusResult -> ResponseCorrelation.deviceControlRequestId(response)
+        is PermissionResult,
+        is GlobalActionResult,
+        is FrameContextValidationResult,
+        is DeviceInfoResult,
+        is CurrentFocusResult,
+        is TraversalOrderResult,
+        is HighlightResponse,
+        is PrototypeResult,
+        is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult,
+        is dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult,
+        is PreferenceFilesResult,
+        is PreferencesResult -> ResponseCorrelation.inspectionRequestId(response)
+        is SubscribeStorageResult,
+        is UnsubscribeStorageResult,
+        is GetPreferenceResult,
+        is SetPreferenceResult,
+        is RemovePreferenceResult,
+        is ClearPreferencesResult,
+        is InstalledPackagesResult,
+        is PackageInfoResult,
+        is LaunchIntentResult,
+        is HierarchyUpdateEvent -> ResponseCorrelation.storageAndPackageRequestId(response)
         // Other event/status frames never echo a requestId.
         is ConnectedResponse,
         is DisplayTransitionEvent,
@@ -360,12 +325,12 @@ class WebSocketServer(
     // get_sdk_capabilities honours userId (work or secondary profile). Hosts omit the field for a
     // service lacking this flag, which would otherwise read the app instance of its own user.
     add("sdk_capabilities_user_id_v1")
-    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
+    if (options.sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_prototype honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the prototype would silently land on the default display.
     // v1 stays for hosts that predate v2; v2 is what current hosts require, so an APK cut before
     // the API 32 floor (which advertised v1 on API 30/31) can never satisfy them (#13164).
-    if (sdkInt() >= PrototypeDisplayRouting.DISPLAY_API) {
+    if (options.sdkInt() >= PrototypeDisplayRouting.DISPLAY_API) {
       add("prototype_display_id_v1")
       add("prototype_display_id_v2")
     }
@@ -537,7 +502,7 @@ class WebSocketServer(
   private suspend fun sendWithDeadline(send: suspend () -> Unit): Boolean =
     // Use the injected dispatcher for deadlines without replacing the caller's cancellation job.
     withContext(scope.coroutineContext.minusKey(Job)) {
-      withTimeoutOrNull(sendTimeoutMs) {
+      withTimeoutOrNull(options.sendTimeoutMs) {
         send()
         true
       } ?: false
@@ -565,7 +530,10 @@ class WebSocketServer(
                   }
                 } ?: break
               if (!sendWithDeadline { transport.send(frame.message) }) {
-                Log.w(TAG, "Client #$id send timed out after ${sendTimeoutMs}ms; disconnecting")
+                Log.w(
+                  TAG,
+                  "Client #$id send timed out after ${options.sendTimeoutMs}ms; disconnecting",
+                )
                 disconnectClient(client, "Outbound send timed out")
                 return@launch
               }
@@ -588,7 +556,7 @@ class WebSocketServer(
     }
     firstClientConnection.complete(Unit)
     client.sender.start()
-    onClientConnected()
+    options.onClientConnected()
     return client
   }
 
@@ -624,8 +592,8 @@ class WebSocketServer(
         }
       }
     if (snapshot == null) return
-    onClientDisconnected(client)
-    onClientCountChanged(snapshot.remaining, snapshot.observerSession)
+    options.onClientDisconnected(client)
+    options.onClientCountChanged(snapshot.remaining, snapshot.observerSession)
     Log.w(
       TAG,
       "Disconnecting client #${client.id}: $reason; discarded ${snapshot.discarded} queued frames; shed ${client.droppedCount} frames total",
@@ -662,11 +630,11 @@ class WebSocketServer(
         for (retry in 1 until MAX_START_ATTEMPTS) {
           delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
           synchronized(startLock) {
-            onRetryLockAcquired()
+            options.onRetryLockAcquired()
             if (!coroutineContext.isActive || server != null || tryStart()) return@launch
             if (retry == MAX_START_ATTEMPTS - 1) {
               Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
-              onPermanentStartFailure()
+              options.onPermanentStartFailure()
             }
           }
         }
@@ -680,103 +648,13 @@ class WebSocketServer(
       try {
         // CIO binds on an internal coroutine and reports an occupied port as an uncaught failure.
         // Detect the common occupied-port case before starting that coroutine.
-        if (!portAvailable(port)) return false
+        if (!options.portAvailable(port)) return false
 
         val candidate =
           // CtrlProxy is reached exclusively through adb forward. Binding loopback
           // prevents the accessibility-control endpoint from being exposed to the
           // device LAN when the runner is installed on a physical device.
-          embeddedServer(CIO, host = "127.0.0.1", port = port) {
-              install(WebSockets) {
-                pingPeriod = 15.seconds
-                timeout = 60.seconds
-                maxFrameSize = MAX_FRAME_SIZE_BYTES
-                masking = false
-              }
-
-              install(ContentNegotiation) { json(json) }
-
-              routing {
-                webSocket("/ws") {
-                  val connectionId = connectionCount.incrementAndGet()
-                  Log.d(TAG, "Client #$connectionId connected")
-
-                  try {
-                    // Send connection greeting before registering for broadcasts
-                    val greetingSent = sendWithDeadline {
-                      send(
-                        Frame.Text(
-                          responseJson.encodeToString(
-                            WebSocketResponse.serializer(),
-                            ConnectedResponse(
-                              id = connectionId,
-                              supportedCommands = supportedCommands(),
-                            ),
-                          ),
-                        ),
-                      )
-                    }
-                    if (!greetingSent) {
-                      Log.w(
-                        TAG,
-                        "Client #$connectionId greeting send timed out after ${sendTimeoutMs}ms; disconnecting",
-                      )
-                      // Abandon the unregistered session without another potentially blocked write.
-                      cancel("Outbound greeting send timed out")
-                      return@webSocket
-                    }
-
-                    val session = this
-                    val client =
-                      registerClient(
-                        connectionId,
-                        object : ClientTransport {
-                          override suspend fun send(message: String) {
-                            session.send(Frame.Text(message))
-                          }
-
-                          override suspend fun close(reason: CloseReason) {
-                            session.close(reason)
-                          }
-                        },
-                      )
-
-                    try {
-                      // Listen for incoming messages
-                      for (frame in incoming) {
-                        when (frame) {
-                          is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
-                          is Frame.Close -> {
-                            Log.d(TAG, "Client #$connectionId closed connection")
-                          }
-                          else -> {
-                            Log.d(TAG, "Received frame type: ${frame.frameType}")
-                          }
-                        }
-                      }
-                    } finally {
-                      unregisterClient(client)
-                    }
-                  } catch (e: CancellationException) {
-                    // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
-                    // `handleClientMessage` throw cancellation. Let it unwind (after `finally`)
-                    // instead of logging a connection error and re-swallowing the rethrow
-                    // handleClientMessage already performs (#3130).
-                    throw e
-                  } catch (e: Exception) {
-                    Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
-                  } finally {
-                    Log.d(
-                      TAG,
-                      "Client #$connectionId disconnected. Active connections: ${connections.size}",
-                    )
-                  }
-                }
-
-                // Health check endpoint
-                get("/health") { call.respond(HttpStatusCode.OK, "OK") }
-              }
-            }
+          embeddedServer(CIO, host = "127.0.0.1", port = port) { configureApplication() }
             .start(wait = false)
         startedServer = candidate
 
@@ -808,6 +686,110 @@ class WebSocketServer(
     server = null
     return false
   }
+
+  private fun Application.configureApplication() {
+    install(WebSockets) {
+      pingPeriod = 15.seconds
+      timeout = 60.seconds
+      maxFrameSize = MAX_FRAME_SIZE_BYTES
+      masking = false
+    }
+
+    install(ContentNegotiation) { json(json) }
+
+    routing {
+      webSocket("/ws") {
+        handleSession(this)
+      }
+
+      // Health check endpoint
+      get("/health") { call.respond(HttpStatusCode.OK, "OK") }
+    }
+  }
+
+  private suspend fun handleSession(session: DefaultWebSocketServerSession) =
+    with(session) {
+      val connectionId = connectionCount.incrementAndGet()
+      Log.d(TAG, "Client #$connectionId connected")
+
+      try {
+        // Send connection greeting before registering for broadcasts
+        val greetingSent = sendWithDeadline {
+          send(
+            Frame.Text(
+              responseJson.encodeToString(
+                WebSocketResponse.serializer(),
+                ConnectedResponse(
+                  id = connectionId,
+                  supportedCommands = supportedCommands(),
+                ),
+              ),
+            ),
+          )
+        }
+        if (!greetingSent) {
+          Log.w(
+            TAG,
+            "Client #$connectionId greeting send timed out after ${options.sendTimeoutMs}ms; disconnecting",
+          )
+          // Abandon the unregistered session without another potentially blocked write.
+          cancel("Outbound greeting send timed out")
+          return@with
+        }
+
+        readRegisteredSession(session, connectionId)
+      } catch (e: CancellationException) {
+        // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
+        // `handleClientMessage` throw cancellation. Let it unwind (after `finally`)
+        // instead of logging a connection error and re-swallowing the rethrow
+        // handleClientMessage already performs (#3130).
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
+      } finally {
+        Log.d(
+          TAG,
+          "Client #$connectionId disconnected. Active connections: ${connections.size}",
+        )
+      }
+    }
+
+  private suspend fun readRegisteredSession(
+    session: DefaultWebSocketServerSession,
+    connectionId: Int,
+  ) =
+    with(session) {
+      val client =
+        registerClient(
+          connectionId,
+          object : ClientTransport {
+            override suspend fun send(message: String) {
+              session.send(Frame.Text(message))
+            }
+
+            override suspend fun close(reason: CloseReason) {
+              session.close(reason)
+            }
+          },
+        )
+
+      try {
+        // Listen for incoming messages
+        for (frame in incoming) {
+          when (frame) {
+            is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
+            is Frame.Close -> {
+              Log.d(TAG, "Client #$connectionId closed connection")
+            }
+            else -> {
+              Log.d(TAG, "Received frame type: ${frame.frameType}")
+            }
+          }
+        }
+      } finally {
+        unregisterClient(client)
+      }
+    }
 
   private fun stopPartiallyStartedServer(startedServer: EmbeddedServer<*, *>?) {
     try {
@@ -1014,7 +996,7 @@ class WebSocketServer(
         if (connections.contains(target) && !enqueueForClient(target, outgoingFrame(message))) {
           overflowed = target
         }
-        onCorrelatedRoutingStep()
+        options.onCorrelatedRoutingStep()
       }
     }
     overflowed?.let { disconnectClient(it, "Outgoing buffer full") }
@@ -1229,7 +1211,10 @@ class WebSocketServer(
     }
   }
 
-  /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
+  /**
+   * Handle an incoming client message by decoding it and dispatching via
+   * [WebSocketServerOptions.messageHandler].
+   */
   /**
    * Checks [frame] against its request type's cap on the raw bytes, so an oversized frame is
    * answered with a correlated error without being decoded into a String or deserialized (#9935).
@@ -1239,7 +1224,7 @@ class WebSocketServer(
     frame: Frame.Text,
     connection: ConnectedClient,
   ) {
-    val rejection = inboundFrameLimits.check(frame.data)
+    val rejection = options.inboundFrameLimits.check(frame.data)
     if (rejection == null) {
       val text = frame.readText()
       Log.d(TAG, inboundFrameLogLine(connectionId, text))
@@ -1268,10 +1253,10 @@ class WebSocketServer(
 
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     if (message.startsWith(PrototypeNetworkFrames.RESPONSE_PREFIX)) {
-      onPrototypeResponse(message)
+      options.onPrototypeResponse(message)
       return
     }
-    val handler = messageHandler
+    val handler = options.messageHandler
     if (handler == null) {
       // Length only: an inbound frame can carry prototype asset bytes.
       Log.w(
@@ -1281,49 +1266,65 @@ class WebSocketServer(
       return
     }
 
-    val request =
-      try {
-        protocolJson.decodeFromString<ProtocolRequest>(message)
-      } catch (e: CancellationException) {
-        // `decodeFromString` is synchronous, so cooperative cancellation cannot arise here today;
-        // rethrow anyway so this fn stays compliant with the auto-discovered suspend-fn scan
-        // (#3191) if this try ever grows a suspend call.
-        throw e
-      } catch (e: IllegalArgumentException) {
-        // Surface a structured error (correlated by best-effort requestId) rather than swallowing
-        // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
-        // #2985.
-        val type = extractStringField(message, "type")
-        if (isPrototypeAssetFrame(message, type)) {
-          // Never echo the frame or the decoder's input snippet: it holds asset bytes.
-          Log.w(
-            TAG,
-            "Failed to parse ${type ?: "asset request"} (${message.length} chars): " +
-              e.javaClass.simpleName,
+    val request = decodeRequest(message, connection) ?: return
+    handleDecodedRequest(request, connection, handler)
+  }
+
+  private fun decodeRequest(message: String, connection: ConnectedClient): ProtocolRequest? {
+    return try {
+      protocolJson.decodeFromString<ProtocolRequest>(message)
+    } catch (e: CancellationException) {
+      // `decodeFromString` is synchronous, so cooperative cancellation cannot arise here today;
+      // rethrow anyway so this fn stays compliant with the auto-discovered suspend-fn scan
+      // (#3191) if this try ever grows a suspend call.
+      throw e
+    } catch (e: IllegalArgumentException) {
+      // Surface a structured error (correlated by best-effort requestId) rather than swallowing
+      // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
+      // #2985.
+      val type = logDecodeFailure(message, e)
+      sendErrorResponse(
+        connection,
+        if (type in prototypeRequestTypes) {
+          PrototypeResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = extractRequestId(message),
+            success = false,
+            error = describeDecodeFailure(message, e),
           )
         } else {
-          val textInputLine = textInputParseFailureLogLine(message, type, e)
-          if (textInputLine != null) Log.w(TAG, textInputLine)
-          else Log.w(TAG, "Failed to parse client message: $message", e)
-        }
-        sendErrorResponse(
-          connection,
-          if (type in prototypeRequestTypes) {
-            PrototypeResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = extractRequestId(message),
-              success = false,
-              error = describeDecodeFailure(message, e),
-            )
-          } else {
-            CorrelatedErrorReporter.frame(
-              requestId = extractRequestId(message),
-              errorMessage = describeDecodeFailure(message, e),
-            )
-          },
-        )
-        return
-      }
+          CorrelatedErrorReporter.frame(
+            requestId = extractRequestId(message),
+            errorMessage = describeDecodeFailure(message, e),
+          )
+        },
+      )
+      return null
+    }
+  }
+
+  private fun logDecodeFailure(message: String, e: IllegalArgumentException): String? {
+    val type = extractStringField(message, "type")
+    if (isPrototypeAssetFrame(message, type)) {
+      // Never echo the frame or the decoder's input snippet: it holds asset bytes.
+      Log.w(
+        TAG,
+        "Failed to parse ${type ?: "asset request"} (${message.length} chars): " +
+          e.javaClass.simpleName,
+      )
+    } else {
+      val textInputLine = textInputParseFailureLogLine(message, type, e)
+      if (textInputLine != null) Log.w(TAG, textInputLine)
+      else Log.w(TAG, "Failed to parse client message: $message", e)
+    }
+    return type
+  }
+
+  private suspend fun handleDecodedRequest(
+    request: ProtocolRequest,
+    connection: ConnectedClient,
+    handler: WebSocketMessageHandler,
+  ) {
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
     // Owned terminal replies route to and clear the entry. Hierarchy errors use that routing;

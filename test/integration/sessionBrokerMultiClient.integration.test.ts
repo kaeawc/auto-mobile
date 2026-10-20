@@ -203,8 +203,8 @@ describe("session broker with several MCP clients", () => {
     // SessionManager). The recovery sweep frees A's devices and nothing of B's.
     host.scopes.unbind(a1.socket);
     host.scopes.unbind(a2.socket);
-    await host.sessions.releaseSession(a1.sessionUuid, "test-owner-crash");
-    await host.sessions.releaseSession(a2.sessionUuid, "test-owner-crash");
+    await host.sessions.releaseSession(a1.sessionUuid, "owner-disconnected");
+    await host.sessions.releaseSession(a2.sessionUuid, "owner-disconnected");
     await host.broker.recover();
     await host.broker.joinReleases();
     expect(await host.broker.hasActiveSession(a1.sessionUuid)).toBe(false);
@@ -401,7 +401,10 @@ describe("session broker with several MCP clients", () => {
 
       const receiptA = await second.client.status(before.a.config.requestId, A.token);
       const receiptB = await second.client.status(before.b.config.requestId, B.token);
-      expect(receiptA?.failure?.code).toBe("session_owner_exited");
+      if (!receiptA) {
+        throw new Error("missing release receipt");
+      }
+      expect(receiptA.failure?.code).toBe("session_owner_exited");
       expect(receiptB?.failure?.code).toBe("session_owner_exited");
       expect(await second.broker.hasActiveSession(before.a.sessionUuid)).toBe(false);
       expect(await second.broker.hasActiveSession(before.b.sessionUuid)).toBe(false);

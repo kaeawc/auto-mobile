@@ -26,24 +26,31 @@ class DeviceControlInputForwarderTest {
     const val TEST_FRAME_CONTEXT = "android:44"
   }
 
-  private fun forward(
-    point: DevicePoint,
-    client: AutoMobileClient?,
-    platform: String = "android",
-    deviceId: String? = "emulator-5554",
-    onError: (String) -> Unit = { error("unexpected error: $it") },
-    frameContext: String = TEST_FRAME_CONTEXT,
-  ) = forwarder.forwardTap(point, client, platform, deviceId, onError, frameContext)
+  private data class ForwardRequest(
+    val point: DevicePoint,
+    val client: AutoMobileClient?,
+    val platform: String = "android",
+    val deviceId: String? = "emulator-5554",
+    val onError: (String) -> Unit = { error("unexpected error: $it") },
+    val frameContext: String = TEST_FRAME_CONTEXT,
+  )
+
+  private fun forward(spec: ForwardRequest) =
+    with(spec) {
+      forwarder.forwardTap(point, client, platform, deviceId, onError, frameContext)
+    }
 
   @Test
   fun `in-bounds tap forwards mapped device coordinates to inputTap`() {
     val fake = FakeAutoMobileClient()
 
     forward(
-      DevicePoint(x = 540, y = 1100, inBounds = true),
-      client = fake,
-      platform = "android",
-      deviceId = "emulator-5554",
+      ForwardRequest(
+        DevicePoint(x = 540, y = 1100, inBounds = true),
+        client = fake,
+        platform = "android",
+        deviceId = "emulator-5554",
+      ),
     )
 
     // Payload-level assertion on the typed helper: coordinates map verbatim (Int device px ->
@@ -70,9 +77,11 @@ class DeviceControlInputForwarderTest {
     var error: String? = null
 
     forward(
-      DevicePoint(x = -3, y = 4000, inBounds = false),
-      client = fake,
-      onError = { error = it },
+      ForwardRequest(
+        DevicePoint(x = -3, y = 4000, inBounds = false),
+        client = fake,
+        onError = { error = it },
+      ),
     )
 
     assertTrue(fake.inputTapCalls.isEmpty(), "off-screen tap must not be sent")
@@ -84,7 +93,13 @@ class DeviceControlInputForwarderTest {
   fun `no connected client drops the tap without error`() {
     var error: String? = null
 
-    forward(DevicePoint(x = 10, y = 20, inBounds = true), client = null, onError = { error = it })
+    forward(
+      ForwardRequest(
+        DevicePoint(x = 10, y = 20, inBounds = true),
+        client = null,
+        onError = { error = it },
+      ),
+    )
 
     assertNull(error)
   }
@@ -102,7 +117,13 @@ class DeviceControlInputForwarderTest {
       }
     var error: String? = null
 
-    forward(DevicePoint(x = 100, y = 200, inBounds = true), client = fake, onError = { error = it })
+    forward(
+      ForwardRequest(
+        DevicePoint(x = 100, y = 200, inBounds = true),
+        client = fake,
+        onError = { error = it },
+      ),
+    )
 
     // The surfaced message is the daemon's own, not an invented generic string.
     assertEquals("No active android device to tap", error)
@@ -119,7 +140,13 @@ class DeviceControlInputForwarderTest {
       }
     var error: String? = null
 
-    forward(DevicePoint(x = 5, y = 6, inBounds = true), client = throwing, onError = { error = it })
+    forward(
+      ForwardRequest(
+        DevicePoint(x = 5, y = 6, inBounds = true),
+        client = throwing,
+        onError = { error = it },
+      ),
+    )
 
     assertEquals("daemon socket closed", error)
   }
@@ -132,7 +159,13 @@ class DeviceControlInputForwarderTest {
       }
     var error: String? = null
 
-    forward(DevicePoint(x = 1, y = 2, inBounds = true), client = fake, onError = { error = it })
+    forward(
+      ForwardRequest(
+        DevicePoint(x = 1, y = 2, inBounds = true),
+        client = fake,
+        onError = { error = it },
+      ),
+    )
 
     assertEquals(DeviceControlInputForwarder.DEFAULT_INPUT_ERROR, error)
   }

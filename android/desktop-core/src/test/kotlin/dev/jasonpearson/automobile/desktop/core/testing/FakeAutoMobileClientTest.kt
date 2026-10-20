@@ -220,53 +220,8 @@ class FakeAutoMobileClientTest {
       listOf("inputTap", "inputSwipe", "inputPressButton", "inputTypeText", "inputKey"),
       client.calls,
     )
-    assertEquals(
-      FakeAutoMobileClient.InputTapCall(
-        x = 10.0,
-        y = 20.0,
-        platform = "android",
-        deviceId = "device-1",
-        duration = 50,
-      ),
-      client.inputTapCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputSwipeCall(
-        startX = 1.0,
-        startY = 2.0,
-        endX = 3.0,
-        endY = 4.0,
-        platform = "ios",
-        deviceId = "device-2",
-        durationMs = 500,
-      ),
-      client.inputSwipeCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputPressButtonCall(
-        button = "back",
-        platform = "android",
-        deviceId = "device-3",
-      ),
-      client.inputPressButtonCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputTypeTextCall(
-        text = "hello",
-        platform = "ios",
-        deviceId = "device-4",
-        submit = true,
-      ),
-      client.inputTypeTextCalls.single(),
-    )
-    assertEquals(
-      FakeAutoMobileClient.InputKeyCall(
-        key = "enter",
-        platform = "android",
-        deviceId = "device-5",
-      ),
-      client.inputKeyCalls.single(),
-    )
+    assertGestureCalls(client)
+    assertKeyboardCalls(client)
   }
 
   @Test
@@ -351,5 +306,58 @@ class FakeAutoMobileClientTest {
     client.killDevice("name", "id", "android", force = true)
 
     assertEquals(listOf(false, true), client.killDeviceForceRequests)
+  }
+
+  private fun assertGestureCalls(client: FakeAutoMobileClient) {
+    assertEquals(
+      FakeAutoMobileClient.InputTapCall(
+        x = 10.0,
+        y = 20.0,
+        platform = "android",
+        deviceId = "device-1",
+        duration = 50,
+      ),
+      client.inputTapCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputSwipeCall(
+        startX = 1.0,
+        startY = 2.0,
+        endX = 3.0,
+        endY = 4.0,
+        platform = "ios",
+        deviceId = "device-2",
+        durationMs = 500,
+      ),
+      client.inputSwipeCalls.single(),
+    )
+  }
+
+  private fun assertKeyboardCalls(client: FakeAutoMobileClient) {
+    assertEquals(
+      FakeAutoMobileClient.InputPressButtonCall(
+        button = "back",
+        platform = "android",
+        deviceId = "device-3",
+      ),
+      client.inputPressButtonCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputTypeTextCall(
+        text = "hello",
+        platform = "ios",
+        deviceId = "device-4",
+        submit = true,
+      ),
+      client.inputTypeTextCalls.single(),
+    )
+    assertEquals(
+      FakeAutoMobileClient.InputKeyCall(
+        key = "enter",
+        platform = "android",
+        deviceId = "device-5",
+      ),
+      client.inputKeyCalls.single(),
+    )
   }
 }

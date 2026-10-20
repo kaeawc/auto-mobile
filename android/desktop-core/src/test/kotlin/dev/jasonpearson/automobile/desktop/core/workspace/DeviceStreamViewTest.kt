@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.waitUntilExactlyOneExists
+import dev.jasonpearson.automobile.desktop.core.control.TestSnapshotSpec
 import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
@@ -36,14 +37,36 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-class DeviceStreamViewTest {
+internal abstract class DeviceStreamViewFixture(
+  protected val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+) {
 
-  private fun col(id: String = "emulator-5554", name: String = "Pixel 8") =
+  protected fun col(id: String = "emulator-5554", name: String = "Pixel 8") =
     DeviceColumn(deviceId = id, name = name, platform = Platform.Android)
 
-  private fun iosCol() =
+  protected fun iosCol() =
     DeviceColumn(deviceId = "ios-simulator", name = "iPhone 16", platform = Platform.Ios)
 
+  /** A minimal armed control state whose dispatcher never reaches a daemon. */
+  protected fun armedControlState(scope: CoroutineScope) =
+    WorkspaceDeviceControlState(
+      dispatcher =
+        VideoInputDispatcher(
+          scope = scope,
+          clientProvider = { null },
+          platform = { "android" },
+          deviceId = "emulator-5554",
+          tracer = InteractionLatencyTracer(),
+        ),
+      interactionSnapshot = testSnapshot(TestSnapshotSpec()),
+      renderSnapshot = testSnapshot(TestSnapshotSpec()),
+      tapError = null,
+      tracer = InteractionLatencyTracer(),
+    )
+}
+
+@OptIn(ExperimentalTestApi::class)
+internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
   @Test
   fun `end status uses plain words and retained frames show it`() {
     val texts =
@@ -126,7 +149,7 @@ class DeviceStreamViewTest {
   fun `downgraded armed pane keeps mirror shows read only and removes control surface`() =
     runComposeUiTest {
       val source = FakeVideoStreamSource()
-      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val scope = CoroutineScope(testDispatcher)
       val control =
         WorkspaceDeviceControlState(
           dispatcher =
@@ -137,8 +160,8 @@ class DeviceStreamViewTest {
               deviceId = "emulator-5554",
               tracer = InteractionLatencyTracer(),
             ),
-          interactionSnapshot = testSnapshot(),
-          renderSnapshot = testSnapshot(),
+          interactionSnapshot = testSnapshot(TestSnapshotSpec()),
+          renderSnapshot = testSnapshot(TestSnapshotSpec()),
           tapError = null,
           tracer = InteractionLatencyTracer(),
         )
@@ -365,23 +388,6 @@ class DeviceStreamViewTest {
       waitUntil { source.connectCalls > connectsBeforeRetry }
     }
 
-  /** A minimal armed control state whose dispatcher never reaches a daemon. */
-  private fun armedControlState(scope: CoroutineScope) =
-    WorkspaceDeviceControlState(
-      dispatcher =
-        VideoInputDispatcher(
-          scope = scope,
-          clientProvider = { null },
-          platform = { "android" },
-          deviceId = "emulator-5554",
-          tracer = InteractionLatencyTracer(),
-        ),
-      interactionSnapshot = testSnapshot(),
-      renderSnapshot = testSnapshot(),
-      tapError = null,
-      tracer = InteractionLatencyTracer(),
-    )
-
   @Test
   fun `an armed pane without video yet shows the waiting hint, not a screenshot surface`() =
     runComposeUiTest {
@@ -389,7 +395,7 @@ class DeviceStreamViewTest {
       // must fall through to the status hint instead of rendering the observation screenshot as an
       // interactive still — the "pane switches over to screenshots" regression (#3348 family).
       val source = FakeVideoStreamSource()
-      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val scope = CoroutineScope(testDispatcher)
       setContent {
         MaterialTheme {
           DeviceStreamView(
@@ -412,7 +418,7 @@ class DeviceStreamViewTest {
   @Test
   fun `an armed pane with live video renders the interactive video surface`() = runComposeUiTest {
     val source = FakeVideoStreamSource(nowMs = { System.nanoTime() / 1_000_000L })
-    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val scope = CoroutineScope(testDispatcher)
     setContent {
       MaterialTheme {
         DeviceStreamView(
@@ -442,7 +448,7 @@ class DeviceStreamViewTest {
       // review). refuseWith keeps the auto-reconnect from racing the state back to Streaming.
       val source =
         FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
-      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val scope = CoroutineScope(testDispatcher)
       setContent {
         MaterialTheme {
           DeviceStreamView(
@@ -481,7 +487,7 @@ class DeviceStreamViewTest {
     // affordance) must stay mounted instead of flickering to the plain mirror and back.
     val source =
       FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
-    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val scope = CoroutineScope(testDispatcher)
     setContent {
       MaterialTheme {
         DeviceStreamView(
@@ -506,7 +512,10 @@ class DeviceStreamViewTest {
     onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(1)
     scope.cancel()
   }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
   @Test
   fun `grace expiry and source-swap restart are driven deterministically`() = runComposeUiTest {
     // Drives the shipped grace window through the injected suspend seam (no wall time, no 0/huge
@@ -514,7 +523,7 @@ class DeviceStreamViewTest {
     // expires and proves a source swap CANCELS the old source's window and starts a fresh one.
     val gates = mutableListOf<CompletableDeferred<Unit>>()
     val sources = mutableListOf<FakeVideoStreamSource>()
-    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val scope = CoroutineScope(testDispatcher)
     val armed = mutableStateOf(false)
     setContent {
       MaterialTheme {
@@ -586,7 +595,7 @@ class DeviceStreamViewTest {
       // the retained frame under that Streaming state. Guards the grace effect's keying across
       // source swaps (CodeRabbit).
       val sources = mutableListOf<FakeVideoStreamSource>()
-      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val scope = CoroutineScope(testDispatcher)
       val armed = mutableStateOf(false)
       setContent {
         MaterialTheme {
@@ -626,7 +635,7 @@ class DeviceStreamViewTest {
       // video relay is still refused; taking the armed branch there rendered a frozen fallback
       // screenshot and hid the approval UI, stranding the user with no way to recover (#5221).
       val source = FakeVideoStreamSource(screenRecordingRequired = true)
-      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val scope = CoroutineScope(testDispatcher)
       val control =
         WorkspaceDeviceControlState(
           dispatcher =
@@ -637,8 +646,8 @@ class DeviceStreamViewTest {
               deviceId = "ios-simulator",
               tracer = InteractionLatencyTracer(),
             ),
-          interactionSnapshot = testSnapshot(), // armed
-          renderSnapshot = testSnapshot(),
+          interactionSnapshot = testSnapshot(TestSnapshotSpec()), // armed
+          renderSnapshot = testSnapshot(TestSnapshotSpec()),
           tapError = null,
           tracer = InteractionLatencyTracer(),
         )

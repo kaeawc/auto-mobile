@@ -85,7 +85,7 @@ posixTest("parses each command and exact start passthrough", () => {
       "0",
     ]).op,
   ).toBe("init");
-  for (const op of ["start", "stop", "status", "env"]) {
+  for (const op of ["start", "stop", "status", "env"] as const) {
     expect(parsed([op, "--batch-dir", options.batchDir, "--daemon", "1"]).op).toBe(op);
   }
   const start = parsed([

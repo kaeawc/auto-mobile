@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -98,8 +99,7 @@ async function tapOn(text: string) {
     },
   );
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => capture.viewHierarchy!;

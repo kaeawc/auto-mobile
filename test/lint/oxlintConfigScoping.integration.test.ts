@@ -209,10 +209,14 @@ async function makeScratchDirectory(): Promise<string> {
 }
 
 describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
-  test("catch-convention and no-unknown-cast are scoped to src/**", () => {
+  test("catch-convention is scoped to src/**; casts are hard errors in src and test", () => {
     expectScopedRule("auto-mobile/catch-convention", ["src/**/*.ts"], "warn");
     // Fully burned down, so enforced directly by oxlint (printed as "deny").
-    expectScopedRule("auto-mobile/no-unknown-cast", ["src/**/*.ts"], "deny");
+    expectScopedRule("auto-mobile/no-unknown-cast", ["src/**/*.ts", "test/**/*.ts"], "deny");
+  });
+
+  test("no-as-any is a hard error scoped to test/**", () => {
+    expectScopedRule("auto-mobile/no-as-any", ["test/**/*.ts"], "deny");
   });
 
   test("max-params and max-lines-per-function are scoped to src/**", () => {

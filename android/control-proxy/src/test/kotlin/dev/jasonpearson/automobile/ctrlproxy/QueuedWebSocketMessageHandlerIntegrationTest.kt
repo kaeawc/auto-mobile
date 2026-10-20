@@ -151,9 +151,12 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = scope,
-        messageHandler = handler,
-        sendTimeoutMs = sendTimeoutMs,
-        onClientDisconnected = handler::disconnect,
+        options =
+          WebSocketServerOptions(
+            messageHandler = handler,
+            sendTimeoutMs = sendTimeoutMs,
+            onClientDisconnected = handler::disconnect,
+          ),
       )
     val first = RecordingTransport(stallFirst)
     val second = RecordingTransport()
@@ -471,17 +474,20 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = scope,
-        onClientDisconnected = queued::disconnect,
-        messageHandler =
-          object : WebSocketMessageHandler {
-            override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-              val origin = checkNotNull(currentCoroutineContext()[CommandOriginContext]).origin
-              loops += origin.lifetime
-              val response = queued.handleMessage(request)
-              accepted.trySend(request.requestId)
-              return response
-            }
-          },
+        options =
+          WebSocketServerOptions(
+            onClientDisconnected = queued::disconnect,
+            messageHandler =
+              object : WebSocketMessageHandler {
+                override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+                  val origin = checkNotNull(currentCoroutineContext()[CommandOriginContext]).origin
+                  loops += origin.lifetime
+                  val response = queued.handleMessage(request)
+                  accepted.trySend(request.requestId)
+                  return response
+                }
+              },
+          ),
       )
     val client = HttpClient(CIO) { install(WebSockets) }
     lateinit var first: DefaultClientWebSocketSession

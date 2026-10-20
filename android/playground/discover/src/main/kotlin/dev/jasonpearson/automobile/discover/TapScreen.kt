@@ -14,23 +14,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,7 +29,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -50,16 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
-import dev.jasonpearson.automobile.design.system.components.AutoMobileContentElevatedButton
-import dev.jasonpearson.automobile.design.system.components.AutoMobileContentOutlinedButton
-import dev.jasonpearson.automobile.design.system.components.AutoMobileContentTextButton
-import dev.jasonpearson.automobile.design.system.components.AutoMobileContentTonalButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileExtendedFloatingActionButton
-import dev.jasonpearson.automobile.design.system.components.AutoMobileFilterChip
 import dev.jasonpearson.automobile.design.system.components.AutoMobileFloatingActionButton
-import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.storage.AnalyticsRepository
@@ -76,19 +59,11 @@ fun TapScreen() {
     val context = LocalContext.current
     val analyticsRepository = remember { AnalyticsRepository(context) }
 
-    // State management for interactive elements
-    var switchChecked by remember { mutableStateOf(false) }
-    var checkboxChecked by remember { mutableStateOf(false) }
-    var radioSelected by remember { mutableStateOf(false) }
-    var sliderValue by remember { mutableStateOf(0.5f) }
-    var chip1Selected by remember { mutableStateOf(false) }
-    var chip2Selected by remember { mutableStateOf(true) }
-    var chip3Selected by remember { mutableStateOf(false) }
-    var buttonPressCount by remember { mutableStateOf(0) }
+    val state = remember { TapControlsState() }
 
     // Helper function to track taps
     val trackTap = {
-      buttonPressCount++
+      state.buttonPressCount++
       analyticsRepository.trackEvent("tap")
     }
 
@@ -99,465 +74,21 @@ fun TapScreen() {
         },
       verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-      Text(
-        text = "TAP SCREEN",
-        fontSize = 24.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_screen_title" },
-      )
-
-      Text(
-        text = "Tap and long press widgets for testing gestures",
-        fontSize = 16.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_screen_description" },
-      )
-
-      // Button press counter for visual feedback
-      if (buttonPressCount > 0) {
-        AutoMobileContentCard(
-          modifier = Modifier.fillMaxWidth().semantics { testTag = "button_press_counter" },
-          colors =
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        ) {
-          Text(
-            text = "Buttons pressed: $buttonPressCount times",
-            modifier =
-              Modifier.padding(16.dp).semantics {
-                testTag = "button_press_counter_text"
-                stateDescription = "Button press count: $buttonPressCount"
-              },
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium,
-          )
-        }
-      }
+      TapScreenHeading(state.buttonPressCount)
 
       PressDurationTracker()
 
-      // Button varieties
-      AutoMobileContentCard(
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "buttons_card" },
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "Buttons",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier =
-              Modifier.padding(bottom = 8.dp).semantics { testTag = "buttons_section_title" },
-          )
+      TapButtons(trackTap)
 
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            AutoMobileContentButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.weight(1f).semantics {
-                  testTag = "button_regular"
-                  contentDescription = "Regular Button"
-                },
-            ) {
-              Text("Button")
-            }
+      TapToggles(state, trackTap)
 
-            AutoMobileContentElevatedButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.weight(1f).semantics {
-                  testTag = "button_elevated"
-                  contentDescription = "Elevated Button"
-                },
-            ) {
-              Text("Elevated")
-            }
-          }
+      TapIconButtons(trackTap)
 
-          Spacer(modifier = Modifier.height(8.dp))
+      TapChips(state, trackTap)
 
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            AutoMobileContentOutlinedButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.weight(1f).semantics {
-                  testTag = "button_outlined"
-                  contentDescription = "Outlined Button"
-                },
-            ) {
-              Text("Outlined")
-            }
+      TapSliderProgress(state)
 
-            AutoMobileContentTextButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.weight(1f).semantics {
-                  testTag = "button_text"
-                  contentDescription = "Text Button"
-                },
-            ) {
-              Text("Text")
-            }
-          }
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          AutoMobileContentTonalButton(
-            onClick = trackTap,
-            modifier =
-              Modifier.fillMaxWidth().semantics {
-                testTag = "button_filled_tonal"
-                contentDescription = "Filled Tonal Button"
-              },
-          ) {
-            Text("Filled Tonal Button")
-          }
-        }
-      }
-
-      // Toggle controls
-      AutoMobileContentCard(
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "toggle_controls_card" },
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "Toggle Controls",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier =
-              Modifier.padding(bottom = 8.dp).semantics {
-                testTag = "toggle_controls_section_title"
-              },
-          )
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-          ) {
-            Switch(
-              checked = switchChecked,
-              onCheckedChange = {
-                switchChecked = it
-                trackTap()
-              },
-              modifier =
-                Modifier.semantics {
-                  testTag = "switch_control"
-                  contentDescription = if (switchChecked) "Switch is on" else "Switch is off"
-                  stateDescription = if (switchChecked) "Enabled" else "Disabled"
-                },
-            )
-            Text("Switch", modifier = Modifier.semantics { testTag = "switch_label" })
-          }
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-          ) {
-            Checkbox(
-              checked = checkboxChecked,
-              onCheckedChange = {
-                checkboxChecked = it
-                trackTap()
-              },
-              modifier =
-                Modifier.semantics {
-                  testTag = "checkbox_control"
-                  contentDescription =
-                    if (checkboxChecked) "Checkbox is checked" else "Checkbox is unchecked"
-                  stateDescription = if (checkboxChecked) "Checked" else "Unchecked"
-                },
-            )
-            Text("Checkbox", modifier = Modifier.semantics { testTag = "checkbox_label" })
-          }
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-          ) {
-            RadioButton(
-              selected = radioSelected,
-              onClick = {
-                radioSelected = !radioSelected
-                trackTap()
-              },
-              modifier =
-                Modifier.semantics {
-                  testTag = "radio_button_control"
-                  contentDescription =
-                    if (radioSelected) "Radio button is selected"
-                    else "Radio button is not selected"
-                  stateDescription = if (radioSelected) "Selected" else "Not selected"
-                },
-            )
-            Text("Radio Button", modifier = Modifier.semantics { testTag = "radio_button_label" })
-          }
-        }
-      }
-
-      // Icon buttons
-      AutoMobileContentCard(
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "icon_buttons_card" },
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "Icon Buttons",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier =
-              Modifier.padding(bottom = 8.dp).semantics {
-                testTag = "icon_buttons_section_title"
-              },
-          )
-
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            AutoMobileIconButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.semantics {
-                  testTag = "icon_button_edit"
-                  contentDescription = "Edit"
-                },
-            ) {
-              Icon(Icons.Filled.Edit, contentDescription = "Edit")
-            }
-
-            AutoMobileIconButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.semantics {
-                  testTag = "icon_button_delete"
-                  contentDescription = "Delete"
-                },
-            ) {
-              Icon(Icons.Filled.Delete, contentDescription = "Delete")
-            }
-
-            AutoMobileIconButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.semantics {
-                  testTag = "icon_button_favorite"
-                  contentDescription = "Favorite"
-                },
-            ) {
-              Icon(Icons.Filled.Favorite, contentDescription = "Favorite")
-            }
-
-            AutoMobileIconButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.semantics {
-                  testTag = "icon_button_star"
-                  contentDescription = "Star"
-                },
-            ) {
-              Icon(Icons.Filled.Star, contentDescription = "Star")
-            }
-
-            AutoMobileIconButton(
-              onClick = trackTap,
-              modifier =
-                Modifier.semantics {
-                  testTag = "icon_button_refresh"
-                  contentDescription = "Refresh"
-                },
-            ) {
-              Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
-            }
-          }
-        }
-      }
-
-      // Chips
-      AutoMobileContentCard(
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "filter_chips_card" },
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "Filter Chips",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier =
-              Modifier.padding(bottom = 8.dp).semantics {
-                testTag = "filter_chips_section_title"
-              },
-          )
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            AutoMobileFilterChip(
-              selected = chip1Selected,
-              onClick = {
-                chip1Selected = !chip1Selected
-                trackTap()
-              },
-              label = { Text("Chip 1") },
-              modifier =
-                Modifier.semantics {
-                  testTag = "filter_chip_1"
-                  contentDescription =
-                    if (chip1Selected) "Chip 1 is selected" else "Chip 1 is not selected"
-                  stateDescription = if (chip1Selected) "Selected" else "Not selected"
-                },
-            )
-
-            AutoMobileFilterChip(
-              selected = chip2Selected,
-              onClick = {
-                chip2Selected = !chip2Selected
-                trackTap()
-              },
-              label = { Text("Chip 2") },
-              modifier =
-                Modifier.semantics {
-                  testTag = "filter_chip_2"
-                  contentDescription =
-                    if (chip2Selected) "Chip 2 is selected" else "Chip 2 is not selected"
-                  stateDescription = if (chip2Selected) "Selected" else "Not selected"
-                },
-            )
-
-            AutoMobileFilterChip(
-              selected = chip3Selected,
-              onClick = {
-                chip3Selected = !chip3Selected
-                trackTap()
-              },
-              label = { Text("Chip 3") },
-              modifier =
-                Modifier.semantics {
-                  testTag = "filter_chip_3"
-                  contentDescription =
-                    if (chip3Selected) "Chip 3 is selected" else "Chip 3 is not selected"
-                  stateDescription = if (chip3Selected) "Selected" else "Not selected"
-                },
-            )
-          }
-        }
-      }
-
-      // Slider and progress
-      AutoMobileContentCard(
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "slider_progress_card" },
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "Slider & Progress",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier =
-              Modifier.padding(bottom = 8.dp).semantics {
-                testTag = "slider_progress_section_title"
-              },
-          )
-
-          Text(
-            "Slider Value: ${(sliderValue * 100).toInt()}%",
-            modifier = Modifier.semantics { testTag = "slider_value_text" },
-          )
-          Slider(
-            value = sliderValue,
-            onValueChange = { sliderValue = it },
-            modifier =
-              Modifier.fillMaxWidth().semantics {
-                testTag = "slider_control"
-                contentDescription = "Slider with value ${(sliderValue * 100).toInt()} percent"
-                stateDescription = "${(sliderValue * 100).toInt()} percent"
-              },
-          )
-
-          Spacer(modifier = Modifier.height(16.dp))
-
-          Text(
-            "Progress Indicators",
-            modifier = Modifier.semantics { testTag = "progress_indicators_label" },
-          )
-          LinearProgressIndicator(
-            modifier =
-              Modifier.fillMaxWidth().semantics {
-                testTag = "linear_progress_indicator"
-                contentDescription =
-                  "Linear progress indicator showing ${(sliderValue * 100).toInt()} percent"
-                stateDescription = "${(sliderValue * 100).toInt()} percent complete"
-              },
-            progress = { sliderValue },
-          )
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            CircularProgressIndicator(
-              progress = { sliderValue },
-              modifier =
-                Modifier.semantics {
-                  testTag = "circular_progress_indicator"
-                  contentDescription =
-                    "Circular progress indicator showing ${(sliderValue * 100).toInt()} percent"
-                  stateDescription = "${(sliderValue * 100).toInt()} percent complete"
-                },
-            )
-          }
-        }
-      }
-
-      // FABs
-      AutoMobileContentCard(
-        modifier = Modifier.fillMaxWidth().semantics { testTag = "floating_action_buttons_card" },
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-      ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-          Text(
-            text = "Floating Action Buttons",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            modifier =
-              Modifier.padding(bottom = 8.dp).semantics {
-                testTag = "floating_action_buttons_section_title"
-              },
-          )
-
-          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            AutoMobileFloatingActionButton(
-              onClick = trackTap,
-              icon = Icons.Filled.Add,
-              contentDescription = "Add",
-              modifier =
-                Modifier.semantics {
-                  testTag = "fab_add"
-                  contentDescription = "Add"
-                },
-            )
-
-            AutoMobileExtendedFloatingActionButton(
-              onClick = trackTap,
-              icon = Icons.Filled.Settings,
-              contentDescription = "Settings",
-              text = "Settings",
-              modifier =
-                Modifier.semantics {
-                  testTag = "fab_extended_settings"
-                  contentDescription = "Settings"
-                },
-            )
-          }
-        }
-      }
+      TapFloatingButtons(trackTap)
 
       Divider()
 
@@ -621,33 +152,7 @@ private fun PressDurationTracker() {
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
   ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-      Text(text = "Press Duration Tracker", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-      Text(
-        text = "Touch and hold to watch the timer update in real time",
-        fontSize = 14.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-
-      Spacer(modifier = Modifier.height(12.dp))
-
-      Text(
-        text = "Duration: ${currentDurationMs}ms",
-        fontSize = 16.sp,
-        modifier = Modifier.semantics { testTag = "press_duration_current" },
-      )
-      Text(
-        text =
-          when {
-            isPressing -> "Holding..."
-            finalDurationMs != null -> "Final duration: ${finalDurationMs}ms"
-            else -> "Tap and hold to begin"
-          },
-        fontSize = 12.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.semantics { testTag = "press_duration_status" },
-      )
-    }
+    PressDurationDisplay(currentDurationMs, finalDurationMs, isPressing)
   }
 }
 
@@ -655,4 +160,206 @@ private fun PressDurationTracker() {
 @Composable
 fun PreviewTapScreen() {
   AutoMobileTheme { TapScreen() }
+}
+
+internal class TapControlsState {
+  var switchChecked by mutableStateOf(false)
+  var checkboxChecked by mutableStateOf(false)
+  var radioSelected by mutableStateOf(false)
+  var sliderValue by mutableStateOf(0.5f)
+  var chip1Selected by mutableStateOf(false)
+  var chip2Selected by mutableStateOf(true)
+  var chip3Selected by mutableStateOf(false)
+  var buttonPressCount by mutableStateOf(0)
+}
+
+@Composable
+private fun TapSliderProgress(state: TapControlsState) {
+  // Slider and progress
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "slider_progress_card" },
+    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+  ) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Text(
+        text = "Slider & Progress",
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        modifier =
+          Modifier.padding(bottom = 8.dp).semantics {
+            testTag = "slider_progress_section_title"
+          },
+      )
+
+      Text(
+        "Slider Value: ${(state.sliderValue * 100).toInt()}%",
+        modifier = Modifier.semantics { testTag = "slider_value_text" },
+      )
+      Slider(
+        value = state.sliderValue,
+        onValueChange = { state.sliderValue = it },
+        modifier =
+          Modifier.fillMaxWidth().semantics {
+            testTag = "slider_control"
+            contentDescription = "Slider with value ${(state.sliderValue * 100).toInt()} percent"
+            stateDescription = "${(state.sliderValue * 100).toInt()} percent"
+          },
+      )
+
+      Spacer(modifier = Modifier.height(16.dp))
+
+      Text(
+        "Progress Indicators",
+        modifier = Modifier.semantics { testTag = "progress_indicators_label" },
+      )
+      LinearProgressIndicator(
+        modifier =
+          Modifier.fillMaxWidth().semantics {
+            testTag = "linear_progress_indicator"
+            contentDescription =
+              "Linear progress indicator showing ${(state.sliderValue * 100).toInt()} percent"
+            stateDescription = "${(state.sliderValue * 100).toInt()} percent complete"
+          },
+        progress = { state.sliderValue },
+      )
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        CircularProgressIndicator(
+          progress = { state.sliderValue },
+          modifier =
+            Modifier.semantics {
+              testTag = "circular_progress_indicator"
+              contentDescription =
+                "Circular progress indicator showing ${(state.sliderValue * 100).toInt()} percent"
+              stateDescription = "${(state.sliderValue * 100).toInt()} percent complete"
+            },
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun TapFloatingButtons(trackTap: () -> Unit) {
+  // FABs
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "floating_action_buttons_card" },
+    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+  ) {
+    Column(modifier = Modifier.padding(16.dp)) {
+      Text(
+        text = "Floating Action Buttons",
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        modifier =
+          Modifier.padding(bottom = 8.dp).semantics {
+            testTag = "floating_action_buttons_section_title"
+          },
+      )
+
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        AutoMobileFloatingActionButton(
+          onClick = trackTap,
+          icon = Icons.Filled.Add,
+          contentDescription = "Add",
+          modifier =
+            Modifier.semantics {
+              testTag = "fab_add"
+              contentDescription = "Add"
+            },
+        )
+
+        AutoMobileExtendedFloatingActionButton(
+          onClick = trackTap,
+          icon = Icons.Filled.Settings,
+          contentDescription = "Settings",
+          text = "Settings",
+          modifier =
+            Modifier.semantics {
+              testTag = "fab_extended_settings"
+              contentDescription = "Settings"
+            },
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun TapButtonCounter(buttonPressCount: Int) {
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "button_press_counter" },
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+  ) {
+    Text(
+      text = "Buttons pressed: $buttonPressCount times",
+      modifier =
+        Modifier.padding(16.dp).semantics {
+          testTag = "button_press_counter_text"
+          stateDescription = "Button press count: $buttonPressCount"
+        },
+      color = MaterialTheme.colorScheme.onPrimaryContainer,
+      fontSize = 16.sp,
+      fontWeight = FontWeight.Medium,
+    )
+  }
+}
+
+@Composable
+private fun PressDurationDisplay(
+  currentDurationMs: Long,
+  finalDurationMs: Long?,
+  isPressing: Boolean,
+) {
+  Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+    Text(text = "Press Duration Tracker", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    Text(
+      text = "Touch and hold to watch the timer update in real time",
+      fontSize = 14.sp,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Text(
+      text = "Duration: ${currentDurationMs}ms",
+      fontSize = 16.sp,
+      modifier = Modifier.semantics { testTag = "press_duration_current" },
+    )
+    Text(
+      text =
+        when {
+          isPressing -> "Holding..."
+          finalDurationMs != null -> "Final duration: ${finalDurationMs}ms"
+          else -> "Tap and hold to begin"
+        },
+      fontSize = 12.sp,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      modifier = Modifier.semantics { testTag = "press_duration_status" },
+    )
+  }
+}
+
+@Composable
+private fun TapScreenHeading(buttonPressCount: Int) {
+  Text(
+    text = "TAP SCREEN",
+    fontSize = 24.sp,
+    fontWeight = FontWeight.Bold,
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_screen_title" },
+  )
+
+  Text(
+    text = "Tap and long press widgets for testing gestures",
+    fontSize = 16.sp,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_screen_description" },
+  )
+
+  // Button press counter for visual feedback
+  if (buttonPressCount > 0) {
+    TapButtonCounter(buttonPressCount)
+  }
 }

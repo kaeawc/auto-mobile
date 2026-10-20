@@ -11,7 +11,7 @@ import {
 } from "../helpers/entrypointOrder";
 const entrypointSource = readFileSync("src/index.ts", "utf8");
 const serverModulesSource = readFileSync("src/startup/serverModules.ts", "utf8");
-const fullDaemonSource = readFileSync("src/daemon/daemon.ts", "utf8");
+const fullDaemonSource = readFileSync("src/daemon/daemonCore/DaemonStartup.ts", "utf8");
 
 /**
  * Only the statements from the phase start to the phase end matter to the auxiliary guard, so the
@@ -22,7 +22,9 @@ function auxiliaryPhaseWindow(source: string): string {
   const start = source.indexOf('startupBenchmark.startPhase("auxiliarySocketServerStart")');
   const endCall = source.indexOf('startupBenchmark.endPhase("auxiliarySocketServerStart")');
   if (start < 0 || endCall < start) {
-    throw new Error("auxiliarySocketServerStart phase window not found in src/daemon/daemon.ts");
+    throw new Error(
+      "auxiliarySocketServerStart phase window not found in src/daemon/daemonCore/DaemonStartup.ts",
+    );
   }
   return source.slice(source.lastIndexOf("\n", start) + 1, source.indexOf("\n", endCall));
 }
@@ -79,11 +81,11 @@ function auxiliarySocketPhaseViolations(source: string): string[] {
   );
   const first = check.require(
     "awaited video-recording socket start",
-    awaited(callsTo(sf, "this.startAuxiliarySocket", '"video-recording"')),
+    awaited(callsTo(sf, "this.host.startAuxiliarySocket", '"video-recording"')),
   );
   const last = check.require(
     "awaited video-stream socket start",
-    awaited(callsTo(sf, "this.startAuxiliarySocket", '"video-stream"')),
+    awaited(callsTo(sf, "this.host.startAuxiliarySocket", '"video-stream"')),
   );
   const phaseEnd = check.require(
     "auxiliary phase end",
@@ -115,8 +117,8 @@ describe("#4631 installer startup diagnostics", () => {
 
   test("the auxiliary phase guard fails when a socket start is no longer awaited", () => {
     const mutated = daemonSource.replace(
-      'await this.startAuxiliarySocket("video-stream"',
-      'void this.startAuxiliarySocket("video-stream"',
+      'await this.host.startAuxiliarySocket("video-stream"',
+      'void this.host.startAuxiliarySocket("video-stream"',
     );
     expect(mutated).not.toBe(daemonSource);
     expect(auxiliarySocketPhaseViolations(mutated)).toContain(
@@ -127,7 +129,8 @@ describe("#4631 installer startup diagnostics", () => {
   test("the auxiliary phase guard fails when the phase ends before the last server starts", () => {
     const sf = parseSource(daemonSource);
     const end = callsTo(sf, "startupBenchmark.endPhase", '"auxiliarySocketServerStart"')[0]!.parent;
-    const lastStart = callsTo(sf, "this.startAuxiliarySocket", '"video-stream"')[0]!.parent.parent;
+    const lastStart = callsTo(sf, "this.host.startAuxiliarySocket", '"video-stream"')[0]!.parent
+      .parent;
     expect(auxiliarySocketPhaseViolations(swapNodes(daemonSource, end, lastStart))).not.toEqual([]);
   });
 });

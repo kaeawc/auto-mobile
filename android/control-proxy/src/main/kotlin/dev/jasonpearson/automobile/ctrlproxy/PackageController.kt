@@ -45,13 +45,15 @@ internal class PackageController(
     val currentUserId = currentUserId()
     if (userId != null && userId != currentUserId) {
       broadcastInstalledPackagesResult(
-        requestId = requestId,
-        success = false,
-        userId = currentUserId,
-        packages = emptyList(),
-        error =
-          "Requested userId=$userId differs from service userId=$currentUserId; ADB fallback required",
-        totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+        InstalledPackagesOutcome(
+          requestId = requestId,
+          success = false,
+          userId = currentUserId,
+          packages = emptyList(),
+          error =
+            "Requested userId=$userId differs from service userId=$currentUserId; ADB fallback required",
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+        ),
       )
       return
     }
@@ -60,12 +62,14 @@ internal class PackageController(
       onFailure = { e ->
         Log.e(TAG, "performInstalledPackages failed", e)
         broadcastInstalledPackagesResult(
-          requestId = requestId,
-          success = false,
-          userId = currentUserId,
-          packages = emptyList(),
-          error = "Failed to enumerate packages: ${e.message}",
-          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          InstalledPackagesOutcome(
+            requestId = requestId,
+            success = false,
+            userId = currentUserId,
+            packages = emptyList(),
+            error = "Failed to enumerate packages: ${e.message}",
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       },
     ) {
@@ -113,12 +117,14 @@ internal class PackageController(
       }
       val totalTime = timeProvider.currentTimeMillis() - startTime
       broadcastInstalledPackagesResult(
-        requestId = requestId,
-        success = true,
-        userId = currentUserId,
-        packages = records,
-        error = null,
-        totalTimeMs = totalTime,
+        InstalledPackagesOutcome(
+          requestId = requestId,
+          success = true,
+          userId = currentUserId,
+          packages = records,
+          error = null,
+          totalTimeMs = totalTime,
+        ),
       )
     }
   }
@@ -136,43 +142,47 @@ internal class PackageController(
           is PackageManager.NameNotFoundException -> {
             Log.w(TAG, "Package not found: $packageName", e)
             broadcastPackageInfoResult(
-              requestId = requestId,
-              success = false,
-              packageName = packageName,
-              isSystem = false,
-              applicationLabel = null,
-              versionName = null,
-              versionCode = null,
-              installerPackage = null,
-              firstInstallTime = null,
-              lastUpdateTime = null,
-              allowBackup = null,
-              requestedPermissions = emptyList(),
-              grantedPermissions = emptyMap(),
-              mainActivity = null,
-              error = "Package not installed or not visible: $packageName",
-              totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+              PackageInfoOutcome(
+                requestId = requestId,
+                success = false,
+                packageName = packageName,
+                isSystem = false,
+                applicationLabel = null,
+                versionName = null,
+                versionCode = null,
+                installerPackage = null,
+                firstInstallTime = null,
+                lastUpdateTime = null,
+                allowBackup = null,
+                requestedPermissions = emptyList(),
+                grantedPermissions = emptyMap(),
+                mainActivity = null,
+                error = "Package not installed or not visible: $packageName",
+                totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+              ),
             )
           }
           else -> {
             Log.e(TAG, "performPackageInfo failed for $packageName", e)
             broadcastPackageInfoResult(
-              requestId = requestId,
-              success = false,
-              packageName = packageName,
-              isSystem = false,
-              applicationLabel = null,
-              versionName = null,
-              versionCode = null,
-              installerPackage = null,
-              firstInstallTime = null,
-              lastUpdateTime = null,
-              allowBackup = null,
-              requestedPermissions = emptyList(),
-              grantedPermissions = emptyMap(),
-              mainActivity = null,
-              error = "Failed to read package info: ${e.message}",
-              totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+              PackageInfoOutcome(
+                requestId = requestId,
+                success = false,
+                packageName = packageName,
+                isSystem = false,
+                applicationLabel = null,
+                versionName = null,
+                versionCode = null,
+                installerPackage = null,
+                firstInstallTime = null,
+                lastUpdateTime = null,
+                allowBackup = null,
+                requestedPermissions = emptyList(),
+                grantedPermissions = emptyMap(),
+                mainActivity = null,
+                error = "Failed to read package info: ${e.message}",
+                totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+              ),
             )
           }
         }
@@ -198,38 +208,10 @@ internal class PackageController(
       val versionCode =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
         else @Suppress("DEPRECATION") info.versionCode.toLong()
-      val installerPackage =
-        try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            packageManager().getInstallSourceInfo(packageName).installingPackageName
-          } else {
-            @Suppress("DEPRECATION") packageManager().getInstallerPackageName(packageName)
-          }
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: PackageManager.NameNotFoundException) {
-          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
-          null
-        } catch (e: IllegalArgumentException) {
-          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
-          null
-        } catch (e: SecurityException) {
-          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
-          null
-        }
+      val installerPackage = installerPackage(packageName)
       val allowBackup = appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
       val requested = info.requestedPermissions?.toList().orEmpty()
-      val flagsArray = info.requestedPermissionsFlags
-      val granted = mutableMapOf<String, Boolean>()
-      if (includePermissions && flagsArray != null) {
-        for (i in requested.indices) {
-          val isGranted =
-            if (i < flagsArray.size) {
-              (flagsArray[i] and PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
-            } else false
-          granted[requested[i]] = isGranted
-        }
-      }
+      val granted = grantedPermissions(info, requested, includePermissions)
       val mainActivity =
         try {
           packageManager().getLaunchIntentForPackage(packageName)?.component?.flattenToShortString()
@@ -242,23 +224,65 @@ internal class PackageController(
 
       val totalTime = timeProvider.currentTimeMillis() - startTime
       broadcastPackageInfoResult(
-        requestId = requestId,
-        success = true,
-        packageName = packageName,
-        isSystem = isSystem,
-        applicationLabel = applicationLabel,
-        versionName = info.versionName,
-        versionCode = versionCode,
-        installerPackage = installerPackage,
-        firstInstallTime = info.firstInstallTime,
-        lastUpdateTime = info.lastUpdateTime,
-        allowBackup = allowBackup,
-        requestedPermissions = requested,
-        grantedPermissions = granted,
-        mainActivity = mainActivity,
-        error = null,
-        totalTimeMs = totalTime,
+        PackageInfoOutcome(
+          requestId = requestId,
+          success = true,
+          packageName = packageName,
+          isSystem = isSystem,
+          applicationLabel = applicationLabel,
+          versionName = info.versionName,
+          versionCode = versionCode,
+          installerPackage = installerPackage,
+          firstInstallTime = info.firstInstallTime,
+          lastUpdateTime = info.lastUpdateTime,
+          allowBackup = allowBackup,
+          requestedPermissions = requested,
+          grantedPermissions = granted,
+          mainActivity = mainActivity,
+          error = null,
+          totalTimeMs = totalTime,
+        ),
       )
+    }
+  }
+
+  private fun grantedPermissions(
+    info: PackageInfo,
+    requested: List<String>,
+    includePermissions: Boolean,
+  ): Map<String, Boolean> {
+    val flagsArray = info.requestedPermissionsFlags
+    val granted = mutableMapOf<String, Boolean>()
+    if (includePermissions && flagsArray != null) {
+      for (i in requested.indices) {
+        val isGranted =
+          if (i < flagsArray.size) {
+            (flagsArray[i] and PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
+          } else false
+        granted[requested[i]] = isGranted
+      }
+    }
+    return granted
+  }
+
+  private fun installerPackage(packageName: String): String? {
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        packageManager().getInstallSourceInfo(packageName).installingPackageName
+      } else {
+        @Suppress("DEPRECATION") packageManager().getInstallerPackageName(packageName)
+      }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: PackageManager.NameNotFoundException) {
+      Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+      null
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+      null
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+      null
     }
   }
 
@@ -269,12 +293,14 @@ internal class PackageController(
       onFailure = { e ->
         Log.e(TAG, "performLaunchIntent failed for $packageName", e)
         broadcastLaunchIntentResult(
-          requestId = requestId,
-          success = false,
-          packageName = packageName,
-          componentName = null,
-          error = "Failed to resolve launch intent: ${e.message}",
-          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          LaunchIntentOutcome(
+            requestId = requestId,
+            success = false,
+            packageName = packageName,
+            componentName = null,
+            error = "Failed to resolve launch intent: ${e.message}",
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       },
     ) {
@@ -283,103 +309,74 @@ internal class PackageController(
       val totalTime = timeProvider.currentTimeMillis() - startTime
       val success = component != null
       broadcastLaunchIntentResult(
-        requestId = requestId,
-        success = success,
-        packageName = packageName,
-        componentName = component,
-        error = if (!success) "No launch intent for $packageName" else null,
-        totalTimeMs = totalTime,
+        LaunchIntentOutcome(
+          requestId = requestId,
+          success = success,
+          packageName = packageName,
+          componentName = component,
+          error = if (!success) "No launch intent for $packageName" else null,
+          totalTimeMs = totalTime,
+        ),
       )
     }
   }
 
-  private suspend fun broadcastInstalledPackagesResult(
-    requestId: String?,
-    success: Boolean,
-    userId: Int,
-    packages: List<InstalledPackageRecord>,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastInstalledPackagesResult(outcome: InstalledPackagesOutcome) {
     if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(requestId, "installed_packages_result") {
+    resultBroadcaster.guard(outcome.requestId, "installed_packages_result") {
       responseSender.broadcast(
         InstalledPackagesResult(
           timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          userId = userId,
-          packages = packages,
-          totalTimeMs = totalTimeMs,
-          error = error,
+          requestId = outcome.requestId,
+          success = outcome.success,
+          userId = outcome.userId,
+          packages = outcome.packages,
+          totalTimeMs = outcome.totalTimeMs,
+          error = outcome.error,
         ),
       )
     }
   }
 
-  private suspend fun broadcastPackageInfoResult(
-    requestId: String?,
-    success: Boolean,
-    packageName: String,
-    isSystem: Boolean,
-    applicationLabel: String?,
-    versionName: String?,
-    versionCode: Long?,
-    installerPackage: String?,
-    firstInstallTime: Long?,
-    lastUpdateTime: Long?,
-    allowBackup: Boolean?,
-    requestedPermissions: List<String>,
-    grantedPermissions: Map<String, Boolean>,
-    mainActivity: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastPackageInfoResult(outcome: PackageInfoOutcome) {
     if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(requestId, "package_info_result") {
+    resultBroadcaster.guard(outcome.requestId, "package_info_result") {
       responseSender.broadcast(
         PackageInfoResult(
           timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          packageName = packageName,
-          isSystem = isSystem,
-          applicationLabel = applicationLabel,
-          versionName = versionName,
-          versionCode = versionCode,
-          installerPackage = installerPackage,
-          firstInstallTime = firstInstallTime,
-          lastUpdateTime = lastUpdateTime,
-          allowBackup = allowBackup,
-          requestedPermissions = requestedPermissions,
-          grantedPermissions = grantedPermissions,
-          mainActivity = mainActivity,
-          totalTimeMs = totalTimeMs,
-          error = error,
+          requestId = outcome.requestId,
+          success = outcome.success,
+          packageName = outcome.packageName,
+          isSystem = outcome.isSystem,
+          applicationLabel = outcome.applicationLabel,
+          versionName = outcome.versionName,
+          versionCode = outcome.versionCode,
+          installerPackage = outcome.installerPackage,
+          firstInstallTime = outcome.firstInstallTime,
+          lastUpdateTime = outcome.lastUpdateTime,
+          allowBackup = outcome.allowBackup,
+          requestedPermissions = outcome.requestedPermissions,
+          grantedPermissions = outcome.grantedPermissions,
+          mainActivity = outcome.mainActivity,
+          totalTimeMs = outcome.totalTimeMs,
+          error = outcome.error,
         ),
       )
     }
   }
 
-  private suspend fun broadcastLaunchIntentResult(
-    requestId: String?,
-    success: Boolean,
-    packageName: String,
-    componentName: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastLaunchIntentResult(outcome: LaunchIntentOutcome) {
     if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(requestId, "launch_intent_result") {
+    resultBroadcaster.guard(outcome.requestId, "launch_intent_result") {
       responseSender.broadcast(
         LaunchIntentResult(
           timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          packageName = packageName,
-          componentName = componentName,
-          totalTimeMs = totalTimeMs,
-          error = error,
+          requestId = outcome.requestId,
+          success = outcome.success,
+          packageName = outcome.packageName,
+          componentName = outcome.componentName,
+          totalTimeMs = outcome.totalTimeMs,
+          error = outcome.error,
         ),
       )
     }

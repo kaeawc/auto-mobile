@@ -531,58 +531,8 @@ internal class GestureController(
             dragDurationMs,
             holdDurationMs,
           )
-        val ownedPerf = requireNotNull(dragPerf)
-        val gestureBuiltTime = timeProvider.currentTimeMillis()
-        ownedPerf.children.single().endTime = gestureBuiltTime
-        val dispatchPerf = MutablePerfEntry("dispatchGesture", gestureBuiltTime, requestId)
-        val lifecycle =
-          GestureDispatchLifecycle(
-            startTimeMs = startTime,
-            gestureBuiltTimeMs = gestureBuiltTime,
-            nowMs = { timeProvider.currentTimeMillis() },
-            startOperation = { ownedPerf.children.add(dispatchPerf) },
-            endOperation = { dispatchPerf.endTime = timeProvider.currentTimeMillis() },
-            endPerfBlock = {
-              ownedPerf.endTime = timeProvider.currentTimeMillis()
-              perfProvider.complete(ownedPerf)
-            },
-          )
-        host.forgetRememberedInsert()
-        lifecycle.startDispatch()
-        val onResult: (GestureDispatchOutcome) -> Unit = { dragResultReporter(requestId, it) }
-        val posted = gestureThread.post {
-          // Check once immediately before DOWN; this gesture's own events may advance the token.
-          if (frameContext != null && frameContext != host.currentFrameContext()) {
-            lifecycle.failed(
-              IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
-              onResult,
-            )
-          } else {
-            DragStrokeSession(
-                plan = plan,
-                dispatcher = AccessibilityStrokeDispatcher(),
-                deadline = dragDeadline,
-                displayId = displayId,
-                logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
-                onFinished = { success, error ->
-                  if (success) {
-                    serviceScope.launch(
-                      gestureHandler.asCoroutineDispatcher().immediate +
-                        RequestIdContext(requestId) +
-                        PerfRequestContext(requestId),
-                    ) {
-                      gestureCompletionMutex.withLock { lifecycle.completed(onResult = onResult) }
-                    }
-                  } else {
-                    lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
-                  }
-                },
-                nowMs = android.os.SystemClock::elapsedRealtime,
-              )
-              .start()
-          }
-        }
-        if (!posted) lifecycle.notDispatched(onResult)
+        ContinuedDrag(requestId, startTime, frameContext, displayId, requireNotNull(dragPerf))
+          .dispatch(plan)
         return
       }
       val gesture = gestureBuilder.build()
@@ -601,6 +551,68 @@ internal class GestureController(
       ) { outcome ->
         dragResultReporter(requestId, outcome)
       }
+    }
+  }
+
+  private inner class ContinuedDrag(
+    private val requestId: String?,
+    private val startTime: Long,
+    private val frameContext: String?,
+    private val displayId: Int?,
+    private val ownedPerf: MutablePerfEntry,
+  ) {
+    fun dispatch(plan: List<GestureSegment>) {
+      val gestureBuiltTime = timeProvider.currentTimeMillis()
+      ownedPerf.children.single().endTime = gestureBuiltTime
+      val dispatchPerf = MutablePerfEntry("dispatchGesture", gestureBuiltTime, requestId)
+      val lifecycle =
+        GestureDispatchLifecycle(
+          startTimeMs = startTime,
+          gestureBuiltTimeMs = gestureBuiltTime,
+          nowMs = { timeProvider.currentTimeMillis() },
+          startOperation = { ownedPerf.children.add(dispatchPerf) },
+          endOperation = { dispatchPerf.endTime = timeProvider.currentTimeMillis() },
+          endPerfBlock = {
+            ownedPerf.endTime = timeProvider.currentTimeMillis()
+            perfProvider.complete(ownedPerf)
+          },
+        )
+      host.forgetRememberedInsert()
+      lifecycle.startDispatch()
+      val onResult: (GestureDispatchOutcome) -> Unit = { dragResultReporter(requestId, it) }
+      val posted = gestureThread.post {
+        // Check once immediately before DOWN; this gesture's own events may advance the token.
+        if (frameContext != null && frameContext != host.currentFrameContext()) {
+          lifecycle.failed(
+            IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
+            onResult,
+          )
+        } else {
+          DragStrokeSession(
+              plan = plan,
+              dispatcher = AccessibilityStrokeDispatcher(),
+              deadline = dragDeadline,
+              displayId = displayId,
+              logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
+              onFinished = { success, error ->
+                if (success) {
+                  serviceScope.launch(
+                    gestureHandler.asCoroutineDispatcher().immediate +
+                      RequestIdContext(requestId) +
+                      PerfRequestContext(requestId),
+                  ) {
+                    gestureCompletionMutex.withLock { lifecycle.completed(onResult = onResult) }
+                  }
+                } else {
+                  lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
+                }
+              },
+              nowMs = android.os.SystemClock::elapsedRealtime,
+            )
+            .start()
+        }
+      }
+      if (!posted) lifecycle.notDispatched(onResult)
     }
   }
 
@@ -878,7 +890,16 @@ internal class GestureController(
 
     resultBroadcaster.guard(requestId, "swipe_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        swipeResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
+        swipeResultFrame(
+          GestureFrameResult(
+            requestId = requestId,
+            success = success,
+            error = error,
+            totalTimeMs = totalTimeMs,
+            gestureTimeMs = gestureTimeMs,
+          ),
+          perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted swipe result to ${responseSender.connectionCount()} clients")
     }
@@ -899,7 +920,16 @@ internal class GestureController(
 
     resultBroadcaster.guard(requestId, "drag_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        dragResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
+        dragResultFrame(
+          GestureFrameResult(
+            requestId = requestId,
+            success = success,
+            error = error,
+            totalTimeMs = totalTimeMs,
+            gestureTimeMs = gestureTimeMs,
+          ),
+          perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted drag result to ${responseSender.connectionCount()} clients")
     }
@@ -943,7 +973,16 @@ internal class GestureController(
 
     resultBroadcaster.guard(requestId, "pinch_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        pinchResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
+        pinchResultFrame(
+          GestureFrameResult(
+            requestId = requestId,
+            success = success,
+            error = error,
+            totalTimeMs = totalTimeMs,
+            gestureTimeMs = gestureTimeMs,
+          ),
+          perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted pinch result to ${responseSender.connectionCount()} clients")
     }

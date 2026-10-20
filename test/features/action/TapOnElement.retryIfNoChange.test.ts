@@ -1,3 +1,7 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
+import { runBlockWithEnvelope, isolatedTapStrategy } from "../../helpers/observedInteractionStub";
+import { FakeElementSelector } from "../../fakes/FakeElementSelector";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type {
   Element,
@@ -42,7 +46,10 @@ function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
 function createTapOnElement(
   platform: "android" | "ios" = "android",
   waitForCondition?: WaitForCondition,
-  extraOptions: Pick<TapOnElementDependencies, "selectionStateTracker"> = {},
+  extraOptions: Pick<
+    TapOnElementDependencies,
+    "selectionStateTracker" | "elementSelector" | "tapStrategy"
+  > = {},
 ): { tap: TapOnElement; timer: FakeTimer } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -218,6 +225,8 @@ describe("deriveTapEffect", () => {
   test("captures terminal evidence after effect polling selects the destination observation", async () => {
     const finalizeEffects: unknown[] = [];
     const { tap } = createTapOnElement("android", undefined, {
+      elementSelector: new FakeElementSelector(makeElement()),
+      tapStrategy: isolatedTapStrategy(),
       selectionStateTracker: {
         prepare: async () => null,
         finalize: async (request) => {
@@ -242,9 +251,18 @@ describe("deriveTapEffect", () => {
     });
     const captured: ObserveResult[] = [];
 
-    tap.observedInteraction = async (_interaction, options) => {
+    source.viewHierarchy = makeHierarchy("source");
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(source);
+    tap.observeScreen = screen;
+    tap.executeAndroidTap = async () => undefined;
+    tap.prepareSelectionCapture = async () => null;
+    tap.observedInteraction = async (interaction, options) => {
       expect(options.deferPostActionScreenshot).toBe(true);
-      return { success: true, action: "tap", element: makeElement(), observation: source };
+      return runBlockWithEnvelope(() => recordObservationRead(source), { observation: source })(
+        interaction,
+        options,
+      );
     };
     tap.deriveTapEffectAfterPostTapObservation = async () => ({
       effect: { screenChanged: true, basis: "activeWindow changed" },

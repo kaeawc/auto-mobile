@@ -38,7 +38,7 @@ import org.junit.Test
  * Nothing sleeps: the server answers synchronously from its stdin flush, and every wait is a latch
  * or a join bounded only so that a regression fails instead of hanging.
  */
-class McpStdioClientStalledReadTest {
+internal class McpStdioClientStalledReadTest : McpStdioClientStalledReadDispatcherFixture() {
   private val threads = CopyOnWriteArrayList<Thread>()
   private val clients = CopyOnWriteArrayList<McpStdioClient>()
 
@@ -187,7 +187,7 @@ class McpStdioClientStalledReadTest {
         ioExecutor.submit {}.get(JOIN_MS, TimeUnit.MILLISECONDS)
         // Real clock for the retry: runTest would fast-forward its 5 s bound while the real IO
         // thread works.
-        val retried = withContext(Dispatchers.Default) { source.getFailureGroups() }
+        val retried = withContext(testDispatcher) { source.getFailureGroups() }
         assertTrue(retried is Result.Success, "retry=$retried")
       } finally {
         io.close()
@@ -336,3 +336,7 @@ class McpStdioClientStalledReadTest {
     const val FAILURES_JSON = """{"groups":[],"generatedAt":"2026-10-05T00:00:00Z"}"""
   }
 }
+
+internal abstract class McpStdioClientStalledReadDispatcherFixture(
+  protected val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
+)

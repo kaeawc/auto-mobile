@@ -581,7 +581,10 @@ internal class McpDaemonClientInputTest : McpDaemonClientInputFixture() {
         val client =
           McpDaemonClient(
             socketPathValue = server.socketPath.toString(),
-            inputRequestTimeoutMs = 1_234,
+            requestTimeouts =
+              DaemonRequestTimeouts(
+                inputRequestTimeoutMs = 1_234,
+              ),
           )
 
         client.inputTap(
@@ -1041,7 +1044,11 @@ internal class McpDaemonClientTypedInputTest : McpDaemonClientInputFixture() {
   @Test
   fun `non socket clients explicitly report unsupported typed input`() {
     val httpResult =
-      McpHttpClient("http://localhost:1/auto-mobile/streamable")
+      McpHttpClient(
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            "http://localhost:1/auto-mobile/streamable",
+          ),
+        )
         .inputTap(
           input =
             TapInput(
@@ -1099,7 +1106,10 @@ internal class McpDaemonClientInputDeadlineTest : McpDaemonClientInputFixture() 
       val client =
         McpDaemonClient(
           socketPathValue = socketPath.toString(),
-          inputRequestTimeoutMs = 100,
+          requestTimeouts =
+            DaemonRequestTimeouts(
+              inputRequestTimeoutMs = 100,
+            ),
         )
       val error =
         assertFailsWith<DaemonUnavailableException> {
@@ -1152,7 +1162,10 @@ internal class McpDaemonClientInputDeadlineTest : McpDaemonClientInputFixture() 
       val client =
         McpDaemonClient(
           socketPathValue = socketPath.toString(),
-          inputRequestTimeoutMs = 100,
+          requestTimeouts =
+            DaemonRequestTimeouts(
+              inputRequestTimeoutMs = 100,
+            ),
         )
       val error =
         assertFailsWith<DaemonUnavailableException> {

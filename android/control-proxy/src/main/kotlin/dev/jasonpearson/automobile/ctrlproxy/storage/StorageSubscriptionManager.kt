@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.net.toUri
 import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
@@ -166,7 +167,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val result = context.contentResolver.call(uri, "checkAvailability", null, null)
 
       if (result == null) {
@@ -219,7 +220,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       Log.d(TAG, "listPreferenceFiles: calling contentResolver.call with authority=$authority")
       val result = context.contentResolver.call(uri, "listFiles", null, null)
       Log.d(TAG, "listPreferenceFiles: contentResolver.call returned, result=$result")
@@ -287,7 +288,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       val result = context.contentResolver.call(uri, "getPreferences", null, extras)
 
@@ -350,7 +351,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("adapterName", adapterName) }
       val result = context.contentResolver.call(uri, "listDataStores", null, extras)
 
@@ -410,7 +411,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("adapterName", adapterName)
@@ -562,7 +563,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       val result = context.contentResolver.call(uri, "subscribeToFile", null, extras)
 
@@ -609,7 +610,7 @@ class StorageSubscriptionManager(
         Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
       },
     ) {
-      val uri = Uri.parse("content://$packageName$AUTHORITY_SUFFIX")
+      val uri = "content://$packageName$AUTHORITY_SUFFIX".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
     }
@@ -657,7 +658,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras = Bundle().apply { putString("fileName", fileName) }
       context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
     }
@@ -695,7 +696,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -766,7 +767,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -817,7 +818,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -865,7 +866,7 @@ class StorageSubscriptionManager(
       },
     ) {
       val authority = packageName + AUTHORITY_SUFFIX
-      val uri = Uri.parse("content://$authority")
+      val uri = "content://$authority".toUri()
       val extras =
         Bundle().apply {
           putString("fileName", fileName)
@@ -930,7 +931,7 @@ class StorageSubscriptionManager(
               // This sibling is deliberately outside withTimeout's child hierarchy: a Binder call
               // may ignore interruption. Bound the await, without joining a stuck provider thread.
               val call = cleanupScope.async {
-                val uri = Uri.parse("content://${subscription.packageName}$AUTHORITY_SUFFIX")
+                val uri = "content://${subscription.packageName}$AUTHORITY_SUFFIX".toUri()
                 val extras = Bundle().apply { putString("fileName", subscription.fileName) }
                 backgroundCalls.call(uri, "unsubscribeFromFile", extras)
               }
@@ -979,7 +980,7 @@ class StorageSubscriptionManager(
       }
 
       val authority = packageName + AUTHORITY_SUFFIX
-      val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
+      val changesUri = "content://$authority/$CHANGES_PATH".toUri()
 
       val signals = Channel<Unit>(Channel.CONFLATED)
       val observer =
@@ -1047,7 +1048,7 @@ class StorageSubscriptionManager(
     val state = synchronized(lifecycleLock) { packageObservers[packageName] } ?: return
     if (destroyed || state.signals !== signals) return
     val authority = packageName + AUTHORITY_SUFFIX
-    val uri = Uri.parse("content://$authority")
+    val uri = "content://$authority".toUri()
 
     for (fileName in state.subscriptions.toList()) {
       coroutineContext.ensureActive()

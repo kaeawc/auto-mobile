@@ -42,6 +42,8 @@ const recoveryMethods = collaboratorMethods("recoveryPublication.ts", "SessionRe
 // Retained expireIfDue paths use this.getSession to preserve instance patches (#12581).
 // Counts must shrink with migrations; adding a reader requires an explicit expiry decision.
 const RETAINED_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  // Live facade wiring; the target remains checked in recoveryPublication.
+  createCollaboratorHost: 1,
   recoverPersistedRow: 1,
 };
 
@@ -207,6 +209,10 @@ const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 // findSession (a migrated site drops out, as the appearance sweep did). Counts may only shrink;
 // a new pure reader must call findSession, a new admission site needs an explicit entry here.
 const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  // These factories moved from SessionManager; retain each expiring call, including the row read.
+  "sessionManager/construction.ts#getSession": 1,
+  "sessionManager/wiring.ts#getSession": 1,
+  "sessionManager/wiring.ts#readSessionRow": 1,
   "sessionManager/recoveryPublication.ts#recoverPersistedRow": 1,
   "sessionManager/recoveredTerminalReleaseIntents.ts#applyRecoveredTerminalReleaseIntents": 1,
   "setupTiming.ts#consumeSetupTiming": 1,

@@ -62,28 +62,30 @@ class McpStatusTimeoutTest {
     var requests = 0
     val client =
       McpHttpClient(
-        endpoint = "http://localhost/mcp",
-        retryPolicy = RetryPolicy(maxRetries = 3, initialDelayMs = 1),
-        statusRequestTimeoutMs = 120,
-        statusDeadlineFactory = { timeoutMs -> StatusRequestDeadline(timeoutMs) { nowNanos } },
-        requestSender =
-          HttpRequestSender { request ->
-            when (requests++) {
-              0 -> {
-                assertEquals(Duration.ofMillis(120), request.timeout().orElseThrow())
-                nowNanos += Duration.ofMillis(80).toNanos()
-                FakeHttpResponse(request, initializeResponse)
+        dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+          endpoint = "http://localhost/mcp",
+          retryPolicy = RetryPolicy(maxRetries = 3, initialDelayMs = 1),
+          statusRequestTimeoutMs = 120,
+          statusDeadlineFactory = { timeoutMs -> StatusRequestDeadline(timeoutMs) { nowNanos } },
+          requestSender =
+            HttpRequestSender { request ->
+              when (requests++) {
+                0 -> {
+                  assertEquals(Duration.ofMillis(120), request.timeout().orElseThrow())
+                  nowNanos += Duration.ofMillis(80).toNanos()
+                  FakeHttpResponse(request, initializeResponse)
+                }
+                1 -> {
+                  assertEquals(Duration.ofMillis(40), request.timeout().orElseThrow())
+                  FakeHttpResponse(request, "{}")
+                }
+                else -> {
+                  assertEquals(Duration.ofMillis(40), request.timeout().orElseThrow())
+                  throw HttpTimeoutException("status request timed out")
+                }
               }
-              1 -> {
-                assertEquals(Duration.ofMillis(40), request.timeout().orElseThrow())
-                FakeHttpResponse(request, "{}")
-              }
-              else -> {
-                assertEquals(Duration.ofMillis(40), request.timeout().orElseThrow())
-                throw HttpTimeoutException("status request timed out")
-              }
-            }
-          },
+            },
+        ),
       )
 
     assertFailsWith<HttpTimeoutException> { client.getDaemonStatus() }
@@ -229,27 +231,29 @@ class McpStatusTimeoutTest {
   ): McpHttpClient {
     var requests = 0
     return McpHttpClient(
-      endpoint = "http://localhost/mcp",
-      requestSender =
-        HttpRequestSender { request ->
-          assertTrue(request.headers().firstValue("mcp-session-id").isEmpty)
-          if (requests > 0) {
-            assertEquals(
-              "2025-11-25",
-              request.headers().firstValue("mcp-protocol-version").orElseThrow(),
+      dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+        endpoint = "http://localhost/mcp",
+        requestSender =
+          HttpRequestSender { request ->
+            assertTrue(request.headers().firstValue("mcp-session-id").isEmpty)
+            if (requests > 0) {
+              assertEquals(
+                "2025-11-25",
+                request.headers().firstValue("mcp-protocol-version").orElseThrow(),
+              )
+            } else {
+              assertTrue(request.headers().firstValue("mcp-protocol-version").isEmpty)
+            }
+            FakeHttpResponse(
+              request,
+              when (requests++) {
+                0 -> initialization
+                1 -> "{}" // The initialized notification has no response result.
+                else -> responseBody
+              },
             )
-          } else {
-            assertTrue(request.headers().firstValue("mcp-protocol-version").isEmpty)
-          }
-          FakeHttpResponse(
-            request,
-            when (requests++) {
-              0 -> initialization
-              1 -> "{}" // The initialized notification has no response result.
-              else -> responseBody
-            },
-          )
-        },
+          },
+      ),
     )
   }
 

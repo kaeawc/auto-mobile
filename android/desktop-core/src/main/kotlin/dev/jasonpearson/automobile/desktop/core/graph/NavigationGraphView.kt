@@ -149,54 +149,16 @@ private fun GraphCanvas(
       remember(recentTransitions) { recentTransitions.flatMap { listOf(it.from, it.to) }.toSet() }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
-      drawEdges(summary, layout, palette, historyById, historyByEdge, recentTransitions.size)
+      drawEdges(
+        summary,
+        layout,
+        palette,
+        GraphEdgeHistory(historyById, historyByEdge, recentTransitions.size),
+      )
       drawNodes(summary, layout, palette, historyNodes)
     }
 
-    if (layout.nodeLayouts.isNotEmpty()) {
-      val labelMaxWidthPx = with(density) { 140.dp.toPx() }
-      val labelHeightPx = with(density) { 16.dp.toPx() }
-      layout.nodeLayouts.values.forEach { nodeLayout ->
-        val label =
-          if (nodeLayout.node.visitCount > 1) {
-            "${nodeLayout.node.screenName} (${nodeLayout.node.visitCount})"
-          } else {
-            nodeLayout.node.screenName
-          }
-        val isCurrent = nodeLayout.node.screenName == summary.currentScreen
-        val isHistory = historyNodes.contains(nodeLayout.node.screenName)
-        val labelColor =
-          when {
-            isCurrent -> palette.nodeCurrentStroke
-            isHistory -> palette.edgeHistory
-            else -> palette.label
-          }
-
-        val widthPx = size.width.toFloat()
-        val heightPx = size.height.toFloat()
-        val placeLeft = nodeLayout.center.x > widthPx * 0.6f
-        val rawX =
-          if (placeLeft) {
-            nodeLayout.center.x - nodeLayout.radius - 8f - labelMaxWidthPx
-          } else {
-            nodeLayout.center.x + nodeLayout.radius + 8f
-          }
-        val maxX = (widthPx - labelMaxWidthPx - 4f).coerceAtLeast(4f)
-        val maxY = (heightPx - labelHeightPx - 4f).coerceAtLeast(4f)
-        val x = rawX.coerceIn(4f, maxX)
-        val y = (nodeLayout.center.y - nodeLayout.radius - 6f).coerceIn(4f, maxY)
-
-        Text(
-          text = label,
-          color = labelColor,
-          fontSize = 11.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-          modifier =
-            Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.widthIn(max = 140.dp),
-        )
-      }
-    }
+    GraphNodeLabels(summary, layout, palette, historyNodes, size)
   }
 }
 
@@ -204,44 +166,50 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEdges(
   summary: NavigationGraphSummary,
   layout: GraphLayout,
   palette: GraphPalette,
-  historyById: Map<Int, Int>,
-  historyByEdge: Map<ScreenEdgeKey, Int>,
-  historySize: Int,
+  history: GraphEdgeHistory,
 ) {
-  if (layout.nodeLayouts.isEmpty()) {
-    return
-  }
+  with(history) {
+    if (layout.nodeLayouts.isEmpty()) {
+      return
+    }
 
-  summary.edges.forEach { edge ->
-    val from = layout.nodeLayouts[edge.from] ?: return@forEach
-    val to = layout.nodeLayouts[edge.to] ?: return@forEach
-    val recencyIndex = historyById[edge.id] ?: historyByEdge[ScreenEdgeKey(edge.from, edge.to)]
-    val recencyRatio =
-      if (recencyIndex != null && historySize > 0) {
-        (recencyIndex + 1).toFloat() / historySize.toFloat()
-      } else {
-        null
-      }
+    summary.edges.forEach { edge ->
+      val from = layout.nodeLayouts[edge.from] ?: return@forEach
+      val to = layout.nodeLayouts[edge.to] ?: return@forEach
+      val recencyIndex = historyById[edge.id] ?: historyByEdge[ScreenEdgeKey(edge.from, edge.to)]
+      val recencyRatio =
+        if (recencyIndex != null && historySize > 0) {
+          (recencyIndex + 1).toFloat() / historySize.toFloat()
+        } else {
+          null
+        }
 
-    val color =
+      val color =
+        if (recencyRatio != null) {
+          lerp(palette.edgeDefault, palette.edgeHistory, 0.35f + 0.65f * recencyRatio)
+        } else {
+          palette.edgeDefault
+        }
+      val strokeWidth = if (recencyRatio != null) 2.5f + 3f * recencyRatio else 1.2f
+      val dash =
+        if (recencyRatio == null && edge.toolName == null) {
+          PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+        } else {
+          null
+        }
+
+      val (start, end) = trimLine(from.center, to.center, from.radius, to.radius)
+      drawLine(
+        color = color,
+        start = start,
+        end = end,
+        strokeWidth = strokeWidth,
+        pathEffect = dash,
+      )
+
       if (recencyRatio != null) {
-        lerp(palette.edgeDefault, palette.edgeHistory, 0.35f + 0.65f * recencyRatio)
-      } else {
-        palette.edgeDefault
+        drawArrow(end, start, color, strokeWidth)
       }
-    val strokeWidth = if (recencyRatio != null) 2.5f + 3f * recencyRatio else 1.2f
-    val dash =
-      if (recencyRatio == null && edge.toolName == null) {
-        PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
-      } else {
-        null
-      }
-
-    val (start, end) = trimLine(from.center, to.center, from.radius, to.radius)
-    drawLine(color = color, start = start, end = end, strokeWidth = strokeWidth, pathEffect = dash)
-
-    if (recencyRatio != null) {
-      drawArrow(end, start, color, strokeWidth)
     }
   }
 }
@@ -363,4 +331,65 @@ private fun rememberGraphPalette(): GraphPalette {
     labelMuted = baseText.copy(alpha = 0.65f),
     error = error,
   )
+}
+
+private data class GraphEdgeHistory(
+  val historyById: Map<Int, Int>,
+  val historyByEdge: Map<ScreenEdgeKey, Int>,
+  val historySize: Int,
+)
+
+@Composable
+private fun GraphNodeLabels(
+  summary: NavigationGraphSummary,
+  layout: GraphLayout,
+  palette: GraphPalette,
+  historyNodes: Set<String>,
+  size: IntSize,
+) {
+  val density = LocalDensity.current
+  if (layout.nodeLayouts.isNotEmpty()) {
+    val labelMaxWidthPx = with(density) { 140.dp.toPx() }
+    val labelHeightPx = with(density) { 16.dp.toPx() }
+    layout.nodeLayouts.values.forEach { nodeLayout ->
+      val label =
+        if (nodeLayout.node.visitCount > 1) {
+          "${nodeLayout.node.screenName} (${nodeLayout.node.visitCount})"
+        } else {
+          nodeLayout.node.screenName
+        }
+      val isCurrent = nodeLayout.node.screenName == summary.currentScreen
+      val isHistory = historyNodes.contains(nodeLayout.node.screenName)
+      val labelColor =
+        when {
+          isCurrent -> palette.nodeCurrentStroke
+          isHistory -> palette.edgeHistory
+          else -> palette.label
+        }
+
+      val widthPx = size.width.toFloat()
+      val heightPx = size.height.toFloat()
+      val placeLeft = nodeLayout.center.x > widthPx * 0.6f
+      val rawX =
+        if (placeLeft) {
+          nodeLayout.center.x - nodeLayout.radius - 8f - labelMaxWidthPx
+        } else {
+          nodeLayout.center.x + nodeLayout.radius + 8f
+        }
+      val maxX = (widthPx - labelMaxWidthPx - 4f).coerceAtLeast(4f)
+      val maxY = (heightPx - labelHeightPx - 4f).coerceAtLeast(4f)
+      val x = rawX.coerceIn(4f, maxX)
+      val y = (nodeLayout.center.y - nodeLayout.radius - 6f).coerceIn(4f, maxY)
+
+      Text(
+        text = label,
+        color = labelColor,
+        fontSize = 11.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier =
+          Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.widthIn(max = 140.dp),
+      )
+    }
+  }
 }

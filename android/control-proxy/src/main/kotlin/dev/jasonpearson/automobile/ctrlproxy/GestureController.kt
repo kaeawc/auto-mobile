@@ -2,11 +2,11 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.accessibilityservice.AccessibilityService.GestureResultCallback
 import android.accessibilityservice.GestureDescription
-import android.annotation.TargetApi
 import android.graphics.Path
 import android.os.Build
 import android.os.Handler
 import android.util.Log
+import androidx.annotation.RequiresApi
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -185,7 +185,10 @@ internal class GestureController(
       newSession = { onFinished ->
         GestureStreamSession(
           coordinator = GestureStreamCoordinator(),
-          dispatcher = AccessibilityStrokeDispatcher(),
+          // startStream rejects API < 26 before this factory can run on the gesture thread.
+          dispatcher =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) AccessibilityStrokeDispatcher()
+            else error("Streaming gestures require Android 8.0 (API 26)"),
           runOnGestureThread = { gestureThread.post(it) },
           onFinished = onFinished,
         )
@@ -200,7 +203,7 @@ internal class GestureController(
    * seam so the continuation loop ([GestureStreamSession]) stays framework-free and unit-tested.
    * Requires API 26+ (the `willContinue` constructor and `continueStroke`); the caller guards.
    */
-  @TargetApi(Build.VERSION_CODES.O)
+  @RequiresApi(Build.VERSION_CODES.O)
   private inner class AccessibilityStrokeDispatcher :
     StrokeDispatcher<GestureDescription.StrokeDescription> {
     override fun initialStroke(segment: GestureSegment): GestureDescription.StrokeDescription =
@@ -578,7 +581,7 @@ internal class GestureController(
             IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
             onResult,
           )
-        } else {
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
           DragStrokeSession(
               plan = plan,
               dispatcher = AccessibilityStrokeDispatcher(),

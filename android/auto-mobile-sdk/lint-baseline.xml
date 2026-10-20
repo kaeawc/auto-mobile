@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="SdCardPath"
+        message="Do not hardcode &quot;/sdcard/&quot;; use `Environment.getExternalStorageDirectory().getPath()` instead"
+        errorLine1="  private const val DEFAULT_IMAGE_DIR = &quot;/sdcard/Download/automobile&quot;"
+        errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/AutoMobileNotifications.kt"
+            line="81"
+            column="42"/>
+    </issue>
+
+    <issue
+        id="DiscouragedApi"
+        message="Use of `scheduleAtFixedRate` is strongly discouraged because it can lead to unexpected behavior when Android processes become cached (tasks may unexpectedly execute hundreds or thousands of times in quick succession when a process changes from cached to uncached); prefer using `scheduleWithFixedDelay`"
+        errorLine1="          executor.scheduleAtFixedRate("
+        errorLine2="          ^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/events/SdkEventBuffer.kt"
+            line="107"
+            column="11"/>
+    </issue>
+
+    <issue
+        id="ExportedContentProvider"
+        message="Exported content providers can provide access to potentially sensitive data"
+        errorLine1="    &lt;provider"
+        errorLine2="     ~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="20"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="ExportedContentProvider"
+        message="Exported content providers can provide access to potentially sensitive data"
+        errorLine1="    &lt;provider"
+        errorLine2="     ~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="25"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="ExportedContentProvider"
+        message="Exported content providers can provide access to potentially sensitive data"
+        errorLine1="    &lt;provider"
+        errorLine2="     ~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="29"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="ExportedContentProvider"
+        message="Exported content providers can provide access to potentially sensitive data"
+        errorLine1="    &lt;provider"
+        errorLine2="     ~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="34"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `AnrReportingSession` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="  private var session: AnrReportingSession? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/anr/AutoMobileAnr.kt"
+            line="73"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `AutoMobileBiometrics` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/**"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/biometrics/AutoMobileBiometrics.kt"
+            line="12"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/biometrics/AutoMobileBiometrics.kt"
+            line="100"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `AutoMobileCrashes` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/**"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/crashes/AutoMobileCrashes.kt"
+            line="20"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/crashes/AutoMobileCrashes.kt"
+            line="60"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `AutoMobileFailures` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/**"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/failures/AutoMobileFailures.kt"
+            line="15"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/failures/AutoMobileFailures.kt"
+            line="56"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `AutoMobileNotifications` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/** Debug-focused notification helper for AutoMobile tests. Requires app-under-test integration. */"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/AutoMobileNotifications.kt"
+            line="62"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/AutoMobileNotifications.kt"
+            line="85"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `AutoMobileSDK` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/**"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/AutoMobileSDK.kt"
+            line="54"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  @Volatile private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/AutoMobileSDK.kt"
+            line="94"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `DatabaseInspector` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/**"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/database/DatabaseInspector.kt"
+            line="8"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/database/DatabaseInspector.kt"
+            line="26"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `SQLiteDatabaseDriver` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="  private var _driver: SQLiteDatabaseDriver? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/database/DatabaseInspector.kt"
+            line="28"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `FrameMetricsCollector` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/**"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/FrameMetricsCollector.kt"
+            line="21"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/FrameMetricsCollector.kt"
+            line="60"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `RecompositionTracker` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="internal object RecompositionTracker {"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/RecompositionTracker.kt"
+            line="15"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/RecompositionTracker.kt"
+            line="38"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `SharedPreferencesInspector` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="/**"
+        errorLine2="^">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/storage/SharedPreferencesInspector.kt"
+            line="8"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields; this is a memory leak"
+        errorLine1="  private var context: Context? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/storage/SharedPreferencesInspector.kt"
+            line="26"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `SharedPreferencesDriverImpl` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="  private var _driver: SharedPreferencesDriverImpl? = null"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/sdk/storage/SharedPreferencesInspector.kt"
+            line="28"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="UseTomlInstead"
+        message="Use version catalog instead"
+        errorLine1="  implementation(&quot;androidx.compose.runtime:runtime&quot;)"
+        errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="60"
+            column="18"/>
+    </issue>
+
+</issues>

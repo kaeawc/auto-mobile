@@ -2,8 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>SwallowedException:FailureRedactingMCPClient.kt:FailureRedactingMCPClient$e: Exception</ID>
-    <ID>SwallowedException:RedactingMCPClient.kt:RedactingMCPClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAgent.kt:AutoMobileAgent$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAgent.kt:AutoMobileAgent.DefaultMCPClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAgent.kt:AutoMobileAgent.WaitForTool$e: Exception</ID>

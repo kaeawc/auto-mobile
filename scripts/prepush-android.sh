@@ -6,8 +6,11 @@ usage() {
   cat <<'EOF'
 Usage: scripts/prepush-android.sh [--base-ref <ref>]
 
-Runs fast formatting, scoped Detekt, compilation, and tests for Android Kotlin
-modules changed since the merge-base with the default branch.
+Runs Android lint and the shrink-only baseline guard for changed Android modules,
+plus fast formatting, scoped Detekt, compilation, and tests for Kotlin changes.
+Sources, resources, manifests and baselines select their owning module for lint;
+build-logic or Gradle configuration changes select all Android lintDebug tasks.
+Includes committed changes since the merge-base, staged, unstaged and untracked files.
 EOF
 }
 
@@ -74,6 +77,8 @@ set +e
 android_changes_output="$(vcs_changed_files_since_merge_base "${base_ref}" \
   'android/**' \
   'scripts/android/**' \
+  'scripts/prepush-android.sh' \
+  '.github/workflows/merge.yml' \
   '.github/actions/android-emulator/**' \
   '.github/actions/gradle-task-run/**' \
   'scripts/local-dev/hot-reload.sh' \
@@ -84,6 +89,14 @@ set -e
 if [[ "${android_changes_status}" -ne 0 ]]; then
   echo "error: failed to list Android changes since ${base_ref}" >&2
   exit 2
+fi
+
+# Include local edits before a commit, as well as branch changes. Deletions
+# matter too (removing a resource or baseline can introduce a lint finding).
+if [[ -e .git ]]; then
+  local_android_changes="$(git diff --name-only HEAD -- android scripts/android scripts/prepush-android.sh .github/workflows/pull_request.yml .github/workflows/merge.yml)"
+  untracked_android_changes="$(git ls-files --others --exclude-standard -- android scripts/android scripts/prepush-android.sh)"
+  android_changes_output="$(printf '%s\n' "$android_changes_output" "$local_android_changes" "$untracked_android_changes" | sort -u)"
 fi
 
 android_changes=()
@@ -99,15 +112,19 @@ fi
 root_gradle_changed=false
 detekt_config_changed=false
 sdk_api_baseline_changed=false
+lint_baseline_changed=false
 for changed_file in "${android_changes[@]}"; do
   case "${changed_file}" in
+    android/**/lint-baseline.xml)
+      lint_baseline_changed=true
+      ;;
     android/auto-mobile-sdk/api/auto-mobile-sdk.api)
       sdk_api_baseline_changed=true
       ;;
     android/config/detekt/*)
       detekt_config_changed=true
       ;;
-    android/build.gradle.kts|android/settings.gradle.kts|android/gradle.properties|android/gradle/*)
+    android/build-logic/*|android/build.gradle.kts|android/settings.gradle.kts|android/gradle.properties|android/gradle/*|android/gradlew|android/gradlew.bat|android/**/gradle.properties)
       root_gradle_changed=true
       ;;
     android/**/build.gradle.kts)
@@ -133,6 +150,34 @@ run_sdk_api_check() {
   echo "==> SDK API baseline validation"
   (cd android && ./gradlew :auto-mobile-sdk:apiCheck)
 }
+
+# Lint also consumes non-Kotlin inputs, so run before Kotlin-only early exits.
+# Module selection is shared with the PR Detekt job (one script, no drift).
+lint_selection="$(printf '%s\n' "${android_changes[@]}" | bash scripts/android/select-lint-modules.sh)"
+if [[ "$root_gradle_changed" == true ]]; then
+  lint_selection=all
+fi
+lint_all=false
+lint_tasks=()
+if [[ "$lint_selection" == all ]]; then
+  lint_all=true
+elif [[ -n "$lint_selection" ]]; then
+  while IFS= read -r lint_task; do
+    lint_tasks+=("$lint_task")
+  done <<< "$lint_selection"
+fi
+if [[ "$lint_all" == true ]]; then
+  echo "==> Android lint (all modules; build configuration or gate changed)"
+  (cd android && ./gradlew lintDebug --continue)
+elif [[ "${#lint_tasks[@]}" -gt 0 ]]; then
+  echo "==> Android lint (${lint_tasks[*]})"
+  (cd android && ./gradlew "${lint_tasks[@]}" --continue)
+fi
+
+if [[ "$lint_all" == true || "$lint_baseline_changed" == true || "${#lint_tasks[@]}" -gt 0 ]]; then
+  echo "==> Android lint baseline shrink-only guard"
+  bash scripts/android/check-lint-baseline-shrink.sh --base-ref "$base_ref" --worktree
+fi
 
 kotlin_changes=()
 while IFS= read -r changed_file; do

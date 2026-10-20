@@ -35,6 +35,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
+import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShellOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
@@ -189,11 +190,13 @@ internal fun DesktopStreamContent(
     val columnControlClientProvider = workspaceControlClientProvider
     val control =
       rememberWorkspaceDeviceControl(
-        column = column,
-        clientProvider = columnControlClientProvider,
-        enabled = controlActive,
-        sessionUuidProvider = paneSessionUuidProvider,
-        onDeviceHeldElsewhere = reportHeldElsewhere,
+        dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceDeviceControlOptions(
+          column = column,
+          clientProvider = columnControlClientProvider,
+          enabled = controlActive,
+          sessionUuidProvider = paneSessionUuidProvider,
+          onDeviceHeldElsewhere = reportHeldElsewhere,
+        ),
       )
     Box {
       DeviceStreamView(
@@ -279,68 +282,75 @@ internal fun DesktopWorkspaceShell(
       WorkspaceShell(
         state = workspaceState,
         onAction = workspaceViewModel::onAction,
-        onDeviceSessionSuperseded = supersededForwarder::onSuperseded,
-        onOpenPicker = workspaceViewModel::openPicker,
-        onOpenPalette = { paletteOpen = true },
-        externalCaptureRequest = captureRequest,
         // The ⌘K command palette is a sibling overlay hosted here (not inside the shell),
         // so isolate the whole workspace behind it — matching how the shell isolates its
         // own scrimmed panels — to keep the palette modal to keyboard/a11y focus (#4846).
         modifier = Modifier.isolatedBehindOverlay(paletteOpen),
-        status = workspaceStatus.status,
-        statusDetail = workspaceStatus.detail,
-        // Health-sheet recovery affordance (#6035): reuse the picker's DaemonBootstrap
-        // seam
-        // so the workspace red dot can start/restart the daemon. ensureReady() blocks up
-        // to
-        // the startup budget, so it runs off the main thread; its phases flow back into
-        // bootstrapState (narrating the in-flight button) and the existing session
-        // re-register loop self-heals the panes once the daemon is reachable. A no-op for
-        // a
-        // non-daemon (Inactive) transport, so the affordance is inert on HTTP/STDIO.
-        bootstrapState = bootstrapState,
-        recovering = recoveringDaemon,
-        // Delegate to the coalescing launcher (#6080) so a rapid second click can't queue
-        // a
-        // duplicate ensureReady() pass; the guard itself lives in
-        // CoalescingRecoveryLauncher
-        // where it is unit-tested.
-        onRecoverDaemon = { recoveryLauncher.launch() },
-        updateStatus = updateStatus,
-        onUpdateClick = { showUpdateDetails = true },
-        facetContent = { column, tool ->
-          WorkspaceFacet(
-            column,
-            tool,
-            // A newly registered session recomposes the facets because the provider's
-            // identity changes with registration; unrelated root recompositions do not.
-            sessionUuidProvider = paneSessionUuidProvider,
-            inputAllocation = inputAllocation,
-          )
-        },
-        observationStreamFactory = {
-          ObservationStreamClient(
+        options =
+          WorkspaceShellOptions(
+            onDeviceSessionSuperseded = supersededForwarder::onSuperseded,
+            onOpenPicker = workspaceViewModel::openPicker,
+            onOpenPalette = { paletteOpen = true },
+            externalCaptureRequest = captureRequest,
+            status = workspaceStatus.status,
+            statusDetail = workspaceStatus.detail,
+            // Health-sheet recovery affordance (#6035): reuse the picker's DaemonBootstrap
+            // seam
+            // so the workspace red dot can start/restart the daemon. ensureReady() blocks up
+            // to
+            // the startup budget, so it runs off the main thread; its phases flow back into
+            // bootstrapState (narrating the in-flight button) and the existing session
+            // re-register loop self-heals the panes once the daemon is reachable. A no-op for
+            // a
+            // non-daemon (Inactive) transport, so the affordance is inert on HTTP/STDIO.
+            bootstrapState = bootstrapState,
+            recovering = recoveringDaemon,
+            // Delegate to the coalescing launcher (#6080) so a rapid second click can't queue
+            // a
+            // duplicate ensureReady() pass; the guard itself lives in
+            // CoalescingRecoveryLauncher
+            // where it is unit-tested.
+            onRecoverDaemon = { recoveryLauncher.launch() },
+            updateStatus = updateStatus,
+            onUpdateClick = { showUpdateDetails = true },
+            facetContent = { column, tool ->
+              WorkspaceFacet(
+                column,
+                tool,
+                // A newly registered session recomposes the facets because the provider's
+                // identity changes with registration; unrelated root recompositions do not.
+                sessionUuidProvider = paneSessionUuidProvider,
+                inputAllocation = inputAllocation,
+              )
+            },
+            observationStreamFactory = {
+              ObservationStreamClient(
+                sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+              )
+            },
             sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-          )
-        },
-        sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-        // Inspect mode's Layout inspector renders live video for its pixels; the session
-        // provider authenticates that subscribe against the stream-socket guard (#4751),
-        // exactly as the stream pane below.
-        inspectContent = { column ->
-          LayoutFacet(
-            column,
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-            streamingEnabled = streamingEnabled,
-          )
-        },
-        // Live device mirror in each pane's stream area, fed by the daemon's video-stream
-        // relay. The pane authenticates with the workspace daemon session (#4977), which
-        // the daemon admits as a viewer whether or not it holds the device (#10698);
-        // when no session is available (non-Unix daemon, or registration failed) the
-        // provider yields null and the pane shows the auth refusal, with
-        // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
-        streamContent = { column -> DesktopStreamContent(presentation, column, streamingEnabled) },
+            // Inspect mode's Layout inspector renders live video for its pixels; the session
+            // provider authenticates that subscribe against the stream-socket guard (#4751),
+            // exactly as the stream pane below.
+            inspectContent = { column ->
+              LayoutFacet(
+                dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacetOptions(
+                  column,
+                  sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                  streamingEnabled = streamingEnabled,
+                ),
+              )
+            },
+            // Live device mirror in each pane's stream area, fed by the daemon's video-stream
+            // relay. The pane authenticates with the workspace daemon session (#4977), which
+            // the daemon admits as a viewer whether or not it holds the device (#10698);
+            // when no session is available (non-Unix daemon, or registration failed) the
+            // provider yields null and the pane shows the auth refusal, with
+            // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
+            streamContent = { column ->
+              DesktopStreamContent(presentation, column, streamingEnabled)
+            },
+          ),
       )
     }
   }

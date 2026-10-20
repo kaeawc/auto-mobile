@@ -25,10 +25,12 @@ internal fun rememberPaneQuality(
     settings?.let { s ->
       remember(column.deviceId) {
         QualityController(
-          initialQuality = VideoStreamQuality.fromWire(s.streamQualityPreset) ?: defaultQuality,
-          targetFps = paneFps,
-          autoAdjustEnabled = s.streamQualityAutoAdjust,
-          onManualSelection = { s.streamQualityPreset = it.wire },
+          dev.jasonpearson.automobile.desktop.core.video.QualityControllerOptions(
+            initialQuality = VideoStreamQuality.fromWire(s.streamQualityPreset) ?: defaultQuality,
+            targetFps = paneFps,
+            autoAdjustEnabled = s.streamQualityAutoAdjust,
+            onManualSelection = { s.streamQualityPreset = it.wire },
+          ),
         )
       }
     }

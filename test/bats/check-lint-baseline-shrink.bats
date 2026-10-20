@@ -93,6 +93,56 @@ commit_fixture() {
   [[ "$output" == *'explicitly allowed'* ]]
 }
 
+@test "new baseline accepts exactly the issue counts removed from an existing baseline" {
+  baseline android/one/lint-baseline.xml Alpha
+  baseline android/two/lint-baseline.xml Alpha Beta
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'2 files checked'* ]]
+}
+
+@test "new baseline with one extra issue fails and reports net growth" {
+  baseline android/one/lint-baseline.xml Alpha
+  baseline android/two/lint-baseline.xml Alpha Beta Beta
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'new baseline (3 issues)'* ]]
+  [[ "$output" == *'Beta 1 -> 2'* ]]
+  [[ "$output" == *'all baselines: total 3 -> 4'* ]]
+}
+
+@test "new baseline without matching issue-id shrink fails even when total shrinks" {
+  baseline android/one/lint-baseline.xml Alpha
+  baseline android/two/lint-baseline.xml Gamma
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'new baseline (1 issues)'* ]]
+  [[ "$output" == *'Gamma 0 -> 1'* ]]
+}
+
+@test "two new baselines cannot spend the same shrink pool twice" {
+  baseline android/one/lint-baseline.xml Alpha Alpha
+  baseline android/two/lint-baseline.xml Beta
+  mkdir -p android/three
+  baseline android/three/lint-baseline.xml Beta
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'android/two/lint-baseline.xml: new baseline (1 issues)'* ]]
+  [[ "$output" == *'Beta 0 -> 1'* ]]
+}
+
+@test "deleted baselines contribute their issue counts to moves" {
+  rm android/one/lint-baseline.xml
+  baseline android/two/lint-baseline.xml Alpha Alpha Beta
+  commit_fixture
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
 @test "HEAD ignores local edits but worktree mode catches untracked and staged growth" {
   baseline android/two/lint-baseline.xml Gamma
   run bash "$SCRIPT"

@@ -349,7 +349,8 @@ internal constructor(
     synchronized(lock) { if (generation == snapshotGeneration) dirty = true }
 
   /** The values that never reached the disk (a refused write), or null when nothing is owed. */
-  internal fun unsavedValues(): PrototypeStoredValues? =
+  @InternalAutoMobilePrototypeApi
+  fun unsavedValues(): PrototypeStoredValues? =
     synchronized(lock) {
       if (dirty && !invalidated) PrototypeStoredValues(version, LinkedHashMap(values)) else null
     }
@@ -374,7 +375,8 @@ internal constructor(
   }
 
   /** The id was deleted: drop the pending write and every later one. Touches no disk. */
-  internal fun invalidate() {
+  @InternalAutoMobilePrototypeApi
+  fun invalidate() {
     synchronized(lock) {
       invalidated = true
       pending?.cancel()

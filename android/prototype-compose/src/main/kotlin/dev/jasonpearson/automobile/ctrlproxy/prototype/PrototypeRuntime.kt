@@ -135,7 +135,7 @@ class PrototypeRuntime(
    * Keeps the spec's `storage` keys across shows (#12522). The [spec] passed in already carries the
    * restored values, so restoring is neither a write nor an event.
    */
-  internal val storage: PrototypeStorageSession? = null,
+  @InternalAutoMobilePrototypeApi val storage: PrototypeStorageSession? = null,
   /** The transports behind `request` actions (#12528); a seam so JVM tests use a fake. */
   private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
   /**
@@ -160,7 +160,8 @@ class PrototypeRuntime(
 
   private val renderMapper = PrototypeRenderMapper()
 
-  internal fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
+  @InternalAutoMobilePrototypeApi
+  fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
     renderMapper.map(snapshot.spec, snapshot.pages, snapshot.stacks, snapshot.shownErrors)
 
   internal val renderMappingPasses: Int
@@ -692,7 +693,8 @@ class PrototypeRuntime(
     }
 
   /** Teardown is terminal even if the platform removal or event delivery fails. */
-  internal suspend fun finishDismissal(reason: PrototypeDismissReason) {
+  @InternalAutoMobilePrototypeApi
+  suspend fun finishDismissal(reason: PrototypeDismissReason) {
     if (!current.active) return
     storage?.record(current.spec)
     storage?.flush()
@@ -707,7 +709,8 @@ class PrototypeRuntime(
    * The resolved light or dark mode changed while shown. The controller decides when; this only
    * allocates the next sequence and sends the event, like every other one.
    */
-  internal suspend fun appearanceChanged(appearance: PrototypeAppearance) {
+  @InternalAutoMobilePrototypeApi
+  suspend fun appearanceChanged(appearance: PrototypeAppearance) {
     if (!current.active) return
     emit(
       kind = PrototypeEventKind.APPEARANCE_CHANGED,
@@ -899,7 +902,8 @@ class PrototypeRuntime(
    * same id without a reset: their responses then apply to the new spec through the normal outcome
    * path. Call before [close], which would cancel them.
    */
-  internal fun handOverRequests(replacement: PrototypeRuntime) {
+  @InternalAutoMobilePrototypeApi
+  fun handOverRequests(replacement: PrototypeRuntime) {
     val moved = synchronized(inFlight) { inFlight.values.toList().also { inFlight.clear() } }
     moved.forEach { request ->
       requestLimiter.release()

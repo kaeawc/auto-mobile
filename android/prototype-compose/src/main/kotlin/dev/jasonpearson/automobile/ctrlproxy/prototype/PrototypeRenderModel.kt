@@ -85,25 +85,13 @@ data class PrototypeRenderModel(
   val layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
   val persistent: Boolean = false,
   val motion: String? = null,
-) {
-  fun request() =
-    PrototypeRequest(
-      placement = placement,
-      opacityPercent = opacityPercent,
-      hasTextField = hasTextField,
-      layer = layer,
-      persistent = persistent,
-      opaqueSurface = prototypeOpaqueSurface(this),
-    ) {
-      PrototypeSpecContent(root, theme = theme)
-    }
-}
+)
 
 /**
  * Window format is chosen at show time and is not re-evaluated for state-driven root changes. A
  * visible, static root is the safe subset; metadata still accounts for a static fullscreen scrim.
  */
-internal fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
+fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
   model.root.visible &&
     model.root.source?.styleWhen.isNullOrEmpty() &&
     model.root.source?.visibleWhen == null &&

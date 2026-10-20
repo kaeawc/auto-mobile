@@ -21,7 +21,8 @@ import kotlin.math.roundToInt
  * display's window metrics (the same source the observation's `insets` come from) do carry it, so
  * the renderer takes the larger of the two.
  */
-internal data class PrototypeInsetFloor(val bottom: Int = 0) {
+@InternalAutoMobilePrototypeApi
+data class PrototypeInsetFloor(val bottom: Int = 0) {
   fun asComposeInsets(): ComposeWindowInsets = ComposeWindowInsets(0, 0, 0, bottom)
 
   companion object {
@@ -29,7 +30,8 @@ internal data class PrototypeInsetFloor(val bottom: Int = 0) {
   }
 }
 
-internal val LocalPrototypeInsetFloor = staticCompositionLocalOf { PrototypeInsetFloor.None }
+@InternalAutoMobilePrototypeApi
+val LocalPrototypeInsetFloor = staticCompositionLocalOf { PrototypeInsetFloor.None }
 
 /**
  * The part of a [navigationBarBottomPx] tall bar that [placement]'s window sits behind. A window
@@ -37,7 +39,8 @@ internal val LocalPrototypeInsetFloor = staticCompositionLocalOf { PrototypeInse
  * all of it; a bottom-gravity floating window is behind what its offset has not lifted it out of (a
  * positive `y` moves a bottom-gravity window up); anything else is not behind the bar.
  */
-internal fun prototypeInsetFloor(
+@InternalAutoMobilePrototypeApi
+fun prototypeInsetFloor(
   placement: PrototypePlacement,
   density: Float,
   navigationBarBottomPx: Int,
@@ -60,7 +63,8 @@ internal fun prototypeInsetFloor(
  * platform cannot say (below API 30 there is no window-metrics inset API).
  */
 @TargetApi(Build.VERSION_CODES.R)
-internal fun navigationBarBottomPx(windowManager: WindowManager, sdkInt: Int): Int {
+@InternalAutoMobilePrototypeApi
+fun navigationBarBottomPx(windowManager: WindowManager, sdkInt: Int): Int {
   if (sdkInt < Build.VERSION_CODES.R) return 0
   return try {
     windowManager.currentWindowMetrics.windowInsets

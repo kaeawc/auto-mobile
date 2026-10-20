@@ -12,7 +12,8 @@ Usage: scripts/android/check-lint-baseline-shrink.sh [--base-ref <ref>] [--workt
 
 Compare Android lint baseline counts at HEAD with the merge-base of HEAD and
 origin/main. Counts must not grow, in total or for any issue id within a module;
-new baseline files are forbidden. --worktree includes staged, unstaged and
+new baseline files may only use issue counts removed from existing baselines.
+--worktree includes staged, unstaged and
 untracked baselines instead of HEAD. --allow-grow is an explicit bootstrap escape
 hatch, never used by the normal pre-push or CI gates.
 HELP
@@ -77,19 +78,42 @@ try:
         paths = {p for p in paths if pathlib.Path(p).is_file()}
     else:
         paths = baseline_paths(git('ls-tree', '-r', '--name-only', '-z', revision))
+    previous_counts = {path: counts(git('show', f'{base}:{path}'))
+                       for path in sorted(old_paths)}
+    current_counts = {
+        path: counts(pathlib.Path(path).read_bytes() if worktree == 'true'
+                     else git('show', f'{revision}:{path}'))
+        for path in sorted(paths)
+    }
+    # Counter subtraction keeps only positive differences, so growth in one
+    # existing file cannot cancel another file's shrink for the same issue id.
+    shrink_pool = collections.Counter()
+    for path, previous in previous_counts.items():
+        shrink_pool.update(previous - current_counts.get(path, collections.Counter()))
+
     failures = []
-    for path in sorted(paths):
-        current = counts(pathlib.Path(path).read_bytes() if worktree == 'true'
-                         else git('show', f'{revision}:{path}'))
-        if path not in old_paths:
-            failures.append(f'{path}: new baseline ({sum(current.values())} issues)')
-            continue
-        previous = counts(git('show', f'{base}:{path}'))
+    for path in sorted(paths & old_paths):
+        current = current_counts[path]
+        previous = previous_counts[path]
         if sum(current.values()) > sum(previous.values()):
             failures.append(f'{path}: total {sum(previous.values())} -> {sum(current.values())}')
         for issue, count in sorted(current.items()):
             if count > previous[issue]:
                 failures.append(f'{path}: {issue} {previous[issue]} -> {count}')
+    for path in sorted(paths - old_paths):
+        current = current_counts[path]
+        overages = current - shrink_pool
+        # Keep rejecting empty new files: they do not move any findings.
+        if not current or overages:
+            failures.append(f'{path}: new baseline ({sum(current.values())} issues)')
+        for issue in sorted(overages):
+            failures.append(f'{path}: {issue} {shrink_pool[issue]} -> {current[issue]}')
+        shrink_pool = shrink_pool - current
+
+    previous_total = sum(sum(c.values()) for c in previous_counts.values())
+    current_total = sum(sum(c.values()) for c in current_counts.values())
+    if current_total > previous_total:
+        failures.append(f'all baselines: total {previous_total} -> {current_total}')
     for failure in failures:
         print(f'Lint baseline growth: {failure}')
     if failures and allow_grow != 'true':

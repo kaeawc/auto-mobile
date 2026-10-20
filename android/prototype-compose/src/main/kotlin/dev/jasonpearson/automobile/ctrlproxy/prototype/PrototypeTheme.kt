@@ -55,7 +55,8 @@ internal data class PrototypeThemeSpec(
  * What a colour slot resolves against: the prototype's Material scheme and the resolved light or
  * dark appearance that picks a side of a `{light, dark}` pair.
  */
-internal data class PrototypePalette(val scheme: ColorScheme, val dark: Boolean)
+@InternalAutoMobilePrototypeApi
+data class PrototypePalette(val scheme: ColorScheme, val dark: Boolean)
 
 /** The prototype's resolved appearance, provided by [PrototypeTheme]; light outside one. */
 internal val LocalPrototypeDark = staticCompositionLocalOf { false }
@@ -363,7 +364,8 @@ private fun Color.hueAndSaturation(): Pair<Float, Float> {
 }
 
 /** Host chrome colours: a background with the content (text, ripple) drawn over it. */
-internal data class PrototypeDismissColors(val background: Color, val content: Color)
+@InternalAutoMobilePrototypeApi
+data class PrototypeDismissColors(val background: Color, val content: Color)
 
 /** The dismiss bar's translucency: quiet, but readable over any prototype. */
 internal const val PROTOTYPE_DISMISS_BAR_ALPHA = 0.6f
@@ -377,14 +379,16 @@ internal const val PROTOTYPE_SHEET_SCRIM_ALPHA = 0.4f
 internal const val PROTOTYPE_DIALOG_SCRIM_ALPHA = 0.32f
 
 /** The dismiss bar: `surfaceContainerHigh` at [PROTOTYPE_DISMISS_BAR_ALPHA] over `onSurface`. */
-internal fun prototypeDismissColors(scheme: ColorScheme): PrototypeDismissColors =
+@InternalAutoMobilePrototypeApi
+fun prototypeDismissColors(scheme: ColorScheme): PrototypeDismissColors =
   PrototypeDismissColors(
     scheme.surfaceContainerHigh.copy(alpha = PROTOTYPE_DISMISS_BAR_ALPHA),
     scheme.onSurface,
   )
 
 /** The persistent Close control: opaque, so authored content cannot show through it. */
-internal fun prototypeCloseColors(scheme: ColorScheme): PrototypeDismissColors =
+@InternalAutoMobilePrototypeApi
+fun prototypeCloseColors(scheme: ColorScheme): PrototypeDismissColors =
   PrototypeDismissColors(scheme.surfaceContainerHigh, scheme.onSurface)
 
 /** The sheet drag handle: the M3 default role. */
@@ -408,7 +412,8 @@ internal fun prototypePlaceholderContentColor(scheme: ColorScheme): Color = sche
  * setting.
  */
 @Composable
-internal fun PrototypeHostTheme(shown: PrototypeShownTheme?, content: @Composable () -> Unit) {
+@InternalAutoMobilePrototypeApi
+fun PrototypeHostTheme(shown: PrototypeShownTheme?, content: @Composable () -> Unit) {
   if (shown != null) {
     val appearance = PrototypeShownAppearance(shown.appearance.dark, shown.paletteKey)
     CompositionLocalProvider(LocalPrototypeShownAppearance provides appearance) {
@@ -648,7 +653,8 @@ internal fun prototypeResolveScrim(
 
 /** [prototypeResolveScrim] against the active prototype theme. */
 @Composable
-internal fun prototypeThemedScrim(literal: Color?, spec: PrototypeModeValue?): Color? =
+@InternalAutoMobilePrototypeApi
+fun prototypeThemedScrim(literal: Color?, spec: PrototypeModeValue?): Color? =
   prototypeResolveScrim(prototypePalette(), literal, spec)
 
 /**

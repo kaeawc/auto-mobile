@@ -3,7 +3,6 @@
 1013	src/daemon/devicePool.ts
 5519	src/daemon/sessionManager.ts
 1596	src/doctor/checks/ios.ts
-1693	src/features/observe/output/SkeletonProjection.ts
 1502	src/features/video/FfmpegVideoProcessingBackend.ts
 1516	src/features/webrtc/IosH264Source.ts
 1979	src/server/bootedDeviceResources.ts

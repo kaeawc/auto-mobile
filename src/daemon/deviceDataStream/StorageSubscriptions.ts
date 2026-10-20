@@ -4,7 +4,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { deviceSessionErrorFields } from "../deviceSessionResolver";
 import { streamAuthRefusalFields, type StreamSocketAuthenticator } from "../streamSocketAuth";
 import type { SubscriptionResponse } from "../socketServer/index";
-import type { OnStorageSubscriptionRequestedCallback } from "../deviceDataStreamSocketServer";
+import type { OnStorageSubscriptionRequestedCallback } from "./streamContracts";
 
 interface StorageReconciliationMessage {
   type: "storage_reconciliation_required";

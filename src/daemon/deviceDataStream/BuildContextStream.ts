@@ -1,5 +1,5 @@
 import type { Timer } from "../../utils/SystemTimer";
-import type { DeviceBuildKey, InitialFrameSubscriber } from "../deviceDataStreamSocketServer";
+import type { DeviceBuildKey, InitialFrameSubscriber } from "./streamContracts";
 
 interface BuildContextMessage {
   type: "device_build_context";

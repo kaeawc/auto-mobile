@@ -15,7 +15,6 @@
     <ID>LargeClass:PrototypeRenderModelTest.kt:PrototypeRenderModelTest</ID>
     <ID>LargeClass:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest</ID>
     <ID>LargeClass:SavedPrototypeStoreTest.kt:SavedPrototypeStoreTest</ID>
-    <ID>LargeClass:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest</ID>
     <ID>LongMethod:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest$@Test fun `metadata attributes two then three surfaces and survives middle dismissal`</ID>
     <ID>LongMethod:PrototypePreviewRequestTest.kt:PrototypePreviewRequestTest$@Test fun `contact sheet lays images out in a near-square grid`</ID>
     <ID>LongMethod:PrototypeRenderModelTest.kt:PrototypeRenderModelTest$@Test fun `every style property and safe area selection survive pure mapping`</ID>

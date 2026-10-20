@@ -39,6 +39,7 @@ jobs:
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
       kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
+      android_lint_changed: ${{ steps.filter-android-lint.outputs.lint }}
       installer_changed: ${{ steps.filter-installer.outputs.installer }}
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
@@ -365,6 +366,21 @@ jobs:
               - 'android/gradle/gradle-daemon-jvm.properties'
               - 'android/config/detekt/**'
               - '.github/actions/gradle-task-run/**'
+
+      # Lint reads resources and manifests as well as Kotlin sources. Changes to
+      # its enforcement must exercise the same cached Android analysis job.
+      - name: "Check for Android lint inputs"
+        id: filter-android-lint
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            lint:
+              - 'android/**'
+              - 'scripts/android/**'
+              - 'scripts/prepush-android.sh'
+              - '.github/actions/gradle-task-run/**'
+              - '.github/workflows/pull_request.yml'
+              - '.github/workflows/merge.yml'
 
       - name: "Check for iOS-related changes"
         id: filter-ios
@@ -1104,16 +1120,15 @@ jobs:
     name: "Detekt"
     runs-on: ubuntu-latest
     needs: detect-changes
-    # detekt analyzes Kotlin only, so a PR touching none of the inputs in the
-    # `kotlin` filter cannot change what it reports. This gates whether the job
-    # runs at all; when it does run it analyzes the whole tree, so it is not a
-    # narrowing of what gets checked. merge.yml re-runs it unconditionally.
-    if: needs.detect-changes.outputs.kotlin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    # Both analyzers run over the whole tree. Lint also needs resource-only
+    # changes; merge.yml re-runs both unconditionally.
+    if: (needs.detect-changes.outputs.kotlin_changed == 'true' || needs.detect-changes.outputs.android_lint_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 0
 
       # Deliberately the FULL task list, not a per-module subset. An earlier
       # revision scoped this to the modules a PR changed; that is unsafe with
@@ -1125,7 +1140,7 @@ jobs:
       # what makes this fast.
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest :build-logic:test"
+          gradle-tasks: "detektMain detektTest :build-logic:test lintDebug"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332). A restored
@@ -1141,6 +1156,21 @@ jobs:
           # in test/bats/detekt-config-cache-disabled.bats pins it.
           reuse-configuration-cache: false
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Check Android lint baselines only shrink"
+        if: success() || failure()
+        run: bash scripts/android/check-lint-baseline-shrink.sh --base-ref origin/main
+
+      - name: "Upload Android Lint Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-lint-reports
+          path: |
+            android/**/build/reports/lint-results-*.html
+            android/**/build/reports/lint-results-*.sarif
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: "Upload Detekt Reports"
         if: failure()

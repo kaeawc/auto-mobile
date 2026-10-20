@@ -51,6 +51,28 @@ describe("shapeToolCallError", () => {
     }
   });
 
+  test('post-dispatch transport loss exposes dispatched: "unknown" on both boundaries', () => {
+    const error = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("connection terminated: read failed"),
+      1000,
+      "unknown",
+    );
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      const result = shapeToolCallError(error, { toolName: "openLink", source });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: false,
+        error: error.message,
+        code: "device_transport_unavailable",
+        retryable: true,
+        retryAfterMs: 1000,
+        deviceId: "emulator-5554",
+        dispatched: "unknown",
+      });
+    }
+  });
+
   test("an unrelated structurally coded actionable error stays plain text", () => {
     const error = Object.assign(new ActionableError("x"), { code: "some_code", retryable: true });
     expect(shapeToolCallError(error, context).content[0].text).toBe("Error: x");

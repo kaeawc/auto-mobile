@@ -4,7 +4,7 @@ import * as databaseModule from "../../src/db";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";

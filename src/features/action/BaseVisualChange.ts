@@ -1,4 +1,9 @@
-import { resolveObservationStartTime, resolvePackageName } from "./visualChangeObservationContext";
+import {
+  captureStabilityWindow,
+  resolveObservationStartTime,
+  resolvePackageName,
+} from "./visualChangeObservationContext";
+import { getActionClockSkewCache, type ActionClockSkewProvider } from "./ActionClockSkewCache";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { ActionableError, BootedDevice, GfxMetrics, ObserveResult } from "../../models";
 import type { BaseActionResult } from "../../models/BaseActionResult";
@@ -111,6 +116,8 @@ export class BaseVisualChange {
 
   windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
 
+  actionClockSkewCache: ActionClockSkewProvider;
+
   /** Selects the navigation graph this device records on; a seam for tests (#10197). */
   navigationGraphResolver: NavigationGraphResolver = resolveNavigationGraphForDevice;
 
@@ -153,6 +160,7 @@ export class BaseVisualChange {
     renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
     displayFence: DisplayFenceDependencies = {},
   ) {
+    this.actionClockSkewCache = getActionClockSkewCache(timer, displayFence.actionClockSkewCache);
     this.device = device;
     const { adbFactory, adb } = BaseVisualChange.resolveAdb(device, adbFactoryOrExecutor);
     this.adbFactory = adbFactory;
@@ -279,6 +287,9 @@ export class BaseVisualChange {
     );
     const coordinateAction = this.reconcileDisplayAfterRead(options, state, previousObserveResult);
 
+    // Start the cache snapshot now; consume it after dispatch so optional stability adds no
+    // pre-gesture await (including actions that skip the stability wait entirely).
+    const beforeWindowRead = captureStabilityWindow(this.window, this.device, options);
     const { actionStartTime, clockSkewMs } = await this.readActionClock(perf);
     const blockResult = await this.runBlock(
       block,
@@ -296,7 +307,12 @@ export class BaseVisualChange {
     this.invalidateCtrlProxyCacheForDisplay(options);
 
     const observationStartTime = resolveObservationStartTime(options, actionStartTime, clockSkewMs);
-    const packageName = await resolvePackageName(this.window, options, previousObserveResult);
+    const packageName = await resolvePackageName(
+      this.window,
+      options,
+      previousObserveResult,
+      await beforeWindowRead,
+    );
     const gfxMetrics = await this.awaitUiStability(options, packageName, timeoutMs, perf);
 
     const observed = await this.takeObservation(blockResult, previousObserveResult, {
@@ -557,20 +573,21 @@ export class BaseVisualChange {
   private async readActionClock(
     perf: PerformanceTracker,
   ): Promise<{ actionStartTime: number; clockSkewMs: number }> {
-    const actionStartTime = await perf.track("getActionStartTime", async () => {
-      if (this.device.platform !== "android") {
-        return this.timer.now();
+    return perf.track("getActionStartTime", async () => {
+      let clockSkewMs = 0;
+      if (
+        this.device.platform === "android" &&
+        typeof this.adb.getDeviceTimestampMs === "function"
+      ) {
+        clockSkewMs =
+          (await this.actionClockSkewCache.getSkewMs(this.device.deviceId, () =>
+            typeof this.adb.getDeviceTimestampMsWithSource === "function"
+              ? this.adb.getDeviceTimestampMsWithSource()
+              : this.adb.getDeviceTimestampMs(),
+          )) ?? 0;
       }
-      if (typeof this.adb.getDeviceTimestampMs === "function") {
-        return this.adb.getDeviceTimestampMs();
-      }
-      return this.timer.now();
+      return { actionStartTime: this.timer.now() + clockSkewMs, clockSkewMs };
     });
-    // Host-device clock skew, measured once with the action-start read. Zero on
-    // iOS and whenever the device clock was unavailable (host-time fallback).
-    // Taken after the read so any round trip makes the converted floor earlier,
-    // never later, than the true post-input device time.
-    return { actionStartTime, clockSkewMs: actionStartTime - this.timer.now() };
   }
 
   /** Run stage: dispatch the block against the pre-read, fenced against display changes. */

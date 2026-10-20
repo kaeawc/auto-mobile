@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { relativePosix, typeScriptFiles } from "./astGuard";
+import { relativePosix, typeScriptFiles, readGuardFile } from "./astGuard";
 import { scanNamedCallOwners, scanNamedCalls } from "./recordHeartbeatCallers";
 
 const source = ts.createSourceFile(
   "sessionManager.ts",
-  readFileSync(new URL("../../src/daemon/sessionManager.ts", import.meta.url), "utf8"),
+  readGuardFile(new URL("../../src/daemon/sessionManager.ts", import.meta.url)),
   ts.ScriptTarget.Latest,
   true,
 );
@@ -23,7 +23,7 @@ const methods = manager.members.filter(ts.isMethodDeclaration);
 function collaboratorMethods(file: string, name: string): ts.MethodDeclaration[] {
   const collaborator = ts.createSourceFile(
     file,
-    readFileSync(new URL(`../../src/daemon/sessionManager/${file}`, import.meta.url), "utf8"),
+    readGuardFile(new URL(`../../src/daemon/sessionManager/${file}`, import.meta.url)),
     ts.ScriptTarget.Latest,
     true,
   );
@@ -134,7 +134,7 @@ test("in-class getSession calls stay within the retained expiry reader inventory
 test("the liveness controller's port getSession calls stay within the retained expiry reader inventory", () => {
   const controllerSource = ts.createSourceFile(
     "sessionLivenessLease.ts",
-    readFileSync(new URL("../../src/daemon/sessionLivenessLease.ts", import.meta.url), "utf8"),
+    readGuardFile(new URL("../../src/daemon/sessionLivenessLease.ts", import.meta.url)),
     ts.ScriptTarget.Latest,
     true,
   );
@@ -193,7 +193,6 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "setActiveDevice.ts#bindRequestedDevice": 1,
   "setActiveDevice.ts#refuseForeignOwnedSession": 1,
   "setActiveDevice.ts#restorePriorDisplayPin": 1,
-  "webrtcStreamManager.ts#isDaemonSessionLive": 1,
 };
 
 const SERVER_DIR = fileURLToPath(new URL("../../src/server/", import.meta.url));
@@ -209,6 +208,7 @@ const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 // findSession (a migrated site drops out, as the appearance sweep did). Counts may only shrink;
 // a new pure reader must call findSession, a new admission site needs an explicit entry here.
 const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  "webrtcStreamManager.ts#isDaemonSessionLive": 1,
   // These factories moved from SessionManager; retain each expiring call, including the row read.
   "sessionManager/construction.ts#getSession": 1,
   "sessionManager/wiring.ts#getSession": 1,
@@ -348,7 +348,7 @@ describe("src/server expiring getSession readers", () => {
   beforeAll(() => {
     actual = {};
     for (const file of typeScriptFiles(SERVER_DIR)) {
-      const text = readFileSync(file, "utf8");
+      const text = readGuardFile(file);
       if (!text.includes("getSession")) {
         continue;
       }
@@ -374,7 +374,7 @@ describe("src/daemon expiring getSession readers", () => {
       if (relative === "sessionManager.ts" || relative === "sessionLivenessLease.ts") {
         continue;
       }
-      const text = readFileSync(file, "utf8");
+      const text = readGuardFile(file);
       if (!text.includes("getSession")) {
         continue;
       }
@@ -396,7 +396,7 @@ describe("src/features expiring getSession readers", () => {
   beforeAll(() => {
     actual = {};
     for (const file of typeScriptFiles(FEATURES_DIR)) {
-      const text = readFileSync(file, "utf8");
+      const text = readGuardFile(file);
       if (!text.includes("getSession")) {
         continue;
       }

@@ -142,6 +142,62 @@ function track(promise: Promise<unknown>): { error: () => unknown; settled: () =
 }
 
 describe("DeviceBootService owned cold-boot termination (#9901)", () => {
+  it("annotates unconfirmed iOS cleanup and releases its queued waiter without an AVD hold", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const udid = "11111111-2222-3333-4444-555555555555";
+    const iosImage: DeviceInfo = {
+      name: "iPhone",
+      deviceId: udid,
+      platform: "ios",
+      isRunning: false,
+    };
+    const cleanup = Promise.withResolvers<boolean>();
+    const child = Object.assign(new FakeChildProcess(timer), {
+      terminationConfirmed: cleanup.promise,
+    });
+    child.kill = () => true;
+    devices.setDeviceImages("ios", [iosImage]);
+    devices.setMockChildProcess(iosImage.name, child);
+    devices.setWaitForDeviceReadyError(new BootFailure("runner readiness failed"));
+    matcher.setImageResult(iosImage);
+    const service = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: matcher,
+      timer,
+      lifecycleCoordinator: coordinator,
+      deviceCreationGate: { isCreationAllowed: () => false, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async () => {
+          throw new Error("unexpected provision");
+        },
+      },
+      matchingStrategy: "LATEST",
+    });
+    const boot = track(service.boot({ platform: "ios" }));
+    await settle();
+    const waiter = coordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: udid },
+      { operation: "start", deadlineMs: 60_000 },
+    );
+    let refused = false;
+    void waiter.catch(() => {
+      refused = true;
+    });
+    cleanup.resolve(false);
+    child.emit("exit", 1, null);
+    await settle();
+    expect(boot.settled()).toBe(true);
+    expect(boot.error()).toBeInstanceOf(BootFailure);
+    expect(String(boot.error())).toContain("device shutdown could not be confirmed");
+    expect(String(boot.error())).not.toContain("AVD");
+    expect(String(boot.error())).not.toContain("SIGKILL");
+    expect(refused).toBe(false);
+    (await waiter).release();
+  });
+
   it("holds the lease until a process that exits on SIGTERM is confirmed gone", async () => {
     const t = setup();
     t.devices.setWaitForDeviceReadyError(new Error("never reached sys.boot_completed"));

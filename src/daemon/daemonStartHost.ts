@@ -3,8 +3,8 @@ import {
   listActiveVideoRecordings,
   setStartupOrphanCaptures,
   setVideoRecordingManagerDependencies,
-} from "../server/videoRecordingManager";
-import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
+} from "./videoRecordingManager";
+import { redriveUnconfirmedCaptureTeardowns } from "./recordingTeardownRedrive";
 import type { DaemonExitRecord } from "./daemonExitRecord";
 import type { DaemonSocketServer } from "./daemonSocketServer";
 import type { RehydrationSummary } from "./sessionManager";
@@ -42,6 +42,10 @@ export interface DaemonStartHost {
   openTerminalReleaseJournal(
     owner: Pick<DaemonTerminalReleaseJournalOptions, "daemonSessionId" | "liveDaemonSessionIds">,
   ): TerminalReleaseJournal;
+  /** Require this daemon's in-memory HTTP credential before binding the listener. */
+  prepareHttpToken(): void;
+  /** Publish this daemon's HTTP credential only after the listener has bound. */
+  publishHttpToken(): void;
   /** The AVD provenance warm-up, port selection and the HTTP MCP listener. */
   startHttpIngress(): Promise<void>;
   /** Drop per-session appearance rows no rehydrated or recoverable session owns (#10976). */

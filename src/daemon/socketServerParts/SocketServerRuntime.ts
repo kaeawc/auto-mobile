@@ -86,7 +86,8 @@ export type SocketServerConstructorArgs = [
      * Runs forwards in process (#11820). The daemon passes its own, so shutdown can close the
      * forwards still running; without one the server builds a default over the shared state.
      */
-    mcpDispatcher?: Pick<InProcessMcpDispatcher, "connect">;
+    mcpDispatcher?: Pick<InProcessMcpDispatcher, "connect"> &
+      Partial<Pick<InProcessMcpDispatcher, "refreshResources">>;
   },
   idGenerator?: IdGenerator,
   bindGuard?: SocketBindGuardOptions,
@@ -187,7 +188,8 @@ export class SocketServerRuntime {
     "isEnabled" | "setEnabled"
   >;
   /** Runs every forward in process: its own MCP client and stateless server (#11820). */
-  readonly mcpDispatcher: Pick<InProcessMcpDispatcher, "connect">;
+  readonly mcpDispatcher: Pick<InProcessMcpDispatcher, "connect"> &
+    Partial<Pick<InProcessMcpDispatcher, "refreshResources">>;
   /** Forwarded MCP requests are cancelled when their owner socket disconnects. */
   readonly mcpRequestAbortControllers = new Map<string, Set<AbortController>>();
   /** Test seam: the per-args `deviceReadOnly` classification behind the read lane (#10969). */

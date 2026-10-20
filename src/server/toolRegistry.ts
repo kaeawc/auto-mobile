@@ -816,17 +816,20 @@ export class ToolRegistryClass {
 
   /** Test-only: forget every registered tool so a suite can register just the tools it exercises. */
   clearToolsForTesting(): void {
+    this.invalidateToolDefinitionSchemaCache();
     this.removalEpoch++;
     this.tools.clear();
   }
 
   /** Test-only: put a previously captured tool back under its own name, replacing any current one. */
   setRegisteredToolForTesting(tool: RegisteredTool): void {
+    this.invalidateToolDefinitionSchemaCache();
     this.tools.set(tool.name, tool);
   }
 
   /** Test-only: unregister one tool by name; a no-op when it was never registered. */
   removeToolForTesting(name: string): void {
+    this.invalidateToolDefinitionSchemaCache();
     this.removalEpoch++;
     this.tools.delete(name);
   }
@@ -960,6 +963,7 @@ export class ToolRegistryClass {
   }
 
   private invalidateToolDefinitionSchemaCache(): void {
+    ListChangedBroadcaster.invalidate("tools");
     this.toolDefinitionSchemaCache.clear();
   }
 

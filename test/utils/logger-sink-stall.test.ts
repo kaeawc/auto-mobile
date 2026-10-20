@@ -462,6 +462,27 @@ describe("logger sink stall watchdog", () => {
     }
   });
 
+  test("remembers a reported stall for a window after the live flag clears (#11990)", async () => {
+    const h = await harness();
+    try {
+      h.mod.logger.info("held A");
+      await drain();
+      expect(h.mod.logSinkStalledWithin(60_000)).toBeFalse();
+      h.timer.advanceTime(STALL_MS);
+      expect(h.mod.logSinkStalledWithin(0)).toBeTrue();
+      h.streams[0].prompt = true;
+      h.streams[0].release();
+      h.mod.logger.info("resumed B");
+      await expectFlushed(h.mod);
+      // The live flag is clear again, but the stall was reported moments ago.
+      expect(h.mod.logSinkStalledWithin(60_000)).toBeTrue();
+      h.timer.advanceTime(60_001);
+      expect(h.mod.logSinkStalledWithin(60_000)).toBeFalse();
+    } finally {
+      await h.dispose();
+    }
+  });
+
   test("abandons once and lazily reopens only after descriptor release", async () => {
     const h = await harness();
     try {

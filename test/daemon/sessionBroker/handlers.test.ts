@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
@@ -11,6 +11,7 @@ import type {
 import { BrokerConnectionScopes } from "../../helpers/brokerHandlerFixtures";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import {
+  BROKER_DAEMON_METHOD_HANDLERS,
   bindBrokerRegistration,
   handleAbandonBrokerSessionRequest,
   handleBrokerSessionStatus,
@@ -19,6 +20,10 @@ import {
   handlePrepareBrokerSession,
   handleReleaseBrokerSession,
 } from "../../../src/daemon/sessionBroker/handlers";
+import {
+  SessionRequestOwnerMismatchError,
+  SESSION_BROKER_RETRY_AFTER_MS,
+} from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import {
@@ -33,7 +38,12 @@ import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResu
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { DaemonRequest } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -88,6 +98,7 @@ function request(params: unknown): DaemonRequest {
 
 class HandlerBroker extends SessionBroker {
   prepareError: Error | undefined;
+  mutationError: Error | undefined;
   prepareResult = result("request-1", "failed");
   ownedStatusError: Error | undefined;
   readonly statuses = new Map<string, SessionBrokerResult>();
@@ -175,11 +186,17 @@ class HandlerBroker extends SessionBroker {
 
   override async abandon(requestId: string, token: string): Promise<SessionBrokerResult> {
     this.abandonCalls.push({ requestId, token });
+    if (this.mutationError) {
+      throw this.mutationError;
+    }
     return result(requestId, "failed");
   }
 
   override async release(sessionId: string) {
     this.releaseCalls.push(sessionId);
+    if (this.mutationError) {
+      throw this.mutationError;
+    }
     return { sessionUuid: sessionId, outcome: "cleanup_pending" as const };
   }
 }
@@ -544,6 +561,156 @@ describe("session broker daemon handlers", () => {
     });
     expect(broker.statusCalls).toEqual([{ requestId: "request-1", token: "wrong-owner" }]);
   });
+
+  for (const restartHandoff of [true, false]) {
+    test(`release and abandon return typed generation refusals (restartHandoff=${restartHandoff})`, async () => {
+      broker.sessionOwners.set(SESSION, TOKEN);
+      broker.mutationError = new SessionRequestOwnerMismatchError(restartHandoff);
+      const expected: DaemonMethodResult = {
+        success: false,
+        code: restartHandoff ? "session_restart_handoff_pending" : "session_owner_mismatch",
+        error: "Session request belongs to another daemon process generation",
+        retryable: restartHandoff,
+        ...(restartHandoff ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
+      };
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        expect(
+          await handleReleaseBrokerSession(
+            request({ sessionId: SESSION, livenessOwnerToken: TOKEN }),
+            state,
+          ),
+        ).toEqual(expected);
+        expect(
+          await handleAbandonBrokerSessionRequest(
+            request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+            state,
+          ),
+        ).toEqual(expected);
+        expect(restartHandoff ? debug : warning).toHaveBeenCalledTimes(2);
+        expect(restartHandoff ? warning : debug).not.toHaveBeenCalled();
+      } finally {
+        warning.mockRestore();
+        debug.mockRestore();
+      }
+    });
+  }
+
+  test("prepare and abandon return stopping refusals at debug without granting a session", async () => {
+    await broker.markRestartHandoff();
+    const prepare = spyOn(broker, "prepare").mockImplementation((...args) =>
+      SessionBroker.prototype.prepare.call(broker, ...args),
+    );
+    const abandon = spyOn(broker, "abandon").mockImplementation((...args) =>
+      SessionBroker.prototype.abandon.call(broker, ...args),
+    );
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    scopes.bind("stopping-socket", { scopeKey: SCOPE, sessionUuids: [SESSION] });
+    const expected: DaemonMethodResult = {
+      success: false,
+      code: "session_broker_stopping",
+      error: "Session broker is stopping",
+      retryable: true,
+      retryAfterMs: 5_000,
+    };
+    try {
+      expect(
+        await handlePrepareBrokerSession(
+          request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
+          state,
+          undefined,
+          "stopping-socket",
+        ),
+      ).toEqual(expected);
+      expect(
+        await handleAbandonBrokerSessionRequest(
+          request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+          state,
+        ),
+      ).toEqual(expected);
+      expect(scopes.get("stopping-socket")?.sessionUuids.size).toBe(0);
+      expect(debug).toHaveBeenCalledTimes(2);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      prepare.mockRestore();
+      abandon.mockRestore();
+      warning.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
+  test("export identity mismatch remains a warning", async () => {
+    broker.prepareError = new SessionExportIdentityMismatchError();
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      expect(
+        await handlePrepareBrokerSession(
+          request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
+          state,
+        ),
+      ).toMatchObject({ success: false, code: "session_export_identity_mismatch" });
+      expect(warning).toHaveBeenCalledWith(
+        `Session broker rejected export identity: ${broker.prepareError.message}`,
+      );
+      expect(debug).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
+  test("release and abandon rethrow unknown failures", async () => {
+    broker.sessionOwners.set(SESSION, TOKEN);
+    const failure = new Error("unexpected storage failure");
+    broker.mutationError = failure;
+    broker.prepareError = failure;
+    await expect(
+      handlePrepareBrokerSession(
+        request({ config: sessionConfig(), livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).rejects.toBe(failure);
+    await expect(
+      handleReleaseBrokerSession(request({ sessionId: SESSION, livenessOwnerToken: TOKEN }), state),
+    ).rejects.toBe(failure);
+    await expect(
+      handleAbandonBrokerSessionRequest(
+        request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).rejects.toBe(failure);
+  });
+
+  for (const configured of [true, false]) {
+    test(`every missing-service handler reports retry hints (configured=${configured})`, async () => {
+      const unavailableState: DaemonStateAccess = {
+        ...state,
+        isSessionBrokerMode: () => configured,
+        getSessionBrokerService: () => undefined,
+      };
+      const expected: DaemonMethodResult = {
+        success: false,
+        code: "session_broker_unavailable",
+        error: expect.any(String),
+        retryable: configured,
+        ...(configured ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
+      };
+      for (const [, handler] of BROKER_DAEMON_METHOD_HANDLERS) {
+        expect(await handler(request({}), unavailableState, undefined, undefined, {})).toEqual(
+          expected,
+        );
+      }
+      expect(
+        await bindBrokerRegistration(unavailableState, SESSION, {
+          requestId: "request-1",
+          livenessOwnerToken: TOKEN,
+        }),
+      ).toEqual(expected);
+    });
+  }
 
   test("abandon validates and forwards the original request identity and owner", async () => {
     expect(

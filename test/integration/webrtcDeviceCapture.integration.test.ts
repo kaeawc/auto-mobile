@@ -1273,7 +1273,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         if (!leaseId) {
           throw new Error("started device WebRTC stream did not return an ownership lease");
         }
-        const { WEBRTC_STREAM_LEASE_TTL_MS } = await import("../../src/server/webrtcStreamManager");
+        const { WEBRTC_STREAM_LEASE_TTL_MS } = await import("../../src/daemon/webrtcStreamManager");
         leaseHeartbeat = startStreamLeaseHeartbeat(
           streamId,
           leaseId,

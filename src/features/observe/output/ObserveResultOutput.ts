@@ -3,6 +3,7 @@ export {
   GFXINFO_DUMP_MARKER,
   sanitizeObserveResult,
   projectSanitizedObserveSkeleton,
+  inheritSkeletonProjectionValidation,
 } from "./resultOutput/sanitize";
 export type {
   SanitizeObserveConfig,

@@ -4,9 +4,13 @@ import type {
   DaemonLifecycleState,
 } from "./DaemonCoreState";
 import { forceStuckSessionRelease } from "../releaseSessionAndDevice";
-import { logger } from "../../utils/logger";
+import { logSinkStalledWithin, logger } from "../../utils/logger";
 import { UnixSocketServer } from "../socketServer";
-import { createDaemonHealthCheck, type HealthFailureKind } from "../daemonHealthCheck";
+import {
+  createDaemonHealthCheck,
+  HOST_IO_STALL_MEMORY_MS,
+  type HealthFailureKind,
+} from "../daemonHealthCheck";
 import { SessionHeartbeatMonitor } from "../SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { DEFAULT_SOCKET_PATH, SOCKET_PATH } from "../constants";
@@ -109,6 +113,7 @@ export class DaemonMaintenance {
           this.host.setLastDatabaseHealthFailure(message);
         },
         recover: (kind) => this.host.attemptRecovery(kind),
+        hostIoStalled: () => logSinkStalledWithin(HOST_IO_STALL_MEMORY_MS),
       }),
     );
     this.host.healthCheck()!.start();
@@ -303,7 +308,13 @@ export class DaemonMaintenance {
           // Reinstall routing, lifecycle delivery, cadence, observation, and
           // navigation callbacks on that replacement.
           this.host.configureDeviceDataStreamServer();
-          logger.info("Observation stream socket server restarted successfully");
+          const healthy = this.host.observationStreamHealth().isHealthy();
+          const log = healthy ? logger.info : logger.warn;
+          log(
+            healthy
+              ? "Observation stream socket server restarted successfully"
+              : "Observation stream socket server remains unavailable after recovery",
+          );
         } catch (error) {
           logger.error(`Failed to restart observation stream socket server: ${error}`);
         }

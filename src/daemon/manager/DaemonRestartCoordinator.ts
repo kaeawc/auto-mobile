@@ -90,6 +90,15 @@ export interface DaemonRestartCoordinatorHost {
   cleanupSocketPaths(primarySocketPath?: string): string[] | undefined;
 }
 
+/**
+ * Bound on connecting to and asking an incumbent daemon for safe-restart admission (#13792). The
+ * start path holds the startup lock across it against a 30 s start budget, and a stalled or too-old
+ * incumbent otherwise made connect and call each wait the client's 120 s default; a timeout is a
+ * deferral like any other admission failure. The incumbent answers synchronously, so a healthy one
+ * never needs more.
+ */
+export const RESTART_ADMISSION_TIMEOUT_MS = 3_000;
+
 /** Daemon Restart Coordinator lifecycle operations. */
 export class DaemonRestartCoordinator {
   constructor(private readonly host: DaemonRestartCoordinatorHost) {}
@@ -213,15 +222,19 @@ export class DaemonRestartCoordinator {
     // reject the newer caller that is requesting the replacement.
     const client = this.host.createClient({ clientIdentity: null });
     try {
-      await client.connect();
-      const result: unknown = await client.callDaemonMethod(DAEMON_PREPARE_RESTART_METHOD, {
-        pid: expected.pid,
-        startedAt: expected.startedAt,
-        ...processGenerationRecordFields(recordedProcessGenerationToken(expected)),
-        version: expected.version,
-        buildId: expected.buildId,
-        entryScript: expected.entryScript,
-      });
+      // callDaemonMethod connects inside its own deadline, so one budget bounds connect and call.
+      const result: unknown = await client.callDaemonMethod(
+        DAEMON_PREPARE_RESTART_METHOD,
+        {
+          pid: expected.pid,
+          startedAt: expected.startedAt,
+          ...processGenerationRecordFields(recordedProcessGenerationToken(expected)),
+          version: expected.version,
+          buildId: expected.buildId,
+          entryScript: expected.entryScript,
+        },
+        { timeoutMs: RESTART_ADMISSION_TIMEOUT_MS },
+      );
       if (!result || typeof result !== "object") {
         throw new DaemonRestartDeferredError(
           "the daemon returned no safe-restart admission result",
@@ -250,7 +263,8 @@ export class DaemonRestartCoordinator {
       // Older daemon generations do not implement atomic restart admission.
       // Fail closed: an explicit operator restart remains available.
       throw new DaemonRestartDeferredError(
-        `safe-restart admission is unavailable: ${errorMessage(error)}`,
+        `safe-restart admission is unavailable for daemon pid ${expected.pid} (version ${expected.version ?? "unknown"}; ` +
+          `daemons before 0.0.74 predate it): ${errorMessage(error)}`,
       );
     } finally {
       await client.close();

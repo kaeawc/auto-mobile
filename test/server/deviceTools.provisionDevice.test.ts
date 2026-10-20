@@ -1,3 +1,16 @@
+import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import {
+  BindingReconciler,
+  DefaultManagedSpecResolver,
+} from "../../src/daemon/sessionBroker/provisioning/reconciler";
+import { ToolBindingProvisioner } from "../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
+import {
+  FakeClaims,
+  FakeDeleter,
+  FakeInventory,
+  FakeMatcher,
+} from "../daemon/sessionBroker/registry/fixtures/reconcilerFakes";
 import * as buildIdentity from "../../src/daemon/buildIdentity";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -86,7 +99,7 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 
 /** Exact provision response body from the registered production handler, with deterministic dependencies. */
@@ -4869,6 +4882,168 @@ describe("provisionDevice handler", () => {
       success: false,
       error: { code: "identity_conflict", retryable: false },
     });
+  });
+
+  test("public provisionDevice schema does not expose binding rollback control", () => {
+    expect(
+      provisionDeviceSchema.safeParse({
+        ...provisionTestArgs("ios"),
+        rollbackOnRetryableReadiness: false,
+      }).success,
+    ).toBe(false);
+  });
+
+  test.each([
+    { context: true, optOut: false, retryable: true, deadline: true, retained: false },
+    { context: true, optOut: true, retryable: true, deadline: true, retained: true },
+    { context: true, optOut: true, retryable: false, deadline: true, retained: false },
+    { context: true, optOut: true, retryable: true, deadline: false, retained: false },
+    { context: false, optOut: true, retryable: true, deadline: true, retained: false },
+  ])(
+    "iOS readiness rollback policy: %j",
+    async ({ context, optOut, retryable, deadline, retained }) => {
+      const created = provisionedTestDevice("ios", true);
+      configureProvisionBootAndTeardown(deviceManager, "ios");
+      exactProvisioner.provision = async (request) => {
+        request.onBeforeCreate?.();
+        deviceManager.setDeviceImages("ios", [created.device]);
+        return created;
+      };
+      setDeviceToolsDependencies({
+        exactDeviceProvisionerFactory: () => exactProvisioner,
+        ensureCtrlProxyReady: async () => {
+          if (!retryable) {
+            throw new ProvisionDeviceError("timeout", "terminal readiness timeout", false);
+          }
+          throw new RunnerReadinessError("readiness deadline", false, deadline, "runner-connect");
+        },
+        idGenerator: new FakeIdGenerator(["readiness-policy"]),
+      });
+      registerDeviceTools();
+      const invoke = () =>
+        provisionResponseText({
+          ...provisionTestArgs("ios"),
+          ...(optOut ? { rollbackOnRetryableReadiness: false } : {}),
+        });
+      const response = JSON.parse(
+        await (context
+          ? runAsBindingReconciler({ scopeKey: "test-binding", bindingIndex: 0 }, invoke)
+          : invoke()),
+      );
+      expect(response).toMatchObject({
+        success: false,
+        error: {
+          code: deadline ? "timeout" : "platform_command_failed",
+          retryable: retryable && deadline,
+        },
+        lifecycle: {
+          state: retained ? "created_not_ready" : "removed",
+          device: { platform: "ios", stableId: "SIM-123" },
+        },
+      });
+      expect((await deviceManager.listDeviceImages("ios")).length).toBe(retained ? 1 : 0);
+      expect((await deviceManager.getBootedDevices("ios")).length).toBe(retained ? 1 : 0);
+      expect(
+        deviceManager
+          .getExecutedOperations()
+          .some((operation) => operation.startsWith("destroyDevice:")),
+      ).toBe(!retained);
+    },
+  );
+
+  test("binding readiness retry preserves and reuses the real provision handler's simulator", async () => {
+    const timer = new FakeTimer();
+    const registry = new FakeBindingRegistry(timer);
+    const inventory = new FakeInventory();
+    const deleter = new FakeDeleter(inventory);
+    const scope = await registry.ensureScope({
+      managedHostScope: "fake-host",
+      runnerNamespace: "retry",
+      runnerIncarnation: "one",
+    });
+    if (scope.kind !== "ready") {
+      throw new Error("scope setup failed");
+    }
+    const key = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
+    configureProvisionBootAndTeardown(deviceManager, "ios");
+    let creates = 0;
+    let readinessCalls = 0;
+    exactProvisioner.provision = async (request) => {
+      const existing = inventory.devices.find((device) => device.name === request.name);
+      const device = existing ?? {
+        ...provisionedTestDevice("ios", true).device,
+        name: request.name,
+      };
+      if (!existing) {
+        request.onBeforeCreate?.();
+        creates++;
+        inventory.devices.push(device);
+        deviceManager.setDeviceImages("ios", [device]);
+        deviceManager.setMockChildProcess(
+          device.name,
+          new ProvisionBootProcess(() => deviceManager.setBootedDevices("ios", [])),
+        );
+      }
+      return { ...provisionedTestDevice("ios", !existing), device };
+    };
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      exactDeviceProvisionerFactory: () => exactProvisioner,
+      ensureCtrlProxyReady: async () => {
+        if (++readinessCalls === 1) {
+          throw new RunnerReadinessError("readiness deadline", false, true, "runner-connect");
+        }
+      },
+    });
+    const provisioner = new ToolBindingProvisioner({
+      invokeTool: async (name, args, signal) =>
+        await ToolRegistry.getTool(name)!.handler(args, undefined, signal),
+      deviceManager,
+      androidConfigReader: { readConfig: async () => null },
+      timer,
+      releaseSession: async () => {},
+    });
+    const reconciler = new BindingReconciler({
+      registry,
+      inventory,
+      matcher: new FakeMatcher(),
+      resolver: new DefaultManagedSpecResolver(),
+      provisioner,
+      deleter,
+      claims: new FakeClaims(),
+      timer,
+      idGenerator: new FakeIdGenerator(),
+    });
+    const request = {
+      key,
+      role: "app",
+      platform: "ios" as const,
+      requestedSpec: provisionTestArgs("ios").device.spec,
+      deadlineMs: 60_000,
+    };
+    expect(await runAsBindingReconciler(key, () => reconciler.reconcile(request))).toMatchObject({
+      outcome: "failed",
+      failure: { retryable: true, provision: { code: "timeout" } },
+    });
+    expect(await registry.listOpenBindingJournal(key)).toMatchObject([
+      { phase: "created", target: { newStableId: "SIM-123" } },
+    ]);
+    expect(await deviceManager.getBootedDevices("ios")).toHaveLength(1);
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .some((operation) => operation.startsWith("destroyDevice:")),
+    ).toBe(false);
+    expect(await runAsBindingReconciler(key, () => reconciler.reconcile(request))).toMatchObject({
+      outcome: "ready",
+      disposition: "reused",
+      assignment: { stableDeviceId: "SIM-123", state: "ready" },
+    });
+    expect(creates).toBe(1);
+    expect(readinessCalls).toBe(2);
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(deleter.calls).toEqual([]);
   });
 
   test("keeps a timeout retryable after successful rollback", async () => {

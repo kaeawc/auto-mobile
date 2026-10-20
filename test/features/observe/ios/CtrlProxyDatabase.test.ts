@@ -235,6 +235,20 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
     db = new CtrlProxyDatabase(h.context);
   });
 
+  test("preserves cancellation during connection acquisition before dispatch", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("Caller cancelled", "AbortError");
+    h.context.ensureConnected = async () => {
+      controller.abort(reason);
+      return true;
+    };
+    await expect(db.listDatabases("com.app", { abortSignal: controller.signal })).rejects.toBe(
+      reason,
+    );
+    expect(h.sentMessages).toHaveLength(0);
+    expect(h.requestManager.getPendingCount()).toBe(0);
+  });
+
   interface Op {
     op: string;
     wireType: string;

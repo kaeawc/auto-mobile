@@ -4,6 +4,7 @@ import { type Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { isIosSimulatorAlreadyStoppedError } from "../../utils/ios-cmdline-tools/simulatorStateErrors";
 import { logger } from "../../utils/logger";
+import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import {
   CREATED_IOS_ABSENCE_POLL_MS,
   CREATED_IOS_ABSENCE_TIMEOUT_MS,
@@ -46,7 +47,10 @@ export async function rollBackCreatedIosSimulator(
     step = "shut down";
     await shutDownCreatedIosSimulator(context, device, cleanupSignal);
     step = "delete";
-    await context.simctl()!.deleteSimulator(created.deviceId, { signal: cleanupSignal });
+    await context.simctl()!.deleteSimulator(created.deviceId, {
+      signal: cleanupSignal,
+      timeoutMs: DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+    });
     step = "verify absence of";
     await verifyCreatedIosSimulatorAbsent(context, created.deviceId, cleanupSignal);
   } catch (cleanupError) {
@@ -85,10 +89,17 @@ export async function shutDownCreatedIosSimulator(
   signal: AbortSignal,
 ): Promise<void> {
   try {
-    await context.simctl()!.killSimulator(device, { signal });
+    await context
+      .simctl()!
+      .killSimulator(device, { signal, timeoutMs: DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS });
   } catch (error) {
     if (!isIosSimulatorAlreadyStoppedError(error)) {
-      throw error;
+      // delete also shuts down the device; a failed shutdown must not skip it.
+      logger.warn(
+        `[DeviceReadiness] Failed to shut down created iOS simulator ${device.deviceId}; attempting delete: ${errorMessage(error)}`,
+        error,
+      );
+      return;
     }
     // simctl reports the simulator is already Shutdown: the state the delete needs.
     logger.debug(

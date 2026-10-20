@@ -1,7 +1,14 @@
 import Foundation
 
-/// Why a prototype went away; the `reason` in the terminal `dismissed` event's payload.
-enum PrototypeDismissReason: String {
+/// Why an embedded prototype went away.
+/// This enum may gain cases; include a default branch when switching over it.
+public enum PrototypeDismissReason: String, Sendable {
+    /// The host dismiss control or a spec `dismiss` action.
+    case user
+}
+
+/// Internal lifecycle reasons retain the injected agent's wire protocol.
+enum PrototypeSessionDismissReason: String, Sendable {
     /// The host dismiss control or a spec `dismiss` action.
     case user
     /// A `dismiss_prototype` request.
@@ -13,12 +20,16 @@ enum PrototypeDismissReason: String {
     case ttl
 }
 
-/// One `prototype_event` push, before the wall-clock timestamp is attached.
-struct PrototypeEvent: Equatable {
-    let id: String
-    let sequence: Int
-    let kind: String
-    let name: String?
+/// A prototype event with a semantic category and JSON snapshots for app-owned Codable payloads.
+/// The session creates it before the model attaches the wire timestamp.
+public struct PrototypeEvent: Equatable, Sendable {
+    /// The prototype that emitted this event.
+    public let id: String
+    /// Monotonic event sequence for this prototype.
+    public let sequence: Int
+    let wireKind: String
+    /// The authored event name, state key, or data path.
+    public let name: String?
     let payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
@@ -26,6 +37,9 @@ struct PrototypeEvent: Equatable {
     var resolvedContext: PrototypeResolvedEmitContext?
     var keys: [String]?
     var validity: [String: Bool]?
+    var embeddedWire: Data? = nil
+    var wireTimestamp = 0
+    var isStateChange = false
 
     var context: [String: JSONValue]? { resolvedContext?.context }
     var contextTruncated: Bool? { resolvedContext?.contextTruncated }
@@ -37,7 +51,7 @@ struct PrototypeEvent: Equatable {
             "timestamp": timestamp,
             "id": id,
             "sequence": sequence,
-            "kind": kind,
+            "kind": wireKind,
             "name": name as Any? ?? NSNull(),
             "payload": payload.foundationObject,
             "state": JSONValue.object(state).foundationObject,
@@ -520,7 +534,11 @@ struct PrototypeSession {
                 "values": .object(Dictionary(uniqueKeysWithValues: keys.map { ($0, state[$0] ?? .null) })),
             ])
         }
-        return emit(kind: "emit", name: "change", payload: payload)
+        return emit(kind: "emit", name: "change", payload: payload).map {
+            var event = $0
+            event.isStateChange = true
+            return event
+        }
     }
 
     /// Several keys written together, reported by one `change` event (see `emitStateChange`). They are
@@ -642,7 +660,7 @@ struct PrototypeSession {
     }
 
     /// The terminal event: every dismissal emits exactly one `dismissed`, carrying its reason.
-    mutating func dismiss(reason: PrototypeDismissReason) -> [PrototypeEvent] {
+    mutating func dismiss(reason: PrototypeSessionDismissReason) -> [PrototypeEvent] {
         guard isShown else { return [] }
         let events = emit(kind: "dismissed", name: nil, payload: .object(["reason": .string(reason.rawValue)]))
         requests.cancelAll()
@@ -661,7 +679,7 @@ struct PrototypeSession {
         return [PrototypeEvent(
             id: id,
             sequence: sequence,
-            kind: kind,
+            wireKind: kind,
             name: name,
             payload: payload,
             state: state,

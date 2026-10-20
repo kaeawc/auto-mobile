@@ -1,3 +1,4 @@
+import { permissivePrototypeEgressPolicy } from "../../fakes/FakePrototypeEgressPolicy";
 import { afterAll, describe, expect, test } from "bun:test";
 import { FetchPrototypeHttpExecutor } from "../../../src/features/prototype/PrototypeHttpExecutor";
 import { SystemTimer, defaultTimer } from "../../../src/utils/SystemTimer";
@@ -14,8 +15,29 @@ const server = Bun.serve({
         accept: req.headers.get("accept"),
       });
     }
+    if (path === "/authority") {
+      return Response.json({ host: req.headers.get("host") });
+    }
+    if (path === "/redirect") {
+      return new Response(null, { status: 302, headers: { Location: "/text" } });
+    }
+    if (path === "/redirect-stream") {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1]));
+          },
+        }),
+        { status: 302, headers: { Location: "/text" } },
+      );
+    }
     if (path === "/text") {
       return new Response("hello");
+    }
+    if (path === "/gzip") {
+      return new Response(Bun.gzipSync(new TextEncoder().encode('{"compressed":true}')), {
+        headers: { "Content-Encoding": "gzip" },
+      });
     }
     if (path === "/big") {
       return new Response(new Uint8Array(1024));
@@ -31,10 +53,45 @@ afterAll(() => server.stop(true));
 
 const base = `http://127.0.0.1:${server.port}`;
 const executor = (maxResponseBytes?: number) =>
-  new FetchPrototypeHttpExecutor({ timer: new SystemTimer(), maxResponseBytes });
+  new FetchPrototypeHttpExecutor({
+    timer: new SystemTimer(),
+    maxResponseBytes,
+    policy: permissivePrototypeEgressPolicy,
+    resolver: async () => [{ address: "127.0.0.1", family: 4 }],
+  });
 const signal = () => new AbortController().signal;
 
 describe("FetchPrototypeHttpExecutor against a local server", () => {
+  test("pins the connection to the resolved IP while preserving the original authority", async () => {
+    expect(
+      await executor().execute(
+        {
+          method: "GET",
+          url: `http://fixture.invalid:${server.port}/authority`,
+        },
+        signal(),
+      ),
+    ).toMatchObject({ ok: true, body: { host: `fixture.invalid:${server.port}` } });
+  });
+
+  test("follows a relative redirect through the pinned transport", async () => {
+    expect(
+      await executor().execute({ method: "GET", url: `${base}/redirect` }, signal()),
+    ).toMatchObject({ ok: true, body: "hello" });
+  });
+
+  test("cancels a streaming redirect body before following the next hop", async () => {
+    expect(
+      await executor().execute({ method: "GET", url: `${base}/redirect-stream` }, signal()),
+    ).toMatchObject({ ok: true, body: "hello" });
+  });
+
+  test("decodes compressed responses through the pinned transport", async () => {
+    expect(
+      await executor().execute({ method: "GET", url: `${base}/gzip` }, signal()),
+    ).toMatchObject({ ok: true, body: { compressed: true } });
+  });
+
   test("round-trips a JSON request", async () => {
     const outcome = await executor().execute(
       {

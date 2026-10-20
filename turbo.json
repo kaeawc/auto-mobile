@@ -4,6 +4,13 @@
   "agentGuidance": false,
   "envMode": "strict",
   "globalDependencies": ["tsconfig.json"],
+  "globalPassThroughEnv": [
+    "AUTOMOBILE_COORDINATION_DIR",
+    "AUTO_MOBILE_COORDINATION_DIR",
+    "AUTOMOBILE_HOST_TEST_SLOTS",
+    "AUTOMOBILE_HEAVY_CHECK_SLOTS",
+    "AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS"
+  ],
   "tasks": {
     "build": {
       "description": "Compile TypeScript source to dist/",
@@ -58,6 +65,7 @@
         "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
+        "android/prototype-compose/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
@@ -108,6 +116,7 @@
         "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
+        "android/prototype-compose/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
@@ -182,6 +191,7 @@
         "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
+        "android/prototype-compose/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
@@ -309,6 +319,7 @@
         "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
+        "android/prototype-compose/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
         "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",

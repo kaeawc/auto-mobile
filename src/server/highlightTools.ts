@@ -14,7 +14,10 @@ import {
 } from "../models";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { VisualHighlightClient } from "../features/debug/VisualHighlightClient";
-import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
+import {
+  generateHighlightId,
+  recordVideoRecordingHighlightAdded,
+} from "../daemon/videoRecordingManager";
 import type { HierarchyCapture, HierarchySnapshot } from "../features/observe/HierarchyCapture";
 import {
   createDeviceHierarchyCapture,

@@ -1,5 +1,5 @@
 import { runBlockWith } from "../../helpers/observedInteractionStub";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test, beforeEach } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -19,6 +19,11 @@ import {
   capturedPrototypeHierarchy,
   observationOf,
 } from "../../helpers/prototypeWindowCapture";
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
 
 /**
  * Observe and default-layer tapOn must agree on every app row under an AutoMobile prototype window
@@ -155,7 +160,7 @@ function createCommand(observation: ObserveResult) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const service = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
+  clientSpy.mockReturnValue(service);
   const detector = new FakeAccessibilityDetector();
   detector.setDefaultResult(false);
   const command = new TapOnElement(
@@ -167,9 +172,7 @@ function createCommand(observation: ObserveResult) {
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
-  spyOn(command, "observedInteraction").mockImplementation(
-    runBlockWith(() => recordObservationRead(observation)),
-  );
+  command.observedInteraction = runBlockWith(() => recordObservationRead(observation));
   return { command, service };
 }
 

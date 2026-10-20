@@ -73,6 +73,8 @@ import {
   type AppearanceOnConnectDependencies,
 } from "../applyAppearanceOnConnect";
 import { storeSetupTiming } from "../setupTiming";
+import { createDefaultBindingExclusion } from "../sessionBroker/provisioning/exclusion";
+import { selectReadinessAutoStartImage } from "./readinessAutoStart";
 import { AndroidCtrlProxyReadiness } from "./AndroidCtrlProxyReadiness";
 import { rollBackCreatedIosSimulator } from "./CreatedIosSimulatorRollback";
 import {
@@ -123,6 +125,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
   private readonly adbFactory: AdbClientFactory;
   private readonly runnerReadinessService: RunnerReadinessService;
   private readonly runnerReadinessTimer: Timer;
+  private readonly bindingExclusion;
   private readonly physicalIosScanBudgetMs: number;
   private readonly runnerReadinessTimeoutMs: number | undefined;
   private readonly runnerProvisionTimeoutMs: number | undefined;
@@ -153,6 +156,8 @@ export class DeviceReadiness implements DeviceReadinessContract {
     });
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
+    this.bindingExclusion =
+      options.bindingExclusion ?? createDefaultBindingExclusion(this.runnerReadinessTimer);
     this.physicalIosScanBudgetMs = options.physicalIosScanBudgetMs ?? PHYSICAL_IOS_SCAN_BUDGET_MS;
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
     this.iosBootInstrumentationInstance = options.iosBootInstrumentation;
@@ -660,7 +665,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
     }
 
     // Start the first available AVD
-    const deviceImage = availableImages[0];
+    const deviceImage = await selectReadinessAutoStartImage(availableImages, this.bindingExclusion);
     return await this.bootAndroidReadinessImage(deviceImage, options, perf);
   }
 
@@ -905,7 +910,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
     }
 
     // No booted devices - boot the first available simulator
-    const device = availableDevices[0];
+    const device = await selectReadinessAutoStartImage(availableDevices, this.bindingExclusion);
     return await this.bootIosReadinessImage(device, options, perf);
   }
 

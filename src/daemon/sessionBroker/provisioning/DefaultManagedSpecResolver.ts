@@ -1,3 +1,5 @@
+import type { SimCtlCatalog } from "../../../utils/ios-cmdline-tools/SimCtlSupport";
+import { ActionableError } from "../../../models/ActionableError";
 import { createHash } from "node:crypto";
 import {
   evaluateIosPairCompatibility,
@@ -159,6 +161,8 @@ function unsupportedFamilyScreenOverrides(
     : undefined;
 }
 
+type CatalogRead = () => Promise<SimCtlCatalog>;
+
 const IOS_RUNTIME_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.SimRuntime.";
 
 /** The Android system-image packages installed in the SDK, as `system-images;...` identifiers. */
@@ -222,7 +226,15 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     resolvedSpec: ResolvedExactDeviceSpecification,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecCreatability> {
-    if (platform !== "android" || !this.androidProfileCatalog) {
+    if (platform === "ios") {
+      const resolution = await this.resolve(
+        platform,
+        { runtime: resolvedSpec.runtime, deviceType: resolvedSpec.deviceType },
+        options,
+      );
+      return resolution.kind === "resolved" ? { kind: "creatable" } : resolution;
+    }
+    if (!this.androidProfileCatalog) {
       return { kind: "creatable" };
     }
     let profileIds: string[];
@@ -250,11 +262,12 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     spec: BindingRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution> {
-    const unsupported = await this.findUnsupportedSpec(platform, spec, options.signal);
+    const readCatalog = this.catalogRead(options.signal);
+    const unsupported = await this.findUnsupportedSpec(platform, spec, options.signal, readCatalog);
     if (unsupported) {
       return { kind: "unsupported", code: "spec_unsupported", message: unsupported };
     }
-    const model = await this.resolveDeviceType(platform, spec, options.signal);
+    const model = await this.resolveDeviceType(platform, spec, readCatalog);
     if (model.kind !== "resolved") {
       return model.resolution;
     }
@@ -267,7 +280,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       return { kind: "unsupported", code: "spec_unsupported", message: cutout.message };
     }
     if (platform === "ios" && this.iosRuntimeCatalog && spec.deviceType !== undefined) {
-      const incompatible = await this.findIosIncompatibility(exact, options.signal);
+      const incompatible = await this.findIosIncompatibility(exact, readCatalog);
       if (incompatible) {
         return { kind: "unsupported", code: "runtime_incompatible", message: incompatible };
       }
@@ -283,6 +296,26 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     };
   }
 
+  /** Memoize success AND failure for this resolution; a retry belongs to the next call. */
+  private catalogRead(signal?: AbortSignal): CatalogRead {
+    let pending: Promise<SimCtlCatalog> | undefined;
+    return () => {
+      if (!pending) {
+        const catalog = this.iosRuntimeCatalog;
+        if (!catalog) {
+          throw new ActionableError("The simulator catalog is unavailable");
+        }
+        pending = catalog.getCatalogChecked
+          ? catalog.getCatalogChecked(signal)
+          : Promise.all([
+              catalog.getRuntimesChecked(undefined, signal),
+              catalog.getDeviceTypesChecked(signal),
+            ]).then(([runtimes, deviceTypes]) => ({ runtimes, deviceTypes }));
+      }
+      return pending;
+    };
+  }
+
   /**
    * Why the spec is `spec_unsupported` before any model is chosen: malformed (an Android runtime
    * that is not a system-image id, an iOS runtime that is not a CoreSimulator id), or naming what
@@ -292,6 +325,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     platform: BindingPlatform,
     spec: BindingRequestedSpec,
     signal: AbortSignal | undefined,
+    readCatalog: CatalogRead,
   ): Promise<string | undefined> {
     const familyConflict =
       unsupportedFamilyScreenOverrides(platform, spec) ?? unsupportedModelFamily(platform, spec);
@@ -304,14 +338,14 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
         : `Android runtime '${spec.runtime}' is not a system-image identifier.`;
     }
     return spec.runtime.startsWith(IOS_RUNTIME_IDENTIFIER_PREFIX)
-      ? await this.findMissingIosCatalogEntry(spec, signal)
+      ? await this.findMissingIosCatalogEntry(spec, readCatalog)
       : `iOS runtime '${spec.runtime}' is not a CoreSimulator runtime identifier (${IOS_RUNTIME_IDENTIFIER_PREFIX}...).`;
   }
 
   private async resolveDeviceType(
     platform: BindingPlatform,
     spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
+    readCatalog: CatalogRead,
   ): Promise<
     | { kind: "resolved"; deviceType: string }
     | { kind: "refused"; resolution: ManagedSpecResolution }
@@ -343,10 +377,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     let runtimes: AppleDeviceRuntime[];
     let deviceTypes: AppleDeviceType[];
     try {
-      [runtimes, deviceTypes] = await Promise.all([
-        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
-        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
-      ]);
+      ({ runtimes, deviceTypes } = await readCatalog());
     } catch (error) {
       logger.warn(
         `[Bindings] iOS catalog unreadable; cannot choose a model: ${errorMessage(error)}`,
@@ -400,7 +431,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
    */
   private async findMissingIosCatalogEntry(
     spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
+    readCatalog: CatalogRead,
   ): Promise<string | undefined> {
     if (!this.iosRuntimeCatalog) {
       return undefined;
@@ -408,10 +439,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     let runtimes: AppleDeviceRuntime[];
     let deviceTypes: AppleDeviceType[];
     try {
-      [runtimes, deviceTypes] = await Promise.all([
-        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
-        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
-      ]);
+      ({ runtimes, deviceTypes } = await readCatalog());
     } catch (error) {
       logger.warn(`[Bindings] iOS catalog check skipped: ${errorMessage(error)}`, error);
       return undefined;
@@ -441,16 +469,12 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
 
   private async findIosIncompatibility(
     spec: ExactDeviceSpecification,
-    signal: AbortSignal | undefined,
+    readCatalog: CatalogRead,
   ): Promise<string | undefined> {
-    const catalog = this.iosRuntimeCatalog!;
     let runtimes: Awaited<ReturnType<ExactIosRuntimeCatalog["getRuntimesChecked"]>>;
     let deviceTypes: Awaited<ReturnType<ExactIosRuntimeCatalog["getDeviceTypesChecked"]>>;
     try {
-      [runtimes, deviceTypes] = await Promise.all([
-        catalog.getRuntimesChecked(undefined, signal),
-        catalog.getDeviceTypesChecked(signal),
-      ]);
+      ({ runtimes, deviceTypes } = await readCatalog());
     } catch (error) {
       // An unreadable catalog is not proof of incompatibility; creation keeps simctl as authority.
       logger.warn(`[Bindings] iOS catalog check skipped: ${errorMessage(error)}`, error);

@@ -1,3 +1,8 @@
+import type {
+  BootCapacityReserver,
+  BootReservationOptions,
+  BootSlotReservation,
+} from "../../devices/bootAdmission/BootSlotReservation";
 import { join } from "node:path";
 import { adbServerScope } from "../../daemon/foreignDeviceOwnership";
 import { getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
@@ -13,7 +18,7 @@ import {
   InMemoryBootDurationHistory,
   type BootDurationHistory,
 } from "../iosSimFleet/BootDurationHistory";
-import type { IosSimCapacityGate } from "../iosSimFleet/CapacityGate";
+import type { IosSimCapacityGate, IosSimulatorOwnershipReader } from "../iosSimFleet/CapacityGate";
 import { createIosSimCapacityGate } from "../iosSimFleet/defaultIosBootInstrumentation";
 import { AndroidBootAdmissionGate } from "./AndroidBootAdmissionGate";
 import { adbEmulatorSerialLister, CommandAndroidCapacitySource } from "./AndroidCapacitySource";
@@ -70,6 +75,19 @@ export interface SharedBootAdmissionGateDeps {
 }
 
 let shared: SharedBootAdmissionGates | undefined;
+let iosOwnership: IosSimulatorOwnershipReader | undefined;
+
+/** Composition-side reader, resolved lazily even if the shared gate already exists. */
+export function installIosSimulatorOwnershipReader(reader: IosSimulatorOwnershipReader): void {
+  iosOwnership = reader;
+}
+
+const defaultIosOwnership: IosSimulatorOwnershipReader = {
+  refresh: async () => {
+    await iosOwnership?.refresh();
+  },
+  isAutoMobileOwned: (udid) => iosOwnership?.isAutoMobileOwned(udid) ?? false,
+};
 
 /** Lazily builds the gates from the environment on first use. */
 export function getSharedBootAdmissionGates(
@@ -134,6 +152,7 @@ export function createBootAdmissionGates(
             simctl: new SimCtlClient(null),
             timer,
             history: iosBootHistory,
+            ownership: defaultIosOwnership,
             env,
             executor,
           }),
@@ -151,6 +170,22 @@ export async function assertBootCapacityAvailable(
   gates: Pick<SharedBootAdmissionGates, "android" | "ios"> = getSharedBootAdmissionGates(),
 ): Promise<void> {
   await gates[platform]?.assertCapacityAvailable(options);
+}
+
+/** Reserve against the very same ledger that ordinary platform boots consult. */
+export async function reserveBootCapacity(
+  platform: Platform,
+  options: BootReservationOptions,
+  gates: Partial<Record<Platform, BootCapacityReserver>> = getSharedBootAdmissionGates(),
+): Promise<BootSlotReservation> {
+  options.signal?.throwIfAborted();
+  return (
+    (await gates[platform]?.reserveBoot(options)) ?? {
+      run: (operation) => operation(),
+      release: () => {},
+      markReplacedDeviceGone: () => {},
+    }
+  );
 }
 
 const CAPACITY_REPORT_TIMEOUT_MS = 3_000;

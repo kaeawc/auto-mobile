@@ -17,7 +17,7 @@ import {
   setVideoRecordingManagerDependencies,
   startVideoRecording,
   stopVideoRecordingUnattended,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import type { BootedDevice } from "../../src/models";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";

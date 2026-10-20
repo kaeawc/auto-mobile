@@ -109,3 +109,6 @@ export function createStatelessMcpServer(
     taskLeaseKeepalive: daemonTaskLeaseKeepalive(),
   });
 }
+
+/** The resource-list freshness hook shared by the MCP handler and control discovery cache. */
+export { refreshMcpResourceList } from "../server";

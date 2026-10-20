@@ -1,3 +1,4 @@
+import { serializeControlFrame } from "../socketServer/controlRoutes";
 import {
   applyResourceSubscription,
   broadcastListChanged as fanOutListChanged,
@@ -15,7 +16,13 @@ import { createRequestContext } from "../requestContext";
 
 import { errorMessage } from "../../utils/describeUnknownError";
 
-import { DaemonNotification, DaemonRequest, DaemonResponse, SessionContext } from "../types";
+import {
+  DaemonNotification,
+  DaemonRequest,
+  DaemonResponse,
+  REQUEST_BUDGET_NOTIFICATION_METHOD,
+  SessionContext,
+} from "../types";
 import {
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_CANCEL_REQUEST_METHOD,
@@ -88,6 +95,7 @@ type Callbacks = Pick<
   | "frameDeviceId"
   | "handleRequest"
   | "abortMcpRequests"
+  | "forgetSocketDiscovery"
   | "clearBoundMcpClientKey"
   | "releaseDevicePoolMcpSessionBindings"
   | "forgetLateSessionToolBindings"
@@ -244,6 +252,7 @@ export class SocketTransport {
       };
       pending = tracked;
       this.state.pendingSocketRequests.add(tracked);
+      this.announceResolvedBudget(socket, sessionId, request, context.totalTimeoutMs, controlFrame);
       deviceId = this.state.onFrameTrace ? this.callbacks.frameDeviceId(request) : undefined;
       if (this.state.onFrameTrace) {
         this.callbacks.traceFrame("frame_parsed", request.id, deviceId);
@@ -372,6 +381,7 @@ export class SocketTransport {
       return;
     }
     this.callbacks.abortMcpRequests(sessionId);
+    this.callbacks.forgetSocketDiscovery(sessionId);
     this.callbacks.trackRequestHandler(
       executionTracker
         .cancelSessionExecutions(sessionId, "socket_disconnect")
@@ -555,6 +565,33 @@ export class SocketTransport {
       message,
     });
   }
+  /**
+   * The client sized its backstop from its own environment (#13797); an opted-in client is told how
+   * long this daemon will really wait so it does not cancel a call still inside that budget.
+   */
+  private announceResolvedBudget(
+    socket: Socket,
+    sessionId: string,
+    request: DaemonRequest,
+    resolvedMs: number,
+    controlFrame: boolean,
+  ): void {
+    if (
+      controlFrame ||
+      request.type !== "mcp_request" ||
+      request.acceptsRequestBudget !== true ||
+      resolvedMs <= (request.timeoutMs ?? 0)
+    ) {
+      return;
+    }
+    this.callbacks.writeFrame(socket, sessionId, {
+      type: "daemon_notification",
+      method: REQUEST_BUDGET_NOTIFICATION_METHOD,
+      requestId: request.id,
+      timeoutMs: resolvedMs,
+    });
+  }
+
   writeFrame(
     socket: Socket,
     sessionId: string,
@@ -609,7 +646,7 @@ export class SocketTransport {
       return;
     }
     try {
-      const payload = JSON.stringify(frame) + "\n";
+      const payload = serializeControlFrame(frame);
       const byteLength = Buffer.byteLength(payload);
       const guard = this.callbacks.connectionFor(socket, sessionId).outboundWriteGuard();
       const queuedBytes = guard.admit(byteLength);

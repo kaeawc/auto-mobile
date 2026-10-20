@@ -1,12 +1,17 @@
+import { didSourceSucceedForDevice, discoverySourceFor } from "../utils/discoverySource";
 import type { BootedDevice } from "../models";
-import type { BootedDeviceDiscovery, MultiPlatformDeviceManager } from "../devices/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+  MultiPlatformDeviceManager,
+} from "../devices/deviceUtils";
 import { transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import type { Session } from "./sessionManager";
 import {
   interruptVideoRecording,
   type listActiveVideoRecordings,
   stopVideoRecordingUnattended,
-} from "../server/videoRecordingManager";
+} from "./videoRecordingManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -63,16 +68,58 @@ export async function discoverAndReconcile(
     planActive,
     platform = "either",
     bypassAndroidDeviceListCache = false,
+    heldDevices = [],
   }: {
     planActive: boolean;
+    heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
   },
 ) {
-  const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+  const trackedDevices = [
+    ...devicePool.getAllDevices().map((device) => ({ platform: device.platform, id: device.id })),
+    ...heldDevices.map((device) => ({ platform: device.platform, id: device.assignedDevice })),
+  ];
+  const options = {
     bypassAndroidDeviceListCache,
-  });
-  discovery.devices = await mapMonitorAndroidDiscovery(devicePool, discovery.devices);
+    skipAndroidProfileEnrichment: true,
+    // An unpooled held device still needs liveness evidence from its own source.
+    skipPhysicalIosDiscovery: !trackedDevices.some(
+      (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+    ),
+  };
+  const read = async (readOptions: BootedDeviceDiscoveryOptions) => {
+    const observation = await deviceManager.getBootedDevicesDetailed(platform, readOptions);
+    observation.devices = await mapMonitorAndroidDiscovery(devicePool, observation.devices);
+    return observation;
+  };
+  let discovery = await read(options);
+  const present = new Set(discovery.devices.map((device) => device.deviceId));
+  const missingDevices = trackedDevices.filter((device) => !present.has(device.id));
+  if (
+    !planActive &&
+    missingDevices.some(
+      (device) =>
+        didSourceSucceedForDevice(discovery, device.platform, device.id) &&
+        (device.platform === "ios" || !bypassAndroidDeviceListCache),
+    )
+  ) {
+    // Plan-time misses are capped below confirmation; its own loss check already reads fresh.
+    // Otherwise only the fresh confirmation reaches reconciliation and miss counting. Healthy/
+    // idle sweeps keep the cheap cached path; a failed confirmation supplies no absence evidence.
+    discovery = await read({
+      ...options,
+      bypassAndroidDeviceListCache:
+        bypassAndroidDeviceListCache ||
+        missingDevices.some((device) => device.platform === "android"),
+      bypassIosDeviceListCache: missingDevices.some(
+        (device) => discoverySourceFor(device.platform, device.id) === "ios-simulator",
+      ),
+      bypassPhysicalIosDeviceListCache: missingDevices.some(
+        (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+      ),
+    });
+  }
   // Reconciliation can quarantine identity and cancel in-flight work. During
   // allocation, discovery supplies only presence evidence for miss counting.
   if (!planActive) {
@@ -334,7 +381,7 @@ export function logDisconnectMisses(
       // Also lower pre-plan misses so a plan-driven restart gets the same grace.
       deviceDisconnectMisses.set(deviceId, misses);
     }
-    const missState = budgetExhausted ? "transitional, budget exhausted" : "absent";
+    const missState = budgetExhausted ? "budget exhausted" : "absent";
     const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
     if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
       logger.debug(message);

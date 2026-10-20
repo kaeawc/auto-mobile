@@ -1,3 +1,4 @@
+import type { ProvisionDeviceLifecycleOutcome } from "./provisionDeviceLifecycle";
 import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
 import { ActionableError } from "../models";
 import type { ProvisionDeviceRecoveryEvidence } from "./provisionDeviceRecoveryEvidenceTypes";
@@ -55,6 +56,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
 };
 
 export interface ProvisionDeviceErrorDiagnostics {
+  /** Internal bridge of provisionDevice lifecycle evidence to the binding creation journal. */
+  retainedDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
   providerCode?: string;
   readinessPhase?: string;
   attempt?: number;
@@ -82,6 +85,7 @@ export interface ProvisionDeviceCapacityDetails {
   booted: number;
   /** Counted devices AutoMobile did not start; present only when there are any. */
   externalDevices?: string[];
+  heldDevices?: string[];
 }
 
 export interface IosRuntimeIncompatibility {

@@ -13,6 +13,7 @@
 SCRIPT="scripts/ci/run-ts-coverage.sh"
 
 setup() {
+  export AUTOMOBILE_RUNNER_CALIBRATION=0
   command -v rg >/dev/null 2>&1 || skip "ripgrep (rg) not installed"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -150,4 +151,12 @@ EOF
   [[ "$output" == *"::group::Unclean coverage log: coverage/shards/shard-2-chunk-2.log"* ]]
   [[ "$output" == *"::error::coverage: FAIL: coverage shard 1 chunk 1/2 exited with status 1"* ]]
   [[ "$output" == *"::error::coverage: FAIL: coverage shard 2 chunk 2/2 exited with status 1"* ]]
+}
+
+@test "WriteFailed cannot recover a log with both zero and nonzero failure summaries" {
+  STUB_LOG="$WORK_DIR/mixed.log"
+  printf '0 fail\n10 fail\nerror: An internal error occurred (WriteFailed)\n' > "$STUB_LOG"
+  make_bun_stub
+  run env PATH="$STUB_DIR:$PATH" bash "$SCRIPT" "$WORK_DIR/out.log"
+  [ "$status" -ne 0 ]
 }

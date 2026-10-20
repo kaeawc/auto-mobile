@@ -69,7 +69,7 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
       break
     fi
   done
-  if [[ "${tolerated}" -eq 1 && "${saw_write_failed}" -eq 1 ]]; then
+  if [[ "${status}" -eq 1 && "${tolerated}" -eq 1 && "${saw_write_failed}" -eq 1 ]]; then
     for unit_log in "${unit_logs[@]}"; do
       unit_dir="${unit_log%.log}"
       bash scripts/ci/verify-ts-coverage-output.sh "${unit_dir}"
@@ -92,7 +92,7 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
     fi
     exit 0
   fi
-elif grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && grep -Eq '(^|[^0-9])0 fail' "${log_file}"; then
+elif [[ "${status}" -eq 1 ]] && grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && grep -Eq '(^|[^0-9])0 fail' "${log_file}" && ! grep -Eq '(^|[^0-9])[1-9][0-9]* fail' "${log_file}"; then
   echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
   tail -n 80 "${log_file}"
   bash scripts/ci/verify-ts-coverage-output.sh coverage

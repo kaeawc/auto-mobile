@@ -1697,18 +1697,19 @@ EOF
 @test "coverage wall timeout is 720 seconds" {
   cat > "$STUB_BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/timeout-args"
+printf '%s\n' "$*" >> "$BATS_TEST_TMPDIR/timeout-args"
 exit 124
 EOF
   chmod +x "$STUB_BIN/timeout"
 
   run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 720 ' "$BATS_TEST_TMPDIR/timeout-args"
+  grep -qE -- '^-k 2 720 bash .*/bun-unit-chunks.sh ' "$BATS_TEST_TMPDIR/timeout-args"
 
+  : > "$BATS_TEST_TMPDIR/timeout-args"
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 33 ' "$BATS_TEST_TMPDIR/timeout-args"
+  grep -qE -- '^-k 2 33 bash .*/bun-unit-chunks.sh ' "$BATS_TEST_TMPDIR/timeout-args"
 }
 
 @test "coverage wall timeout prints a diagnostic on deadline" {

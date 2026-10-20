@@ -20,6 +20,7 @@ EOF
 }
 
 setup() {
+  export AUTOMOBILE_RUNNER_CALIBRATION=0
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -97,7 +98,7 @@ cat > "$report" <<JUNIT
 JUNIT
 if [[ "${STUB_REMOVE_LOG_CHUNK:-}" == "$number-$chunk" ]]; then rm -f "${coverage_dir}.log"; fi
 printf 'end %s\n' "$number" >> "$shards_dir/events"
-if [[ "${STUB_FAIL_CHUNK:-}" == "$number-$chunk" || "${STUB_WRITE_FAILED_CHUNK:-}" == "$number-$chunk" || "${STUB_REAL_FAIL_CHUNK:-}" == "$number-$chunk" ]]; then exit 7; fi
+if [[ "${STUB_FAIL_CHUNK:-}" == "$number-$chunk" || "${STUB_WRITE_FAILED_CHUNK:-}" == "$number-$chunk" || "${STUB_REAL_FAIL_CHUNK:-}" == "$number-$chunk" ]]; then exit "${STUB_EXIT_CODE:-7}"; fi
 EOF
   chmod +x "$STUB_BIN/bun"
 }
@@ -277,7 +278,7 @@ EOF
   stub_find 12
   cat > "$STUB_BIN/bun" <<'EOF'
 #!/usr/bin/env bash
-if [[ "$1" == "scripts/lib/write-coverage-bunfig.ts" || "$1" == */test-file-timings.ts ]]; then exec "$REAL_BUN" "$@"; fi
+if [[ "$1" == "scripts/lib/write-coverage-bunfig.ts" || "$1" == */test-file-timings.ts || "$1" == */runner-calibration.ts ]]; then exec "$REAL_BUN" "$@"; fi
 echo "chunk started and is stuck"
 exec sleep 30
 EOF
@@ -321,5 +322,95 @@ EOF
     bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
   printf '%s\n' "$output"
   [ "$status" -ne 0 ]
+  [ ! -f coverage/lcov.info ]
+}
+
+# Fast infra simulation: timeout runs once as an infra exit, then executes the
+# chunker normally. No real sleeps or 720s watchdog is needed for retry policy.
+make_infra_timeout() {
+  cat > "$STUB_BIN/timeout" <<'SH'
+#!/usr/bin/env bash
+shift 3 # timeout -k 2 SECONDS COMMAND...
+if [[ "$1" == bun && "$2" == */runner-calibration.ts ]]; then exec "$@"; fi
+key="${AUTOMOBILE_WATCHDOG_LABEL// /-}"
+key="${key//\//-}"
+count_file="$BATS_TEST_TMPDIR/attempt-$key"
+count=0
+[[ ! -f "$count_file" ]] || count="$(cat "$count_file")"
+printf '%s\n' "$((count + 1))" > "$count_file"
+if [[ "$count" -eq 0 || "${ALWAYS_INFRA_EXIT:-0}" == 1 ]]; then
+  shard="${AUTOMOBILE_WATCHDOG_LABEL##* }"
+  shard="${shard%%/*}"
+  # A killed attempt may leave invalid partial JUnit. It must be archived,
+  # never globbed into the final coverage timing gate or merged report.
+  printf 'incomplete attempt\n' > "coverage/shards/shard-${shard}-chunk-99.xml"
+  exit "${INFRA_EXIT:-124}"
+fi
+exec "$@"
+SH
+  chmod +x "$STUB_BIN/timeout"
+}
+
+@test "coverage retries infra exits once with fresh chunks and retains retry diagnostics" {
+  stub_find 12
+  make_infra_timeout
+  for code in 124 137; do
+    rm -f "$BATS_TEST_TMPDIR/attempt-"*
+    run_coverage INFRA_EXIT="$code" AUTOMOBILE_COVERAGE_CHUNK_FILES=5
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"retrying once with the same budget"* ]]
+    [[ "$output" == *"passed on its retry"* ]]
+    [ -f coverage/shards/shard-1.attempt-1.log ]
+    [ -f coverage/shards/attempt-1/shard-1-chunk-99.xml ]
+    [ ! -f coverage/shards/shard-1-chunk-99.xml ]
+    [ -f coverage/lcov.info ]
+  done
+}
+
+@test "coverage never retries assertions or infra attempts beyond the lane cap" {
+  stub_find 12
+  run_coverage STUB_FAIL_CHUNK=1-1
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"RETRY:"* ]]
+  make_infra_timeout
+  run_coverage AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=1
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"would pass the 1s lane cap"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+}
+
+@test "coverage calibrated contention writes the dispatch summary and skips same-runner retry" {
+  stub_find 12
+  make_infra_timeout
+  # Wrap the existing fake Bun: calibration writes deterministic probe samples,
+  # lookup uses the real typed parser, while chunk tests keep their canned data.
+  mv "$STUB_BIN/bun" "$STUB_BIN/bun-tests"
+  cat > "$STUB_BIN/bun" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == */runner-calibration.ts ]]; then
+  if [[ "$2" == probe ]]; then
+    printf '%s\t400\t100\n' "$4" >> "$3"
+    exit 0
+  fi
+  exec "$REAL_BUN" "$@"
+fi
+exec "$(dirname "$0")/bun-tests" "$@"
+SH
+  chmod +x "$STUB_BIN/bun"
+  run_coverage AUTOMOBILE_RUNNER_CALIBRATION=1 GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/summary"
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+  grep -q 'RUNNER-CONTENDED: unit shard' "$BATS_TEST_TMPDIR/summary"
+  grep -q 'Unit shard 1 hit its 10s wall-clock budget' "$BATS_TEST_TMPDIR/summary"
+}
+
+@test "WriteFailed cannot waive a signal failure after its infra retry even with clean chunk summaries" {
+  stub_find 12
+  run env PATH="$STUB_BIN:$PATH" STUB_WRITE_FAILED_CHUNK=1-1 STUB_EXIT_CODE=137 \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
+  [ "$status" -eq 137 ]
+  [[ "$output" == *"after a retry"* ]]
+  [[ "$output" != *"continuing to verify coverage output"* ]]
   [ ! -f coverage/lcov.info ]
 }

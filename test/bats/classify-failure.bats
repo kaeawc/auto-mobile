@@ -972,7 +972,7 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
 
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
 @test "reruns a calibrated contended unit timeout before the both-attempts signature" {
-  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)"; do
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage"; do
     runner_shutdown_fixture "$job"
     run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
       FAKE_RUNNER_LOG=$'RUNNER-CONTENDED: unit shard 0 hit its 720s wall-clock budget after a retry on a starved runner (probe slowdown 8x >= 4x); not retrying on the same runner. Re-run the job to get a fresh runner.\nTIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry' bash "$SCRIPT" 123
@@ -983,7 +983,7 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
 }
 
 @test "reruns suspected runner starvation before the plain timeout signature for both Node jobs" {
-  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)"; do
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)" "TypeScript Code Coverage"; do
     runner_shutdown_fixture "$job"
     run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
       FAKE_RUNNER_LOG=$'TIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry\nRUNNER-STARVED-SUSPECTED: all 3 unit shards hit the 720 s wall-clock budget on both attempts (worst probe slowdown 2x); every shard being slow on a retried runner points at a starved runner, not a code regression.' bash "$SCRIPT" 123
@@ -1020,4 +1020,28 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   [ "$status" -eq 0 ]
   [[ "$output" == *"UNKNOWN"* ]]
   [[ "$output" != *"infra retry"* ]]
+}
+
+@test "coverage unit gate preserves timing flap versus confirmed regression classification" {
+  local id verdict
+  for pair in '1 RERUN-DONT-FIX' '18 INVESTIGATE' '22 INVESTIGATE' '4 UNKNOWN'; do
+    read -r id verdict <<< "$pair"
+    jq -n --argjson id "$id" '{jobs:[{databaseId:$id,name:"TypeScript Code Coverage",conclusion:"failure",steps:[{name:"Unit gate",conclusion:"failure"}]}]}' > "$FIXTURE"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" bash "$SCRIPT" 127
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TypeScript Code Coverage → Unit gate → "*" → $verdict"* ]]
+  done
+}
+
+@test "coverage infra retries preserve investigate verdicts without weakening ordinary assertion failures" {
+  runner_shutdown_fixture "TypeScript Code Coverage"
+  for diagnostic in 'TIMEOUT: coverage shard 1 exceeded its wall-clock budget after a retry' 'FAIL: coverage shard 1 exited with status 137 after a retry'; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$diagnostic" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"INVESTIGATE"* ]]
+    [[ "$output" != *"RERUN-DONT-FIX"* ]]
+  done
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG='FAIL: coverage shard 1 exited with status 1' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
 }

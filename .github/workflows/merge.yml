@@ -722,7 +722,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -753,16 +753,6 @@ jobs:
             unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
           fi
           bash scripts/test-ts.sh unit
-
-      - name: "Enforce 100ms budget for merged unit tests"
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          BUN_TEST_TIMING_BASE_REF: HEAD^
-          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
-          # 1560s unit lane cap + 600s rechecks + 120s reserve < 2400s job timeout.
-          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
-        run: bash scripts/validate-bun-test-timings.sh
 
       - name: "Upload unit test diagnostics"
         if: always()
@@ -1221,18 +1211,43 @@ jobs:
 
   ts-code-coverage:
     name: "TypeScript Code Coverage"
+    # The per-merge README badge and Ubuntu unit gate share this one run (#13569).
+    # PRs retain their separate required, uninstrumented build-and-test check.
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 2 x (720s attempt + 60s overhead) + 600s rechecks + 120s reserve < 2400s.
+    timeout-minutes: 40
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 2
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Tests with Coverage"
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          # One infra retry; the shared unit supervisor bounds both attempts.
+          AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
         run: bash scripts/ci/run-ts-coverage.sh
+
+      # Coverage JUnit selects provisional offenders only. The validator measures
+      # their uninstrumented isolated medians, so instrumentation cannot fail 100ms.
+      - name: "Enforce 100ms budget for merged unit tests"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          BUN_TEST_TIMING_BASE_REF: HEAD^
+          BUN_TEST_TIMING_REPORT_DIR: coverage/shards
+          BUN_TEST_TIMING_REPORTS_INSTRUMENTED: "true"
+          # 1560s unit lane cap + 600s rechecks + 120s reserve < 2400s job timeout.
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
+        run: bash scripts/validate-bun-test-timings.sh
 
       - name: "Upload TypeScript Coverage Diagnostics"
         if: always()
@@ -1241,9 +1256,9 @@ jobs:
           name: ts-coverage-diagnostics
           path: |
             ci-logs/ts-coverage.log
-            coverage/shards/*.ndjson
-            coverage/shards/*.log
-            coverage/shards/*-chunk-*.log
+            coverage/shards/**
+            scratch/bun-test-report.recheck.d/**
+            scratch/watchdog-snapshot-*.txt
           if-no-files-found: ignore
           retention-days: 7
 
@@ -1259,6 +1274,22 @@ jobs:
           name: ts-coverage-badge
           path: coverage/ts-coverage-badge.json
           retention-days: 90
+
+      # Last step on purpose: qualify a failure from this job's own summary file
+      # (test-ts.sh appends RUNNER-CONTENDED there) and, on attempt 1, ask
+      # rerun-contended-runner.yml to rerun the failed jobs once the run
+      # completes. A job cannot rerun its own in-progress run. Fork PRs have a
+      # read-only token, so they skip; the script is a logged no-op on any
+      # dispatch error and never changes this job's result (#12758).
+      - name: "Request fresh-runner rerun on runner contention"
+        if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: bash scripts/ci/rerun-contended-runner.sh dispatch "$GITHUB_STEP_SUMMARY" "$RUN_ID" "$RUN_ATTEMPT"
 
   # =============================================================================
   # Kotlin Code Coverage

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 
 @Composable
@@ -62,16 +63,20 @@ internal fun NavigationFacetOptions.NavigationContent(
         }
       is NavigationFacetState.Resolved ->
         NavigationDashboard(
-          providedGraph = current.graph,
-          providedCurrentScreen = currentScreen,
-          clientProvider = clientProvider,
-          settingsProvider = graph.settingsProvider,
-          selectedAppId = foregroundAppId,
-          screenshotLoader = screenshotLoader,
-          streamOnly = true,
-          // Stream build identity tightens provenance to device + package + version + content hash.
-          // No known key keeps the existing device+package fallback.
-          activeContext = buildKeys.activeContext(current.appId),
+          options =
+            NavigationDashboardOptions(
+              providedGraph = current.graph,
+              providedCurrentScreen = currentScreen,
+              clientProvider = clientProvider,
+              settingsProvider = graph.settingsProvider,
+              selectedAppId = foregroundAppId,
+              screenshotLoader = screenshotLoader,
+              streamOnly = true,
+              // Stream build identity tightens provenance to device + package + version + content
+              // hash.
+              // No known key keeps the existing device+package fallback.
+              activeContext = buildKeys.activeContext(current.appId),
+            ),
         )
     }
   }

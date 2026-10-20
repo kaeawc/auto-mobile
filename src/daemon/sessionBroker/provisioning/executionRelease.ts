@@ -1,6 +1,56 @@
-import type { KeepAwakeRestoreReport } from "../../../utils/KeepScreenAwakeManager";
-import type { SessionManager } from "../../sessionManager";
-import type { SessionReleaseReason } from "../../releaseReasons";
+import {
+  type BrokerExecutionReleaseNotice,
+  type BrokerExecutionReleaseOptions,
+  type BrokerExecutionReleaseResult,
+  MANAGED_EXECUTION_DRAIN_BUDGET_MS,
+  MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
+  MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+  MANAGED_EXECUTION_SETTLEMENT_CAP_MS,
+  MANAGED_EXECUTION_SETTLEMENT_POLL_MS,
+  MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_INITIAL_DELAY_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_DELAY_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_WARN_AFTER_MS,
+  type ManagedExecutionBindingEvidence,
+  type ManagedExecutionBindingFailure,
+  type ManagedExecutionBindingRegistry,
+  type ManagedExecutionOwnerHolds,
+  type MarkedBinding,
+  RECENT_RELEASE_LIMIT,
+  RELEASE_REASON,
+  type SettlingMarks,
+  bindingKeyOf,
+  newSettlingMarks,
+  toEvidence,
+} from "./executionReleaseContracts";
+import { markBinding } from "./executionReleaseMarks";
+export {
+  type BrokerExecutionReleaseJournal,
+  type BrokerExecutionReleaseNotice,
+  type BrokerExecutionReleaseOptions,
+  type BrokerExecutionReleaseOutcome,
+  type BrokerExecutionReleaseResult,
+  MANAGED_EXECUTION_DRAIN_BUDGET_MS,
+  MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
+  MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+  MANAGED_EXECUTION_SETTLEMENT_CAP_MS,
+  MANAGED_EXECUTION_SETTLEMENT_POLL_MS,
+  MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_INITIAL_DELAY_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_DELAY_MS,
+  MANAGED_SETTLED_BINDING_RECOVERY_WARN_AFTER_MS,
+  type ManagedExecutionBindingEvidence,
+  type ManagedExecutionBindingFailure,
+  type ManagedExecutionBindingRegistry,
+  type ManagedExecutionOwnerHolds,
+  type ManagedExecutionSessionManager,
+  type ManagedExecutionSessions,
+  type ManagedExecutionSettlement,
+  type ManagedExecutionWork,
+  managedExecutionSessionsFrom,
+} from "./executionReleaseContracts";
 /**
  * End-of-execution drain for managed device bindings (epic #11172, #11177).
  *
@@ -48,248 +98,26 @@ import type { SessionReleaseReason } from "../../releaseReasons";
  * window, forced stuck release): the assignment is always kept.
  */
 
-import { type BackoffPolicy, exponentialBackoff } from "../../../utils/Backoff";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import {
-  RegistryRetryPacing,
-  REGISTRY_RETRY_INITIAL_DELAY_MS,
-  REGISTRY_RETRY_MAX_DELAY_MS,
-  REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
-} from "../registry/registryRetryPacing";
 import { DefaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
-import type { Timer } from "../../../utils/SystemTimer";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
-import {
-  forceStuckSessionRelease,
-  releaseSessionAndDevice,
-  type SessionReleasePool,
-} from "../../releaseSessionAndDevice";
+import type {
+  BindingAssignmentRecord,
+  BindingExecOwnerLiveness,
+  BindingKey,
+  BindingProcessIdentity,
+} from "../registry/bindingRegistry";
+import { journalOwnersEqual } from "../registry/bindingRegistry";
 import {
   currentBindingOwnerProcess,
   defaultBindingExecOwnerLiveness,
   inFlightBindingReservations,
 } from "../registry/ownerLiveness";
+import { RegistryRetryPacing } from "../registry/registryRetryPacing";
 import { BindingOwnerClearer } from "./bindingOwnerClearer";
 import { RegistryStepRetrier } from "./registryStepRetrier";
-import type { BindingJournalInFlight } from "../registry/bindingJournal";
-import { journalOwnersEqual } from "../registry/bindingRegistry";
-import type {
-  BindingAssignmentRecord,
-  BindingAssignmentState,
-  BindingExecOwnerLiveness,
-  BindingKey,
-  BindingPlatform,
-  BindingProcessIdentity,
-  BindingRegistry,
-} from "../registry/bindingRegistry";
-
-export type BrokerExecutionReleaseOutcome = "reusable_for_this_binding" | "cleanup_pending";
-
-/**
- * `confirmed`: nothing the execution started is still running. `settling`: cancellation was
- * requested but some work (an action, or the release's restoration) has not ended yet.
- */
-export type ManagedExecutionSettlement = "confirmed" | "settling";
-
-/** One binding the released execution held, as it stands after the release. */
-export interface ManagedExecutionBindingEvidence {
-  scopeKey: string;
-  bindingIndex: number;
-  role: string;
-  platform: BindingPlatform;
-  generation: number;
-  stableDeviceId: string | null;
-  deviceName: string | null;
-  state: BindingAssignmentState;
-  /** True when this release cleared the binding's execution owner (false when already cleared). */
-  execOwnerReleased: boolean;
-}
-
-export interface ManagedExecutionBindingFailure {
-  scopeKey: string;
-  bindingIndex: number;
-  error: string;
-}
-
-export interface BrokerExecutionReleaseResult {
-  keepAwakeRestore?: KeepAwakeRestoreReport;
-  sessionId: string;
-  outcome: BrokerExecutionReleaseOutcome;
-  settlement: ManagedExecutionSettlement;
-  /** The session was no longer live when this release arrived (a repeated or late release). */
-  alreadyReleased: boolean;
-  /** How many in-flight executions this release asked to cancel. */
-  cancellationRequested: number;
-  /** The session's release outlived its budget and was forced into the stuck-release quarantine. */
-  releaseForced: boolean;
-  /** The device the session held, when known. Still assigned to its binding. */
-  device: string | null;
-  bindings: ManagedExecutionBindingEvidence[];
-  /** Per-binding bookkeeping that failed; every other binding was still released. */
-  bindingFailures: ManagedExecutionBindingFailure[];
-}
-
-/** The registry slice the drain needs. */
-export type ManagedExecutionBindingRegistry = Pick<
-  BindingRegistry,
-  | "findExecutionAssignments"
-  | "claimExecution"
-  | "releaseExecution"
-  | "updateBindingState"
-  | "getAssignment"
-  | "recoverSettledBindings"
-  | "openBindingJournal"
-  | "advanceBindingJournal"
-  | "listOpenBindingJournal"
->;
-
-/**
- * Journal the drain's `settling` marks (#11179): each mark opens a `release` entry owned by this
- * daemon (the settler) in the same transaction, closed when the binding returns to `ready`. A daemon
- * that dies before its work settles leaves the entry for a later daemon's redrive.
- */
-export interface BrokerExecutionReleaseJournal {
-  /** Entries this drain is still guarding; a redrive in this process leaves them alone. */
-  inFlight: BindingJournalInFlight;
-}
-
-/** The execution-tracker slice the drain needs (cancel, bounded wait, and a settled probe). */
-export interface ManagedExecutionWork {
-  cancelDeviceSessionExecutions(sessionId: string, reason: string): Promise<number>;
-  waitForDeviceSessionExecutionsToEnd(sessionId: string, timeoutMs: number): Promise<boolean>;
-  hasActiveDeviceSessionExecutions(sessionId: string): boolean;
-}
-
-/** The session-manager and pool slice the drain needs. */
-export interface ManagedExecutionSessions extends Partial<
-  Pick<SessionManager, "getKeepAwakeRestoreReport">
-> {
-  /** Live or mid-release in this daemon. */
-  isSessionLive(sessionId: string): boolean;
-  /** The device the session holds (or held, while its release is fenced), if known. */
-  deviceOf(sessionId: string): string | null;
-  /** Release the session and hand its device back to the pool; resolves to the released device. */
-  releaseSession(sessionId: string): Promise<string | null>;
-  /** Force a release stuck past its budget into the bounded quarantine; true when one was forced. */
-  forceStuckRelease(sessionId: string): Promise<boolean>;
-  /** The device's release teardown or quarantine has not settled yet. */
-  hasDeviceCleanupInProgress(deviceId: string): boolean;
-}
-
-/** The release-callback snapshot fields the listener reads. */
-export interface BrokerExecutionReleaseNotice {
-  sessionId: string;
-  deviceId: string;
-  livenessPolicy?: string;
-}
-
-/**
- * The daemon side of `daemon/releaseExecution` stays inside the proxy's 1.5 s call timeout
- * (`MANAGED_EXECUTION_RELEASE_TIMEOUT_MS`): drain + release budgets plus registry writes.
- */
-export const MANAGED_EXECUTION_DRAIN_BUDGET_MS = 500;
-export const MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS = 700;
-/** How often the settlement watcher re-checks unsettled work. */
-export const MANAGED_EXECUTION_SETTLEMENT_POLL_MS = 250;
-/**
- * How long the watcher polls unsettled work at the fast cadence. Past it the binding stays `settling`
- * and the watcher keeps going at {@link MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS}, so the binding
- * returns to `ready` whenever its work finally settles (#11336).
- */
-export const MANAGED_EXECUTION_SETTLEMENT_CAP_MS = 5 * 60 * 1000;
-/** How often the watcher re-checks work that outlived the cap. */
-export const MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS = 30 * 1000;
-/**
- * How a registry step of the drain that threw (a busy host-wide registry) is retried until the
- * settlement cap; past the cap it is re-tried every {@link MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS}.
- */
-export const MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
-  initialDelayMs: 250,
-  maxDelayMs: 5_000,
-});
-/** Released sessions remembered so a repeated release can still name its bindings. */
-const RECENT_RELEASE_LIMIT = 256;
-
-const RELEASE_REASON = "managed-execution-release";
-
-export const MANAGED_SETTLED_BINDING_RECOVERY_RETRY_INITIAL_DELAY_MS =
-  REGISTRY_RETRY_INITIAL_DELAY_MS;
-export const MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_DELAY_MS = REGISTRY_RETRY_MAX_DELAY_MS;
-export const MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS =
-  REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS;
-export const MANAGED_SETTLED_BINDING_RECOVERY_WARN_AFTER_MS = 5_000;
-
-/**
- * Session ids whose owner records this daemon must keep reading as live although the session is
- * gone: the released work still runs and its binding's `settling` mark has not been written yet
- * (#11616). The daemon's owner liveness (`withLiveExecutionSessions`) reads the same set as its
- * in-flight reservations, so the registry refuses a claim of such a binding.
- */
-export interface ManagedExecutionOwnerHolds {
-  add(sessionId: string): void;
-  delete(sessionId: string): void;
-}
-
-export interface BrokerExecutionReleaseOptions {
-  registry: () => Promise<ManagedExecutionBindingRegistry>;
-  work: ManagedExecutionWork;
-  sessions: ManagedExecutionSessions;
-  timer: Timer;
-  drainBudgetMs?: number;
-  releaseBudgetMs?: number;
-  settlementPollMs?: number;
-  settlementCapMs?: number;
-  settlementSlowPollMs?: number;
-  /** This daemon, recorded as the settler of bindings it marks `settling`. Default: this process. */
-  settler?: BindingProcessIdentity;
-  journal?: BrokerExecutionReleaseJournal;
-  /**
-   * Judges an owner record left on a binding this drain marked `settling` (#11545): pass the
-   * registry's own predicate, so the watcher and the registry agree. Default: PID plus process
-   * start identity, under which a record this daemon wrote always reads live and is never cleared.
-   */
-  isExecOwnerLive?: BindingExecOwnerLiveness;
-  /** Backoff between retries of a registry step that threw. Default: 250 ms doubling to 5 s. */
-  registryRetryBackoff?: BackoffPolicy;
-  /**
-   * Where the drain records the released sessions whose owner records must still read live.
-   * Default: the process-wide set the daemon's owner liveness reads.
-   */
-  ownerHolds?: ManagedExecutionOwnerHolds;
-  ownership?: {
-    isReleaseHeld(sessionId: string): boolean;
-    confirmOwnership(sessionId: string): void;
-    loseOwnership?(sessionId: string): void;
-  };
-}
-
-interface MarkedBinding {
-  execOwner: BindingAssignmentRecord["execOwner"];
-  key: BindingKey;
-  generation: number;
-  stableDeviceId: string | null;
-  /** The release journal entry recording the mark, when journaling is on. */
-  journalEntryId?: number;
-}
-
-/** The `settling` marks of one release: the bindings fenced, and the ones whose mark threw (owed). */
-interface SettlingMarks {
-  marked: MarkedBinding[];
-  owed: BindingAssignmentRecord[];
-  /** Bindings whose owner record names this daemon, or needs no re-stamp. */
-  stamped: Set<BindingAssignmentRecord>;
-  /** A failed re-stamp was already reported for this release. */
-  stampWarned: boolean;
-}
-
-function newSettlingMarks(): SettlingMarks {
-  return { marked: [], owed: [], stamped: new Set(), stampWarned: false };
-}
-
-/** What a mark attempt came to when it did not throw: fenced, refused, or not journaled. */
-type MarkAttempt = MarkedBinding | { refused: string };
 
 export class BrokerExecutionRelease {
   private readonly drainBudgetMs: number;
@@ -800,105 +628,16 @@ export class BrokerExecutionRelease {
     assignment: BindingAssignmentRecord,
     failures: ManagedExecutionBindingFailure[],
   ): Promise<MarkedBinding | null> {
-    let attempt: MarkAttempt;
-    try {
-      attempt = await this.markBindingOnce(registry, assignment);
-    } catch (error) {
-      const landed = await this.findOwnMark(registry, assignment);
-      if (landed === null) {
-        throw error;
-      }
-      const key = bindingKeyOf(assignment);
-      this.warn(
-        `[BrokerExecutionRelease] Marking binding ${key.scopeKey}/${key.bindingIndex} settling failed ` +
-          `after the mark was written; going on from the written mark: ${errorMessage(error)}`,
-        error,
-      );
-      return landed;
-    }
-    if (!("refused" in attempt)) {
-      return attempt;
-    }
-    const landed = await this.findOwnMark(registry, assignment);
-    if (landed === null) {
-      failures.push({
-        ...bindingKeyOf(assignment),
-        error: `could not mark settling: ${attempt.refused}`,
-      });
-    }
-    return landed;
-  }
-
-  /** One attempt at the mark: through a release journal entry, else directly. */
-  private async markBindingOnce(
-    registry: ManagedExecutionBindingRegistry,
-    assignment: BindingAssignmentRecord,
-  ): Promise<MarkAttempt> {
-    const journaled = await this.markJournaled(registry, assignment);
-    if (journaled !== "unjournaled") {
-      return journaled;
-    }
-    const key = bindingKeyOf(assignment);
-    const updated = await registry.updateBindingState(
-      key,
-      { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
-      "settling",
-      { settler: this.settlerIdentity() },
+    return markBinding(
+      {
+        warn: this.warn.bind(this),
+        settlerIdentity: this.settlerIdentity.bind(this),
+        options: this.options,
+      },
+      registry,
+      assignment,
+      failures,
     );
-    if (updated.kind !== "updated") {
-      return { refused: updated.kind };
-    }
-    // Entering the fence bumped the generation; the watcher restores under the new one.
-    return {
-      key,
-      execOwner: updated.assignment.execOwner,
-      generation: updated.assignment.generation,
-      stableDeviceId: updated.assignment.stableDeviceId,
-    };
-  }
-
-  /**
-   * This drain's own `settling` mark of `assignment`, read back from the registry: the binding is
-   * `settling` under this daemon, on the same device, one generation past the binding the mark
-   * was made from (entering the fence advances it by one). A `settling` binding accepts no claim and
-   * no other fence, so nothing else produces that state from that binding. Null when the mark is
-   * not there. May throw (registry).
-   */
-  private async findOwnMark(
-    registry: ManagedExecutionBindingRegistry,
-    assignment: BindingAssignmentRecord,
-  ): Promise<MarkedBinding | null> {
-    const key = bindingKeyOf(assignment);
-    const self = this.settlerIdentity();
-    const current = await registry.getAssignment(key);
-    if (
-      current === null ||
-      current.state !== "settling" ||
-      current.settler === null ||
-      !journalOwnersEqual(current.settler, self) ||
-      current.stableDeviceId !== assignment.stableDeviceId ||
-      current.generation !== assignment.generation + 1
-    ) {
-      return null;
-    }
-    const marked: MarkedBinding = {
-      key,
-      execOwner: current.execOwner,
-      generation: current.generation,
-      stableDeviceId: current.stableDeviceId,
-    };
-    const journal = this.options.journal;
-    if (!journal) {
-      return marked;
-    }
-    const entry = (await registry.listOpenBindingJournal(key)).find(
-      (open) => open.kind === "release" && journalOwnersEqual(open.owner, self),
-    );
-    if (!entry) {
-      return marked;
-    }
-    journal.inFlight.add(entry.id);
-    return { ...marked, journalEntryId: entry.id };
   }
 
   /**
@@ -962,58 +701,6 @@ export class BrokerExecutionRelease {
     if (marks.marked.length > 0) {
       await this.settleLater(registry, sessionId, deviceId, marks.marked);
     }
-  }
-
-  /**
-   * Mark one binding `settling` through a release journal entry, in one transaction. Returns
-   * `unjournaled` when journaling is off or the binding already has an open entry (which governs it),
-   * so the caller marks the binding directly.
-   */
-  private async markJournaled(
-    registry: ManagedExecutionBindingRegistry,
-    assignment: BindingAssignmentRecord,
-  ): Promise<MarkAttempt | "unjournaled"> {
-    const journal = this.options.journal;
-    if (!journal) {
-      return "unjournaled";
-    }
-    const key = bindingKeyOf(assignment);
-    const settler = this.settlerIdentity();
-    const opened = await registry.openBindingJournal(key, {
-      kind: "release",
-      phase: "intent",
-      owner: settler,
-      target: {
-        oldStableId: assignment.stableDeviceId,
-        oldName: assignment.deviceName,
-        newName: null,
-        newStableId: null,
-        requestedSpec: assignment.requestedSpec,
-        resolvedSpec: assignment.resolvedSpec,
-        specFingerprint: assignment.specFingerprint,
-      },
-      assignment: {
-        kind: "state",
-        expected: { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
-        state: "settling",
-        options: { settler },
-      },
-    });
-    if (opened.kind === "opened") {
-      journal.inFlight.add(opened.entry.id);
-      // Entering the fence bumped the generation; the watcher restores under the new one.
-      return {
-        key,
-        execOwner: opened.assignment.execOwner,
-        generation: opened.assignment.generation,
-        stableDeviceId: opened.assignment.stableDeviceId,
-        journalEntryId: opened.entry.id,
-      };
-    }
-    if (opened.kind === "journal_open") {
-      return "unjournaled";
-    }
-    return { refused: opened.kind };
   }
 
   /**
@@ -1320,87 +1007,4 @@ export class BrokerExecutionRelease {
       });
     this.background.add(tracked);
   }
-}
-
-function bindingKeyOf(assignment: BindingKey): BindingKey {
-  return { scopeKey: assignment.scopeKey, bindingIndex: assignment.bindingIndex };
-}
-
-function toEvidence(
-  assignment: BindingAssignmentRecord,
-  execOwnerReleased: boolean,
-): ManagedExecutionBindingEvidence {
-  return {
-    scopeKey: assignment.scopeKey,
-    bindingIndex: assignment.bindingIndex,
-    role: assignment.role,
-    platform: assignment.platform,
-    generation: assignment.generation,
-    stableDeviceId: assignment.stableDeviceId,
-    deviceName: assignment.deviceName,
-    state: assignment.state,
-    execOwnerReleased,
-  };
-}
-
-/** The session-manager surface {@link managedExecutionSessionsFrom} adapts. */
-export interface ManagedExecutionSessionManager extends Partial<
-  Pick<SessionManager, "getKeepAwakeRestoreReport">
-> {
-  hasSession(sessionId: string): boolean;
-  getSession(sessionId: string): { assignedDevice: string } | null;
-  getReleasingSession(sessionId: string): { assignedDevice: string } | null;
-  getTerminalReleaseSnapshot(sessionId: string): { deviceId: string } | undefined;
-  releaseSession(sessionId: string, reason?: SessionReleaseReason): Promise<string | null>;
-  forceStuckRelease(sessionId: string): { deviceId: string } | undefined;
-  hasDeviceCleanupInProgress(deviceId: string): boolean;
-}
-
-/**
- * The daemon's sessions as the drain sees them: release goes through the same
- * {@link releaseSessionAndDevice} path as `daemon/releaseSession` (the device returns to the pool,
- * where generic exclusion still keeps it to its binding), and a stuck release through
- * {@link forceStuckSessionRelease}.
- */
-export function managedExecutionSessionsFrom(
-  manager: ManagedExecutionSessionManager,
-  pool: SessionReleasePool,
-): ManagedExecutionSessions {
-  const deviceOf = (sessionId: string): string | null =>
-    manager.getSession(sessionId)?.assignedDevice ??
-    manager.getReleasingSession(sessionId)?.assignedDevice ??
-    manager.getTerminalReleaseSnapshot(sessionId)?.deviceId ??
-    null;
-  return {
-    isSessionLive: (sessionId) =>
-      manager.hasSession(sessionId) || manager.getReleasingSession(sessionId) !== null,
-    deviceOf,
-    getKeepAwakeRestoreReport: (sessionId) => manager.getKeepAwakeRestoreReport?.(sessionId),
-    releaseSession: async (sessionId) => {
-      let deviceId = deviceOf(sessionId);
-      await releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
-        release: async () => {
-          deviceId = await manager.releaseSession(sessionId);
-          return deviceId;
-        },
-      });
-      return deviceId;
-    },
-    forceStuckRelease: async (sessionId) => {
-      let forced = false;
-      await forceStuckSessionRelease(
-        {
-          forceStuckRelease: (id) => {
-            const result = manager.forceStuckRelease(id);
-            forced = result !== undefined;
-            return result;
-          },
-        },
-        pool,
-        sessionId,
-      );
-      return forced;
-    },
-    hasDeviceCleanupInProgress: (deviceId) => manager.hasDeviceCleanupInProgress(deviceId),
-  };
 }

@@ -1,11 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
-import dev.jasonpearson.automobile.desktop.domain.NodeDiffState
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 
@@ -41,7 +39,7 @@ fun parseHierarchyFromJson(hierarchyJson: JsonElement): ParsedHierarchy? {
       parentMap = parentMap,
       rotation = rotation,
     )
-  } catch (e: Exception) {
+  } catch (e: IllegalArgumentException) {
     log.warn("Failed to parse hierarchy JSON: ${e.message}", e)
     null
   }
@@ -77,7 +75,7 @@ private fun parseRoots(
   return when (rootElements.size) {
     0 -> null
     // Single window: unwrapped root at depth 0 — identical to the pre-#4874 behavior.
-    1 -> parseNodeElement(rootElements[0], 0, 0, elementMap, parentMap)
+    1 -> parseNodeElement(rootElements[0], NodePosition(0, 0), elementMap, parentMap)
     else -> buildMultiWindowRoot(rootElements, elementMap, parentMap)
   }
 }
@@ -104,7 +102,7 @@ private fun buildMultiWindowRoot(
   // the
   // genuinely-indistinguishable nodes take an order-dependent suffix (issue #4874 review).
   val windows = rootElements.mapNotNull { element ->
-    parseNodeElement(element, 1, 0, elementMap, parentMap, idDepthOffset = 1)
+    parseNodeElement(element, NodePosition(1, 0, idDepthOffset = 1), elementMap, parentMap)
   }
   if (windows.isEmpty()) return null
 
@@ -146,25 +144,25 @@ private fun buildMultiWindowRoot(
 }
 
 /**
- * Parse a node JsonElement which can be either a single node or array of nodes. [idDepthOffset] is
- * subtracted from a node's tree depth when forming its ID, so a window's subtree gets
- * window-relative depths regardless of whether the frame is single- or multi-window.
+ * Parse a node JsonElement which can be either a single node or array of nodes.
+ * [NodePosition.idDepthOffset] is subtracted from a node's tree depth when forming its ID, so a
+ * window's subtree gets window-relative depths regardless of whether the frame is single- or
+ * multi-window.
  */
+private data class NodePosition(val depth: Int, val siblingIndex: Int, val idDepthOffset: Int = 0)
+
 private fun parseNodeElement(
   nodeElement: JsonElement,
-  depth: Int,
-  siblingIndex: Int,
+  position: NodePosition,
   elementMap: MutableMap<String, UIElementInfo>,
   parentMap: MutableMap<String, String>,
-  idDepthOffset: Int = 0,
 ): UIElementInfo? {
   return when (nodeElement) {
-    is JsonObject ->
-      parseJsonObjectNode(nodeElement, depth, siblingIndex, elementMap, parentMap, idDepthOffset)
+    is JsonObject -> parseJsonObjectNode(nodeElement, position, elementMap, parentMap)
     is JsonArray -> {
       // If it's an array, parse the first element
       nodeElement.firstOrNull()?.let {
-        parseNodeElement(it, depth, siblingIndex, elementMap, parentMap, idDepthOffset)
+        parseNodeElement(it, position, elementMap, parentMap)
       }
     }
     else -> null
@@ -174,12 +172,11 @@ private fun parseNodeElement(
 /** Parse a single node JsonObject into UIElementInfo. */
 private fun parseJsonObjectNode(
   nodeObj: JsonObject,
-  depth: Int,
-  siblingIndex: Int,
+  position: NodePosition,
   elementMap: MutableMap<String, UIElementInfo>,
   parentMap: MutableMap<String, String>,
-  idDepthOffset: Int = 0,
 ): UIElementInfo {
+  val (depth, siblingIndex, idDepthOffset) = position
   // Check if attributes are in "$" or at root level
   val attrs = nodeObj["\$"]?.jsonObject ?: nodeObj
 
@@ -263,57 +260,6 @@ private fun parseJsonObjectNode(
   return element
 }
 
-/** Parse bounds from either the attributes object or a separate bounds object. */
-private fun parseBounds(attrs: JsonObject, nodeObj: JsonObject): ElementBounds {
-  return parseBoundsElement(attrs["bounds"])
-    ?: parseBoundsElement(nodeObj["bounds"])
-    ?: ElementBounds(0, 0, 0, 0)
-}
-
-private fun parseBoundsElement(boundsElement: JsonElement?): ElementBounds? {
-  return when (boundsElement) {
-    is JsonObject -> {
-      ElementBounds(
-        left = boundsElement.getInt("left") ?: 0,
-        top = boundsElement.getInt("top") ?: 0,
-        right = boundsElement.getInt("right") ?: 0,
-        bottom = boundsElement.getInt("bottom") ?: 0,
-      )
-    }
-    is JsonPrimitive -> boundsElement.contentOrNull?.let { parseBoundsString(it) }
-    // Compact form emitted by the MCP server's --observe-result-compact flag:
-    // bounds is the positional tuple [left, top, right, bottom]. Mirrors the
-    // sibling RealLayoutDataSource.parseBounds so both hierarchy parsers agree.
-    is JsonArray ->
-      if (boundsElement.size == 4)
-        ElementBounds(
-          left = (boundsElement[0] as? JsonPrimitive)?.intOrNull ?: 0,
-          top = (boundsElement[1] as? JsonPrimitive)?.intOrNull ?: 0,
-          right = (boundsElement[2] as? JsonPrimitive)?.intOrNull ?: 0,
-          bottom = (boundsElement[3] as? JsonPrimitive)?.intOrNull ?: 0,
-        )
-      else ElementBounds(0, 0, 0, 0)
-    else -> null
-  }
-}
-
-/** Parse legacy uiautomator bounds string format "[left,top][right,bottom]". */
-private fun parseBoundsString(boundsStr: String): ElementBounds {
-  val regex = """\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]""".toRegex()
-  val match = regex.find(boundsStr)
-  return if (match != null) {
-    val (left, top, right, bottom) = match.destructured
-    ElementBounds(
-      left = left.toIntOrNull() ?: 0,
-      top = top.toIntOrNull() ?: 0,
-      right = right.toIntOrNull() ?: 0,
-      bottom = bottom.toIntOrNull() ?: 0,
-    )
-  } else {
-    ElementBounds(0, 0, 0, 0)
-  }
-}
-
 /** Parse child nodes from the "node" field which can be a single object or array. */
 private fun parseChildren(
   childrenElement: JsonElement?,
@@ -327,12 +273,22 @@ private fun parseChildren(
   return when (childrenElement) {
     is JsonArray -> {
       childrenElement.mapIndexedNotNull { index, elem ->
-        parseNodeElement(elem, parentDepth, index, elementMap, parentMap, idDepthOffset)
+        parseNodeElement(
+          elem,
+          NodePosition(parentDepth, index, idDepthOffset),
+          elementMap,
+          parentMap,
+        )
       }
     }
     is JsonObject -> {
       listOfNotNull(
-        parseJsonObjectNode(childrenElement, parentDepth, 0, elementMap, parentMap, idDepthOffset),
+        parseJsonObjectNode(
+          childrenElement,
+          NodePosition(parentDepth, 0, idDepthOffset),
+          elementMap,
+          parentMap,
+        ),
       )
     }
     else -> emptyList()
@@ -353,46 +309,4 @@ private fun disambiguateId(base: String, elementMap: Map<String, UIElementInfo>)
     suffix++
   }
   return "$base#$suffix"
-}
-
-/**
- * Map the daemon's `diffState` wire value to the typed enum; unknown/absent values render unmarked.
- */
-private fun parseDiffState(value: String?): NodeDiffState? =
-  when (value) {
-    "added" -> NodeDiffState.Added
-    "changed" -> NodeDiffState.Changed
-    else -> null
-  }
-
-/** Parse the "extras" map from node JSON. Checks both the attributes object and the node itself. */
-private fun parseExtras(attrs: JsonObject, nodeObj: JsonObject): Map<String, String> {
-  val extrasObj = (attrs["extras"] ?: nodeObj["extras"]) as? JsonObject ?: return emptyMap()
-  val result = mutableMapOf<String, String>()
-  for ((key, value) in extrasObj) {
-    if (value is JsonPrimitive) {
-      value.contentOrNull?.let { result[key] = it }
-    }
-  }
-  return result
-}
-
-// Extension functions for safe JSON access
-
-private fun JsonObject.getString(key: String): String? {
-  return this[key]?.let {
-    when (it) {
-      is JsonPrimitive -> it.contentOrNull?.takeIf { str -> str.isNotEmpty() }
-      else -> null
-    }
-  }
-}
-
-private fun JsonObject.getInt(key: String): Int? {
-  return this[key]?.let {
-    when (it) {
-      is JsonPrimitive -> it.intOrNull
-      else -> null
-    }
-  }
 }

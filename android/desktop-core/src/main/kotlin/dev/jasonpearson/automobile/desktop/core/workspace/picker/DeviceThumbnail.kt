@@ -25,34 +25,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.StreamSessionRejectedException
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
-import java.util.Base64
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.filterIsInstance
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import org.jetbrains.skia.Image as SkiaImage
 
 private val LOG = LoggerFactory.getLogger("DeviceThumbnail")
 
@@ -68,27 +52,32 @@ internal const val PLACEHOLDER_THUMBNAIL_ASPECT = 0.62f
 private const val SCREENSHOT_RETRY_INITIAL_MS = 1_000L
 private const val SCREENSHOT_RETRY_MAX_MS = 15_000L
 
+internal data class ScreenshotRetry(
+  val initialBackoffMs: Long = SCREENSHOT_RETRY_INITIAL_MS,
+  val maxBackoffMs: Long = SCREENSHOT_RETRY_MAX_MS,
+  val delayMs: suspend (Long) -> Unit = { delay(it) },
+)
+
 /**
  * Capture the thumbnail still, retrying with bounded exponential backoff until one succeeds. A
  * single timed-out or too-early capture must not leave the card stuck on its hint: when the
  * observation service becomes ready, the next attempt succeeds. The caller cancels this by leaving
- * the composition. [delayMs] is injectable so a test can drive the cadence without real time.
+ * the composition. [ScreenshotRetry.delayMs] is injectable so a test can drive the cadence without
+ * real time.
  */
 internal suspend fun captureScreenshotWithRetry(
   deviceId: String,
   source: DeviceThumbnailScreenshotSource,
   sessionUuidProvider: () -> String? = { null },
-  initialBackoffMs: Long = SCREENSHOT_RETRY_INITIAL_MS,
-  maxBackoffMs: Long = SCREENSHOT_RETRY_MAX_MS,
-  delayMs: suspend (Long) -> Unit = { delay(it) },
+  retry: ScreenshotRetry = ScreenshotRetry(),
 ): ImageBitmap {
-  var backoff = initialBackoffMs
+  var backoff = retry.initialBackoffMs
   while (true) {
     source.latest(deviceId, sessionUuidProvider)?.let {
       return it
     }
-    delayMs(backoff)
-    backoff = (backoff * 2).coerceAtMost(maxBackoffMs)
+    retry.delayMs(backoff)
+    backoff = (backoff * 2).coerceAtMost(retry.maxBackoffMs)
   }
 }
 
@@ -161,13 +150,24 @@ fun DeviceThumbnail(
     if (placeholder == null && screenshotSource != null && screenshot == null) {
       try {
         screenshot = captureScreenshotWithRetry(device.id, screenshotSource, sessionUuidProvider)
-      } catch (_: StreamSessionRejectedException) {
+      } catch (rejection: StreamSessionRejectedException) {
+        LOG.debug("Thumbnail session rejected for ${device.id}: ${rejection.message}")
         // The stream surfaced the typed rejection once; keep the placeholder without retrying.
       }
     }
   }
 
-  val still = screenshot
+  ThumbnailContent(device, booting, placeholder, screenshot, modifier)
+}
+
+@Composable
+private fun ThumbnailContent(
+  device: PickerDevice,
+  booting: Boolean,
+  placeholder: String?,
+  still: ImageBitmap?,
+  modifier: Modifier,
+) {
   // Each card fits its own device: the decoded screenshot's ratio once available, a portrait
   // stand-in until then. This is what lets the staggered grid pack disjoint card heights.
   val aspect =
@@ -189,18 +189,7 @@ fun DeviceThumbnail(
     contentAlignment = Alignment.Center,
   ) {
     when {
-      device.state == DeviceState.Shutdown && !booting ->
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          val isIos = device.platform == Platform.Ios
-          Icon(
-            imageVector = PlatformIcons.logo(isIos),
-            contentDescription = "${PlatformIcons.contentDescription(isIos)} device silhouette",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(48.dp),
-          )
-          Spacer(Modifier.height(8.dp))
-          Text("Shutdown", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        }
+      device.state == DeviceState.Shutdown && !booting -> ShutdownThumbnail(device.platform)
       placeholder != null ->
         Text(placeholder, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
       still != null ->
@@ -222,57 +211,17 @@ fun DeviceThumbnail(
   }
 }
 
-/**
- * Thumbnail still backed by a one-shot [ObservationStream] observation. Deliberately does NOT cache
- * across calls: the caller ([ScreenshotThumbnail]) already holds the captured still in per-deviceId
- * composition state, and a booted card unmounts through the "Shutdown"/"Booting" placeholder on a
- * reboot — so a rebooted device (same AVD/simulator id) captures a fresh still rather than showing
- * the previous boot's screen indefinitely (which a process-lifetime cache keyed only by deviceId
- * would do). System-touching, so (like the workspace's screenshot capture) it is exercised only in
- * manual/production runs; tests inject a fake [DeviceThumbnailScreenshotSource].
- */
-object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
-  private const val CAPTURE_TIMEOUT_MS = 5_000L
-
-  @OptIn(ExperimentalCoroutinesApi::class)
-  override suspend fun latest(
-    deviceId: String,
-    sessionUuidProvider: () -> String?,
-  ): ImageBitmap? {
-    if (sessionUuidProvider() == null) return null
-    val stream = ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
-    return try {
-      val base64 =
-        withContext(Dispatchers.IO) {
-          stream.connect(deviceId)
-          stream.requestObservation(deviceId)
-          withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
-            merge(
-                stream.screenshotUpdates.map { update ->
-                  update.screenshotBase64.takeIf { isThumbnailFrameFor(deviceId, update) }
-                },
-                stream.connectionState.filterIsInstance<ConnectionState.Error>().map {
-                  throw StreamSessionRejectedException(it.message)
-                },
-              )
-              .first { it != null }
-          }
-        }
-      base64?.let {
-        val bytes = Base64.getDecoder().decode(it)
-        withContext(Dispatchers.Default) {
-          SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap()
-        }
-      }
-    } catch (rejection: StreamSessionRejectedException) {
-      throw rejection
-    } catch (cancellation: CancellationException) {
-      throw cancellation
-    } catch (error: Exception) {
-      LOG.warn("Thumbnail screenshot capture failed for $deviceId: ${error.message}", error)
-      null
-    } finally {
-      withContext(NonCancellable + Dispatchers.IO) { stream.dispose() }
-    }
+@Composable
+private fun ShutdownThumbnail(platform: Platform) {
+  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    val isIos = platform == Platform.Ios
+    Icon(
+      imageVector = PlatformIcons.logo(isIos),
+      contentDescription = "${PlatformIcons.contentDescription(isIos)} device silhouette",
+      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+      modifier = Modifier.size(48.dp),
+    )
+    Spacer(Modifier.height(8.dp))
+    Text("Shutdown", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
   }
 }

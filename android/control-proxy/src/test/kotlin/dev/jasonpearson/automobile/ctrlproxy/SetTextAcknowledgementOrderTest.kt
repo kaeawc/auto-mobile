@@ -21,8 +21,16 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performSetText acknowledges a successful action before hierarchy postprocessing`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
-    val body = functionBody(source, "suspend fun performSetText(")
-    val action = body.indexOf("targetNode.performAction(")
+    val entry = functionBody(source, "suspend fun performSetText(")
+    assertTrue(
+      entry.contains("SetTextOperation(requestId, text, resourceId, dismissKeyboard).run()"),
+    )
+    val operation = functionBody(source, "private inner class SetTextOperation(")
+    assertTrue(functionBody(operation, "suspend fun run()").contains("perform()"))
+    val body = functionBody(operation, "private suspend fun perform()")
+    val mutation = functionBody(source, "private fun applySetText(")
+    assertTrue(mutation.contains("targetNode.performAction("))
+    val action = body.indexOf("applySetText(targetNode, text)")
     val acknowledgement = body.indexOf("broadcastSetTextResult(", startIndex = action)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = action)
 

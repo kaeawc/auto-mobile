@@ -28,6 +28,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeOptions
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeView
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
 import dev.jasonpearson.automobile.desktop.core.layout.PropertyInspectorPanel
@@ -127,12 +128,15 @@ private fun LiveLayoutSplitPane(
     Column(Modifier.fillMaxSize()) {
       Box(Modifier.fillMaxWidth().height(with(density) { topHeightPx.toDp() })) {
         HierarchyTreeView(
-          hierarchy = layoutInspectorState.hierarchy,
-          selectedElementId = layoutInspectorState.selectedElementId,
-          hoveredElementId = layoutInspectorState.hoveredElementId,
-          onElementSelected = { layoutInspectorState.selectElement(it) },
-          onElementHovered = { layoutInspectorState.hoverElement(it) },
-          parentMap = layoutInspectorState.parentMap,
+          options =
+            HierarchyTreeOptions(
+              hierarchy = layoutInspectorState.hierarchy,
+              selectedElementId = layoutInspectorState.selectedElementId,
+              hoveredElementId = layoutInspectorState.hoveredElementId,
+              onElementSelected = { layoutInspectorState.selectElement(it) },
+              onElementHovered = { layoutInspectorState.hoverElement(it) },
+              parentMap = layoutInspectorState.parentMap,
+            ),
           modifier = Modifier.fillMaxSize(),
         )
       }

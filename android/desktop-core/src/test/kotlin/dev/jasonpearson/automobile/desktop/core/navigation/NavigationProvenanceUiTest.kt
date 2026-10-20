@@ -86,9 +86,12 @@ class NavigationProvenanceUiTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
           NavigationDashboard(
-            providedGraph = graph,
-            providedCurrentScreen = "Home",
-            activeContext = activeContext,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = graph,
+                providedCurrentScreen = "Home",
+                activeContext = activeContext,
+              ),
           )
         }
       }
@@ -126,9 +129,12 @@ class NavigationProvenanceUiTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
           NavigationDashboard(
-            providedGraph = graph,
-            providedCurrentScreen = "Legacy",
-            activeContext = activeContext,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = graph,
+                providedCurrentScreen = "Legacy",
+                activeContext = activeContext,
+              ),
           )
         }
       }
@@ -174,9 +180,12 @@ class NavigationProvenanceUiTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
           NavigationDashboard(
-            providedGraph = graph,
-            providedCurrentScreen = "Shared",
-            activeContext = activeContext,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = graph,
+                providedCurrentScreen = "Shared",
+                activeContext = activeContext,
+              ),
           )
         }
       }
@@ -202,9 +211,12 @@ class NavigationProvenanceUiTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
           NavigationDashboard(
-            providedGraph = graph,
-            providedCurrentScreen = "Home",
-            readOnly = true,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = graph,
+                providedCurrentScreen = "Home",
+                readOnly = true,
+              ),
           )
         }
       }

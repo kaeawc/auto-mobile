@@ -36,6 +36,7 @@ import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -257,12 +258,16 @@ private fun AppGraphStep(
           }
         is AppGraphState.Resolved ->
           NavigationDashboard(
-            providedGraph = current.graph,
-            screenshotLoader = screenshotLoader,
-            settingsProvider = graph.settingsProvider,
-            selectedAppId = app.appId,
-            // Offline: device-side navigate actions are unavailable; browsing/panning still work.
-            readOnly = true,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = current.graph,
+                screenshotLoader = screenshotLoader,
+                settingsProvider = graph.settingsProvider,
+                selectedAppId = app.appId,
+                // Offline: device-side navigate actions are unavailable; browsing/panning still
+                // work.
+                readOnly = true,
+              ),
           )
       }
     }

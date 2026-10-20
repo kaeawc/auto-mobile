@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resetAndroidDeviceImageResourceCache as invalidateImageResourceViaDaemon } from "../../../src/daemon/deviceResourceInvalidation";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
@@ -69,7 +70,7 @@ describe("Device Image Resources with Fakes", () => {
     await handler.getDeviceImagesForPlatforms(["android"]);
     expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(2);
 
-    resetAndroidDeviceImageResourceCache();
+    invalidateImageResourceViaDaemon();
     await handler.getDeviceImagesForPlatforms(["android"]);
     expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(3);
   });

@@ -1136,7 +1136,7 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
   @Test
   fun `switching apps resets fog so the new app starts with the full graph`() = runComposeUiTest {
     // App A starts with fog enabled (persisted). Switching to B must not carry A's fog into B.
-    val settings = FakeSettingsProvider(fogModeEnabled = true)
+    val settings = FakeSettingsProvider(FakeSettingsProvider.Values(fogModeEnabled = true))
     val client = FakeAutoMobileClient()
     val graphProvider =
       object : AutoMobileGraphProvider {

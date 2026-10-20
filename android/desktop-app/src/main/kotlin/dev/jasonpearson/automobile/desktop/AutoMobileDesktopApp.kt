@@ -17,6 +17,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacetOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacetOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.TestFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 
@@ -90,11 +91,14 @@ internal fun WorkspaceFacet(
     // daemon and target the correct iOS device (#4708).
     Tool.Storage ->
       StorageFacet(
-        column,
-        sessionUuidProvider = sessionUuidProvider,
-        // Storage edits are device mutations: they allocate the pane's device and carry the
-        // desktop session (#10977).
-        inputAllocation = inputAllocation,
+        options =
+          StorageFacetOptions(
+            column,
+            sessionUuidProvider = sessionUuidProvider,
+            // Storage edits are device mutations: they allocate the pane's device and carry the
+            // desktop session (#10977).
+            inputAllocation = inputAllocation,
+          ),
       )
     // Network reads per-device via the getNetworkGraph MCP tool call (deviceId is an argument),
     // not the broadcast observation stream, so panes don't cross-contaminate.

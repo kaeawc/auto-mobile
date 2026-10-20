@@ -1023,7 +1023,7 @@ const RAW_ACCESSOR_NAMES = new Set([
 ]);
 // Files whose raw-accessor use is hint extraction / diagnostics, not selection.
 const RAW_ACCESSOR_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|systemTrayHelpers)|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
+  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|helpers\/(?:hierarchy|matching|groupExpansion|dismissal))|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
 const noRawSelectorFieldReadRule = {
   meta: {
     type: "problem",

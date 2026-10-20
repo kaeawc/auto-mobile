@@ -54,13 +54,15 @@ internal abstract class DeviceControlSessionFixture {
     publishError: (String?) -> Unit = {},
   ) =
     DeviceControlSession(
-      scope = scope,
-      clientProvider = { client },
-      platform = { "android" },
-      nowMs = { 1_000L },
-      publishError = publishError,
-      uiContext = UnconfinedTestDispatcher(testScheduler),
-      ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      DeviceControlSessionOptions(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = publishError,
+        uiContext = UnconfinedTestDispatcher(testScheduler),
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      ),
     )
 
   /** A coherent, freshly-received screenshot+hierarchy pair sharing one capture identity. */
@@ -71,14 +73,16 @@ internal abstract class DeviceControlSessionFixture {
     publishError: (String?) -> Unit = {},
   ) =
     DeviceControlSession(
-      scope = scope,
-      clientProvider = { client },
-      platform = { "android" },
-      nowMs = { 1_000L },
-      publishError = publishError,
-      uiContext = UnconfinedTestDispatcher(scheduler),
-      ioDispatcher = UnconfinedTestDispatcher(scheduler),
-      streamingEnabled = true,
+      DeviceControlSessionOptions(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        nowMs = { 1_000L },
+        publishError = publishError,
+        uiContext = UnconfinedTestDispatcher(scheduler),
+        ioDispatcher = UnconfinedTestDispatcher(scheduler),
+        streamingEnabled = true,
+      ),
     )
 
   protected data class PairedFrameSpec(
@@ -143,13 +147,15 @@ internal class DeviceControlSessionTest : DeviceControlSessionFixture() {
     val client = FakeAutoMobileClient()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = UnconfinedTestDispatcher(testScheduler),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = UnconfinedTestDispatcher(testScheduler),
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        ),
       )
 
     val clicked = testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554", sequence = 5L))
@@ -285,13 +291,15 @@ internal class DeviceControlSessionTest : DeviceControlSessionFixture() {
     val published = mutableListOf<String?>()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = { published += it },
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = { published += it },
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
     val snapshot = testSnapshot(TestSnapshotSpec(sequence = 7L))
 
@@ -331,13 +339,15 @@ internal class DeviceControlSessionTest : DeviceControlSessionFixture() {
     var clientIndex = 0
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { clients[clientIndex++] },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { clients[clientIndex++] },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
     val staleSnapshot =
       assertNotNull(
@@ -394,13 +404,15 @@ internal class DeviceControlSessionTest : DeviceControlSessionFixture() {
     var banner: String? = "stale"
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { provider() },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = { banner = it },
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { provider() },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = { banner = it },
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
 
     repeat(4) { session.tap(testSnapshot(TestSnapshotSpec(sequence = it.toLong())), point) }
@@ -700,13 +712,15 @@ internal class DeviceControlSessionFramePairingTest : DeviceControlSessionFixtur
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { FakeAutoMobileClient() },
-        platform = { "android" },
-        nowMs = { now },
-        publishError = {},
-        uiContext = UnconfinedTestDispatcher(testScheduler),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { FakeAutoMobileClient() },
+          platform = { "android" },
+          nowMs = { now },
+          publishError = {},
+          uiContext = UnconfinedTestDispatcher(testScheduler),
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        ),
       )
 
     val clicked =
@@ -886,13 +900,15 @@ internal class DeviceControlSessionFramePairingTest : DeviceControlSessionFixtur
     val clients = mutableListOf<FakeAutoMobileClient>()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { FakeAutoMobileClient().also { clients.add(it) } },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { FakeAutoMobileClient().also { clients.add(it) } },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
 
     val legacy =
@@ -1406,13 +1422,15 @@ internal class DeviceControlSessionRetentionTest : DeviceControlSessionFixture()
     val client = FakeAutoMobileClient()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { now },
-        publishError = {},
-        uiContext = UnconfinedTestDispatcher(testScheduler),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { now },
+          publishError = {},
+          uiContext = UnconfinedTestDispatcher(testScheduler),
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        ),
       )
 
     // A frame received 4.9s ago: still inside the 5s screenshot bound, so control is available.
@@ -1565,13 +1583,15 @@ internal class DeviceControlSessionRetentionTest : DeviceControlSessionFixture()
     val clients = mutableListOf<FakeAutoMobileClient>()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { FakeAutoMobileClient().also { clients += it } },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { FakeAutoMobileClient().also { clients += it } },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
     val initial = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)
@@ -1643,13 +1663,15 @@ internal class DeviceControlSessionRetentionTest : DeviceControlSessionFixture()
     val client = FakeAutoMobileClient()
     val session =
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { client },
-        platform = { "android" },
-        nowMs = { 1_000L },
-        publishError = {},
-        uiContext = StandardTestDispatcher(testScheduler),
-        ioDispatcher = StandardTestDispatcher(ioScheduler),
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          nowMs = { 1_000L },
+          publishError = {},
+          uiContext = StandardTestDispatcher(testScheduler),
+          ioDispatcher = StandardTestDispatcher(ioScheduler),
+        ),
       )
     val initial = paired(PairedFrameSpec(captureSequence = 7L, sourceSequence = 10L))
     val snapshot = assertNotNull(session.evaluate(initial).snapshotOrNull)

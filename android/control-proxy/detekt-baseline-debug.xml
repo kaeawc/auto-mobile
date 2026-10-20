@@ -153,8 +153,6 @@
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer$private fun tryStart: Boolean</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
     <ID>LongParameterList:CaCertificateController.kt:CaCertificateController</ID>
-    <ID>LongParameterList:CaCertificateController.kt:CaCertificateController$private suspend fun broadcastCaCertResult</ID>
-    <ID>LongParameterList:ClipboardController.kt:ClipboardController$private suspend fun broadcastClipboardResult</ID>
     <ID>LongParameterList:ConnectionCommandQueue.kt:ConnectionCommandQueue</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastActionResult</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastCrashEvent</ID>
@@ -162,9 +160,7 @@
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastPackageEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun handledExceptionEventResponse: HandledExceptionEvent</ID>
-    <ID>LongParameterList:CtrlProxyActions.kt:CtrlProxyActions$suspend fun setPreference</ID>
     <ID>LongParameterList:CtrlProxyActions.kt:CtrlProxyActions$suspend fun showPrototype</ID>
-    <ID>LongParameterList:CtrlProxyIme.kt:CtrlProxyIme$fun commitText</ID>
     <ID>LongParameterList:CtrlProxyIme.kt:CtrlProxyIme$private fun awaitInputConnection</ID>
     <ID>LongParameterList:DragStrokeSession.kt:DragStrokeSession</ID>
     <ID>LongParameterList:GestureController.kt:GestureController</ID>
@@ -184,18 +180,11 @@
     <ID>LongParameterList:ImeCommitDriver.kt:ImeCommitDriver$fun commit</ID>
     <ID>LongParameterList:ImeCommitDriver.kt:ImeCommitDriver.Companion$internal fun reconcileDecision: Reconciliation</ID>
     <ID>LongParameterList:ImeController.kt:ImeController</ID>
-    <ID>LongParameterList:ImeController.kt:ImeController$private suspend fun broadcastCommitTextResult</ID>
-    <ID>LongParameterList:ImeController.kt:ImeController$private suspend fun broadcastKeyboardProfileCatalog</ID>
-    <ID>LongParameterList:ImeController.kt:ImeController.ImeTarget$fun commitText</ID>
     <ID>LongParameterList:InsertTextPlanner.kt:internal fun planInsertText: InsertTextPlan</ID>
     <ID>LongParameterList:InsertTextSettle.kt:internal suspend fun awaitPrecedingInput: Boolean</ID>
     <ID>LongParameterList:MultiFingerGeometry.kt:internal fun computeMultiFingerStrokes: List&lt;FingerStroke&gt;</ID>
     <ID>LongParameterList:NavigationEventAccumulator.kt:NavigationEventAccumulator$fun addEvent: TimestampedNavigationEvent</ID>
-    <ID>LongParameterList:NodeActionController.kt:NodeActionController.Host$suspend fun sendActionResult</ID>
     <ID>LongParameterList:OwnWindowTypeMemo.kt:internal fun ownWindowEventDecision: OwnWindowEventDecision</ID>
-    <ID>LongParameterList:PackageController.kt:PackageController$private suspend fun broadcastInstalledPackagesResult</ID>
-    <ID>LongParameterList:PackageController.kt:PackageController$private suspend fun broadcastLaunchIntentResult</ID>
-    <ID>LongParameterList:PackageController.kt:PackageController$private suspend fun broadcastPackageInfoResult</ID>
     <ID>LongParameterList:PinchGeometry.kt:internal fun computePinchFingerPositions: PinchFingerPositions</ID>
     <ID>LongParameterList:PrototypeCarousel.kt:internal fun pagerIndicatorDots: List&lt;PrototypeDot&gt;</ID>
     <ID>LongParameterList:PrototypeController.kt:PrototypeController</ID>
@@ -214,31 +203,13 @@
     <ID>LongParameterList:PrototypeSpecContent.kt:internal fun prototypeContentDescription: String?</ID>
     <ID>LongParameterList:PrototypeStorageSession.kt:PrototypeStorageSession</ID>
     <ID>LongParameterList:PrototypeSwipeRow.kt:@Composable private fun androidx.compose.foundation.layout.BoxScope.PrototypeSwipeButtons</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun caCertResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun clipboardResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun commitTextResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun deviceOwnerStatusResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun dragResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun imeActionResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun insertTextResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun keyboardProfilesResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun packageEventFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun pinchResultFrame: String</ID>
     <ID>LongParameterList:ResultFrames.kt:internal fun prototypeResultFrame: String</ID>
-    <ID>LongParameterList:ResultFrames.kt:internal fun swipeResultFrame: String</ID>
     <ID>LongParameterList:SavedPrototypeController.kt:SavedPrototypeController</ID>
     <ID>LongParameterList:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore</ID>
     <ID>LongParameterList:SavedPrototypeStore.kt:SavedPrototypeLoadResult.Loaded</ID>
     <ID>LongParameterList:SdkEventBatchProcessor.kt:SdkEventBatchProcessor$fun enqueueNavigationEvent: Boolean</ID>
-    <ID>LongParameterList:SettingsController.kt:SettingsController$private suspend fun broadcastSettingsGetResult</ID>
-    <ID>LongParameterList:SettingsController.kt:SettingsController$private suspend fun broadcastSettingsListResult</ID>
-    <ID>LongParameterList:SettingsController.kt:SettingsController$private suspend fun broadcastSettingsPutResult</ID>
-    <ID>LongParameterList:StorageController.kt:StorageController$fun handleSetPreference</ID>
-    <ID>LongParameterList:StorageController.kt:StorageController$private suspend fun broadcastGetPreferenceResult</ID>
     <ID>LongParameterList:StorageSubscriptionManager.kt:StorageSubscriptionManager</ID>
     <ID>LongParameterList:TextInputController.kt:TextInputController</ID>
-    <ID>LongParameterList:TextInputController.kt:TextInputController$private suspend fun broadcastInsertTextResult</ID>
-    <ID>LongParameterList:TextInputController.kt:TextInputController$suspend fun broadcastImeActionResult</ID>
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromActiveWindow: ViewHierarchy?</ID>
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun collectFocusableElements</ID>

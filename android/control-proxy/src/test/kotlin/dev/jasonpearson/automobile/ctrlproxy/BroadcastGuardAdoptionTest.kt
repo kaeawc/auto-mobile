@@ -200,7 +200,7 @@ class BroadcastGuardAdoptionTest {
     val source =
       locateSource("CaCertificateController.kt")
         .readText()
-        .replace("resultBroadcaster.guard(requestId, \"ca_cert_result\")", "run")
+        .replace("resultBroadcaster.guard(outcome.requestId, \"ca_cert_result\")", "run")
         .replace("resultBroadcaster.guard(requestId, \"device_owner_status_result\")", "run")
 
     val missing =
@@ -985,7 +985,8 @@ object BroadcastGuardScanner {
 
   // `suspend` is optional so a non-suspend `private fun broadcast*Result(requestId)` (the shape of
   // the existing `broadcastScreenshot`) can't evade the scan by dropping `suspend`. The naming
-  // suffix (Result/Error/Response) + a `requestId` param is the load-bearing discriminator that
+  // suffix (Result/Error/Response) + a `requestId` param or correlated `outcome` parameter object
+  // is the load-bearing discriminator that
   // separates requestId-correlated result broadcasters (must be guarded) from push-event
   // broadcasters (`*Event`/`*Update`/`*Change`, no requestId) that legitimately log-and-swallow.
   private val HELPER = Regex("""(?:suspend )?fun (broadcast\w*(?:Result|Error|Response))\(""")
@@ -1026,7 +1027,7 @@ object BroadcastGuardScanner {
       val sigEnd =
         KotlinSourceScan.matchParen(code, m.range.first + m.value.indexOf('(')) // index after ')'
       val signature = code.substring(m.range.first, sigEnd)
-      if (!signature.contains("requestId"))
+      if (!signature.contains("requestId") && !signature.contains("outcome:"))
         continue // only requestId-correlated helpers are in scope
 
       guardedHelpers.add(name)

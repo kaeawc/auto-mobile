@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceEntry
 import dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceFileInfo
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.ctrlproxy.storage.buildStorageChangedMessage
+import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -142,29 +143,62 @@ internal class StorageController(
       val result = manager().getPreference(packageName, fileName, key)
       result.fold(
         onSuccess = { entry ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, entry, null)
+          broadcastGetPreferenceResult(
+            GetPreferenceOutcome(
+              requestId = requestId,
+              packageName = packageName,
+              fileName = fileName,
+              key = key,
+              entry = entry,
+              error = null,
+            ),
+          )
         },
         onFailure = { error ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, null, error.message)
+          broadcastGetPreferenceResult(
+            GetPreferenceOutcome(
+              requestId = requestId,
+              packageName = packageName,
+              fileName = fileName,
+              key = key,
+              entry = null,
+              error = error.message,
+            ),
+          )
         },
       )
     }
   }
 
-  fun handleSetPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) {
-    asyncActionRunner.launch(requestId, "set_preference") {
-      val result = manager().setPreference(packageName, fileName, key, value, type)
+  fun handleSetPreference(request: SetPreference) {
+    asyncActionRunner.launch(request.requestId, "set_preference") {
+      val result =
+        manager()
+          .setPreference(
+            request.packageName,
+            request.fileName,
+            request.key,
+            request.value,
+            request.valueType,
+          )
       result.fold(
-        onSuccess = { broadcastSetPreferenceResult(requestId, packageName, fileName, key, null) },
+        onSuccess = {
+          broadcastSetPreferenceResult(
+            request.requestId,
+            request.packageName,
+            request.fileName,
+            request.key,
+            null,
+          )
+        },
         onFailure = { error ->
-          broadcastSetPreferenceResult(requestId, packageName, fileName, key, error.message)
+          broadcastSetPreferenceResult(
+            request.requestId,
+            request.packageName,
+            request.fileName,
+            request.key,
+            error.message,
+          )
         },
       )
     }
@@ -344,40 +378,35 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastGetPreferenceResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    entry: PreferenceEntry?,
-    error: String?,
-  ) {
+  private suspend fun broadcastGetPreferenceResult(outcome: GetPreferenceOutcome) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping get preference broadcast")
       return
     }
 
-    resultBroadcaster.guard(requestId, "get_preference_result") {
+    resultBroadcaster.guard(outcome.requestId, "get_preference_result") {
       val message = buildString {
         append(
           """{"type":"get_preference_result","timestamp":${timeProvider.currentTimeMillis()}""",
         )
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
+        if (outcome.requestId != null) {
+          appendJsonStringField("requestId", outcome.requestId, jsonCompact)
         }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"found":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else if (entry != null) {
+        append(""","packageName":${jsonCompact.encodeToString(outcome.packageName)}""")
+        append(""","fileName":${jsonCompact.encodeToString(outcome.fileName)}""")
+        append(""","key":${jsonCompact.encodeToString(outcome.key)}""")
+        if (outcome.error != null) {
+          append(
+            ""","success":false,"found":false,"error":${jsonCompact.encodeToString(outcome.error)}""",
+          )
+        } else if (outcome.entry != null) {
           append(""","success":true,"found":true""")
-          if (entry.value != null) {
-            append(""","value":${jsonCompact.encodeToString(entry.value)}""")
+          if (outcome.entry.value != null) {
+            append(""","value":${jsonCompact.encodeToString(outcome.entry.value)}""")
           } else {
             append(""","value":null""")
           }
-          append(""","valueType":${jsonCompact.encodeToString(entry.type)}""")
+          append(""","valueType":${jsonCompact.encodeToString(outcome.entry.type)}""")
         } else {
           append(""","success":true,"found":false""")
         }

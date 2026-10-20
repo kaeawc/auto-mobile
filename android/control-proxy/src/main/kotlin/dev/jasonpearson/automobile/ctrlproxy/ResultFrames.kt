@@ -15,7 +15,6 @@ import dev.jasonpearson.automobile.protocol.InsertTextState
 import dev.jasonpearson.automobile.protocol.InsertTextStateResult
 import dev.jasonpearson.automobile.protocol.InteractionEvent
 import dev.jasonpearson.automobile.protocol.KeyboardProfileCatalogResult
-import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
 import dev.jasonpearson.automobile.protocol.PackageEvent
 import dev.jasonpearson.automobile.protocol.PackageEventData
@@ -61,42 +60,28 @@ private val omitNullsFrameJson = Json {
 private fun typedResultFrame(response: WebSocketResponse): String =
   omitNullsFrameJson.encodeToString<WebSocketResponse>(response)
 
-internal fun swipeResultFrame(
-  requestId: String?,
-  success: Boolean,
-  error: String?,
-  totalTimeMs: Long,
-  gestureTimeMs: Long?,
-  perfTiming: JsonElement?,
-): String =
+internal fun swipeResultFrame(outcome: GestureFrameResult, perfTiming: JsonElement?): String =
   typedResultFrame(
     SwipeResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      gestureTimeMs = gestureTimeMs,
-      error = error,
+      requestId = outcome.requestId,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      gestureTimeMs = outcome.gestureTimeMs,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
 
-internal fun dragResultFrame(
-  requestId: String?,
-  success: Boolean,
-  error: String?,
-  totalTimeMs: Long,
-  gestureTimeMs: Long?,
-  perfTiming: JsonElement?,
-): String =
+internal fun dragResultFrame(outcome: GestureFrameResult, perfTiming: JsonElement?): String =
   typedResultFrame(
     DragResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      gestureTimeMs = gestureTimeMs,
-      error = error,
+      requestId = outcome.requestId,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      gestureTimeMs = outcome.gestureTimeMs,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
@@ -119,111 +104,75 @@ internal fun tapCoordinatesResultFrame(
     ),
   )
 
-internal fun pinchResultFrame(
-  requestId: String?,
-  success: Boolean,
-  error: String?,
-  totalTimeMs: Long,
-  gestureTimeMs: Long?,
-  perfTiming: JsonElement?,
-): String =
+internal fun pinchResultFrame(outcome: GestureFrameResult, perfTiming: JsonElement?): String =
   typedResultFrame(
     PinchResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      gestureTimeMs = gestureTimeMs,
-      error = error,
+      requestId = outcome.requestId,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      gestureTimeMs = outcome.gestureTimeMs,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
 
-internal fun clipboardResultFrame(
-  requestId: String?,
-  action: String,
-  success: Boolean,
-  text: String?,
-  error: String?,
-  totalTimeMs: Long,
-  perfTiming: JsonElement?,
-): String =
+internal fun clipboardResultFrame(outcome: ClipboardFrameResult, perfTiming: JsonElement?): String =
   typedResultFrame(
     ClipboardResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      action = action,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      text = text,
-      error = error,
+      requestId = outcome.requestId,
+      action = outcome.action,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      text = outcome.text,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
 
-internal fun caCertResultFrame(
-  requestId: String?,
-  action: String,
-  success: Boolean,
-  alias: String?,
-  error: String?,
-  totalTimeMs: Long,
-  perfTiming: JsonElement?,
-): String =
+internal fun caCertResultFrame(outcome: CaCertificateResult, perfTiming: JsonElement?): String =
   typedResultFrame(
     CaCertResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      action = action,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      alias = alias,
-      error = error,
+      requestId = outcome.requestId,
+      action = outcome.action,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      alias = outcome.alias,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
 
 internal fun deviceOwnerStatusResultFrame(
-  requestId: String?,
-  packageName: String,
-  isDeviceOwner: Boolean,
-  isAdminActive: Boolean,
-  error: String?,
-  totalTimeMs: Long,
+  outcome: DeviceOwnerResult,
   perfTiming: JsonElement?,
 ): String =
   typedResultFrame(
     DeviceOwnerStatusResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = error == null,
-      totalTimeMs = totalTimeMs,
-      packageName = packageName,
-      isDeviceOwner = isDeviceOwner,
-      isAdminActive = isAdminActive,
-      error = error,
+      requestId = outcome.requestId,
+      success = outcome.error == null,
+      totalTimeMs = outcome.totalTimeMs,
+      packageName = outcome.packageName,
+      isDeviceOwner = outcome.isDeviceOwner,
+      isAdminActive = outcome.isAdminActive,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
 
-internal fun imeActionResultFrame(
-  requestId: String?,
-  action: String,
-  success: Boolean,
-  error: String?,
-  totalTimeMs: Long,
-  approximated: Boolean?,
-  perfTiming: JsonElement?,
-): String =
+internal fun imeActionResultFrame(outcome: ImeActionFrameResult, perfTiming: JsonElement?): String =
   typedResultFrame(
     ImeActionResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      approximated = approximated,
-      action = action,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      error = error,
+      requestId = outcome.requestId,
+      approximated = outcome.approximated,
+      action = outcome.action,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
@@ -288,19 +237,19 @@ internal fun interactionEventFrame(timestamp: Long, eventJson: String): String =
  * when known and doubles as the marker that `userId` is a real user id: APKs that predate #10067
  * sent the uid in `userId` and no `uid`, which the host converts itself.
  */
-internal fun packageEventFrame(
-  timestamp: Long,
-  action: String,
-  packageName: String,
-  userId: Int,
-  uid: Int?,
-  isSystem: Boolean?,
-  removedForAllUsers: Boolean,
-): String =
+internal fun packageEventFrame(outcome: PackageEventResult): String =
   typedResultFrame(
     PackageEvent(
-      timestamp = timestamp,
-      event = PackageEventData(action, packageName, userId, uid, isSystem, removedForAllUsers),
+      timestamp = outcome.timestamp,
+      event =
+        PackageEventData(
+          outcome.action,
+          outcome.packageName,
+          outcome.userId,
+          outcome.uid,
+          outcome.isSystem,
+          outcome.removedForAllUsers,
+        ),
     ),
   )
 
@@ -323,27 +272,20 @@ internal fun setTextResultFrame(
   )
 
 internal fun insertTextResultFrame(
-  requestId: String?,
-  success: Boolean,
-  error: String?,
-  totalTimeMs: Long,
-  warning: String?,
-  caretPlaced: Boolean?,
-  resultingTextLength: Int?,
-  partialApplication: Boolean,
+  outcome: InsertTextFrameResult,
   perfTiming: JsonElement?,
 ): String =
   typedResultFrame(
     InsertTextResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      error = error,
-      warning = warning,
-      caretPlaced = caretPlaced,
-      resultingTextLength = resultingTextLength,
-      partialApplication = partialApplication,
+      requestId = outcome.requestId,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      error = outcome.error,
+      warning = outcome.warning,
+      caretPlaced = outcome.caretPlaced,
+      resultingTextLength = outcome.resultingTextLength,
+      partialApplication = outcome.partialApplication,
       perfTiming = perfTiming?.toString(),
     ),
   )
@@ -367,29 +309,21 @@ internal fun insertTextStateResultFrame(
   )
 
 internal fun commitTextResultFrame(
-  requestId: String?,
-  success: Boolean,
-  error: String?,
-  totalTimeMs: Long,
-  partialApplication: Boolean,
-  committedUnits: Int,
-  insertedText: String?,
-  trace: List<String>?,
-  editorConsumed: Boolean,
+  outcome: CommitTextFrameResult,
   perfTiming: JsonElement?,
 ): String =
   typedResultFrame(
     CommitTextResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = success,
-      totalTimeMs = totalTimeMs,
-      partialApplication = partialApplication,
-      committedUnits = committedUnits,
-      insertedText = insertedText,
-      editorConsumed = editorConsumed,
-      trace = trace,
-      error = error,
+      requestId = outcome.requestId,
+      success = outcome.success,
+      totalTimeMs = outcome.totalTimeMs,
+      partialApplication = outcome.partialApplication,
+      committedUnits = outcome.committedUnits,
+      insertedText = outcome.insertedText,
+      editorConsumed = outcome.editorConsumed,
+      trace = outcome.trace,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )
@@ -413,26 +347,20 @@ internal fun cancelImeCommitResultFrame(
   )
 
 internal fun keyboardProfilesResultFrame(
-  requestId: String?,
-  success: Boolean,
-  catalogVersion: Int?,
-  supportedCatalogVersions: List<Int>,
-  activeProfileId: String?,
-  profiles: List<KeyboardProfileInfo>,
-  error: String?,
+  outcome: KeyboardProfilesResult,
   perfTiming: JsonElement?,
 ): String =
   typedResultFrame(
     KeyboardProfileCatalogResult(
       timestamp = System.currentTimeMillis(),
-      requestId = requestId,
-      success = success,
+      requestId = outcome.requestId,
+      success = outcome.success,
       catalogId = "automobile_behavior_profiles",
-      catalogVersion = catalogVersion,
-      supportedCatalogVersions = supportedCatalogVersions,
-      activeProfileId = activeProfileId,
-      profiles = if (success) profiles else null,
-      error = error,
+      catalogVersion = outcome.catalogVersion,
+      supportedCatalogVersions = outcome.supportedCatalogVersions,
+      activeProfileId = outcome.activeProfileId,
+      profiles = if (outcome.success) outcome.profiles else null,
+      error = outcome.error,
       perfTiming = perfTiming?.toString(),
     ),
   )

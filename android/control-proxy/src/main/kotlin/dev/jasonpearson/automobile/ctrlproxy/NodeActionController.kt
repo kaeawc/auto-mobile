@@ -43,14 +43,7 @@ internal class NodeActionController(
 
     fun forgetRememberedInsert()
 
-    suspend fun sendActionResult(
-      requestId: String?,
-      action: String,
-      success: Boolean,
-      error: String?,
-      totalTimeMs: Long,
-      alreadySatisfied: Boolean = false,
-    )
+    suspend fun sendActionResult(outcome: NodeActionResult)
   }
 
   /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
@@ -70,11 +63,13 @@ internal class NodeActionController(
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
       host.launchRequestScope(requestId) {
         host.sendActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Semantic accessibility links require Android API 26 or later",
-          timeProvider.currentTimeMillis() - startTime,
+          NodeActionResult(
+            requestId = requestId,
+            action = "activate_accessibility_link",
+            success = false,
+            error = "Semantic accessibility links require Android API 26 or later",
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       }
       return
@@ -82,11 +77,13 @@ internal class NodeActionController(
     if (text.isBlank() || occurrence < 0) {
       host.launchRequestScope(requestId) {
         host.sendActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Link text must be non-blank and occurrence must be non-negative",
-          timeProvider.currentTimeMillis() - startTime,
+          NodeActionResult(
+            requestId = requestId,
+            action = "activate_accessibility_link",
+            success = false,
+            error = "Link text must be non-blank and occurrence must be non-negative",
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       }
       return
@@ -112,22 +109,26 @@ internal class NodeActionController(
         }
       host.launchRequestScope(requestId) {
         host.sendActionResult(
-          requestId,
-          "activate_accessibility_link",
-          activation.activated,
-          error,
-          timeProvider.currentTimeMillis() - startTime,
+          NodeActionResult(
+            requestId = requestId,
+            action = "activate_accessibility_link",
+            success = activation.activated,
+            error = error,
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       }
     } catch (error: IllegalArgumentException) {
       Log.w(TAG, "Semantic accessibility link activation failed", error)
       host.launchRequestScope(requestId) {
         host.sendActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          error.message ?: error.javaClass.simpleName,
-          timeProvider.currentTimeMillis() - startTime,
+          NodeActionResult(
+            requestId = requestId,
+            action = "activate_accessibility_link",
+            success = false,
+            error = error.message ?: error.javaClass.simpleName,
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       }
     } catch (error: IllegalStateException) {
@@ -135,22 +136,26 @@ internal class NodeActionController(
       Log.w(TAG, "Semantic accessibility link activation failed", error)
       host.launchRequestScope(requestId) {
         host.sendActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          error.message ?: error.javaClass.simpleName,
-          timeProvider.currentTimeMillis() - startTime,
+          NodeActionResult(
+            requestId = requestId,
+            action = "activate_accessibility_link",
+            success = false,
+            error = error.message ?: error.javaClass.simpleName,
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       }
     } catch (error: SecurityException) {
       Log.w(TAG, "Semantic accessibility link activation failed", error)
       host.launchRequestScope(requestId) {
         host.sendActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          error.message ?: error.javaClass.simpleName,
-          timeProvider.currentTimeMillis() - startTime,
+          NodeActionResult(
+            requestId = requestId,
+            action = "activate_accessibility_link",
+            success = false,
+            error = error.message ?: error.javaClass.simpleName,
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
       }
     }
@@ -235,7 +240,15 @@ internal class NodeActionController(
         val error = "A resource-id or stable node selector is required for accessibility actions"
         Log.w(TAG, error)
         host.launchRequestScope(requestId) {
-          host.sendActionResult(requestId, action, false, error, errorTime - startTime)
+          host.sendActionResult(
+            NodeActionResult(
+              requestId = requestId,
+              action = action,
+              success = false,
+              error = error,
+              totalTimeMs = errorTime - startTime,
+            ),
+          )
         }
         return
       }
@@ -258,7 +271,15 @@ internal class NodeActionController(
         val error = "Element not found with $targetDescription"
         Log.w(TAG, error)
         host.launchRequestScope(requestId) {
-          host.sendActionResult(requestId, action, false, error, errorTime - startTime)
+          host.sendActionResult(
+            NodeActionResult(
+              requestId = requestId,
+              action = action,
+              success = false,
+              error = error,
+              totalTimeMs = errorTime - startTime,
+            ),
+          )
         }
         return
       }
@@ -291,12 +312,14 @@ internal class NodeActionController(
       Log.d(TAG, "Action total time: ${totalTime}ms")
 
       host.sendActionResult(
-        requestId,
-        action,
-        success,
-        if (success) null else actionError ?: "performAction returned false",
-        totalTime,
-        alreadySatisfied,
+        NodeActionResult(
+          requestId = requestId,
+          action = action,
+          success = success,
+          error = if (success) null else actionError ?: "performAction returned false",
+          totalTimeMs = totalTime,
+          alreadySatisfied = alreadySatisfied,
+        ),
       )
     } catch (e: CancellationException) {
       throw e
@@ -304,17 +327,41 @@ internal class NodeActionController(
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing action", e)
-      host.sendActionResult(requestId, action, false, e.message, errorTime - startTime)
+      host.sendActionResult(
+        NodeActionResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+        ),
+      )
     } catch (e: IllegalStateException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing action", e)
-      host.sendActionResult(requestId, action, false, e.message, errorTime - startTime)
+      host.sendActionResult(
+        NodeActionResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+        ),
+      )
     } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing action", e)
-      host.sendActionResult(requestId, action, false, e.message, errorTime - startTime)
+      host.sendActionResult(
+        NodeActionResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+        ),
+      )
     }
   }
 }

@@ -490,15 +490,7 @@ class CtrlProxyMessageHandler(
           request.fileName,
           request.key,
         )
-      is SetPreference ->
-        actions.setPreference(
-          request.requestId,
-          request.packageName,
-          request.fileName,
-          request.key,
-          request.value,
-          request.valueType,
-        )
+      is SetPreference -> actions.setPreference(request)
       is RemovePreference ->
         actions.removePreference(
           request.requestId,

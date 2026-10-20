@@ -220,7 +220,15 @@ class SetTextAcknowledgementOrderTest {
     assertTrue("acknowledgement must include the computed outcome", broadcast > outcome)
     // The wire encoding (omitted optionals, partialApplication only when true) is pinned
     // byte-for-byte against the old hand-built frame in ResultFramesGoldenTest.
-    val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
+    // The broadcaster now forwards the result object; its fields are read by the frame builder.
+    val frames =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("ResultFrames.kt").readText())
+    val broadcaster =
+      functionBody(source, "private suspend fun broadcastInsertTextResult(") +
+        frames.substring(
+          frames.indexOf("internal fun insertTextResultFrame("),
+          frames.indexOf("internal fun insertTextStateResultFrame("),
+        )
     assertTrue(
       "insert acknowledgements must be synchronous",
       "responseSender.broadcastWithPerfSync" in broadcaster,

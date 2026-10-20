@@ -324,10 +324,12 @@ internal class TextInputController(
         finishPerf()
         host.launchRequestScope(requestId) {
           broadcastInsertTextResult(
-            requestId,
-            false,
-            "No focused editable node found",
-            timeProvider.currentTimeMillis() - startTime,
+            InsertTextFrameResult(
+              requestId = requestId,
+              success = false,
+              error = "No focused editable node found",
+              totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+            ),
           )
         }
         return
@@ -341,10 +343,12 @@ internal class TextInputController(
         nodeToRecycle = null
         finishPerf()
         broadcastInsertTextResult(
-          requestId,
-          false,
-          "Cannot insert text into a password field without exposing its original value",
-          timeProvider.currentTimeMillis() - startTime,
+          InsertTextFrameResult(
+            requestId = requestId,
+            success = false,
+            error = "Cannot insert text into a password field without exposing its original value",
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          ),
         )
         return
       }
@@ -447,11 +451,13 @@ internal class TextInputController(
         rememberedInsert = null
         finishPerf()
         broadcastInsertTextResult(
-          requestId,
-          false,
-          error,
-          timeProvider.currentTimeMillis() - startTime,
-          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+          InsertTextFrameResult(
+            requestId = requestId,
+            success = false,
+            error = error,
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+            warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+          ),
         )
         return
       }
@@ -502,11 +508,13 @@ internal class TextInputController(
         nodeToRecycle = null
         finishPerf()
         broadcastInsertTextResult(
-          requestId,
-          false,
-          "Focused editable node does not support ${unsupportedAction.value}",
-          timeProvider.currentTimeMillis() - startTime,
-          warning = precedingWarning,
+          InsertTextFrameResult(
+            requestId = requestId,
+            success = false,
+            error = "Focused editable node does not support ${unsupportedAction.value}",
+            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+            warning = precedingWarning,
+          ),
         )
         return
       }
@@ -623,14 +631,17 @@ internal class TextInputController(
       finishPerf()
 
       broadcastInsertTextResult(
-        requestId,
-        outcome.success,
-        outcome.error,
-        timeProvider.currentTimeMillis() - startTime,
-        outcome.partialApplication,
-        outcome.warning,
-        outcome.caretPlaced,
-        if (setTextSucceeded && acceptsCaretNotPlaced) plan.updatedText.length else null,
+        InsertTextFrameResult(
+          requestId = requestId,
+          success = outcome.success,
+          error = outcome.error,
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          partialApplication = outcome.partialApplication,
+          warning = outcome.warning,
+          caretPlaced = outcome.caretPlaced,
+          resultingTextLength =
+            if (setTextSucceeded && acceptsCaretNotPlaced) plan.updatedText.length else null,
+        ),
       )
       if (setTextSucceeded) refreshHierarchyAfterTextInput()
     } catch (e: CancellationException) {
@@ -644,12 +655,14 @@ internal class TextInputController(
       finishPerf()
       Log.e(TAG, "Error inserting text", e)
       broadcastInsertTextResult(
-        requestId,
-        false,
-        e.message,
-        timeProvider.currentTimeMillis() - startTime,
-        partialApplication = textMutated,
-        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+        InsertTextFrameResult(
+          requestId = requestId,
+          success = false,
+          error = e.message,
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          partialApplication = textMutated,
+          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+        ),
       )
     } catch (e: IllegalStateException) {
       rememberedInsert = null
@@ -657,12 +670,14 @@ internal class TextInputController(
       finishPerf()
       Log.e(TAG, "Error inserting text", e)
       broadcastInsertTextResult(
-        requestId,
-        false,
-        e.message,
-        timeProvider.currentTimeMillis() - startTime,
-        partialApplication = textMutated,
-        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+        InsertTextFrameResult(
+          requestId = requestId,
+          success = false,
+          error = e.message,
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          partialApplication = textMutated,
+          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+        ),
       )
     } catch (e: SecurityException) {
       rememberedInsert = null
@@ -670,12 +685,14 @@ internal class TextInputController(
       finishPerf()
       Log.e(TAG, "Error inserting text", e)
       broadcastInsertTextResult(
-        requestId,
-        false,
-        e.message,
-        timeProvider.currentTimeMillis() - startTime,
-        partialApplication = textMutated,
-        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+        InsertTextFrameResult(
+          requestId = requestId,
+          success = false,
+          error = e.message,
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+          partialApplication = textMutated,
+          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
+        ),
       )
     }
   }
@@ -771,7 +788,15 @@ internal class TextInputController(
         val errorTime = timeProvider.currentTimeMillis()
         Log.w(TAG, error)
         host.launchRequestScope(requestId) {
-          broadcastImeActionResult(requestId, action, false, error, errorTime - startTime)
+          broadcastImeActionResult(
+            ImeActionFrameResult(
+              requestId = requestId,
+              action = action,
+              success = false,
+              error = error,
+              totalTimeMs = errorTime - startTime,
+            ),
+          )
         }
         return
       }
@@ -861,12 +886,14 @@ internal class TextInputController(
       Log.d(TAG, "IME action total time: ${totalTime}ms")
 
       broadcastImeActionResult(
-        requestId,
-        action,
-        success,
-        if (success) null else "Action failed",
-        totalTime,
-        approximated,
+        ImeActionFrameResult(
+          requestId = requestId,
+          action = action,
+          success = success,
+          error = if (success) null else "Action failed",
+          totalTimeMs = totalTime,
+          approximated = approximated,
+        ),
       )
     } catch (e: CancellationException) {
       finishPerf()
@@ -876,60 +903,70 @@ internal class TextInputController(
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
       broadcastImeActionResult(
-        requestId,
-        action,
-        false,
-        e.message,
-        errorTime - startTime,
-        approximated,
+        ImeActionFrameResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+          approximated = approximated,
+        ),
       )
     } catch (e: InterruptedException) {
       finishPerf()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
       broadcastImeActionResult(
-        requestId,
-        action,
-        false,
-        e.message,
-        errorTime - startTime,
-        approximated,
+        ImeActionFrameResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+          approximated = approximated,
+        ),
       )
     } catch (e: IllegalArgumentException) {
       finishPerf()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
       broadcastImeActionResult(
-        requestId,
-        action,
-        false,
-        e.message,
-        errorTime - startTime,
-        approximated,
+        ImeActionFrameResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+          approximated = approximated,
+        ),
       )
     } catch (e: IllegalStateException) {
       finishPerf()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
       broadcastImeActionResult(
-        requestId,
-        action,
-        false,
-        e.message,
-        errorTime - startTime,
-        approximated,
+        ImeActionFrameResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+          approximated = approximated,
+        ),
       )
     } catch (e: SecurityException) {
       finishPerf()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
       broadcastImeActionResult(
-        requestId,
-        action,
-        false,
-        e.message,
-        errorTime - startTime,
-        approximated,
+        ImeActionFrameResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+          approximated = approximated,
+        ),
       )
     } finally {
       if (focusedNode !== root) {
@@ -1066,63 +1103,29 @@ internal class TextInputController(
   }
 
   /** Broadcast insert text result to WebSocket clients. */
-  private suspend fun broadcastInsertTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    partialApplication: Boolean = false,
-    warning: String? = null,
-    caretPlaced: Boolean? = null,
-    resultingTextLength: Int? = null,
-  ) {
+  private suspend fun broadcastInsertTextResult(outcome: InsertTextFrameResult) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping insert text result broadcast")
       return
     }
 
-    resultBroadcaster.guard(requestId, "insert_text_result") {
+    resultBroadcaster.guard(outcome.requestId, "insert_text_result") {
       responseSender.broadcastWithPerfSync { perfTiming ->
-        insertTextResultFrame(
-          requestId,
-          success,
-          error,
-          totalTimeMs,
-          warning,
-          caretPlaced,
-          resultingTextLength,
-          partialApplication,
-          perfTiming,
-        )
+        insertTextResultFrame(outcome, perfTiming)
       }
     }
   }
 
   /** Broadcast IME action result to WebSocket clients */
-  suspend fun broadcastImeActionResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    approximated: Boolean? = null,
-  ) {
+  suspend fun broadcastImeActionResult(outcome: ImeActionFrameResult) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
       return
     }
 
-    resultBroadcaster.guard(requestId, "ime_action_result") {
+    resultBroadcaster.guard(outcome.requestId, "ime_action_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        imeActionResultFrame(
-          requestId,
-          action,
-          success,
-          error,
-          totalTimeMs,
-          approximated,
-          perfTiming,
-        )
+        imeActionResultFrame(outcome, perfTiming)
       }
       Log.d(TAG, "Broadcasted IME action result to ${responseSender.connectionCount()} clients")
     }

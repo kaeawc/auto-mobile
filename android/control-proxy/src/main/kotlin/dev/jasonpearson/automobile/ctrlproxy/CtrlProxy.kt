@@ -30,6 +30,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
@@ -96,7 +97,6 @@ import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
 import dev.jasonpearson.automobile.protocol.NavigationEventData
@@ -137,6 +137,7 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
+import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -1358,21 +1359,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
 
-          override suspend fun sendActionResult(
-            requestId: String?,
-            action: String,
-            success: Boolean,
-            error: String?,
-            totalTimeMs: Long,
-            alreadySatisfied: Boolean,
-          ) =
+          override suspend fun sendActionResult(outcome: NodeActionResult) =
             this@CtrlProxy.broadcastActionResult(
-              requestId,
-              action,
-              success,
-              error,
-              totalTimeMs,
-              alreadySatisfied,
+              outcome.requestId,
+              outcome.action,
+              outcome.success,
+              outcome.error,
+              outcome.totalTimeMs,
+              outcome.alreadySatisfied,
             )
         },
       perfProvider = perfProvider,
@@ -1523,25 +1517,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             CtrlProxyIme.current()?.let { ime ->
               object : ImeController.ImeTarget {
                 override fun commitText(
-                  text: String,
-                  priorImeId: String?,
-                  isCancelled: () -> Boolean,
-                  delivery: ImeTextDelivery,
-                  timeoutMs: Long?,
-                  requestDeadlineMs: Long,
-                  trace: Boolean,
+                  request: ImeCommitRequest,
                   onResult: (ImeCommitResult) -> Unit,
-                ) =
-                  ime.commitText(
-                    text,
-                    priorImeId,
-                    isCancelled,
-                    delivery,
-                    timeoutMs,
-                    requestDeadlineMs,
-                    trace,
-                    onResult,
-                  )
+                ) = ime.commitText(request, onResult)
               }
             }
 
@@ -2617,7 +2595,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       StaleFrameContextAction.SET_TEXT ->
         textInputController.broadcastSetTextResult(requestId, false, error, 0)
       StaleFrameContextAction.IME_ACTION ->
-        textInputController.broadcastImeActionResult(requestId, action.wireName, false, error, 0)
+        textInputController.broadcastImeActionResult(
+          ImeActionFrameResult(
+            requestId = requestId,
+            action = action.wireName,
+            success = false,
+            error = error,
+            totalTimeMs = 0,
+          ),
+        )
       StaleFrameContextAction.GLOBAL_ACTION ->
         webSocketServer.broadcast(
           dev.jasonpearson.automobile.protocol.GlobalActionResult(
@@ -2980,14 +2966,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     key: String,
   ) = storageController.handleGetPreference(requestId, packageName, fileName, key)
 
-  override suspend fun setPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) = storageController.handleSetPreference(requestId, packageName, fileName, key, value, type)
+  override suspend fun setPreference(request: SetPreference) =
+    storageController.handleSetPreference(request)
 
   override suspend fun removePreference(
     requestId: String?,
@@ -3283,7 +3263,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       val timestamp = timeProvider.currentTimeMillis()
       val message =
-        packageEventFrame(timestamp, action, packageName, userId, uid, isSystem, removedForAllUsers)
+        packageEventFrame(
+          PackageEventResult(
+            timestamp = timestamp,
+            action = action,
+            packageName = packageName,
+            userId = userId,
+            uid = uid,
+            isSystem = isSystem,
+            removedForAllUsers = removedForAllUsers,
+          ),
+        )
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")
     } catch (e: CancellationException) {

@@ -365,5 +365,8 @@ describe("root SPM toolchain floor workflow", () => {
     expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "26.5"');
     expect(steps.indexOf(selectXcode!)).toBeLessThan(build);
     expect(steps.indexOf(selfHosted!)).toBeLessThan(build);
+    const prototypeBuild = stepNamed(steps, "Build AutoMobilePrototype library and embed consumer");
+    expect(prototypeBuild?.run).toBe("bash scripts/ios/prototype-library-build.sh");
+    expect(steps.indexOf(prototypeBuild!)).toBeGreaterThan(build);
   });
 });

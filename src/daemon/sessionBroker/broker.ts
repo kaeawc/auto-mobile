@@ -1,5 +1,5 @@
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
-import { isRetryableCleanReleaseError } from "./cleanReleaseFailure";
+import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
@@ -866,9 +866,14 @@ export class SessionBroker {
       logger.warn(
         `Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`,
       );
-      // A clean baseline must survive a failed receipt write. Otherwise retry only known
-      // transient failures; the releasing/resetting rows keep ownership for recover().
-      return resetClean || isRetryableCleanReleaseError(error) ? "pending" : "destroy";
+      const kind = classifyCleanReleaseError(error);
+      if (kind === "permanent" || (!resetClean && kind === "unknown")) {
+        return "destroy";
+      }
+      // A clean baseline survives unknown receipt-write failures; earlier failures need a
+      // known retryable kind. recover()/service redrive bounds each pass, not total retries:
+      // no per-request attempt/time cap exists, so persistent failures can stay pending forever.
+      return "pending";
     }
   }
 

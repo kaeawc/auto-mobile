@@ -99,10 +99,12 @@ fun NavigationFacet(
 
   val observation =
     rememberReconnectingObservationState(
-      deviceId = column.deviceId,
-      streamFactory = { options.observationStreamFactory(column.deviceId) },
-      backoffDelay = options.backoffDelay,
-      socketAvailable = options.socketAvailable,
+      ReconnectingObservationOptions(
+        deviceId = column.deviceId,
+        streamFactory = { options.observationStreamFactory(column.deviceId) },
+        backoffDelay = options.backoffDelay,
+        socketAvailable = options.socketAvailable,
+      ),
     )
   val stream = observation.stream
 

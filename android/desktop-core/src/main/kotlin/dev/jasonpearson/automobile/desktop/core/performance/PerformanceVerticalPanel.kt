@@ -78,17 +78,19 @@ fun PerformanceVerticalPanel(
         onCollapse = onToggle,
       )
       PerformanceDashboard(
-        onNavigateToScreen = onNavigateToScreen,
-        onNavigateToTest = onNavigateToTest,
-        dataSourceMode = dataSourceMode,
-        clientProvider = clientProvider,
-        observationStreamClient = observationStreamClient,
-        initialFps = currentFps,
-        initialFrameTimeMs = currentFrameTimeMs,
-        initialJankFrames = currentJankFrames,
-        initialMemoryMb = currentMemoryMb,
-        initialTouchLatencyMs = currentTouchLatencyMs,
-        initialRecompositionRate = currentRecompositionRate,
+        PerformanceDashboardOptions(
+          onNavigateToScreen = onNavigateToScreen,
+          onNavigateToTest = onNavigateToTest,
+          dataSourceMode = dataSourceMode,
+          clientProvider = clientProvider,
+          observationStreamClient = observationStreamClient,
+          initialFps = currentFps,
+          initialFrameTimeMs = currentFrameTimeMs,
+          initialJankFrames = currentJankFrames,
+          initialMemoryMb = currentMemoryMb,
+          initialTouchLatencyMs = currentTouchLatencyMs,
+          initialRecompositionRate = currentRecompositionRate,
+        ),
       )
     }
   }

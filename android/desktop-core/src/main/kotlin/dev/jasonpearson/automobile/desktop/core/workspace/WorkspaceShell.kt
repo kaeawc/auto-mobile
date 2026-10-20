@@ -283,7 +283,7 @@ data class WorkspaceShellOptions(
   val facetContent: @Composable (DeviceColumn, Tool) -> Unit = { _, tool ->
     WorkspaceFacetPlaceholder(tool)
   },
-  val inspectContent: @Composable (DeviceColumn) -> Unit = { LayoutFacet(it) },
+  val inspectContent: @Composable (DeviceColumn) -> Unit = { LayoutFacet(LayoutFacetOptions(it)) },
   val streamContent: @Composable (DeviceColumn) -> Unit = { WorkspaceStreamPlaceholder() },
   val sessionUuidProvider: () -> String? = { null },
   val observationStreamFactory: (String) -> ObservationStream = {

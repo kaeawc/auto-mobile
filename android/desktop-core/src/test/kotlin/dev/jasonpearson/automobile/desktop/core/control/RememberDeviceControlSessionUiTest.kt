@@ -46,15 +46,17 @@ internal class RememberDeviceControlSessionUiTest :
       setContent {
         session =
           rememberDeviceControlSession(
-            scope = scope,
-            clientProvider = { client },
-            inputAllocation = { allocation },
-            platform = { "android" },
-            nowMs = { 1_000L },
-            publishError = {},
-            streamingEnabled = false,
-            uiContext = testDispatcher,
-            ioDispatcher = testDispatcher,
+            dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
+              scope = scope,
+              clientProvider = { client },
+              inputAllocation = { allocation },
+              platform = { "android" },
+              nowMs = { 1_000L },
+              publishError = {},
+              streamingEnabled = false,
+              uiContext = testDispatcher,
+              ioDispatcher = testDispatcher,
+            ),
           )
       }
 
@@ -77,15 +79,17 @@ internal class RememberDeviceControlSessionUiTest :
       setContent {
         session =
           rememberDeviceControlSession(
-            scope = scope,
-            clientProvider = { client },
-            inputAllocation = { allocation },
-            platform = { "android" },
-            nowMs = { 1_000L },
-            publishError = { errors += it },
-            streamingEnabled = false,
-            uiContext = testDispatcher,
-            ioDispatcher = testDispatcher,
+            dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
+              scope = scope,
+              clientProvider = { client },
+              inputAllocation = { allocation },
+              platform = { "android" },
+              nowMs = { 1_000L },
+              publishError = { errors += it },
+              streamingEnabled = false,
+              uiContext = testDispatcher,
+              ioDispatcher = testDispatcher,
+            ),
           )
       }
 
@@ -113,15 +117,17 @@ internal class RememberDeviceControlSessionUiTest :
       val currentAllocation = allocation.value
       session =
         rememberDeviceControlSession(
-          scope = scope,
-          clientProvider = currentProvider,
-          inputAllocation = { currentAllocation },
-          platform = { "android" },
-          nowMs = { 1_000L },
-          publishError = {},
-          streamingEnabled = false,
-          uiContext = testDispatcher,
-          ioDispatcher = testDispatcher,
+          dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
+            scope = scope,
+            clientProvider = currentProvider,
+            inputAllocation = { currentAllocation },
+            platform = { "android" },
+            nowMs = { 1_000L },
+            publishError = {},
+            streamingEnabled = false,
+            uiContext = testDispatcher,
+            ioDispatcher = testDispatcher,
+          ),
         )
     }
     val held = session
@@ -146,15 +152,17 @@ internal class RememberDeviceControlSessionUiTest :
     setContent {
       session =
         rememberDeviceControlSession(
-          scope = scope,
-          clientProvider = provider.value,
-          inputAllocation = { RecordingAllocation() },
-          platform = { "android" },
-          nowMs = { 1_000L },
-          publishError = {},
-          streamingEnabled = false,
-          uiContext = testDispatcher,
-          ioDispatcher = testDispatcher,
+          dev.jasonpearson.automobile.desktop.core.control.RememberDeviceControlOptions(
+            scope = scope,
+            clientProvider = provider.value,
+            inputAllocation = { RecordingAllocation() },
+            platform = { "android" },
+            nowMs = { 1_000L },
+            publishError = {},
+            streamingEnabled = false,
+            uiContext = testDispatcher,
+            ioDispatcher = testDispatcher,
+          ),
         )
     }
     session.tap(testSnapshot(TestSnapshotSpec()), point)

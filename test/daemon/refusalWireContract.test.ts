@@ -54,6 +54,7 @@ import * as nsDaemonToolUnavailableError from "../../src/daemon/proxy/DaemonTool
 import * as nsDaemonVersionMismatchError from "../../src/daemon/proxy/DaemonVersionMismatchError";
 import * as nsLifecycleConnectionInFlightError from "../../src/daemon/proxy/LifecycleConnectionInFlightError";
 import * as sessionManager from "../../src/daemon/sessionManager";
+import * as sessionRecoveryIdentityLossError from "../../src/daemon/sessionErrors/SessionRecoveryIdentityLossError";
 import * as sessionErrors from "../../src/daemon/sessionErrors";
 import * as sessionOwnership from "../../src/models/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
@@ -195,6 +196,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/proxy/DaemonVersionMismatchError": nsDaemonVersionMismatchError,
   "daemon/proxy/LifecycleConnectionInFlightError": nsLifecycleConnectionInFlightError,
   "daemon/sessionManager": sessionManager,
+  "daemon/sessionErrors/SessionRecoveryIdentityLossError": sessionRecoveryIdentityLossError,
   "daemon/sessionErrors/SessionHeldByRecoveryError": sessionErrors,
   "daemon/sessionErrors/SessionRebindingError": sessionErrors,
   "daemon/sessionErrors/SessionSuspectError": sessionErrors,

@@ -480,10 +480,8 @@ describe("Simctl", function () {
             "",
           );
         }
-        // Only the first bootstatus child is under test: later cleanup calls to execAsync
-        // carry their own signals and must not overwrite the one captured here.
         if (args.includes("bootstatus")) {
-          capturedSignal ??= signal;
+          capturedSignal = signal;
         }
         // Simulate a long-running child that only settles when aborted, mirroring
         // execFile rejecting with an AbortError once its signal fires.

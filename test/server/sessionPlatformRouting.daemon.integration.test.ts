@@ -198,6 +198,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const fixtures = new Map<string, McpTestFixture>();
   const received: string[] = [];
   const routes: string[] = [];
+  const boundRoutes: string[] = [];
   const acquisitionOwners: Array<string | undefined> = [];
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
@@ -210,6 +211,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     await socket.testHooks.restoreSelectorSessions(args, socketSessionId);
     const route = await socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
+    if (route.sessionUuid) {
+      boundRoutes.push(route.clientKey);
+    }
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
       fixture = new McpTestFixture({
@@ -552,7 +556,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
               : "";
         expect(failureText).not.toMatch(/disabled/i);
         expect(failureText).not.toMatch(/unknown tool/i);
-        const fixture = fixtures.get(routes.at(-1)!);
+        // Inventory listings never inherit the proxy's binding (#13796), so the call's own
+        // route is unbound; the advertisement under test is the bound connection's.
+        const fixture = fixtures.get(boundRoutes.at(-1)!);
         expect(fixture).toBeDefined();
         const advertisedToolNames = (await fixture!.client.listTools()).tools.map(
           (tool) => tool.name,

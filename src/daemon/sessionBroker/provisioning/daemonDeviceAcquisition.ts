@@ -1,3 +1,4 @@
+import type { reserveBootCapacity } from "../../../features/bootAdmission/sharedBootAdmissionGates";
 /**
  * Assembles the broker's native-device acquisition (#11173 part b) from production parts: the
  * host-wide binding registry, the reconciler over real inventory / provisionDevice / deleteDevice /
@@ -73,13 +74,15 @@ export interface DaemonBrokerDeviceAcquisitionOptions {
 
 /** Each part defaults to the host's real tooling. */
 export interface DaemonBindingTooling {
-  deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages">;
+  deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages"> &
+    Partial<Pick<PlatformDeviceManager, "getBootedDevicesDetailed">>;
   androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   androidImageCatalog?: ManagedAndroidImageCatalog;
   androidProfileCatalog?: ManagedAndroidProfileCatalog;
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: BindingBootCapacityAssertion;
+  reserveBootCapacity?: typeof reserveBootCapacity;
   /** Native preparation port; defaults to the daemon tool workflow. */
   provisioner?: BindingDeviceProvisioner;
   /** Verified native deletion port; defaults to the daemon delete workflow. */
@@ -110,6 +113,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}) {
       tooling.iosRuntimeCatalog ??
       (process.platform === "darwin" ? new SimCtlClient(null) : undefined),
     checkBootCapacity: tooling.checkBootCapacity,
+    reserveBootCapacity: tooling.reserveBootCapacity,
   };
 }
 
@@ -189,9 +193,13 @@ export function createDaemonBrokerDeviceAcquisition(
               ),
             }
           : {}),
-        // The provision path refuses a boot at the limit, but only after a replacement deleted the
-        // old device: the reconciler asks the same gates first, so it fails before deleting.
-        capacity: new GateBindingBootCapacity(options.timer, tooling.checkBootCapacity),
+        // Replacement reserves in the shared boot ledger before deletion, then transfers the slot
+        // to the provision-path boot. Fresh creates retain their read-only preflight.
+        capacity: new GateBindingBootCapacity(
+          options.timer,
+          tooling.checkBootCapacity,
+          tooling.reserveBootCapacity,
+        ),
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },
       });

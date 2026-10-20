@@ -5,12 +5,11 @@ import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepositor
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeDaemonShutdownIo } from "../helpers/daemonShutdownIoFakes";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   chmodSync,
   closeSync,
   existsSync,
-  mkdtempSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -20,7 +19,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import {
@@ -78,15 +77,15 @@ describe("daemon HTTP token helpers", () => {
 });
 
 describe("daemon HTTP token runtime file", () => {
+  const scratch = useScratchRoot("am-token-store-");
   let directory: string;
   let path: string;
   let store: FileDaemonHttpTokenStore;
   beforeEach(() => {
-    directory = mkdtempSync(join(tmpdir(), "am-token-store-"));
+    directory = scratch.next();
     path = join(directory, "daemon.token");
     store = new FileDaemonHttpTokenStore(path, new CountingIdGenerator("temporary"));
   });
-  afterEach(() => rmSync(directory, { recursive: true, force: true }));
 
   test("publishes only the token with mode 0600 and leaves no temporary file", () => {
     store.write(TOKEN);

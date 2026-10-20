@@ -29,8 +29,8 @@ import kotlinx.coroutines.delay
 @Composable
 fun CodeSampleSlideItem(
   content: SlideContent.CodeSample,
-  isDarkMode: Boolean = false,
   modifier: Modifier = Modifier,
+  isDarkMode: Boolean = false,
 ) {
   val code = content.code
   val language = content.language

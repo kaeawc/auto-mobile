@@ -65,9 +65,9 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun SlidesScreen(
+  modifier: Modifier = Modifier,
   slides: List<SlideContent> = getAllSlides(),
   initialSlideIndex: Int = 0,
-  modifier: Modifier = Modifier,
   onNavigateBack: (() -> Unit)? = null,
 ) {
   TrackRecomposition(id = "screen.slides", composableName = "SlidesScreen") {

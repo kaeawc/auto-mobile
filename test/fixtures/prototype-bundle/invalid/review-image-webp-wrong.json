@@ -1,0 +1,36 @@
+{
+  "description": "image/webp wrong",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "image"
+    }
+  },
+  "manifest": {
+    "assets": [
+      {
+        "id": "image",
+        "file": "assets/039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81.webp",
+        "sha256": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+        "mediaType": "image/webp"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "name": "assets/039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81.webp",
+      "base64": "AQID"
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "assets/039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81.webp"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Repeated local offset belongs to second central record",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "index": 1,
+      "offset": 42,
+      "type": "u32",
+      "value": 0
+    }
+  ],
+  "expected": {
+    "code": "zip_invalid",
+    "entry": "spec.json"
+  }
+}

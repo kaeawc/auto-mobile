@@ -8,7 +8,7 @@
     }
   ],
   "expected": {
-    "code": "size_mismatch",
+    "code": "zip_invalid",
     "entry": "spec.json"
   }
 }

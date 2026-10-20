@@ -1,0 +1,14 @@
+{
+  "description": "Local payload crosses central-directory boundary",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "compressedSize": 100
+    }
+  ],
+  "expected": {
+    "code": "zip_invalid",
+    "entry": "spec.json"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "description": "WebP magic byte 0 has its high bit set",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "image"
+    }
+  },
+  "manifest": {
+    "assets": [
+      {
+        "id": "image",
+        "file": "assets/6a2870a0934d9c4257927e017c7fa20a256ce90cfb7f7a5999b82aed90ad377a.webp",
+        "sha256": "6a2870a0934d9c4257927e017c7fa20a256ce90cfb7f7a5999b82aed90ad377a",
+        "mediaType": "image/webp"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "name": "assets/6a2870a0934d9c4257927e017c7fa20a256ce90cfb7f7a5999b82aed90ad377a.webp",
+      "base64": "0klGRgAAAABXRUJQ"
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "assets/6a2870a0934d9c4257927e017c7fa20a256ce90cfb7f7a5999b82aed90ad377a.webp"
+  }
+}

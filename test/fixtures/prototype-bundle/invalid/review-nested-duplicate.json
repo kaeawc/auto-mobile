@@ -1,0 +1,9 @@
+{
+  "description": "nested-duplicate",
+  "base": "minimal",
+  "specText": "{\"id\":\"minimal\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"text\",\"text\":\"ignored\",\"te\\u0078t\":\"Hello\"}}",
+  "expected": {
+    "code": "spec_invalid",
+    "entry": "spec.json"
+  }
+}

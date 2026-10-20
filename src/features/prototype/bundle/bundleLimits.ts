@@ -26,12 +26,14 @@ export interface BundleLimits {
   maxCompressedBytes: number;
   maxExpandedBytes: number;
   maxRatio: number;
+  maxAssetBytes: number;
 }
 export const BUNDLE_LIMITS: Readonly<BundleLimits> = Object.freeze({
   maxEntries: MAX_BUNDLE_ENTRIES,
   maxCompressedBytes: MAX_BUNDLE_COMPRESSED_BYTES,
   maxExpandedBytes: MAX_BUNDLE_EXPANDED_BYTES,
   maxRatio: MAX_BUNDLE_RATIO,
+  maxAssetBytes: asset.MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
 });
 /** Test/consumer limits may only tighten the production contract. */
 export function resolveBundleLimits(overrides: Partial<BundleLimits> = {}): BundleLimits {

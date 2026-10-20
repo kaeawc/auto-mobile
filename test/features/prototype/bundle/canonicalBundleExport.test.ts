@@ -27,7 +27,11 @@ import {
 } from "../../../helpers/prototypeBundleRecipe";
 import assetContract from "../../../../schemas/prototype-asset-contract.json";
 
-const image = { id: "image", mimeType: "image/png", bytes: Uint8Array.from([1, 2, 3]) } as const;
+const image = {
+  id: "image",
+  mimeType: "image/png",
+  bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+} as const;
 const font = { id: "font", mimeType: "font/ttf", bytes: Uint8Array.from([0, 1, 0, 0]) } as const;
 const spec = {
   ...RECIPE_MINIMAL_SPEC,

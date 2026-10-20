@@ -1,0 +1,9 @@
+{
+  "description": "lone-low-surrogate",
+  "base": "minimal",
+  "specText": "{\"id\":\"minimal\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"text\",\"text\":\"\\uDC00\"}}",
+  "expected": {
+    "code": "spec_invalid",
+    "entry": "spec.json"
+  }
+}

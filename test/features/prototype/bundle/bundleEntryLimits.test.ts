@@ -64,12 +64,12 @@ describe("per-entry expanded limits", () => {
         manifest: { assets: records },
         entries: records.map((item, index) => ({
           name: item.file,
-          repeat: { byte: index, count: index < 4 ? 4 * 1024 * 1024 : lastBytes },
+          repeat: { byte: index, count: index < 4 ? 16 : lastBytes },
         })),
       });
     // Hashes are deliberately wrong: at the boundary we reach hash validation;
     // one extra byte must instead stop at the independent aggregate asset cap.
-    expect(() => readPrototypeBundle(build(lastBytes))).toThrow(
+    expect(() => readPrototypeBundle(build(lastBytes), { maxAssetBytes: 64 })).toThrow(
       lastBytes === 0 ? "sha_mismatch" : "expanded_too_large",
     );
   });

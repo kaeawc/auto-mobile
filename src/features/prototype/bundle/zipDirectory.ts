@@ -87,13 +87,13 @@ function checkEntryAttributes(bytes: Buffer, at: number, entry: ZipEntry): void 
   bundleAssert((entry.flags & ~0x800) === 0, "flags_unsupported", entry.name);
   bundleAssert(entry.method === 0 || entry.method === 8, "unsupported_method", entry.name);
 }
-function centralEntry(bytes: Buffer, at: number): { entry: ZipEntry; next: number } {
-  zipRange(bytes, at, 46);
+function centralEntry(bytes: Buffer, at: number, end: number): { entry: ZipEntry; next: number } {
+  bundleAssert(at >= 0 && at + 46 <= end, "zip_invalid");
   bundleAssert(bytes.readUInt32LE(at) === 0x02014b50, "zip_invalid");
   const nameSize = bytes.readUInt16LE(at + 28);
   const extraSize = bytes.readUInt16LE(at + 30);
   const commentSize = bytes.readUInt16LE(at + 32);
-  zipRange(bytes, at + 46, nameSize + extraSize + commentSize);
+  bundleAssert(at + 46 + nameSize + extraSize + commentSize <= end, "zip_invalid");
   const name = entryName(bytes.subarray(at + 46, at + 46 + nameSize));
   const entry: ZipEntry = {
     name,
@@ -129,12 +129,14 @@ export function readZipDirectory(bytes: Buffer, limits: BundleLimits): ZipDirect
   bundleAssert(offset + size === end, "eocd_invalid");
   const entries: ZipEntry[] = [];
   const names = new Set<string>();
+  const offsets = new Set<number>();
   let at = offset;
   for (let index = 0; index < count; index++) {
-    const parsed = centralEntry(bytes, at);
-    bundleAssert(parsed.next <= end, "zip_invalid", parsed.entry.name);
+    const parsed = centralEntry(bytes, at, end);
     bundleAssert(!names.has(parsed.entry.name), "duplicate_entry", parsed.entry.name);
+    bundleAssert(!offsets.has(parsed.entry.offset), "zip_invalid", parsed.entry.name);
     names.add(parsed.entry.name);
+    offsets.add(parsed.entry.offset);
     entries.push(parsed.entry);
     at = parsed.next;
   }

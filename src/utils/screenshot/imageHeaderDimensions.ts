@@ -31,8 +31,8 @@ export function detectImageMimeType(buffer: Buffer): ImageMimeType | null {
   }
   if (
     buffer.length >= 12 &&
-    buffer.toString("ascii", 0, 4) === "RIFF" &&
-    buffer.toString("ascii", 8, 12) === "WEBP"
+    buffer.toString("latin1", 0, 4) === "RIFF" &&
+    buffer.toString("latin1", 8, 12) === "WEBP"
   ) {
     return "image/webp";
   }

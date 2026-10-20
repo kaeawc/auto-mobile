@@ -1,0 +1,36 @@
+{
+  "description": "WebP magic byte 8 has its high bit set",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "image"
+    }
+  },
+  "manifest": {
+    "assets": [
+      {
+        "id": "image",
+        "file": "assets/4191d2c0df3a1ab1bc5c89eb7daf91a89c6ee4b53bfabaa303696786094f3573.webp",
+        "sha256": "4191d2c0df3a1ab1bc5c89eb7daf91a89c6ee4b53bfabaa303696786094f3573",
+        "mediaType": "image/webp"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "name": "assets/4191d2c0df3a1ab1bc5c89eb7daf91a89c6ee4b53bfabaa303696786094f3573.webp",
+      "base64": "UklGRgAAAADXRUJQ"
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "assets/4191d2c0df3a1ab1bc5c89eb7daf91a89c6ee4b53bfabaa303696786094f3573.webp"
+  }
+}

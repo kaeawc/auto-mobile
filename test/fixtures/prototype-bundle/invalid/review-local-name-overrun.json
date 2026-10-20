@@ -1,0 +1,17 @@
+{
+  "description": "Local name crosses central-directory boundary",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "local",
+      "index": 1,
+      "offset": 26,
+      "type": "u16",
+      "value": 109
+    }
+  ],
+  "expected": {
+    "code": "zip_invalid",
+    "entry": "spec.json"
+  }
+}

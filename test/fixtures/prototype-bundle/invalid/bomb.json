@@ -16,7 +16,7 @@
     }
   ],
   "expected": {
-    "code": "expanded_too_large",
+    "code": "size_mismatch",
     "entry": "spec.json"
   }
 }

@@ -1,0 +1,14 @@
+{
+  "description": "number-overflow",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "bundle.json",
+      "text": "{\"bundleFormatVersion\":1e400,\"specSha256\":\"891e5c4cd7fcb5c25cb54ef5a197b4f96920779d3661515c944c6150c7e753d2\",\"assets\":[],\"fonts\":[],\"requires\":[]}"
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "bundle.json"
+  }
+}

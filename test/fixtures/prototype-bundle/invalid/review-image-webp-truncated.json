@@ -1,0 +1,36 @@
+{
+  "description": "image/webp truncated",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "image"
+    }
+  },
+  "manifest": {
+    "assets": [
+      {
+        "id": "image",
+        "file": "assets/4fc8834bd69762ec91181ea189484abd2e5470b23882ea6a341a980fa5274b4a.webp",
+        "sha256": "4fc8834bd69762ec91181ea189484abd2e5470b23882ea6a341a980fa5274b4a",
+        "mediaType": "image/webp"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "name": "assets/4fc8834bd69762ec91181ea189484abd2e5470b23882ea6a341a980fa5274b4a.webp",
+      "base64": "UklGRgAAAABXRUI="
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "assets/4fc8834bd69762ec91181ea189484abd2e5470b23882ea6a341a980fa5274b4a.webp"
+  }
+}

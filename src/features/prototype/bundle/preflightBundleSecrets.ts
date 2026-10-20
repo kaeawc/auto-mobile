@@ -5,22 +5,37 @@ import { walkPrototypeNodes } from "../prototypeNodeChildren";
 import { mapBindableFields, record } from "../prototypeTemplate";
 
 export interface BundleSecretWarning {
-  code: "secret_header" | "secret_query" | "private_host";
+  code: "secret_header" | "secret_query" | "secret_userinfo" | "private_host";
   path: string;
   /** Header/query name or host only; never includes a secret value. */
   name: string;
 }
-const secretHeader = /^(?:authorization|cookie|x-api-key)$/i;
-const secretQuery = /^(?:token|key|secret|sig)$/i;
+const secretHeader = /^(?:authorization|proxy-authorization|cookie|x-api-key|x-auth-token)$/i;
+const secretQuery =
+  /^(?:token|access_token|id_token|refresh_token|key|api_key|apikey|secret|client_secret|sig|signature|password)$/i;
 const hostPolicy = new StrictEgressPolicy(new Set());
 function parseUrl(value: string): URL | undefined {
   return URL.canParse(value) ? new URL(value) : undefined;
 }
 function warnHost(url: URL, path: string, out: BundleSecretWarning[]): void {
   const host = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
-  if (!hostPolicy.permitsHostname(host) || (isIP(host) && classifyAddress(host) !== "public")) {
+  if (
+    !hostPolicy.permitsHostname(host) ||
+    /\.(?:internal|local|lan|localhost)$/i.test(host) ||
+    (isIP(host) && classifyAddress(host) !== "public")
+  ) {
     out.push({ code: "private_host", path: `${path}.url`, name: host });
   }
+}
+function queryParams(value: string, url: URL | undefined): URLSearchParams {
+  if (url) {
+    return url.searchParams;
+  }
+  // Strip the fragment first: a question mark inside it is not a query delimiter.
+  const beforeFragment = value.split("#", 1)[0]!;
+  const at = beforeFragment.indexOf("?");
+  // URLSearchParams supplies the standard &, =, percent and + decoding offline.
+  return new URLSearchParams(at < 0 ? "" : beforeFragment.slice(at + 1));
 }
 function requestWarnings(
   action: Record<string, unknown>,
@@ -33,10 +48,14 @@ function requestWarnings(
     }
   }
   const query = new Set(Object.keys(record(action.query) ?? {}));
-  const url = typeof action.url === "string" ? parseUrl(action.url) : undefined;
+  const urlText = typeof action.url === "string" ? action.url : "";
+  const url = parseUrl(urlText);
+  for (const key of queryParams(urlText, url).keys()) {
+    query.add(key);
+  }
   if (url) {
-    for (const key of url.searchParams.keys()) {
-      query.add(key);
+    if (url.username || url.password) {
+      out.push({ code: "secret_userinfo", path: `${path}.url`, name: "userinfo" });
     }
     warnHost(url, path, out);
   }

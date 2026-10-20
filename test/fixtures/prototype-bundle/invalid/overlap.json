@@ -11,7 +11,7 @@
     }
   ],
   "expected": {
-    "code": "extra_data",
+    "code": "zip_invalid",
     "entry": "spec.json"
   }
 }

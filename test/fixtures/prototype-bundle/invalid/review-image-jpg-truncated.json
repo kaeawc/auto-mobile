@@ -1,0 +1,36 @@
+{
+  "description": "image/jpeg truncated",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "image"
+    }
+  },
+  "manifest": {
+    "assets": [
+      {
+        "id": "image",
+        "file": "assets/71563ad80061407ede9c6f316836284bd3710a520c5a792b5eda1cb703690815.jpg",
+        "sha256": "71563ad80061407ede9c6f316836284bd3710a520c5a792b5eda1cb703690815",
+        "mediaType": "image/jpeg"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "name": "assets/71563ad80061407ede9c6f316836284bd3710a520c5a792b5eda1cb703690815.jpg",
+      "base64": "/9g="
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "assets/71563ad80061407ede9c6f316836284bd3710a520c5a792b5eda1cb703690815.jpg"
+  }
+}

@@ -3,7 +3,7 @@ import { inflateRawSync } from "node:zlib";
 import { PrototypeBundleError, bundleAssert } from "./bundleErrors";
 import { bundleCrc32 } from "./bundleIntegrity";
 import { entryExpandedCap, type BundleLimits } from "./bundleLimits";
-import { checkZipExtras, zipRange, type ZipEntry, type ZipDirectory } from "./zipDirectory";
+import { checkZipExtras, type ZipEntry, type ZipDirectory } from "./zipDirectory";
 
 function localPayload(
   bytes: Buffer,
@@ -11,12 +11,13 @@ function localPayload(
   directoryOffset: number,
 ): { data: Buffer; end: number } {
   const at = entry.offset;
-  zipRange(bytes, at, 30, entry.name);
+  bundleAssert(at >= 0 && at + 30 <= directoryOffset, "zip_invalid", entry.name);
   bundleAssert(bytes.readUInt32LE(at) === 0x04034b50, "zip_invalid", entry.name);
   const nameSize = bytes.readUInt16LE(at + 26);
   const extraSize = bytes.readUInt16LE(at + 28);
   const start = at + 30 + nameSize + extraSize;
-  zipRange(bytes, at + 30, nameSize + extraSize, entry.name);
+  const end = start + entry.compressed;
+  bundleAssert(end <= directoryOffset, "zip_invalid", entry.name);
   bundleAssert(
     bytes.subarray(at + 30, at + 30 + nameSize).equals(Buffer.from(entry.name, "ascii")),
     "size_mismatch",
@@ -36,8 +37,6 @@ function localPayload(
     entry.name,
   );
   checkZipExtras(bytes, at + 30 + nameSize, extraSize, entry.name);
-  const end = start + entry.compressed;
-  bundleAssert(end <= directoryOffset, "size_mismatch", entry.name);
   return { data: bytes.subarray(start, end), end };
 }
 function isInflateResult(
@@ -52,7 +51,7 @@ function inflate(
   data: Buffer,
   entry: ZipEntry,
   cap: number,
-  capCode: "expanded_too_large" | "ratio_exceeded",
+  capCode: "expanded_too_large" | "ratio_exceeded" | "size_mismatch",
 ): Buffer {
   if (entry.method === 0) {
     bundleAssert(data.length <= cap, capCode, entry.name);
@@ -90,12 +89,17 @@ export function inflateZipEntries(
     const ratioCap = entry.compressed * limits.maxRatio;
     bundleAssert(entry.expanded <= expandedCap, "expanded_too_large", entry.name);
     bundleAssert(entry.expanded <= ratioCap, "ratio_exceeded", entry.name);
-    const cap = Math.min(expandedCap, ratioCap);
+    const budgetCap = Math.min(expandedCap, ratioCap);
+    const cap = Math.min(budgetCap, entry.expanded + 1);
     const inflated = inflate(
       payload.data,
       entry,
       cap,
-      ratioCap < expandedCap ? "ratio_exceeded" : "expanded_too_large",
+      entry.expanded + 1 <= budgetCap
+        ? "size_mismatch"
+        : ratioCap < expandedCap
+          ? "ratio_exceeded"
+          : "expanded_too_large",
     );
     total += inflated.length;
     bundleAssert(inflated.length === entry.expanded, "size_mismatch", entry.name);

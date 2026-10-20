@@ -3,7 +3,7 @@ import { validatePrototypeSpec } from "../prototypeValidation";
 import { detectFontMimeType, prototypeAssetUploadProblem } from "../prototypeAssets";
 import { bundleAssert, PrototypeBundleError } from "./bundleErrors";
 import { bundleSha256 } from "./bundleIntegrity";
-import { BUNDLE_ASSET_LIMITS, resolveBundleLimits, type BundleLimits } from "./bundleLimits";
+import { resolveBundleLimits, type BundleLimits } from "./bundleLimits";
 import {
   parseBundleJson,
   parseBundleManifest,
@@ -13,6 +13,7 @@ import {
 import { bundleReferences, type BundleReferences } from "./bundleReferences";
 import { readZipDirectory } from "./zipDirectory";
 import { inflateZipEntries } from "./zipInflate";
+import { detectImageMimeType } from "../../../utils/screenshot/imageHeaderDimensions";
 
 export interface PrototypeBundle {
   manifest: BundleManifest;
@@ -56,7 +57,9 @@ function checkRecords(
       item.file,
     );
     bundleAssert(
-      !item.mediaType.startsWith("font/") || detectFontMimeType(bytes) === item.mediaType,
+      item.mediaType.startsWith("font/")
+        ? detectFontMimeType(bytes) === item.mediaType
+        : detectImageMimeType(bytes) === item.mediaType,
       "manifest_invalid",
       item.file,
     );
@@ -64,7 +67,7 @@ function checkRecords(
   }
   return out;
 }
-function bundleContents(entries: Map<string, Buffer>): PrototypeBundle {
+function bundleContents(entries: Map<string, Buffer>, limits: BundleLimits): PrototypeBundle {
   const manifest = parseBundleManifest(
     parseBundleJson(utf8(requiredEntry(entries, "bundle.json"), "bundle.json"), "bundle.json"),
   );
@@ -90,10 +93,7 @@ function bundleContents(entries: Map<string, Buffer>): PrototypeBundle {
       assetTotal += bytes.length;
     }
   }
-  bundleAssert(
-    assetTotal <= BUNDLE_ASSET_LIMITS.MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
-    "expanded_too_large",
-  );
+  bundleAssert(assetTotal <= limits.maxAssetBytes, "expanded_too_large");
   return {
     manifest,
     specJson,
@@ -110,5 +110,5 @@ export function readPrototypeBundle(
   bundleAssert(input.byteLength <= limits.maxCompressedBytes, "compressed_too_large");
   // A private snapshot makes mutation of the caller's bytes unable to change validation.
   const bytes = Buffer.from(input);
-  return bundleContents(inflateZipEntries(bytes, readZipDirectory(bytes, limits), limits));
+  return bundleContents(inflateZipEntries(bytes, readZipDirectory(bytes, limits), limits), limits);
 }

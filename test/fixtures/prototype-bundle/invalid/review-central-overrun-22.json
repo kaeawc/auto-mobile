@@ -1,0 +1,16 @@
+{
+  "description": "Central name crosses directory end by 22",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "index": 1,
+      "offset": 28,
+      "type": "u16",
+      "value": 31
+    }
+  ],
+  "expected": {
+    "code": "zip_invalid"
+  }
+}

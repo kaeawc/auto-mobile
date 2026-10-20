@@ -13,7 +13,7 @@
     }
   ],
   "expected": {
-    "code": "ratio_exceeded",
+    "code": "size_mismatch",
     "entry": "spec.json"
   }
 }

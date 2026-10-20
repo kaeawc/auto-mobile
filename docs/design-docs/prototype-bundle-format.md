@@ -43,6 +43,15 @@ No filesystem, DNS, network, clock, randomness, or logger is used by the codec.
 The reused spec validator may log invalid JSON; the codec decodes JSON itself
 before validation so malformed JSON is a structured codec failure.
 
+Both JSON files must use the portable JSON subset: valid UTF-8 and JSON grammar,
+unique decoded object keys at every nesting depth (including escaped-equivalent
+keys), Unicode scalar strings/keys (no lone high or low surrogate escapes), and
+numbers whose IEEE-754 double conversion is finite (`1e400` is refused).
+Paired surrogate escapes are accepted. Duplicate keys are rejected even if their
+values agree. Violations are `manifest_invalid` / `spec_invalid`, with the JSON
+filename as `entry`. Check the original token stream before schema validation;
+parsing into a map alone silently loses duplicates on some platforms.
+
 `exportCanonicalBundle({spec, assets?, fonts?, requires?})` takes existing
 `PrototypeAssetUpload` records (id, mimeType, bytes). It validates the spec and
 rebuilds an archive containing only referenced uploads, plus bundle.json/spec.json.
@@ -64,9 +73,17 @@ No source URL, thumbnail, library file, local storage policy, or timestamps are
 added. Repeated exports of equivalent input produce identical bytes.
 
 `preflightBundleSecrets(spec)` returns advisory `{code,path,name}` warnings for
-secret_header (Authorization/Cookie/X-Api-Key, case insensitive), secret_query
-(token/key/secret/sig, case insensitive, URL and explicit query keys), private_host
-(localhost/subdomains and non-public IP literals). It reuses the egress address
+secret_header (Authorization, Proxy-Authorization, Cookie, X-Api-Key, X-Auth-Token),
+secret_query (token, access_token, id_token, refresh_token, key, api_key, apikey,
+secret, client_secret, sig, signature, password), secret_userinfo (nonempty URL
+username or password; name is always `userinfo`), and private_host
+(localhost/subdomains, *.internal, *.local, *.lan, *.localhost and non-public IP
+literals, including metadata.google.internal). Header/query matching is case
+insensitive. URL query keys are URL-decoded; explicit query keys are literal.
+For relative or templated URLs that the URL parser cannot parse, strip `#` and
+everything after it, take the substring after the first `?`, and split query
+pairs at `&` and their first `=` using standard form percent/plus decoding.
+It reuses the egress address
 classifier and component/node/action walkers, including nested request follow-ups.
 It performs no DNS lookup; domain names resolving to private addresses cannot be
 classified offline. Diagnostic names never contain header/query secret values.
@@ -91,12 +108,18 @@ expanded cap is cumulative actual output; individual images retain the 4 MiB cap
 fonts 2 MiB, assets/fonts together 16 MiB. The per-entry ratio is actual expanded
 bytes / compressed payload bytes (zero compressed bytes permit zero output only).
 Spec and manifest have the allowances above. `maxOutputLength` in zlib counts
-output while inflating; headers never authorize unbounded allocation. The remaining
-aggregate budget and ratio budget further tighten that hard cap. Header-declared
-sizes are checked before inflate and actual sizes/CRC after inflate. A cap hit
-reports the smaller limiting budget (expanded wins a tie). Exact boundaries pass.
+output while inflating; headers never authorize unbounded allocation. First check
+declared size against the remaining expanded budget and then the declared ratio.
+The inflate cap is min(declared uncompressed size + 1, expanded budget, ratio budget).
+A cap hit reports `size_mismatch` when declared size + 1 is a smallest cap
+(it wins ties); otherwise it reports the smaller budget (expanded wins a tie).
+Actual size equality and CRC follow inflation. Exact boundaries pass.
 The expanded/spec allowances reserve metadata independently of the asset total;
 manifest record count makes normally realizable archives at most 34 entries.
+`BundleLimits.maxAssetBytes` independently tightens the combined image/font total
+(default 16,777,216); it does not consume the metadata allowance. Together with
+maxEntries, maxCompressedBytes, maxExpandedBytes and maxRatio, it obeys the same
+positive safe-integer, tightening-only override rule.
 
 ## ZIP acceptance and rejection ordering
 
@@ -119,45 +142,85 @@ ASCII names with `..`, backslash, leading slash, drive prefix or NUL fail as pat
 traversal. Remaining disallowed names (including directories and __MACOSX) fail
 entry_not_allowed. Duplicate names are case sensitive and fail before inflation.
 
-Processing order: validate overrides and input compressed cap; locate/validate
-EOCD and count; parse central entries in directory order (name, attributes/disk/
-ZIP64/flags/method, extras, duplicates); process local entries by ascending offset;
-check local header consistency, expanded cap, ratio, inflate, actual size, CRC;
-require/parse manifest, require/hash/decode/validate spec, reject storage; reject
-unlisted files and asset-total excess; cross-check image IDs/files/SHA/payload,
-then font IDs/files/SHA/payload. First failure wins. Kotlin and Swift must mirror
-this order as well as the codes, not rely on platform ZIP-library error messages.
-The transport hashes encoded files; image decoding belongs to later importers.
-Font signatures reuse the existing asset contract's TTF/OTF detection.
-The detected signature must match the declared font media type.
+First failure wins, in this exact order:
 
-| Code                  | Meaning                                                            |
-| --------------------- | ------------------------------------------------------------------ |
-| entry_not_allowed     | Non-allowlisted entry, DOS directory, or unlisted payload          |
-| duplicate_entry       | Repeated central-directory filename                                |
-| path_traversal        | Unsafe ASCII path spelling                                         |
-| non_ascii_name        | Filename contains a byte above 127                                 |
-| unsupported_method    | Compression method other than 0 or 8                               |
-| encrypted             | Encryption, strong-encryption or masked-header flag                |
-| unix_mode_not_regular | Nonzero Unix mode without regular-file type                        |
-| multi_disk            | Archive/entry disk fields or EOCD counts disagree                  |
-| too_many_entries      | EOCD entry count exceeds cap                                       |
-| compressed_too_large  | Whole archive exceeds compressed cap                               |
-| expanded_too_large    | Individual, aggregate or asset-total expanded cap                  |
-| ratio_exceeded        | Declared or actual entry ratio exceeds cap                         |
-| size_mismatch         | Local/central mismatch or actual/header size mismatch              |
-| crc_mismatch          | Inflated CRC-32 differs                                            |
-| sha_mismatch          | Spec hash or manifest/named payload hash differs                   |
-| eocd_invalid          | Missing/truncated EOCD or inconsistent directory extent            |
-| manifest_invalid      | Invalid JSON/UTF-8/schema/group/path/ID/reference/payload contract |
-| spec_invalid          | Invalid JSON/UTF-8/spec contract or storage present                |
-| missing_entry         | Required file or referenced ID absent                              |
-| extra_data            | Gaps, overlaps, comments, trailing data, leftover DEFLATE input    |
-| zip64_unsupported     | ZIP64 marker/extra/version-needed                                  |
-| flags_unsupported     | Unsupported flags, including data descriptors                      |
-| zip_invalid           | Invalid/truncated header, bounds or extra-field structure          |
-| inflate_invalid       | Malformed DEFLATE or unavailable inflate-result accounting         |
-| limits_invalid        | Noninteger, nonpositive or raised cap override                     |
+1. Validate overrides; check whole-input compressed cap; require at least 22 bytes.
+   Search backward from length - 22 through max(0, length - 22 - 65535) for EOCD.
+   The first signature found must be at length - 22 with comment length zero;
+   a misplaced signature or comment gives `extra_data`. No signature in this
+   window gives `eocd_invalid` (including truncated input).
+2. Check EOCD disks and matching counts (`multi_disk`), then ZIP64 sentinels,
+   then `too_many_entries`, **before** requiring offset + size === EOCD start
+   (`eocd_invalid`). Kotlin must compute offset + size using Long/UInt with
+   widening before addition; never signed 32-bit arithmetic or wrapping UInt addition.
+3. Parse central records in directory order. Bound the fixed 46-byte header by
+   the directory end **before reading its fields**; check signature; read lengths;
+   bound the entire name/extras/comment region by the directory end before decoding
+   names (`zip_invalid` without `entry` for either region overrun).
+   Check non-ASCII, path traversal, then filename allowlist. In
+   `checkEntryAttributes`, check Unix mode, DOS directory bit, disk, ZIP64
+   version/offset/sizes, encryption flags, unsupported flags, then method, in that
+   order. Next check extra fields (each header bounds, ZIP64 tag, payload bounds),
+   entry comment (`extra_data`), duplicate name (`duplicate_entry`), and duplicate
+   local offset (`zip_invalid`, attributed to the second directory record).
+   Require consumed directory bytes to equal its extent (`extra_data`). A comment
+   length extending into EOCD is a bounds failure before the comment check.
+4. Process locals by ascending numeric offset. Offsets are unique; do not depend
+   on sort stability. Require offset == cursor (`extra_data`, including gaps or
+   overlap). Bound the fixed 30-byte local header by directoryOffset before any
+   field read; check signature; read lengths; bound the complete local name,
+   extras and declared compressed payload by directoryOffset **before** name or
+   consistency checks (`zip_invalid`, with the central entry name). Compare raw
+   name bytes (`size_mismatch` on local-name disagreement), then version, flags,
+   method, CRC and sizes (`size_mismatch`), then local extras. Check declared
+   expanded cap, declared ratio, inflate (including output cap), consumed DEFLATE
+   input (`extra_data`), actual size, CRC. Require final cursor == directoryOffset.
+   STORED entries check the output cap before copying and actual size afterward.
+5. Require bundle.json, decode UTF-8, validate JSON grammar/subset, validate strict
+   manifest schema and record count, then record IDs/groups/hash paths in authored
+   assets-then-fonts order, then unique requires. Require spec.json, hash it,
+   decode UTF-8, validate JSON grammar/subset and spec contract, then reject storage.
+   Walk references; reject unlisted entries in local offset order; check asset total.
+6. Cross-check images, then fonts. For each group, require referenced IDs in walk
+   order; for each authored manifest record, require that ID is referenced, require
+   its file, check SHA, upload contract, then signature agreement. No locale or
+   Unicode-normalising comparison is permitted: Swift/Kotlin must compare raw
+   ASCII filename bytes for names and canonical ZIP ordering.
+
+Kotlin and Swift must mirror these codes and checks instead of platform ZIP-library
+error messages. The transport hashes encoded files; image decoding belongs to later
+importers. Image signatures are PNG `89 50 4E 47 0D 0A 1A 0A`, JPEG `FF D8 FF`,
+WebP `RIFF` + four arbitrary bytes + `WEBP` (at least 12 bytes). Font signatures
+reuse the existing TTF/OTF detection. Signature/type disagreement is
+`manifest_invalid` with the asset/font filename as `entry`.
+
+| Code                  | Meaning                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| entry_not_allowed     | Non-allowlisted entry, DOS directory, or unlisted payload                                |
+| duplicate_entry       | Repeated central-directory filename                                                      |
+| path_traversal        | Unsafe ASCII path spelling                                                               |
+| non_ascii_name        | Filename contains a byte above 127                                                       |
+| unsupported_method    | Compression method other than 0 or 8                                                     |
+| encrypted             | Encryption, strong-encryption or masked-header flag                                      |
+| unix_mode_not_regular | Nonzero Unix mode without regular-file type                                              |
+| multi_disk            | Archive/entry disk fields or EOCD counts disagree                                        |
+| too_many_entries      | EOCD entry count exceeds cap                                                             |
+| compressed_too_large  | Whole archive exceeds compressed cap                                                     |
+| expanded_too_large    | Individual, aggregate or asset-total expanded cap                                        |
+| ratio_exceeded        | Declared or actual entry ratio exceeds cap                                               |
+| size_mismatch         | Local/central name/field mismatch, actual/header size or declared inflate cap            |
+| crc_mismatch          | Inflated CRC-32 differs                                                                  |
+| sha_mismatch          | Spec hash or manifest/named payload hash differs                                         |
+| eocd_invalid          | Missing/truncated EOCD or inconsistent directory extent                                  |
+| manifest_invalid      | Invalid JSON/UTF-8/schema/group/path/ID/reference/payload contract                       |
+| spec_invalid          | Invalid JSON/UTF-8/spec contract or storage present                                      |
+| missing_entry         | Required file or referenced ID absent                                                    |
+| extra_data            | Gaps, overlaps, comments, trailing data, leftover DEFLATE input                          |
+| zip64_unsupported     | ZIP64 marker/extra/version-needed                                                        |
+| flags_unsupported     | Unsupported flags, including data descriptors                                            |
+| zip_invalid           | Invalid/truncated header, region bounds, duplicate local offset or extra-field structure |
+| inflate_invalid       | Malformed DEFLATE or unavailable inflate-result accounting                               |
+| limits_invalid        | Noninteger, nonpositive or raised cap override                                           |
 
 ## Language-neutral recipe format
 
@@ -166,7 +229,7 @@ LF as text in .gitattributes. No binary ZIPs are checked in. The independent tes
 builder is `test/helpers/prototypeBundleRecipe.ts`; Kotlin/Swift must implement the
 same JSON recipe instructions. The corpus test verifies every closed code occurs.
 
-Each recipe has `description`, optional `base`, optional `limits` (the four
+Each recipe has `description`, optional `base`, optional `limits` (the five
 BundleLimits field names), and `expected`: either `"accept"` or `{code,entry?}`.
 `base: "minimal"` creates bundle.json and spec.json in that order. The default spec
 is compact UTF-8 JSON with exactly this insertion order:
@@ -181,11 +244,13 @@ is compact UTF-8 JSON with exactly this insertion order:
 
 `base: "assets_fonts"` replaces root with column/children, first image asset
 `"image"`, then text `"Font"` styled with fontFamily `{asset:"font"}`. It adds
-image bytes [1,2,3] as image/png and font bytes [0,1,0,0] as font/ttf. Image/font
+image bytes [137,80,78,71,13,10,26,10] as image/png and font bytes [0,1,0,0] as font/ttf. Image/font
 records have id,file,sha256,mediaType in that order. The manifest field order is
 bundleFormatVersion,specSha256,assets,fonts,requires. The hash covers the exact
 compact spec bytes. All defaults use STORED. No base means no implicit entries.
-`spec` replaces the base spec. `manifest` shallow-overrides base manifest fields.
+`spec` replaces the base spec. `specText`, when present, overrides serialized spec
+bytes verbatim (and the default manifest hash covers those bytes), enabling invalid
+JSON and duplicate-key recipes. `manifest` shallow-overrides base manifest fields.
 Serialize JSON compactly, no newline, in the order shown/authored in the recipe.
 
 `omit` removes base entries by literal filename. `overrides` shallow-merges entry

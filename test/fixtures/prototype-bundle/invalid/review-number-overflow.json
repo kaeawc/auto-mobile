@@ -1,0 +1,9 @@
+{
+  "description": "number-overflow",
+  "base": "minimal",
+  "specText": "{\"id\":\"minimal\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"data\":{\"n\":1e400},\"root\":{\"type\":\"text\",\"text\":\"Hello\"}}",
+  "expected": {
+    "code": "spec_invalid",
+    "entry": "spec.json"
+  }
+}

@@ -3,6 +3,7 @@ import { savedPrototypeAssetPath } from "../savedPrototypeLayout";
 import { prototypeAssetIdProblem } from "../prototypeAssets";
 import { BUNDLE_ASSET_LIMITS } from "./bundleLimits";
 import { bundleAssert, PrototypeBundleError } from "./bundleErrors";
+import { validateBundleJsonTokens } from "./bundleJson";
 
 const sha = z.string().regex(/^[0-9a-f]{64}$/);
 const recordSchema = z
@@ -61,7 +62,9 @@ export function parseBundleManifest(value: unknown): BundleManifest {
 }
 export function parseBundleJson(text: string, entry: "bundle.json" | "spec.json"): unknown {
   try {
-    return JSON.parse(text);
+    const value: unknown = JSON.parse(text);
+    validateBundleJsonTokens(text);
+    return value;
   } catch (error) {
     throw new PrototypeBundleError(
       entry === "bundle.json" ? "manifest_invalid" : "spec_invalid",

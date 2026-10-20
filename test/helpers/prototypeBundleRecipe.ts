@@ -28,6 +28,7 @@ export interface BundleRecipe {
   description: string;
   base?: "minimal" | "assets_fonts";
   spec?: unknown;
+  specText?: string;
   manifest?: Record<string, unknown>;
   omit?: string[];
   overrides?: RecipeEntry[];
@@ -43,7 +44,7 @@ export const RECIPE_MINIMAL_SPEC = {
   window: { placement: { type: "fullscreen" } },
   root: { type: "text", text: "Hello" },
 };
-const image = Buffer.from([1, 2, 3]);
+const image = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const font = Buffer.from([0, 1, 0, 0]);
 const hash = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 export const RECIPE_IMAGE_PATH = `assets/${hash(image)}.png`;
@@ -70,7 +71,7 @@ function baseEntries(recipe: BundleRecipe): RecipeEntry[] {
           },
         }
       : RECIPE_MINIMAL_SPEC);
-  const specJson = JSON.stringify(spec);
+  const specJson = recipe.specText ?? JSON.stringify(spec);
   const manifest = {
     bundleFormatVersion: 1,
     specSha256: hash(Buffer.from(specJson)),

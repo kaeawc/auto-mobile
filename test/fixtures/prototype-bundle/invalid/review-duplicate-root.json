@@ -1,0 +1,9 @@
+{
+  "description": "duplicate-root",
+  "base": "minimal",
+  "specText": "{\"id\":\"minimal\",\"window\":{\"placement\":{\"type\":\"fullscreen\"}},\"root\":{\"type\":\"text\",\"text\":\"ignored\"},\"root\":{\"type\":\"text\",\"text\":\"Hello\"}}",
+  "expected": {
+    "code": "spec_invalid",
+    "entry": "spec.json"
+  }
+}

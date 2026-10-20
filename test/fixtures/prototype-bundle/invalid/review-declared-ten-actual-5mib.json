@@ -1,0 +1,18 @@
+{
+  "description": "Declared ten bytes must cap inflation before ratio/expanded budgets",
+  "entries": [
+    {
+      "name": "spec.json",
+      "method": 8,
+      "expandedSize": 10,
+      "repeat": {
+        "byte": 65,
+        "count": 5242880
+      }
+    }
+  ],
+  "expected": {
+    "code": "size_mismatch",
+    "entry": "spec.json"
+  }
+}

@@ -1,6 +1,7 @@
 import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  hasSameTapTargetingLayout,
   SnapshotReferenceStore,
   snapshotReferenceUnavailable,
 } from "../../../src/features/observe/SnapshotReferenceStore";
@@ -451,6 +452,41 @@ describe("SnapshotReferenceStore", () => {
   });
 
   test.each(["observation", "hierarchy", "window"])(
+    "issues and validates a reference with only %s host-output truncation",
+    (location) => {
+      const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const complete = observation(100, 200, "frame-123", 0, {
+        node: Array.from({ length: 70 }, (_, index) => ({
+          class: "android.widget.Button",
+          bounds: { left: 0, top: index * 2, right: 100, bottom: index * 2 + 2 },
+          clickable: true,
+        })),
+      });
+      const reasons = ["max_children[node kept 64 of 70]"];
+      if (location === "observation") {
+        complete.truncationReasons = reasons;
+      } else if (location === "hierarchy") {
+        complete.viewHierarchy!.truncationReasons = reasons;
+      } else {
+        complete.viewHierarchy!.windows = [{ truncationReasons: reasons }];
+      }
+      expect(snapshotReferenceUnavailable(complete)).toEqual([]);
+      const ref = captureReference(store, "device-1", complete);
+      const refreshed = structuredClone(complete);
+      expect(store.staleReason(ref.snapshotId, "device-1", refreshed)).toBeUndefined();
+      expect(hasSameTapTargetingLayout(complete, refreshed)).toBe(true);
+      reasons.push("max_children");
+      expect(store.capture("device-1", complete)).toEqual({
+        status: "unavailable",
+        missing: ["completeHierarchy"],
+      });
+      expect(store.staleReason(ref.snapshotId, "device-1", complete)).toContain(
+        "hierarchy capture was incomplete",
+      );
+    },
+  );
+
+  test.each(["observation", "hierarchy", "window"])(
     "does not issue a reference for %s truncation",
     (location) => {
       const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
@@ -464,7 +500,7 @@ describe("SnapshotReferenceStore", () => {
       }
       expect(store.capture("device-1", truncated)).toEqual({
         status: "unavailable",
-        missing: ["Hierarchy was truncated; observe with a narrower scope."],
+        missing: ["completeHierarchy"],
       });
       expect(store.size).toBe(0);
     },
@@ -479,7 +515,9 @@ describe("SnapshotReferenceStore", () => {
         ...complete,
         truncationReasons: ["max_nodes"],
       }),
-    ).toContain("Hierarchy was truncated; observe with a narrower scope.");
+    ).toBe(
+      "Snapshot layout is unavailable. The hierarchy capture was incomplete; observe again, or use a selector or coordinates without a snapshotId.",
+    );
   });
 
   test("expires at the deadline and bounds capacity", () => {

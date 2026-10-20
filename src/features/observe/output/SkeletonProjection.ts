@@ -1,4 +1,4 @@
-import { isSystemUiStatusBarId } from "./resultOutput/hierarchy";
+import { isSystemUiStatusBarId } from "../../../utils/androidStatusBar";
 import {
   displayedSearchableLabel,
   foldSearchableLabels,

@@ -6,7 +6,8 @@ import {
   nodeBounds,
   type ViewHierarchyNode,
 } from "../../models/ViewHierarchyResult";
-import { isSystemUiStatusBarId } from "./output/resultOutput/hierarchy";
+import { isSystemUiStatusBarId } from "../../utils/androidStatusBar";
+import { captureFidelityTruncationReasons } from "./truncationReasons";
 import type { ObserveResult } from "../../models/ObserveResult";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -49,14 +50,20 @@ function withoutVolatileTapLayoutFields(value: unknown): unknown {
 
 function hasTruncatedTapLayout(observation: ObserveResult): boolean {
   return Boolean(
-    observation.truncationReasons?.length || observation.viewHierarchy?.truncationReasons?.length,
+    captureFidelityTruncationReasons(observation.truncationReasons).length ||
+    captureFidelityTruncationReasons(observation.viewHierarchy?.truncationReasons).length,
   );
 }
 
 function hasTruncatedSnapshotLayout(observation: ObserveResult): boolean {
   return (
     hasTruncatedTapLayout(observation) ||
-    Boolean(observation.viewHierarchy?.windows?.some((window) => window.truncationReasons?.length))
+    Boolean(
+      observation.viewHierarchy?.windows?.some(
+        (window) =>
+          captureFidelityTruncationReasons(window.truncationReasons ?? undefined).length > 0,
+      ),
+    )
   );
 }
 
@@ -177,7 +184,7 @@ export function snapshotReferenceUnavailable(observation: ObserveResult): string
     missing.push("frameContext");
   }
   if (hasTruncatedSnapshotLayout(observation)) {
-    missing.push("Hierarchy was truncated; observe with a narrower scope.");
+    missing.push("completeHierarchy");
   }
   return missing;
 }
@@ -393,7 +400,7 @@ export class SnapshotReferenceStore {
       return "Snapshot reference expired; re-observe.";
     }
     if (hasTruncatedSnapshotLayout(observation)) {
-      return "Snapshot layout is unavailable. Hierarchy was truncated; observe with a narrower scope.";
+      return "Snapshot layout is unavailable. The hierarchy capture was incomplete; observe again, or use a selector or coordinates without a snapshotId.";
     }
     const current = geometry(deviceId, observation);
     if (!current) {

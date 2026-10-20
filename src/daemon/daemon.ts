@@ -76,7 +76,7 @@ import {
 import {
   notifyBootedDeviceResourcesUpdated,
   resetBootedDevicesResourceCache,
-} from "../server/bootedDeviceResources";
+} from "./deviceResourceInvalidation";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,

@@ -177,8 +177,6 @@
     <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:e: NullPointerException</ID>
     <ID>TooGenericExceptionCaught:WebSocketServer.kt:WebSocketServer$e: Exception</ID>
-    <ID>TooManyFunctions:CaCertificateController.kt:CaCertificateController</ID>
-    <ID>TooManyFunctions:ConfigurableTypingPolicy.kt:ConfigurableTypingPolicy : TypingPolicy</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy$&lt;no name provided&gt; : Host</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:dev.jasonpearson.automobile.ctrlproxy.CtrlProxy.kt</ID>
@@ -190,11 +188,7 @@
     <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitDriver$CommitSequence</ID>
     <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitSink</ID>
     <ID>TooManyFunctions:ImeConnection.kt:ImeConnection</ID>
-    <ID>TooManyFunctions:ImeGraphemes.kt:ImeGraphemes</ID>
     <ID>TooManyFunctions:InputConnectionAdapter.kt:InputConnectionAdapter : ImeConnection</ID>
-    <ID>TooManyFunctions:KeyboardController.kt:KeyboardController</ID>
-    <ID>TooManyFunctions:OverlayDrawer.kt:OverlayDrawer</ID>
-    <ID>TooManyFunctions:PerfProvider.kt:PerfProvider</ID>
     <ID>TooManyFunctions:PrototypeAssetStore.kt:PrototypeAssetStore : PrototypeAssetSource</ID>
     <ID>TooManyFunctions:PrototypeController.kt:PrototypeController</ID>
     <ID>TooManyFunctions:PrototypeHost.kt:DefaultPrototypeHost : PrototypeHost</ID>
@@ -207,7 +201,6 @@
     <ID>TooManyFunctions:PrototypeSpecContent.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent.kt</ID>
     <ID>TooManyFunctions:PrototypeStorageSession.kt:PrototypeStorageSession</ID>
     <ID>TooManyFunctions:PrototypeTheme.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeTheme.kt</ID>
-    <ID>TooManyFunctions:ResultFrames.kt:dev.jasonpearson.automobile.ctrlproxy.ResultFrames.kt</ID>
     <ID>TooManyFunctions:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore : SavedPrototypeStore</ID>
     <ID>TooManyFunctions:StorageController.kt:StorageController</ID>
     <ID>TooManyFunctions:StorageSubscriptionManager.kt:StorageSubscriptionManager</ID>

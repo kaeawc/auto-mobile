@@ -12,6 +12,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionOptions
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketOptions
@@ -191,12 +192,14 @@ internal class PaneSessionProviderStabilityTest : PaneSessionProviderStabilityDi
   @Composable
   private fun rememberSession(root: Root): DesktopDaemonSessionState =
     rememberDesktopDaemonSession(
-      socketPath = "in-memory",
-      panes = root.panes,
-      sessionFactory = {
-        DesktopDaemonSession(McpDaemonClient(root.transport, sessionUuid = "desktop-session"))
-      },
-      ioDispatcher = testDispatcher,
+      DesktopDaemonSessionOptions(
+        socketPath = "in-memory",
+        panes = root.panes,
+        sessionFactory = {
+          DesktopDaemonSession(McpDaemonClient(root.transport, sessionUuid = "desktop-session"))
+        },
+        ioDispatcher = testDispatcher,
+      ),
     )
 
   @Composable

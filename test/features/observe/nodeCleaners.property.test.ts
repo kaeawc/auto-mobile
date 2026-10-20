@@ -140,7 +140,7 @@ function cleanIosNode(attrs: Record<string, unknown>): Record<string, unknown> {
   return result.hierarchy;
 }
 
-function cleanerOutputs(attrs: Record<string, unknown>): Record<string, Record<string, unknown>> {
+function cleanerOutputs(attrs: Record<string, unknown>) {
   return {
     viewHierarchy: cleanAndroidNode(attrs),
     outputTrim: trimOutputNode(attrs),
@@ -214,9 +214,7 @@ describe("observe node cleaners (property-based)", () => {
       expect(outputs.ctrlProxyIos[key]).toEqual(attrs[key]);
       expect(outputs.cleanupIos[key]).toEqual(attrs[key]);
     }
-    for (const key of CORE_KEYS.filter(
-      (candidate) => candidate !== "className" && candidate !== "value",
-    )) {
+    for (const key of CORE_KEYS.filter((candidate) => candidate !== "value")) {
       expect(outputs.viewHierarchy[key]).toEqual(attrs[key]);
     }
     expect(outputs.ctrlProxyIos.value).toEqual(attrs.value);
@@ -236,7 +234,7 @@ describe("observe node cleaners (property-based)", () => {
       const actual = Object.values(cleanerOutputs(difference.attrs)).map(
         (cleaned) => difference.attrKey in cleaned,
       );
-      expect(actual, difference.policy).toEqual(difference.survives);
+      expect(actual, difference.policy).toEqual([...difference.survives]);
     }
   });
 });

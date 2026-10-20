@@ -76,7 +76,21 @@ export function findClockReadingOffsetProviders(source: string): string[] {
             found.add(lineOf(inner.start));
           }
         },
-      }).visit(provider);
+      }).visit({
+        type: "Program",
+        start: provider.start,
+        end: provider.end,
+        sourceType: "module",
+        hashbang: null,
+        body: [
+          {
+            type: "ExpressionStatement",
+            start: provider.start,
+            end: provider.end,
+            expression: provider,
+          },
+        ],
+      });
     },
   }).visit(parsed.program);
   return [...found];

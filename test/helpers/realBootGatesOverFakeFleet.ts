@@ -1,4 +1,4 @@
-import type { ChildProcess } from "child_process";
+import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 import {
   ANDROID_MAX_BOOTED_ENV,
   AndroidBootAdmissionGate,
@@ -49,7 +49,7 @@ export class RealBootGatesOverFakeFleet {
   readonly android: AndroidBootAdmissionGate;
   readonly ios: IosSimCapacityGate;
   /** Emulator processes spawned and not yet exited, as the process table would show them. */
-  private readonly liveEmulatorProcesses = new Set<ChildProcess>();
+  private readonly liveEmulatorProcesses = new Set<HostChildProcess>();
   /** False models a host whose process table cannot be read. */
   processTableReadable = true;
 

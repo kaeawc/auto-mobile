@@ -52,7 +52,7 @@ test("JUnit wire literal matches the daemon constant and heartbeat carries its o
     readFileSync(
       join(
         root,
-        "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonHeartbeat.kt",
+        "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/HeartbeatTransport.kt",
       ),
       "utf8",
     ),

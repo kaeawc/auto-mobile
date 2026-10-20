@@ -75,9 +75,9 @@ STUB
   run "$SCRIPT" --reports-dir "$BATS_TEST_TMPDIR"
   [ "$status" -eq 2 ]; [[ "$output" == *'missing report'* ]]
   mkdir "$BATS_TEST_TMPDIR/release"
-  cp "$FIXTURE/control-proxy-composables.txt" "$BATS_TEST_TMPDIR/"
+  cp "$FIXTURE/prototype-compose-composables.txt" "$BATS_TEST_TMPDIR/"
   run "$SCRIPT" --reports-dir "$BATS_TEST_TMPDIR"
-  [ "$status" -eq 2 ]; [[ "$output" == *'release/control-proxy-module.json'* ]]
+  [ "$status" -eq 2 ]; [[ "$output" == *'release/prototype-compose-module.json'* ]]
   run "$SCRIPT" --bogus
   [ "$status" -eq 2 ]; [[ "$output" == *'unknown option'* ]]
 }
@@ -87,7 +87,7 @@ STUB
   mkdir -p "$copied"
   cp -R "$FIXTURE/." "$copied/"
   # Derive a parser edge case from the captured block, leaving the fixture byte-exact.
-  sed 's/unstable theme: PrototypeThemeSpec/unstable theme: PrototypeThemeSpec | Other/' "$FIXTURE/control-proxy-composables.txt" > "$copied/control-proxy-composables.txt"
+  sed 's/unstable theme: PrototypeThemeSpec/unstable theme: PrototypeThemeSpec | Other/' "$FIXTURE/prototype-compose-composables.txt" > "$copied/prototype-compose-composables.txt"
   run "$SCRIPT" --reports-dir "$copied"
   [ "$status" -eq 0 ]
   [[ "$output" == *'`theme: PrototypeThemeSpec \| Other`'* ]]

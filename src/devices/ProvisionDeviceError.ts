@@ -82,6 +82,7 @@ export interface ProvisionDeviceCapacityDetails {
   booted: number;
   /** Counted devices AutoMobile did not start; present only when there are any. */
   externalDevices?: string[];
+  heldDevices?: string[];
 }
 
 export interface IosRuntimeIncompatibility {

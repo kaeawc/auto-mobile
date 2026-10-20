@@ -1,3 +1,4 @@
+import { CtrlProxyLaunchTimeoutError } from "./CtrlProxyLaunchTimeoutError";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import { RemoteServicePortUnavailableError } from "./RemoteServicePortUnavailableError";
 import type { SharedCtrlProxyStart } from "./IosCtrlProxyLifecycleSteps";
@@ -294,13 +295,15 @@ export class IosCtrlProxyStartup {
       return;
     }
     if (heldProcesses.length > 0) {
-      throw new Error(
+      throw new CtrlProxyLaunchTimeoutError(
         `CtrlProxy failed to start within timeout (${timeoutSeconds}s); port ${this.state.servicePort} ` +
           `still held by ${this.host.formatListeningProcesses(heldProcesses)}`,
       );
     }
 
-    throw new Error(`CtrlProxy failed to start within timeout (${timeoutSeconds}s)`);
+    throw new CtrlProxyLaunchTimeoutError(
+      `CtrlProxy failed to start within timeout (${timeoutSeconds}s)`,
+    );
   }
 
   private async prepareRunnerForStartup(

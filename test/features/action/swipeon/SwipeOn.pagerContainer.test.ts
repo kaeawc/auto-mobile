@@ -1,5 +1,5 @@
 import { createAndroidHierarchyConverter } from "../../../helpers/androidHierarchyConverter";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { AccessibilityHierarchy } from "../../../../src/features/observe/android/types";
@@ -40,7 +40,7 @@ function harness(
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(timer));
+  clientSpy.mockReturnValue(new FakeCtrlProxy(timer));
   const observation: ObserveResult = {
     ...observationOf(viewHierarchy),
     updatedAt: 0,
@@ -128,4 +128,9 @@ describe("swipeOn container that is a pager page (#10752)", () => {
     expect(result.error).toBeUndefined();
     expect(result.element?.["resource-id"]).toBe("coverBox");
   });
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 });

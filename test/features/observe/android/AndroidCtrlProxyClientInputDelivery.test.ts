@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -113,4 +113,8 @@ describe("AndroidCtrlProxyClient input delivery", () => {
       send.mockRestore();
     });
   }
+});
+
+afterEach(() => {
+  mock.restore();
 });

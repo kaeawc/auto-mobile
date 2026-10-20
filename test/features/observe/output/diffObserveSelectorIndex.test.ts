@@ -1,6 +1,6 @@
 import { createFlatNodeForTest } from "../flatHierarchyBuilders";
 import { buildObserveResult } from "../../../helpers/observeFixture";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
@@ -659,4 +659,8 @@ describe("review regressions", () => {
     expect(selector.index).toBeUndefined();
     expect(selector).not.toHaveProperty("ambiguous");
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

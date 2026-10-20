@@ -26,7 +26,7 @@ final class PrototypeChecksStackScreenTests: XCTestCase {
         XCTAssertFalse(session.isEnabled(homeButton))
         XCTAssertFalse(session.isEnabled(detailButton))
         let blocked = try session.simulateTap(identifier: "submit").get()
-        XCTAssertEqual(blocked.map(\.kind), ["validation_failed"])
+        XCTAssertEqual(blocked.map(\.wireKind), ["validation_failed"])
         XCTAssertEqual(blocked.first?.keys, ["name", "detail"])
 
         let homeChange = session.change(key: "name", value: .string("Ada"))
@@ -35,7 +35,7 @@ final class PrototypeChecksStackScreenTests: XCTestCase {
         XCTAssertTrue(session.isEnabled(homeButton))
         XCTAssertFalse(session.isEnabled(detailButton))
         let stillBlocked = try session.simulateTap(identifier: "submit").get()
-        XCTAssertEqual(stillBlocked.map(\.kind), ["validation_failed"])
+        XCTAssertEqual(stillBlocked.map(\.wireKind), ["validation_failed"])
         XCTAssertEqual(stillBlocked.first?.keys, ["detail"])
 
         // The detail screen has never been pushed, but its validity must still be tracked.
@@ -44,7 +44,7 @@ final class PrototypeChecksStackScreenTests: XCTestCase {
         XCTAssertEqual(detailChange.first?.validity, session.validity)
         XCTAssertTrue(session.isEnabled(detailButton))
         let submitted = try session.simulateTap(identifier: "submit").get()
-        XCTAssertEqual(submitted.map(\.kind), ["emit"])
+        XCTAssertEqual(submitted.map(\.wireKind), ["emit"])
         XCTAssertEqual(submitted.first?.name, "submit")
 
         _ = session.change(key: "name", value: .string(""))

@@ -276,6 +276,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Export identity mismatch is mapped to a {success:false, code} daemon reply by the export handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
   "daemon/sessionBroker/SessionRequestOwnerMismatchError":
     "Request owner mismatch is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply (retryAfterMs only when retryable) by the release/abandon handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionBrokerStoppingError":
+    "Shutdown refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
 };
 
 interface CodedErrorModule {
@@ -518,6 +520,7 @@ function readFields(payload: WirePayload): RefusalFields {
     ...(typeof retryAfterMs === "number" && retryAfterMs > 0 ? { retryAfterMs } : {}),
     ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
+    ...(payload.heldDevices ? { heldDevices: payload.heldDevices } : {}),
   };
 }
 
@@ -952,6 +955,12 @@ describe("refusal wire contract", () => {
     const rows = Object.values(expectations.codes).map((row) => row.fields);
     expect(rows.some((fields) => fields.retryAfterMs !== undefined)).toBe(true);
     expect(rows.some((fields) => fields.externalDevices !== undefined)).toBe(true);
+    expect(rows.some((fields) => fields.heldDevices !== undefined)).toBe(true);
+    expect(
+      rows.some(
+        (fields) => fields.heldDevices?.length === 2 && fields.externalDevices === undefined,
+      ),
+    ).toBe(true);
     expect(rows.some((fields) => fields.acquireNewSession)).toBe(true);
   });
 

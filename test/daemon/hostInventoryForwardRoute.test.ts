@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { resolveSocketAdmissionLane } from "../../src/daemon/socketRequestAdmission";
+import { DAEMON_TOOL_SELECTION_PROFILE_PARAM } from "../../src/daemon/constants";
+import { createFakeSession } from "./helpers/inputSocketHarness";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 
@@ -57,4 +60,49 @@ describe("forward route of a host-inventory listing (#13796)", () => {
 
     expect(route.executionKey).toBe("device:SIM-1");
   });
+});
+
+const inventoryCases: Array<[string, string, Record<string, unknown>]> = [];
+for (const tool of ["listDevices", "listDeviceImages"]) {
+  for (const socket of ["sock-1", "sock-free"]) {
+    for (const args of [
+      {},
+      { [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile" },
+      { platform: "ios" },
+    ]) {
+      inventoryCases.push([tool, socket, args]);
+    }
+  }
+}
+
+describe("inventory admission/forward agreement", () => {
+  test.each(inventoryCases)(
+    "%s on %s with %j agrees with admission",
+    async (tool, socket, args) => {
+      const sessions = new Map([["held", createFakeSession("held", "SIM-1", "ios")]]);
+      const state = createFakeDaemonState(sessions);
+      const pool = state.getDevicePool();
+      state.getDevicePool = () => ({
+        ...pool,
+        resolveAutolockSessionForMcpSession: (id) => (id === "sock-1" ? "held" : undefined),
+      });
+      const s = new UnixSocketServerHarness(
+        "unused",
+        state,
+        new FakeTimer(),
+        undefined,
+        { mcpDispatcher: unreachableMcpDispatcher },
+        undefined,
+        { bindLock: fakeBindLock },
+      );
+      const request = call(tool, args);
+      const admissionLane = resolveSocketAdmissionLane(request);
+      const route = await s.forwardRouteFor(request, socket);
+      expect(admissionLane).toBe("host:inventory");
+      expect(admissionLane).toBe(route.executionKey);
+      if (args[DAEMON_TOOL_SELECTION_PROFILE_PARAM]) {
+        expect(route.toolSelectionProfileUuid).toBe("profile");
+      }
+    },
+  );
 });

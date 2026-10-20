@@ -44,6 +44,28 @@ describe("ServerConfig", () => {
       expect(serverConfig.isPlanExecutionActive()).toBe(false);
     });
 
+    test("leases register targets independently and release only their own registration", () => {
+      const target = { sessionUuid: "plan-session", deviceId: "simulator" };
+      const first = serverConfig.acquirePlanExecutionLease(target);
+      const second = serverConfig.acquirePlanExecutionLease(target);
+      releases.push(
+        () => first.release(),
+        () => second.release(),
+      );
+      target.deviceId = "changed-by-caller";
+      expect(serverConfig.getActivePlanExecutions()).toEqual([
+        { sessionUuid: "plan-session", deviceId: "simulator" },
+        { sessionUuid: "plan-session", deviceId: "simulator" },
+      ]);
+      first.release();
+      first.release();
+      expect(serverConfig.getActivePlanExecutions()).toEqual([
+        { sessionUuid: "plan-session", deviceId: "simulator" },
+      ]);
+      second.release();
+      expect(serverConfig.getActivePlanExecutions()).toEqual([]);
+    });
+
     test("releasing one of two leases keeps the other active", () => {
       const first = acquire();
       const second = acquire();

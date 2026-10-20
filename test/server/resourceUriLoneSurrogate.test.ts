@@ -57,7 +57,10 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
   let offenders: string[] = [];
   beforeAll(() => {
     const roots = [
-      ...readdirSync(`${import.meta.dir}/../../src/server`).map((name) => `src/server/${name}`),
+      ...readdirSync(`${import.meta.dir}/../../src/server`, {
+        recursive: true,
+        encoding: "utf8",
+      }).map((name) => `src/server/${name}`),
       "src/utils/navigationResourceUri.ts",
     ].filter((path) => path.endsWith(".ts"));
     offenders = roots.filter((path) => {

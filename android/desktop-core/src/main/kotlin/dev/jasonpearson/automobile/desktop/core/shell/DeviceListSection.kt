@@ -1,16 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.shell
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,133 +12,69 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerButton
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.onPointerEvent
-import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
+import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
+import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClient
+import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import java.io.IOException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Section displaying a list of booted devices grouped by platform, with context menus, health
- * indicators, and favorite device support.
- */
+/** Inputs and host callbacks for the device list. */
+data class DeviceListOptions(
+  val dataSourceMode: DataSourceMode,
+  val connectedProcess: McpProcess?,
+  val onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit,
+  val activeDeviceId: String?,
+  val suppressAutoSelect: Boolean,
+  val onDeviceAction: ((deviceId: String, action: String) -> Unit)? = null,
+  val favoriteDeviceIds: Set<String> = emptySet(),
+  val onToggleFavorite: ((deviceId: String) -> Unit)? = null,
+  val devices: List<BootedDeviceInfo>? = null,
+  val onKillDevice: ((String) -> Unit)? = null,
+  /** Why the last kill of a device failed, by device id; shown under its row. */
+  val killDeviceErrors: Map<String, String> = emptyMap(),
+)
+
+private class DeviceListState {
+  var devices by mutableStateOf<List<BootedDeviceInfo>>(emptyList())
+  var isLoading by mutableStateOf(true)
+  var error by mutableStateOf<String?>(null)
+
+  fun failed(message: String, cause: Exception) {
+    LoggerFactory.getLogger("DeviceListSection").warn(message, cause)
+    error = cause.message ?: message
+    isLoading = false
+  }
+}
+
+/** Devices grouped by platform, with host-provided selection and action callbacks. */
 @Composable
 fun DeviceListSection(
-  dataSourceMode: DataSourceMode,
-  connectedProcess: McpProcess?,
-  onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit,
-  activeDeviceId: String?,
-  suppressAutoSelect: Boolean,
-  onDeviceAction: ((deviceId: String, action: String) -> Unit)? = null,
-  favoriteDeviceIds: Set<String> = emptySet(),
-  onToggleFavorite: ((deviceId: String) -> Unit)? = null,
+  options: DeviceListOptions,
   modifier: Modifier = Modifier,
-  devices: List<BootedDeviceInfo>? = null,
-  onKillDevice: ((String) -> Unit)? = null,
-  /** Why the last kill of a device failed, by device id; shown under its row. */
-  killDeviceErrors: Map<String, String> = emptyMap(),
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
   val colors = SharedTheme.globalColors
   var expanded by remember { mutableStateOf(true) }
-  var bootedDevices by remember { mutableStateOf<List<BootedDeviceInfo>>(emptyList()) }
-  var isLoading by remember { mutableStateOf(true) }
-  var error by remember { mutableStateOf<String?>(null) }
-
-  // Fetch devices -- re-run when the data-source mode or connected process changes
-  LaunchedEffect(dataSourceMode, connectedProcess, devices) {
-    if (devices != null) {
-      bootedDevices = devices
-      isLoading = false
-      error = null
-      return@LaunchedEffect
-    }
-    isLoading = true
-    error = null
-    val client =
-      if (dataSourceMode == DataSourceMode.Real) {
-        try {
-          val daemonClient =
-            withContext(Dispatchers.IO) {
-              dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createFromProcess(
-                connectedProcess,
-              )
-            }
-          dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient(daemonClient)
-        } catch (e: kotlinx.coroutines.CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          LoggerFactory.getLogger("DeviceListSection").warn("Failed to connect to daemon", e)
-          error = e.message ?: "Failed to connect to daemon"
-          isLoading = false
-          return@LaunchedEffect
-        }
-      } else {
-        dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.createFake()
-      }
-    try {
-      val result =
-        withContext(Dispatchers.IO) {
-          client.readResource("automobile:devices/booted")
-        }
-      when (result) {
-        is ResourceReadResult.Success -> {
-          val parsed = DeviceResourceParser.parseBootedDevices(result.content)
-          bootedDevices = parsed?.devices ?: emptyList()
-        }
-        is ResourceReadResult.Error -> {
-          LoggerFactory.getLogger("DeviceListSection")
-            .warn("Failed to fetch devices: ${result.message}")
-          error = result.message
-        }
-      }
-      withContext(Dispatchers.IO) { client.close() }
-    } catch (e: kotlinx.coroutines.CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      LoggerFactory.getLogger("DeviceListSection").warn("Failed to fetch devices", e)
-      error = e.message ?: "Failed to fetch devices"
-    }
-    isLoading = false
+  val state = remember { DeviceListState() }
+  LaunchedEffect(options.dataSourceMode, options.connectedProcess, options.devices) {
+    loadDeviceList(options, state, ioDispatcher)
   }
-
-  // Auto-select single device
-  LaunchedEffect(bootedDevices, suppressAutoSelect) {
-    if (!suppressAutoSelect && bootedDevices.size == 1 && activeDeviceId == null) {
-      val device = bootedDevices.first()
-      onDeviceSelected(device.runtime.deviceId ?: device.identity.stableId, device.name)
-    }
-  }
-
-  // Sort: favorites first, then alphabetically by name
-  val sortedDevices =
-    remember(bootedDevices, favoriteDeviceIds) {
-      bootedDevices.sortedWith(
-        compareByDescending<BootedDeviceInfo> {
-            (it.runtime.deviceId ?: it.identity.stableId) in favoriteDeviceIds
-          }
-          .thenBy { it.name },
-      )
-    }
-
+  DeviceAutoSelection(state.devices, options)
   Column(
     modifier =
       modifier
@@ -156,259 +86,140 @@ fun DeviceListSection(
       title = "Devices",
       expanded = expanded,
       onToggle = { expanded = !expanded },
-      trailing = {
-        if (isLoading) {
-          Text(
-            "Loading...",
-            fontSize = 10.sp,
-            color = Color(0xFF2196F3),
-            maxLines = 1,
-            softWrap = false,
-          )
-        } else if (bootedDevices.isNotEmpty()) {
-          Text(
-            "${bootedDevices.size}",
-            fontSize = 10.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
-            maxLines = 1,
-            softWrap = false,
-          )
-        }
-      },
+      trailing = { DeviceListCount(state) },
     )
+    if (expanded) DeviceListContent(state, options)
+  }
+}
 
-    if (expanded) {
-      if (error != null) {
-        Text(
-          error!!,
-          fontSize = 10.sp,
-          color = Color(0xFFE53935),
-        )
-      } else if (!isLoading && sortedDevices.isEmpty()) {
-        Text(
-          "No devices found",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          maxLines = 1,
-          softWrap = false,
-        )
-      } else if (!isLoading) {
-        // Group by platform
-        val androidDevices = sortedDevices.filter { it.platform == "android" }
-        val iosDevices = sortedDevices.filter { it.platform == "ios" }
-
-        if (androidDevices.isNotEmpty()) {
-          DevicePlatformGroup(
-            label = "Android",
-            icon = "\uD83E\uDD16",
-            devices = androidDevices,
-            activeDeviceId = activeDeviceId,
-            onDeviceSelected = onDeviceSelected,
-            onDeviceAction = onDeviceAction,
-            favoriteDeviceIds = favoriteDeviceIds,
-            onToggleFavorite = onToggleFavorite,
-            onKillDevice = onKillDevice,
-            killDeviceErrors = killDeviceErrors,
-            showUnavailableActions = devices == null,
-          )
-        }
-        if (iosDevices.isNotEmpty()) {
-          DevicePlatformGroup(
-            label = "iOS",
-            icon = "\uD83C\uDF4E",
-            devices = iosDevices,
-            activeDeviceId = activeDeviceId,
-            onDeviceSelected = onDeviceSelected,
-            onDeviceAction = onDeviceAction,
-            favoriteDeviceIds = favoriteDeviceIds,
-            onToggleFavorite = onToggleFavorite,
-            onKillDevice = onKillDevice,
-            killDeviceErrors = killDeviceErrors,
-            showUnavailableActions = devices == null,
-          )
-        }
+private suspend fun loadDeviceList(
+  options: DeviceListOptions,
+  state: DeviceListState,
+  ioDispatcher: CoroutineDispatcher,
+) {
+  options.devices?.let {
+    state.devices = it
+    state.isLoading = false
+    state.error = null
+    return
+  }
+  state.isLoading = true
+  state.error = null
+  val client = createDeviceListClient(options, state, ioDispatcher) ?: return
+  try {
+    when (
+      val result = withContext(ioDispatcher) { client.readResource("automobile:devices/booted") }
+    ) {
+      is ResourceReadResult.Success -> {
+        state.devices =
+          DeviceResourceParser.parseBootedDevices(result.content)?.devices ?: emptyList()
       }
+      is ResourceReadResult.Error -> {
+        LoggerFactory.getLogger("DeviceListSection")
+          .warn("Failed to fetch devices: ${result.message}")
+        state.error = result.message
+      }
+    }
+    withContext(ioDispatcher) { client.close() }
+  } catch (e: IOException) {
+    state.failed("Failed to fetch devices", e)
+  } catch (e: McpConnectionException) {
+    state.failed("Failed to fetch devices", e)
+  }
+  state.isLoading = false
+}
+
+private suspend fun createDeviceListClient(
+  options: DeviceListOptions,
+  state: DeviceListState,
+  ioDispatcher: CoroutineDispatcher,
+): McpResourceClient? {
+  return try {
+    if (options.dataSourceMode == DataSourceMode.Real) {
+      val daemonClient =
+        withContext(ioDispatcher) {
+          McpClientFactory.createFromProcess(options.connectedProcess)
+        }
+      DaemonMcpResourceClient(daemonClient)
+    } else McpResourceClientFactory.createFake()
+  } catch (e: UnsupportedOperationException) {
+    state.failed("Failed to connect to daemon", e)
+    null
+  } catch (e: IllegalArgumentException) {
+    state.failed("Failed to connect to daemon", e)
+    null
+  } catch (e: IOException) {
+    state.failed("Failed to connect to daemon", e)
+    null
+  } catch (e: McpConnectionException) {
+    state.failed("Failed to connect to daemon", e)
+    null
+  }
+}
+
+@Composable
+private fun DeviceAutoSelection(bootedDevices: List<BootedDeviceInfo>, options: DeviceListOptions) {
+  // Auto-select single device
+  LaunchedEffect(bootedDevices, options.suppressAutoSelect) {
+    if (!options.suppressAutoSelect && bootedDevices.size == 1 && options.activeDeviceId == null) {
+      val device = bootedDevices.first()
+      options.onDeviceSelected(device.runtime.deviceId ?: device.identity.stableId, device.name)
     }
   }
 }
 
 @Composable
-private fun DevicePlatformGroup(
-  label: String,
-  icon: String,
-  devices: List<BootedDeviceInfo>,
-  activeDeviceId: String?,
-  onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit,
-  onDeviceAction: ((deviceId: String, action: String) -> Unit)?,
-  favoriteDeviceIds: Set<String>,
-  onToggleFavorite: ((deviceId: String) -> Unit)?,
-  onKillDevice: ((String) -> Unit)?,
-  killDeviceErrors: Map<String, String>,
-  showUnavailableActions: Boolean,
-) {
+private fun DeviceListCount(state: DeviceListState) {
   val colors = SharedTheme.globalColors
-
-  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+  if (state.isLoading) {
+    Text("Loading...", fontSize = 10.sp, color = Color(0xFF2196F3), maxLines = 1, softWrap = false)
+  } else if (state.devices.isNotEmpty()) {
     Text(
-      "$icon $label (${devices.size})",
-      fontSize = 11.sp,
-      color = colors.text.normal.copy(alpha = 0.6f),
+      "${state.devices.size}",
+      fontSize = 10.sp,
+      color = colors.text.normal.copy(alpha = 0.5f),
       maxLines = 1,
       softWrap = false,
     )
-    devices.forEach { device ->
-      val deviceId = device.runtime.deviceId ?: device.identity.stableId
-      DeviceRow(
-        device = device,
-        isSelected = deviceId == activeDeviceId,
-        isFavorite = deviceId in favoriteDeviceIds,
-        onSelect = { onDeviceSelected(deviceId, device.name) },
-        // Preserve legacy affordances for self-fetching callers; host-owned lists only show
-        // actions that the host can perform.
-        onToggleFavorite =
-          if (onToggleFavorite != null || showUnavailableActions) {
-            {
-              onToggleFavorite?.invoke(deviceId)
-            }
-          } else null,
-        onKillDevice = onKillDevice?.let { callback -> { callback(deviceId) } },
-        onDeviceAction =
-          if (onDeviceAction != null || showUnavailableActions) {
-            { action: String ->
-              onDeviceAction?.invoke(deviceId, action)
-            }
-          } else null,
-      )
-      killDeviceErrors[deviceId]?.let { message ->
-        Text(
-          message,
-          fontSize = 10.sp,
-          color = Color(0xFFE53935),
-          maxLines = 3,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.padding(horizontal = 8.dp),
-        )
-      }
-    }
   }
 }
 
-@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
-private fun DeviceRow(
-  device: BootedDeviceInfo,
-  isSelected: Boolean,
-  isFavorite: Boolean,
-  onSelect: () -> Unit,
-  onToggleFavorite: (() -> Unit)?,
-  onKillDevice: (() -> Unit)?,
-  onDeviceAction: ((String) -> Unit)?,
-) {
+private fun DeviceListContent(state: DeviceListState, options: DeviceListOptions) {
   val colors = SharedTheme.globalColors
-  var showContextMenu by remember { mutableStateOf(false) }
-
-  Box {
-    Row(
-      modifier =
-        Modifier.fillMaxWidth()
-          .background(
-            if (isSelected) colors.outlines.focused.copy(alpha = 0.12f) else Color.Transparent,
-            RoundedCornerShape(4.dp),
-          )
-          .semantics { selected = isSelected }
-          .clickable { onSelect() }
-          .onPointerEvent(PointerEventType.Press) { event ->
-            if (onDeviceAction != null && event.button == PointerButton.Secondary) {
-              showContextMenu = true
-            }
+  val sortedDevices =
+    remember(state.devices, options.favoriteDeviceIds) {
+      state.devices.sortedWith(
+        compareByDescending<BootedDeviceInfo> {
+            (it.runtime.deviceId ?: it.identity.stableId) in options.favoriteDeviceIds
           }
-          .pointerHoverIcon(PointerIcon.Hand)
-          .padding(horizontal = 8.dp, vertical = 4.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      if (onToggleFavorite != null) {
-        Text(
-          if (isFavorite) "\u2605" else "\u2606",
-          fontSize = 12.sp,
-          color = if (isFavorite) Color(0xFFFFC107) else colors.text.normal.copy(alpha = 0.3f),
-          modifier =
-            Modifier.clickable { onToggleFavorite() }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(end = 4.dp),
-        )
-      }
-
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          device.name,
-          fontSize = 12.sp,
-          fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
-          color = colors.text.normal,
-          maxLines = 1,
-          softWrap = false,
-          overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-          "${device.runtime.lifecycle.state} \u00B7 ${device.runtime.deviceId ?: device.identity.stableId}",
-          fontSize = 10.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-          maxLines = 1,
-          softWrap = false,
-          overflow = TextOverflow.Ellipsis,
-        )
-      }
-
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        onKillDevice?.let { kill ->
-          Text(
-            "\u23F9",
-            color = colors.text.error,
-            modifier =
-              Modifier.semantics { contentDescription = "Kill ${device.name}" }
-                .clickable(onClick = kill)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(4.dp),
-          )
-        }
-        if (isSelected) {
-          Text(
-            "\u2713",
-            fontSize = 12.sp,
-            color = colors.outlines.focused,
-          )
-        }
-      }
+          .thenBy { it.name },
+      )
     }
-
-    DropdownMenu(
-      expanded = showContextMenu,
-      onDismissRequest = { showContextMenu = false },
-    ) {
-      DropdownMenuItem(
-        text = { Text("Take Screenshot", fontSize = 12.sp) },
-        onClick = {
-          showContextMenu = false
-          onDeviceAction?.invoke("screenshot")
-        },
+  when {
+    state.error != null ->
+      Text(
+        requireNotNull(state.error) { "Device loading error must be present" },
+        fontSize = 10.sp,
+        color = Color(0xFFE53935),
       )
-      DropdownMenuItem(
-        text = { Text("Reboot Device", fontSize = 12.sp) },
-        onClick = {
-          showContextMenu = false
-          onDeviceAction?.invoke("reboot")
-        },
+    !state.isLoading && sortedDevices.isEmpty() ->
+      Text(
+        "No devices found",
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.5f),
+        maxLines = 1,
+        softWrap = false,
       )
-      DropdownMenuItem(
-        text = { Text("Clear App Data", fontSize = 12.sp) },
-        onClick = {
-          showContextMenu = false
-          onDeviceAction?.invoke("clearAppData")
-        },
-      )
+    !state.isLoading -> {
+      val androidDevices = sortedDevices.filter { it.platform == "android" }
+      val iosDevices = sortedDevices.filter { it.platform == "ios" }
+      if (androidDevices.isNotEmpty()) {
+        DevicePlatformGroup("Android", "\uD83E\uDD16", androidDevices, options)
+      }
+      if (iosDevices.isNotEmpty()) {
+        DevicePlatformGroup("iOS", "\uD83C\uDF4E", iosDevices, options)
+      }
     }
   }
 }

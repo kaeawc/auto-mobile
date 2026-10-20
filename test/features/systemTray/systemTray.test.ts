@@ -51,7 +51,7 @@ import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 isolateToolRegistry();
 
 const POLL_INTERVAL_MS = 250;
-// Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
+// Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in helpers/runtime.ts.
 const REEXPAND_INTERVAL_MS = 1000;
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 const mockInstalledApps = (packageNames: string[]) =>

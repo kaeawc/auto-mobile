@@ -1,3 +1,4 @@
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import type { IosInstallBackend, IosInstallBackendDeps } from "./IosDeviceBackend";
 
 export class SimulatorIosInstallBackend implements IosInstallBackend {
@@ -8,12 +9,15 @@ export class SimulatorIosInstallBackend implements IosInstallBackend {
     private readonly simctl: IosInstallBackendDeps["simctl"],
   ) {}
 
-  installApp(artifactPath: string, options?: { timeoutMs?: number }): Promise<void> {
-    return this.simctl.installApp(
-      artifactPath,
-      this.deviceId,
-      options?.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs },
-    );
+  installApp(
+    artifactPath: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
+    // Large app bundles get an explicit budget; a downgrade reinstall keeps its own deadline.
+    return this.simctl.installApp(artifactPath, this.deviceId, {
+      ...options,
+      timeoutMs: options?.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    });
   }
 
   listApps(): Promise<Record<string, unknown>[]> {

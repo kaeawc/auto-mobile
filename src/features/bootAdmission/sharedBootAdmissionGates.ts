@@ -18,7 +18,7 @@ import {
   InMemoryBootDurationHistory,
   type BootDurationHistory,
 } from "../iosSimFleet/BootDurationHistory";
-import type { IosSimCapacityGate } from "../iosSimFleet/CapacityGate";
+import type { IosSimCapacityGate, IosSimulatorOwnershipReader } from "../iosSimFleet/CapacityGate";
 import { createIosSimCapacityGate } from "../iosSimFleet/defaultIosBootInstrumentation";
 import { AndroidBootAdmissionGate } from "./AndroidBootAdmissionGate";
 import { adbEmulatorSerialLister, CommandAndroidCapacitySource } from "./AndroidCapacitySource";
@@ -75,6 +75,19 @@ export interface SharedBootAdmissionGateDeps {
 }
 
 let shared: SharedBootAdmissionGates | undefined;
+let iosOwnership: IosSimulatorOwnershipReader | undefined;
+
+/** Composition-side reader, resolved lazily even if the shared gate already exists. */
+export function installIosSimulatorOwnershipReader(reader: IosSimulatorOwnershipReader): void {
+  iosOwnership = reader;
+}
+
+const defaultIosOwnership: IosSimulatorOwnershipReader = {
+  refresh: async () => {
+    await iosOwnership?.refresh();
+  },
+  isAutoMobileOwned: (udid) => iosOwnership?.isAutoMobileOwned(udid) ?? false,
+};
 
 /** Lazily builds the gates from the environment on first use. */
 export function getSharedBootAdmissionGates(
@@ -139,6 +152,7 @@ export function createBootAdmissionGates(
             simctl: new SimCtlClient(null),
             timer,
             history: iosBootHistory,
+            ownership: defaultIosOwnership,
             env,
             executor,
           }),

@@ -32,6 +32,25 @@ Acknowledged or expired export rows prune with their eligible request receipts;
 pending resource cleanup and retained-receipt tombstone guards still apply.
 Clients omitting `export` retain the existing prepare contract.
 
+## Shutdown refusals and retry cadence
+
+Once restart handoff begins, new prepare and abandon calls return an RPC refusal:
+`success: false`, `code: "session_broker_stopping"`, `error: "Session broker is stopping"`,
+`retryable: true`, and `retryAfterMs: 5000`. Retry the same request identity against the
+successor daemon; the stopping refusal neither admits a request nor stores a terminal
+receipt. It stays outside preparation's `failureFor` mapping. Already-running
+preparations cancelled by shutdown retain the existing `session_preparation_failed`
+terminal receipt and cleanup behavior.
+
+Retryable `session_restart_handoff_pending` and configured-but-unavailable broker
+refusals use the same hint, shared with the service's five-second idle interval between
+recovery passes. This is a pacing hint, not a readiness deadline: recovery work can
+extend a pass. Stopping and handoff-pending refusals log at debug; non-retryable request
+owner and export identity mismatches remain warnings. A failed initial handoff snapshot
+warns and still joins preparations; close retries the snapshot after that join before
+finishing releases. A failed second snapshot still rejects close so the service keeps
+its host lock.
+
 ## Current qualification boundary
 
 The first native milestone deliberately uses zero pooling. Every relinquished
@@ -237,7 +256,15 @@ sessions, reset, uncertain state, and unfinished destruction count toward the
 total cap. Failed acquisition with unfinished native work retains session
 capacity too. A full pool must confirm eviction before reserving a replacement;
 there is no temporary burst. Pool selection prefers the most recently returned
-compatible device and evicts the least recently returned idle device.
+compatible device, even after a total-cap reduction, and evicts the least recently
+returned idle device when no compatible idle device is available. A pending
+eviction or transient destroy failure returns `eviction_pending` with
+`retryable: true` and `retryAfterMs: 1000`. Its destroying resource keeps capacity
+reserved for recovery. The failed request ID remains terminal; after cleanup
+frees capacity, retry with a new request ID. Permanent destroy errors remain
+non-retryable `session_preparation_failed` failures.
+Managed provisioning's `cleanup_pending` remains a separate failure: its retryability
+is suppressed while that request's resource cleanup is pending, with no retry delay injected.
 
 ## Consumer contract
 

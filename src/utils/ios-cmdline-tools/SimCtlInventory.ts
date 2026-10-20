@@ -1,4 +1,5 @@
 import {
+  type SimCtlCatalog,
   AppleDevice,
   AppleDeviceRuntime,
   AppleDeviceType,
@@ -19,6 +20,8 @@ import { logger } from "../logger";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice } from "../../models";
 
 import { Timer } from "../SystemTimer";
+import { TTLCache } from "../cache/Cache";
+import { SingleFlight } from "../cache/SingleFlight";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 
@@ -76,7 +79,64 @@ export interface SimCtlInventoryContext {
   getDeviceInfo(udid: string): Promise<AppleDevice | null>;
   invalidateDeviceListCache(): void;
 }
+interface CatalogState {
+  cache: TTLCache<string, SimCtlCatalog>;
+  flight: SingleFlight<number, SimCtlCatalog>;
+  generation: number;
+}
+
 export class SimCtlInventory {
+  // Production clients share defaultTimer; fake timers keep independent hosts isolated.
+  private static readonly catalogs = new WeakMap<Timer, CatalogState>();
+
+  private catalogState(): CatalogState {
+    let state = SimCtlInventory.catalogs.get(this.context.timer);
+    if (!state) {
+      state = {
+        cache: new TTLCache(this.context.timer, { ttlMs: 60_000, maxEntries: 1 }),
+        flight: new SingleFlight(),
+        generation: 0,
+      };
+      SimCtlInventory.catalogs.set(this.context.timer, state);
+    }
+    return state;
+  }
+
+  async getCatalogChecked(signal = getAbortSignal()): Promise<SimCtlCatalog> {
+    signal?.throwIfAborted();
+    const state = this.catalogState();
+    const cached = state.cache.get("catalog");
+    if (cached) {
+      return cached;
+    }
+    const generation = state.generation;
+    return state.flight.run(
+      generation,
+      (flightSignal) =>
+        runWithAbortSignal(undefined, async () => {
+          const [runtimes, deviceTypes] = await Promise.all([
+            this.getRuntimesChecked(undefined, flightSignal),
+            this.getDeviceTypesChecked(flightSignal),
+          ]);
+          flightSignal?.throwIfAborted();
+          const catalog = { runtimes, deviceTypes };
+          // Invalidation fences a listing that began before a failed create.
+          if (state.generation === generation) {
+            state.cache.set("catalog", catalog);
+          }
+          return catalog;
+        }),
+      signal,
+      { cancelWhenAllWaitersAbort: true },
+    );
+  }
+
+  private invalidateCatalog(): void {
+    const state = this.catalogState();
+    state.generation++;
+    state.cache.clear();
+  }
+
   /** Read-only cache diagnostics; invalidation is the sole public mutation seam. */
   static deviceListSnapshots(): {
     cached: readonly DeviceInfo[] | null;
@@ -873,6 +933,12 @@ export class SimCtlInventory {
         undefined,
         signal,
       );
+    } catch (error) {
+      if (/invalid (?:runtime|device type)/i.test(errorMessage(error))) {
+        this.invalidateCatalog();
+      }
+      logger.warn(`Failed to create iOS simulator ${name}: ${errorMessage(error)}`, error);
+      throw error;
     } finally {
       // A freshly created simulator must be visible to the very next
       // listSimulatorImages() call, otherwise the provisioning path boots off a

@@ -1,3 +1,4 @@
+import type { InternalProvisionDeviceArgs } from "../../../features/deviceLifecycle/core/contracts";
 import type { DeviceInfo } from "../../../models/index";
 import {
   ProvisionDeviceError,
@@ -65,6 +66,37 @@ function numberField(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** Device IDs arriving over a tool response retain only string entries. */
+function deviceIdsField(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Read explicit retained-creation evidence rather than guessing from a timeout. */
+function retainedProvisionDeviceIdentity(payload: Record<string, unknown>) {
+  const lifecycle = payload.lifecycle;
+  if (!isRecord(lifecycle) || !isRecord(lifecycle.device)) {
+    return {};
+  }
+  const device = lifecycle.device;
+  const name = stringField(device.name);
+  const stableId = [stringField(device.stableId), stringField(device.runtimeDeviceId)].find(
+    (id) => id !== undefined && id !== name,
+  );
+  const retainedDevice =
+    lifecycle.state === "created_not_ready" &&
+    lifecycle.phase === "readiness" &&
+    device.platform === "ios" &&
+    stableId &&
+    name
+      ? { platform: "ios" as const, stableId, name }
+      : undefined;
+  return retainedDevice ? { retainedDevice } : {};
+}
+
 /** Rebuild the typed provision failure from a provisionDevice error response. */
 export function provisionErrorFromPayload(
   payload: Record<string, unknown>,
@@ -77,10 +109,10 @@ export function provisionErrorFromPayload(
   const limit = numberField(error.limit);
   const booted = numberField(error.booted);
   const retryAfterMs = numberField(error.retryAfterMs);
-  const externalDevices = Array.isArray(error.externalDevices)
-    ? error.externalDevices.filter((udid): udid is string => typeof udid === "string")
-    : [];
+  const externalDevices = deviceIdsField(error.externalDevices);
+  const heldDevices = deviceIdsField(error.heldDevices);
   return new ProvisionDeviceError(code, message, retryable, {
+    ...retainedProvisionDeviceIdentity(payload),
     ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     ...(limit !== undefined && booted !== undefined
       ? {
@@ -88,6 +120,7 @@ export function provisionErrorFromPayload(
             limit,
             booted,
             ...(externalDevices.length > 0 ? { externalDevices } : {}),
+            ...(heldDevices.length > 0 ? { heldDevices } : {}),
           },
         }
       : {}),
@@ -202,28 +235,28 @@ export class ToolBindingProvisioner implements BindingDeviceProvisioner {
   }
 
   async provision(request: BindingProvisionRequest): Promise<BindingProvisionedDevice> {
-    const spec =
-      request.spec.deviceType === undefined
-        ? { ...request.spec, deviceType: await this.existingModel(request) }
-        : request.spec;
-    const response = await this.deps.invokeTool(
-      "provisionDevice",
-      {
-        device: {
-          platform: request.platform,
-          name: request.name,
-          ...(request.platform === "ios" && request.deviceId ? { deviceId: request.deviceId } : {}),
-          spec,
-        },
-        boot: true,
-        readiness: "automation",
-        timeoutMs: clampTimeoutMs(
-          request.deadlineMs - this.deps.timer.now(),
-          MAX_PROVISION_DEVICE_TIMEOUT_MS,
-        ),
+    const spec = {
+      ...request.spec,
+      deviceType: request.spec.deviceType ?? (await this.existingModel(request)),
+    };
+    const args: InternalProvisionDeviceArgs = {
+      device: {
+        platform: request.platform,
+        name: request.name,
+        ...(request.platform === "ios" && request.deviceId ? { deviceId: request.deviceId } : {}),
+        spec,
       },
-      request.signal,
-    );
+      boot: true,
+      readiness: "automation",
+      ...(request.platform === "ios" && request.mode === "create"
+        ? { rollbackOnRetryableReadiness: false }
+        : {}),
+      timeoutMs: clampTimeoutMs(
+        request.deadlineMs - this.deps.timer.now(),
+        MAX_PROVISION_DEVICE_TIMEOUT_MS,
+      ),
+    };
+    const response = await this.deps.invokeTool("provisionDevice", { ...args }, request.signal);
     const { isError, payload } = readToolPayload(response);
     if (isError) {
       throw provisionErrorFromPayload(payload, `provisionDevice '${request.name}' failed`);

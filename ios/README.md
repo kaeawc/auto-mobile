@@ -51,6 +51,16 @@ Manual overrides (optional):
 - `AUTOMOBILE_IOS_SKIP_XCTESTSERVICE_APP_HASH` (skip installed-app hash verification)
 - `AUTOMOBILE_XCTESTSERVICE_APP_HASH` or `AUTOMOBILE_XCTESTSERVICE_APP_HASH_DEVICE` (expected app bundle hash override)
 
+### Embedded prototype view
+
+`AutoMobilePrototypeView` in `prototype-agent` presents a spec inside an app without an AutoMobile server.
+Storage defaults to `.none`, matching Android: values last only for that presentation, even when the spec
+has a `storage` block. Pass `.fileBacked` or `.directory(url)` explicitly to persist the spec's listed keys.
+Changes to spec, asset content, or storage replace the presentation. Updating callbacks or the network
+configuration preserves its state; subsequent requests use the updated clients, while requests already
+started keep their original client. Callbacks run on the main actor; `PrototypeEvent` is `Sendable` and
+exposes its semantic category as `kind`. An authored emit named `change` remains `.emitted`.
+
 ### XCTestRunner
 
 **Path**: `ios/XCTestRunner/`

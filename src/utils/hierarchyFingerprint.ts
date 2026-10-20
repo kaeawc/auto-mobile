@@ -2,11 +2,24 @@ import type { ViewHierarchyResult } from "../models";
 import { NodeCryptoService } from "./crypto";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
+import { STATUS_BAR_ROOT_IDS } from "./androidStatusBar";
+
+/** `JSON.stringify` replacer that omits status-bar subtrees; other nodes serialize unchanged. */
+function omitStatusBar(key: string, value: unknown): unknown {
+  // The root itself is never dropped: a replacer result of undefined there is no serialization.
+  if (key !== "" && typeof value === "object" && value !== null && "resource-id" in value) {
+    const resourceId = value["resource-id"];
+    if (typeof resourceId === "string" && STATUS_BAR_ROOT_IDS.has(resourceId)) {
+      return undefined;
+    }
+  }
+  return value;
+}
 
 /**
  * The single definition of "did the screen change?" (issues #6435, #6477).
  *
- * Fingerprints only the structural tree (`viewHierarchy.hierarchy`). Per-capture
+ * Fingerprints only the structural tree (`viewHierarchy.hierarchy`), without the status bar. Per-capture
  * metadata on `ViewHierarchyResult` — `updatedAt`, `receivedAt`, `frameContext`,
  * `fresh`, and the rest — is stamped on every capture, so including it would make
  * two captures of a static screen look different.
@@ -28,7 +41,7 @@ export function createHierarchyFingerprinter(
     }
     let fingerprint: string | null = null;
     try {
-      fingerprint = hash(JSON.stringify(viewHierarchy.hierarchy));
+      fingerprint = hash(JSON.stringify(viewHierarchy.hierarchy, omitStatusBar));
     } catch (error) {
       // Change detection is best-effort: malformed captures report "unknown".
       // Cache that verdict too, after logging the failure once for this object.

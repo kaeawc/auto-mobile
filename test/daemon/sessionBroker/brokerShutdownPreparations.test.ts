@@ -7,11 +7,14 @@ import {
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { SessionBrokerStoppingError } from "../../../src/daemon/sessionBroker/SessionBrokerStoppingError";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { logger } from "../../../src/utils/logger";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 
 function config(requestId: string): SessionConfig {
   return {
@@ -79,6 +82,86 @@ describe("preparations crossing restart handoff", () => {
     );
   }
 
+  test.each(["prepare", "abandon"] as const)(
+    "stopping refuses %s before touching durable request identity",
+    async (operation) => {
+      await broker.markRestartHandoff();
+      const expected = {
+        message: "Session broker is stopping",
+        code: "session_broker_stopping",
+        retryable: true,
+        retryAfterMs: 5_000,
+      };
+      const pending =
+        operation === "prepare"
+          ? broker.prepare(config("stopping-request"), "owner")
+          : broker.abandon("stopping-request", "owner");
+      await expect(pending).rejects.toBeInstanceOf(ActionableError);
+      await expect(pending).rejects.toBeInstanceOf(SessionBrokerStoppingError);
+      await expect(pending).rejects.toMatchObject(expected);
+      expect(await store.getRequest("stopping-request")).toBeUndefined();
+      expect(devices.prepared).toEqual([]);
+    },
+  );
+
+  test("broker close joins preparations and releases after its first handoff snapshot fails", async () => {
+    const ready = await broker.prepare(config("release-before-close"), "release-owner");
+    expect(ready.outcome).toBe("ready");
+    const releaseEntered = Promise.withResolvers<void>();
+    const finishRelease = Promise.withResolvers<void>();
+    devices.releaseHook = async () => {
+      releaseEntered.resolve();
+      await finishRelease.promise;
+    };
+    const releasing = broker.release(ready.sessionUuid!);
+    await releaseEntered.promise;
+    devices.releaseHook = undefined;
+
+    const preparationEntered = Promise.withResolvers<AbortSignal | undefined>();
+    const finishPreparation = Promise.withResolvers<void>();
+    devices.prepareHook = async ({ signal }) => {
+      preparationEntered.resolve(signal);
+      await finishPreparation.promise;
+    };
+    const preparing = broker.prepare(config("prepare-before-close"), "prepare-owner");
+    const signal = await preparationEntered.promise;
+    const failure = new Error("handoff snapshot unavailable");
+    const snapshot = spyOn(store, "listRecoverableRequests").mockRejectedValueOnce(failure);
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    let closed = false;
+    const closing = Promise.allSettled([broker.close()]).then((results) => {
+      closed = true;
+      return results;
+    });
+    try {
+      expect(signal?.aborted).toBe(true);
+      // A durable read is also a deterministic async checkpoint for close's rejected snapshot.
+      await store.getRequest("prepare-before-close");
+      expect(closed).toBe(false);
+      expect(warning).toHaveBeenCalledWith(
+        "Session broker restart handoff failed: handoff snapshot unavailable",
+        failure,
+      );
+      finishPreparation.resolve();
+      expect(await preparing).toMatchObject({
+        outcome: "failed",
+        failure: { code: "session_preparation_failed", retryable: false },
+      });
+      expect(closed).toBe(false);
+      finishRelease.resolve();
+      expect(await closing).toEqual([{ status: "fulfilled", value: undefined }]);
+      expect(snapshot.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(await releasing).toMatchObject({ outcome: "released" });
+      expect(devices.sessions.size).toBe(0);
+    } finally {
+      finishPreparation.resolve();
+      finishRelease.resolve();
+      await Promise.all([preparing, releasing, closing]);
+      snapshot.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
   test.each(["service", "broker"] as const)(
     "%s close marks a late activation before joining other preparations or recovery",
     async (entry) => {
@@ -109,7 +192,7 @@ describe("preparations crossing restart handoff", () => {
       const recoveryEntered = Promise.withResolvers<void>();
       const finishRecovery = Promise.withResolvers<void>();
       let recoverySettled = false;
-      const recovery = spyOn(broker, "recover").mockImplementationOnce(async () => {
+      const recovery = spyOn(broker, "recoverReceipts").mockImplementationOnce(async () => {
         recoveryEntered.resolve();
         await finishRecovery.promise;
         recoverySettled = true;
@@ -117,7 +200,6 @@ describe("preparations crossing restart handoff", () => {
       const host = service();
       if (entry === "service") {
         host.start();
-        timer.advanceTime(5_000);
         await recoveryEntered.promise;
       }
 
@@ -174,13 +256,12 @@ describe("preparations crossing restart handoff", () => {
     const signal = await entered.promise;
     const recoveryEntered = Promise.withResolvers<void>();
     const finishRecovery = Promise.withResolvers<void>();
-    const recovery = spyOn(broker, "recover").mockImplementationOnce(async () => {
+    const recovery = spyOn(broker, "recoverReceipts").mockImplementationOnce(async () => {
       recoveryEntered.resolve();
       await finishRecovery.promise;
     });
     const host = service();
     host.start();
-    timer.advanceTime(5_000);
     await recoveryEntered.promise;
     const closing = host.close();
     try {
@@ -205,7 +286,6 @@ describe("preparations crossing restart handoff", () => {
     const pending = broker.prepare(config("snapshot-failure"), "owner");
     const signal = await entered.promise;
     const failure = new Error("handoff snapshot unavailable");
-    const snapshot = spyOn(store, "listRecoverableRequests").mockRejectedValueOnce(failure);
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     const release = spyOn(broker, "close");
     let unlocked = false;
@@ -213,6 +293,10 @@ describe("preparations crossing restart handoff", () => {
       unlocked = true;
     });
     host.start();
+    await drainUntil(() => timer.getPendingTimeouts().includes(5_000), {
+      description: "initial recovery finished before handoff snapshot failure",
+    });
+    const snapshot = spyOn(store, "listRecoverableRequests").mockRejectedValueOnce(failure);
     const closing = Promise.allSettled([host.close()]);
     try {
       expect(signal?.aborted).toBe(true);

@@ -1,3 +1,4 @@
+import { isAuxiliarySocketUnavailable } from "./auxiliarySocketAvailability";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { SingleFlightInterval } from "../utils/SingleFlightInterval";
@@ -86,7 +87,7 @@ export function createDaemonHealthCheck(deps: DaemonHealthCheckDeps): SingleFlig
       recordFailure("socket");
       return false;
     }
-    if (!deps.observationStreamHealthy()) {
+    if (!deps.observationStreamHealthy() && !isAuxiliarySocketUnavailable("observation-stream")) {
       logger.warn("Health check failed: Observation stream socket unavailable");
       recordFailure("socket");
       return false;

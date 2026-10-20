@@ -10,6 +10,7 @@ import {
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
 } from "./sessionLivenessWindows";
 import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
+export const DAEMON_LAUNCH_NONCE_ENV = ENV.DAEMON_LAUNCH_NONCE.name;
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
 /**

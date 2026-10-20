@@ -2,6 +2,7 @@ import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/dev
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
@@ -514,6 +515,36 @@ describe("session-only broker lifecycle", () => {
     await ready("next");
   });
 
+  test("reset capacity refusal returns cleanup_pending and preserves the device until recovery", async () => {
+    broker = new SessionBroker({ ...options, reuseCleanDevices: true });
+    const first = await ready("first");
+    const refusal = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 5_000 },
+      "iOS simulator capacity exhausted",
+    );
+    devices.resetError = refusal;
+
+    expect(await broker.release(first)).toEqual({ sessionUuid: first, outcome: "cleanup_pending" });
+    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
+    expect((await options.store.listResources())[0].state).toBe("resetting");
+    expect(devices.destroyed).toEqual([]);
+    expect(await broker.status("first")).toMatchObject({ cleanupPending: true });
+    await broker.recover();
+    expect(devices.resetResources).toHaveLength(2);
+    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
+    expect((await options.store.listResources())[0].state).toBe("resetting");
+    expect(devices.destroyed).toEqual([]);
+
+    devices.resetError = undefined;
+    await broker.recover();
+    expect(devices.resetResources).toHaveLength(3);
+    expect((await options.store.listResources())[0].state).toBe("idle");
+    expect(await broker.release(first)).toMatchObject({ outcome: "released" });
+    await ready("second");
+    expect(devices.prepared[1]).toBe(devices.prepared[0]);
+    expect(devices.destroyed).toEqual([]);
+  });
+
   test("reset exception retires the device instead of reusing contaminated state", async () => {
     broker = new SessionBroker({ ...options, reuseCleanDevices: true });
     const first = await ready("first");
@@ -685,7 +716,6 @@ describe("session-only broker lifecycle", () => {
       },
     );
     service.start();
-    timer.advanceTime(5_000);
     await entered.promise;
     const closing = service.close();
     try {
@@ -784,7 +814,9 @@ describe("session-only broker lifecycle", () => {
     ).toBeUndefined();
   });
 
-  test("service stop ends recovery between requests and skips retention", async () => {
+  test("service stop leaves queued native releases durable and skips retention", async () => {
+    options.cleanupConcurrency = 1;
+    broker = new SessionBroker(options);
     options.limits = { totalDeviceCap: 2, sessionCap: 2 };
     const first = await ready("a-expired");
     const second = await ready("b-expired");
@@ -808,13 +840,12 @@ describe("session-only broker lifecycle", () => {
       timer,
     );
     service.start();
-    timer.advanceTime(5_000);
     await entered.promise;
     const closing = service.close();
     try {
       complete.resolve();
       await closing;
-      expect(dispositions).toEqual([first]);
+      expect(dispositions).toEqual([first, second]);
       expect(devices.released).toEqual([first]);
       expect(devices.sessions.has(second)).toBe(true);
       expect(prune).not.toHaveBeenCalled();
@@ -823,7 +854,9 @@ describe("session-only broker lifecycle", () => {
     }
   });
 
-  test("shutdown stops the resource recovery sweep between destruction attempts", async () => {
+  test("shutdown stops queued resource cleanup and fences late destruction confirmation", async () => {
+    options.cleanupConcurrency = 1;
+    broker = new SessionBroker(options);
     options.limits = { totalDeviceCap: 2, sessionCap: 2 };
     const first = await ready("a-failed");
     const second = await ready("b-failed");
@@ -844,7 +877,7 @@ describe("session-only broker lifecycle", () => {
     expect(devices.sessions.has(second)).toBe(true);
     expect(
       (await options.store.listResources()).filter((resource) => resource.state === "destroying"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   test("repeated shutdown marking is idempotent and preserves the active grant", async () => {

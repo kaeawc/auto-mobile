@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock, beforeEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
@@ -14,6 +14,13 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
+
+afterEach(() => mock.restore());
+
+let clientSpy: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">>;
+beforeEach(() => {
+  clientSpy = spyOn(DaemonClient, "isAvailable");
+});
 
 const refusal = (retryAfterMs: number) =>
   shapeToolCallError(new DeviceCleanupInProgressError("emulator-5554", retryAfterMs), {
@@ -67,7 +74,7 @@ async function setup(
   });
   const manager = new FakeDaemonManager();
   manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
-  const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  const isAvailableSpy = clientSpy.mockResolvedValue(true);
   const proxy = new DaemonMcpProxy({
     clientFactory: () => client,
     daemonManager: manager,

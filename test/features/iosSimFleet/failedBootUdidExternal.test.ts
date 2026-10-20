@@ -73,7 +73,7 @@ test("a simulator whose AutoMobile boot failed unlisted is external when booted 
   expect(error).toBeInstanceOf(BootCapacityExhaustedError);
   // Fails today: externalDevices is undefined and the message blames no external simulator.
   expect((error as BootCapacityExhaustedError).details.externalDevices).toEqual([IOS27]);
-  expect((error as Error).message).toContain("not started by AutoMobile");
+  expect((error as Error).message).toContain("have no AutoMobile owner");
 });
 
 function setup() {

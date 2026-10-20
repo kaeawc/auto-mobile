@@ -224,7 +224,7 @@ final class PrototypeChecksTests: XCTestCase {
         let events = try session.simulateTap(identifier: "submit").get()
         XCTAssertEqual(events.count, 1)
         let event = try XCTUnwrap(events.first)
-        XCTAssertEqual(event.kind, "validation_failed")
+        XCTAssertEqual(event.wireKind, "validation_failed")
         XCTAssertEqual(event.name, "submit")
         XCTAssertEqual(event.keys, ["email"])
         XCTAssertEqual(event.wireObject(timestamp: 0)["keys"] as? [String], ["email"])
@@ -269,11 +269,11 @@ final class PrototypeChecksTests: XCTestCase {
         var session = PrototypeSession()
         session.show(spec)
         let events = session.control(own: [("email", .string("a@b.co"))], then: actions)
-        XCTAssertEqual(events.map(\.kind), ["validation_failed"])
+        XCTAssertEqual(events.map(\.wireKind), ["validation_failed"])
         XCTAssertEqual(session.state["email"], .string(""))
         let afterDismiss = try JSONDecoder().decode([PrototypeAction].self, from: Data("""
         [{"type":"dismiss"},{"type":"emit","requireValid":["email"]}]
         """.utf8))
-        XCTAssertEqual(session.run(afterDismiss).map(\.kind), ["dismissed"])
+        XCTAssertEqual(session.run(afterDismiss).map(\.wireKind), ["dismissed"])
     }
 }

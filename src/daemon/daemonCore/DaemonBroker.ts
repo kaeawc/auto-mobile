@@ -352,9 +352,9 @@ export class DaemonBroker {
     }
   }
 
-  async installSessionBroker(): Promise<void> {
+  async installSessionBroker(): Promise<Pick<SessionBrokerService, "start"> | undefined> {
     if (!this.host.lifecycle.sessionBrokerConfigPath() || this.sessionBrokerService) {
-      return;
+      return this.sessionBrokerService;
     }
     const acquisition = this.host.brokerDeviceAcquisition();
     const release = this.brokerExecutionRelease;
@@ -367,9 +367,10 @@ export class DaemonBroker {
     const config = await readSessionBrokerHostConfig(
       this.host.lifecycle.sessionBrokerConfigPath()!,
     );
-    // Install before opening the service: startup recovery can provision through acquisition.
+    // Install configuration before exposing the service; startup recovers durable receipts only.
     this.sessionBrokerConfig = config;
     this.sessionBrokerService = await openSessionBrokerService({
+      deferStart: true,
       config,
       registry,
       acquisition: acquisition.acquisition,
@@ -396,6 +397,7 @@ export class DaemonBroker {
     if (!this.bindingRedrive && readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test") {
       this.bindingRedrive = acquisition.startJournalRedrive(registry);
     }
+    return this.sessionBrokerService;
   }
 
   private async warmConfirmedManagedExecution(sessionUuid: string): Promise<void> {

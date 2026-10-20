@@ -20,7 +20,7 @@ import {
 } from "../../src/daemon/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
-import type { PidFileData } from "../../src/daemon/types";
+import type { DaemonStatus, PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 class ProbeClient implements DaemonClientLike {
@@ -56,7 +56,11 @@ class ProbeClient implements DaemonClientLike {
     throw new Error("not used");
   }
 
-  async callDaemonMethod(): Promise<any> {
+  status?: DaemonStatus;
+  async callDaemonMethod(method: string): Promise<unknown> {
+    if (method === "ide/status" && this.status) {
+      return this.status;
+    }
     throw new Error("not used");
   }
 }
@@ -725,6 +729,7 @@ describe("DaemonManager readiness", () => {
     const manager = new DaemonManager({
       clientFactory: () => {
         const client = new ProbeClient(true);
+        client.status = { running: true, pid: spawner.process.pid, startedAt: 20, version: "test" };
         clients.push(client);
         return client;
       },
@@ -745,6 +750,7 @@ describe("DaemonManager readiness", () => {
       return {
         running: true,
         pid: spawner.process.pid,
+        startedAt: 20,
         port: 31879,
         socketPath,
       };

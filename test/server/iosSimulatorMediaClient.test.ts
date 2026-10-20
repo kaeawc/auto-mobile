@@ -17,7 +17,7 @@ describe("SimctlIosSimulatorMediaClient", () => {
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       {
         args: ["addmedia", device.deviceId, "/tmp/photo one.png", "/tmp/video;two.mov"],
-        timeoutMs: undefined,
+        timeoutMs: 300_000,
       },
     ]);
   });

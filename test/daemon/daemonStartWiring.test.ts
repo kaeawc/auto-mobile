@@ -1,10 +1,12 @@
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DaemonBroker } from "../../src/daemon/daemonCore/DaemonBroker";
+import { daemonSocketServerDouble } from "../../src/daemon/daemonSocketServer";
 import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
@@ -324,6 +326,56 @@ describe("Daemon.start() tool-call-end wiring", () => {
     } finally {
       spies.reverse().forEach((spy) => spy.mockRestore());
       internals.testHooks.stopSessionTimers();
+    }
+  });
+
+  test("starts broker recovery exactly once after the control socket bind", async () => {
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    daemon.testHooks.overrideStartupStages({ stopAfterFailedStartup: async () => {} });
+    const start = mock(() => {});
+    const install = spyOn(DaemonBroker.prototype, "installSessionBroker").mockResolvedValue({
+      start,
+    });
+    const spies = [
+      install,
+      spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(false),
+      spyOn(daemon, "initializeDatabase").mockResolvedValue(undefined),
+      spyOn(daemon, "initializeDevicePoolWithTimeout").mockResolvedValue(undefined),
+      spyOn(daemon, "initializeIosServices").mockResolvedValue(undefined),
+      spyOn(logger, "info").mockImplementation(() => {}),
+    ];
+    const bind = mock(async () => {
+      expect(install).toHaveBeenCalledTimes(1);
+      expect(start).not.toHaveBeenCalled();
+      return daemonSocketServerDouble({ isListening: () => true });
+    });
+    const host: DaemonStartHost = {
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      prepareHttpToken: () => {},
+      publishHttpToken: () => {},
+      startHttpIngress: async () => {},
+      sweepStaleAppearanceConfigs: async () => {},
+      redriveRecorderTeardowns: async () => true,
+      bindControlSocket: bind,
+      startServicesAfterSocketBind: async () => {
+        expect(bind).toHaveBeenCalledTimes(1);
+        expect(start).toHaveBeenCalledTimes(1);
+      },
+      startMaintenanceMonitors: () => {},
+    };
+    try {
+      // startOn runs the real startThroughSocketBind and startAfterSocketBind stages.
+      await daemon.startOn(host);
+      expect(bind).toHaveBeenCalledTimes(1);
+      expect(start).toHaveBeenCalledTimes(1);
+    } finally {
+      spies.reverse().forEach((spy) => spy.mockRestore());
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
     }
   });
 

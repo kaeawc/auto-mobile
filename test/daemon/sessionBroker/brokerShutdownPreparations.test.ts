@@ -12,6 +12,7 @@ import { logger } from "../../../src/utils/logger";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 
 function config(requestId: string): SessionConfig {
   return {
@@ -109,7 +110,7 @@ describe("preparations crossing restart handoff", () => {
       const recoveryEntered = Promise.withResolvers<void>();
       const finishRecovery = Promise.withResolvers<void>();
       let recoverySettled = false;
-      const recovery = spyOn(broker, "recover").mockImplementationOnce(async () => {
+      const recovery = spyOn(broker, "recoverReceipts").mockImplementationOnce(async () => {
         recoveryEntered.resolve();
         await finishRecovery.promise;
         recoverySettled = true;
@@ -117,7 +118,6 @@ describe("preparations crossing restart handoff", () => {
       const host = service();
       if (entry === "service") {
         host.start();
-        timer.advanceTime(5_000);
         await recoveryEntered.promise;
       }
 
@@ -174,13 +174,12 @@ describe("preparations crossing restart handoff", () => {
     const signal = await entered.promise;
     const recoveryEntered = Promise.withResolvers<void>();
     const finishRecovery = Promise.withResolvers<void>();
-    const recovery = spyOn(broker, "recover").mockImplementationOnce(async () => {
+    const recovery = spyOn(broker, "recoverReceipts").mockImplementationOnce(async () => {
       recoveryEntered.resolve();
       await finishRecovery.promise;
     });
     const host = service();
     host.start();
-    timer.advanceTime(5_000);
     await recoveryEntered.promise;
     const closing = host.close();
     try {
@@ -205,7 +204,6 @@ describe("preparations crossing restart handoff", () => {
     const pending = broker.prepare(config("snapshot-failure"), "owner");
     const signal = await entered.promise;
     const failure = new Error("handoff snapshot unavailable");
-    const snapshot = spyOn(store, "listRecoverableRequests").mockRejectedValueOnce(failure);
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     const release = spyOn(broker, "close");
     let unlocked = false;
@@ -213,6 +211,10 @@ describe("preparations crossing restart handoff", () => {
       unlocked = true;
     });
     host.start();
+    await drainUntil(() => timer.getPendingTimeouts().includes(5_000), {
+      description: "initial recovery finished before handoff snapshot failure",
+    });
+    const snapshot = spyOn(store, "listRecoverableRequests").mockRejectedValueOnce(failure);
     const closing = Promise.allSettled([host.close()]);
     try {
       expect(signal?.aborted).toBe(true);

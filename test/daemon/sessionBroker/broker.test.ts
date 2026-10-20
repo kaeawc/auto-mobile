@@ -685,7 +685,6 @@ describe("session-only broker lifecycle", () => {
       },
     );
     service.start();
-    timer.advanceTime(5_000);
     await entered.promise;
     const closing = service.close();
     try {
@@ -784,7 +783,9 @@ describe("session-only broker lifecycle", () => {
     ).toBeUndefined();
   });
 
-  test("service stop ends recovery between requests and skips retention", async () => {
+  test("service stop leaves queued native releases durable and skips retention", async () => {
+    options.cleanupConcurrency = 1;
+    broker = new SessionBroker(options);
     options.limits = { totalDeviceCap: 2, sessionCap: 2 };
     const first = await ready("a-expired");
     const second = await ready("b-expired");
@@ -808,13 +809,12 @@ describe("session-only broker lifecycle", () => {
       timer,
     );
     service.start();
-    timer.advanceTime(5_000);
     await entered.promise;
     const closing = service.close();
     try {
       complete.resolve();
       await closing;
-      expect(dispositions).toEqual([first]);
+      expect(dispositions).toEqual([first, second]);
       expect(devices.released).toEqual([first]);
       expect(devices.sessions.has(second)).toBe(true);
       expect(prune).not.toHaveBeenCalled();
@@ -823,7 +823,9 @@ describe("session-only broker lifecycle", () => {
     }
   });
 
-  test("shutdown stops the resource recovery sweep between destruction attempts", async () => {
+  test("shutdown stops queued resource cleanup and fences late destruction confirmation", async () => {
+    options.cleanupConcurrency = 1;
+    broker = new SessionBroker(options);
     options.limits = { totalDeviceCap: 2, sessionCap: 2 };
     const first = await ready("a-failed");
     const second = await ready("b-failed");
@@ -844,7 +846,7 @@ describe("session-only broker lifecycle", () => {
     expect(devices.sessions.has(second)).toBe(true);
     expect(
       (await options.store.listResources()).filter((resource) => resource.state === "destroying"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   test("repeated shutdown marking is idempotent and preserves the active grant", async () => {

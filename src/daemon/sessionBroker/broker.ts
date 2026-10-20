@@ -1,3 +1,5 @@
+import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
+import type { Timer } from "../../utils/SystemTimer";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import {
   matchSessionDevice,
@@ -53,6 +55,10 @@ export interface SessionBrokerOptions {
   receiptRetentionMs?: number;
   /** Maximum pin age for an unacknowledged export. */
   exportRetentionMs?: number;
+  cleanupConcurrency?: number;
+  /** Per-item pass wait only; native work retains its slot until it settles. */
+  cleanupWaitMs?: number;
+  timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
 }
 
 export { EXPORT_RETENTION_MS } from "./store";
@@ -108,8 +114,8 @@ function sameProcess(left: BindingProcessIdentity, right: BindingProcessIdentity
  * Requests are reserved before native work. Every unsuccessful acquisition becomes terminal and
  * leaves durable cleanup; no retry or restart silently gives its identity a different session.
  *
- * This class starts no background tasks. The daemon owns and joins explicit recovery passes,
- * and uses the existing native journal driver for platform work that outlives a bounded pass.
+ * The service explicitly drives recovery. Native items that outlive a bounded pass retain
+ * broker ownership until they settle; close aborts/joins them through the native journal seam.
  */
 export class SessionBroker {
   private readonly releases = new Map<string, Promise<SessionBrokerReleaseResult>>();
@@ -120,7 +126,16 @@ export class SessionBroker {
   >();
   private stopping = false;
 
-  constructor(private readonly options: SessionBrokerOptions) {}
+  private readonly cleanup: RecoveryCleanup;
+  private readonly destroys = new Map<string, Promise<void>>();
+
+  constructor(private readonly options: SessionBrokerOptions) {
+    this.cleanup = new RecoveryCleanup(
+      options.cleanupConcurrency,
+      options.cleanupWaitMs,
+      options.timer,
+    );
+  }
 
   prepare(
     config: SessionConfig,
@@ -623,19 +638,11 @@ export class SessionBroker {
     // Retry after joining preparations in case the first snapshot or an inline mark failed;
     // the store makes each mark idempotent.
     await this.markRestartHandoff();
-    const requests = await this.options.store.listRecoverableRequests();
-    // Only a release the consumer already began is finished here.
-    await Promise.allSettled(
-      requests
-        .filter(
-          (request) =>
-            sameProcess(request.owner, this.options.owner) &&
-            request.sessionId &&
-            request.state === "releasing",
-        )
-        .map((request) => this.release(request.sessionId!)),
-    );
+    // Join work already started, not queued recovery releases. Their durable releasing/resetting
+    // rows remain unavailable and are retired by the successor; stop must start no new cleanup.
     await this.joinReleases();
+    await this.cleanup.join();
+    await Promise.allSettled([...this.destroys.values()]);
   }
 
   /**
@@ -644,6 +651,7 @@ export class SessionBroker {
    */
   async markRestartHandoff(): Promise<void> {
     this.stopping = true;
+    this.cleanup.stop();
     for (const preparation of this.preparationOwners.values()) {
       preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
@@ -672,8 +680,14 @@ export class SessionBroker {
     );
   }
 
-  /** Full bounded snapshot, not a repeatedly scanned prefix that can starve later cleanup. */
+  /** Compatibility entry point: durable receipts followed by a bounded native cleanup pass. */
   async recover(): Promise<void> {
+    await this.recoverReceipts();
+    await this.recoverCleanup();
+  }
+
+  /** Startup awaits only transactions and the admission-only session disposition lookup. */
+  async recoverReceipts(): Promise<void> {
     for (const request of await this.options.store.listRecoverableRequests()) {
       if (this.stopping) {
         return;
@@ -681,26 +695,64 @@ export class SessionBroker {
       try {
         await this.recoverOneRequest(request);
       } catch (error) {
-        // One broken request must not starve every later cleanup in each recovery pass.
+        // One broken receipt must not starve every later receipt in each recovery pass.
         logger.warn(
           `Session request ${request.requestId} recovery remains pending: ${errorMessage(error)}`,
+          error,
         );
       }
     }
+  }
+
+  async recoverCleanup(): Promise<void> {
     if (this.stopping) {
       return;
     }
+    const requests = new Map(
+      (await this.options.store.listRecoverableRequests())
+        .filter((request) => sameProcess(request.owner, this.options.owner))
+        .map((request) => [request.requestId, request]),
+    );
+    const items: RecoveryCleanupItem[] = [];
     for (const resource of await this.options.store.listLiveResources()) {
-      if (this.stopping) {
-        return;
+      if (resource.requestId && this.hasPendingPreparation(resource.requestId)) {
+        continue;
       }
-      if (
-        resource.state === "destroying" &&
-        (!resource.requestId || !this.hasPendingPreparation(resource.requestId))
-      ) {
-        await this.tryCleanup(destructionTicket(resource));
+      const request = resource.requestId ? requests.get(resource.requestId) : undefined;
+      if (resource.state !== "destroying" && request?.state !== "releasing") {
+        continue;
       }
+      items.push({
+        resourceId: resource.resourceId,
+        run: (signal) => this.recoverResource(resource, request, signal),
+      });
     }
+    // Invariant: receipts retain releasing/resetting or terminal/destroying ownership until
+    // background cleanup proves absence (or a clean reset). Admission counts these resources
+    // against caps and can reuse only idle rows, never a device awaiting native cleanup.
+    await this.cleanup.run(items);
+  }
+
+  private async recoverResource(
+    resource: BrokerResourceRecord,
+    request: BrokerRequestRecord | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (request?.state === "releasing" && request.sessionId) {
+      const session = request.sessionId;
+      const previous = this.releases.get(session);
+      await (previous ?? this.trackRelease(session, this.releaseOnce(session, signal)));
+      return;
+    }
+    if (
+      request?.state === "failed" &&
+      request.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
+      request.sessionId
+    ) {
+      await this.drainAbandonedSession(request.sessionId);
+    }
+    signal.throwIfAborted();
+    await this.tryCleanup(destructionTicket(resource), signal);
   }
 
   private async recoverOneRequest(request: BrokerRequestRecord): Promise<void> {
@@ -709,10 +761,11 @@ export class SessionBroker {
         request.state === "active" &&
         request.sessionId &&
         this.options.sessionDisposition &&
-        (await this.options.sessionDisposition(request.sessionId)) === "gone"
+        (await this.options.sessionDisposition(request.sessionId)) === "gone" &&
+        !this.stopping
       ) {
         // Expired restart handoffs use ordinary, durably owned release; no replacement is selected.
-        await this.release(request.sessionId);
+        await this.options.store.beginRelease(request.sessionId, this.options.owner);
       }
       if (request.state === "acquiring" && !this.preparations.has(request.requestId)) {
         await this.options.store.failInterruptedAcquisition(
@@ -721,10 +774,8 @@ export class SessionBroker {
           "Acquisition ended without committing a session; cleanup is pending",
         );
       }
-      if (request.state === "releasing" && request.sessionId) {
-        await this.release(request.sessionId);
-      }
-      await this.redriveAbandonedSession(request);
+      // Releasing and failed/abandoned receipts already durably name their native work.
+      // recoverCleanup drains them; no release/reset/destroy is awaited by startup.
       return;
     }
     if ((await this.recoverRestartHandoff(request)) !== "terminal") {
@@ -773,17 +824,10 @@ export class SessionBroker {
     );
   }
 
-  private async redriveAbandonedSession(request: BrokerRequestRecord): Promise<void> {
-    if (
-      request.state === "failed" &&
-      request.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
-      request.sessionId
-    ) {
-      await this.drainAbandonedSession(request.sessionId);
-    }
-  }
-
-  private async releaseOnce(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
+  private async releaseOnce(
+    sessionUuid: string,
+    signal?: AbortSignal,
+  ): Promise<SessionBrokerReleaseResult> {
     const request = await this.options.store.beginRelease(sessionUuid, this.options.owner);
     if (!request) {
       return { sessionUuid, outcome: "unknown_session" };
@@ -798,7 +842,9 @@ export class SessionBroker {
     if (!resource) {
       throw new ActionableError("Session has no durable resource; cannot acknowledge cleanup");
     }
-    const disposition = await this.drainAndReset(request, resource, sessionUuid);
+    signal?.throwIfAborted();
+    const disposition = await this.drainAndReset(request, resource, sessionUuid, signal);
+    signal?.throwIfAborted();
     if (disposition === "pending") {
       return { sessionUuid, outcome: "cleanup_pending" };
     }
@@ -810,7 +856,7 @@ export class SessionBroker {
       this.options.owner,
     );
     if (ticket) {
-      await this.tryCleanup(ticket);
+      await this.tryCleanup(ticket, signal);
     }
     return this.releaseStatus(request, sessionUuid);
   }
@@ -834,11 +880,13 @@ export class SessionBroker {
     request: BrokerRequestRecord,
     resource: BrokerResourceRecord,
     sessionUuid: string,
+    signal?: AbortSignal,
   ): Promise<"idle" | "destroy" | "pending"> {
     try {
       if (!(await this.options.devices.release(sessionUuid)).settled) {
         return "pending";
       }
+      signal?.throwIfAborted();
       if (
         !this.options.reuseCleanDevices ||
         !this.options.devices.reset ||
@@ -849,13 +897,15 @@ export class SessionBroker {
       if ((await this.options.devices.reset(resource)) !== "clean") {
         return "destroy";
       }
+      signal?.throwIfAborted();
       const tickets = await this.options.store.completeCleanRelease(
         request.requestId,
         this.options.owner,
         this.options.limits,
       );
       for (const ticket of tickets) {
-        await this.tryCleanup(ticket);
+        signal?.throwIfAborted();
+        await this.tryCleanup(ticket, signal);
       }
       return "idle";
     } catch (error) {
@@ -947,18 +997,32 @@ export class SessionBroker {
     return (this.preparations.get(requestId) ?? 0) > 0;
   }
 
-  private async destroy(resource: BrokerResourceRecord): Promise<boolean> {
-    if ((await this.options.devices.destroy(resource)) !== "absent") {
+  private async destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<boolean> {
+    if ((await this.options.devices.destroy(resource, signal)) !== "absent") {
       return false;
     }
+    signal?.throwIfAborted();
     return this.options.store.confirmDestroyed(destructionTicket(resource));
   }
 
-  private async tryCleanup(ticket: DestructionTicket): Promise<void> {
+  private tryCleanup(ticket: DestructionTicket, signal?: AbortSignal): Promise<void> {
+    const previous = this.destroys.get(ticket.resourceId);
+    if (previous) {
+      return previous;
+    }
+    const pending = this.cleanupOnce(ticket, signal).finally(() => {
+      this.destroys.delete(ticket.resourceId);
+    });
+    this.destroys.set(ticket.resourceId, pending);
+    return pending;
+  }
+
+  private async cleanupOnce(ticket: DestructionTicket, signal?: AbortSignal): Promise<void> {
     const resource = await this.options.store.getResource(ticket.resourceId);
     if (resource?.state === "destroying" && resource.revision === ticket.revision) {
       try {
-        await this.destroy(resource);
+        signal?.throwIfAborted();
+        await this.destroy(resource, signal);
       } catch (error) {
         // The durable destroying row and native journal retain ownership for another pass.
         logger.warn(

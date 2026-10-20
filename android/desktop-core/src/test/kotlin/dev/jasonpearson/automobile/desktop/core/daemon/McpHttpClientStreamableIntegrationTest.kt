@@ -30,6 +30,7 @@ class McpHttpClientStreamableIntegrationTest {
       McpHttpClient(
         dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
           "http://localhost:${daemon.start()}/auto-mobile/streamable",
+          tokenProvider = DaemonHttpTokenProvider { null },
         ),
       )
   }

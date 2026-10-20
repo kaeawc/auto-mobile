@@ -19,7 +19,7 @@ import org.junit.Test
  */
 class DaemonStatePathsTest {
   @Test
-  fun `socket and PID paths match the shared daemon vectors`() {
+  fun `socket PID and token paths match the shared daemon vectors`() {
     // The vectors are POSIX paths; on Windows `/tmp/...` is not even absolute.
     assumeTrue(File.separatorChar == '/')
     assertTrue(cases.isNotEmpty())
@@ -28,6 +28,17 @@ class DaemonStatePathsTest {
       val env = case.getValue("env").jsonObject.mapValues { it.value.jsonPrimitive.content }
       // Every vector is absolute or names an absolute launch cwd, so userDir must never be used.
       val userDir = "/never/used"
+      kotlin.test.assertEquals(
+        case.getValue("tokenFilePath").jsonPrimitive.content,
+        DaemonStatePaths.resolve(
+          DaemonStateFile.TOKEN,
+          { uid },
+          env::get,
+          userDir,
+          tokenPlatform = DaemonTokenPlatform(windows = false),
+        ),
+        name,
+      )
       assertEquals(
         name,
         case.getValue("suffix").jsonPrimitive.content,

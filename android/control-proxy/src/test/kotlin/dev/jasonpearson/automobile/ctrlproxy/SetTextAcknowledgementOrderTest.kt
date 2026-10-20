@@ -94,6 +94,11 @@ class SetTextAcknowledgementOrderTest {
 
   @Test
   fun `refresh replacements are validated before reading text and remembered state has hooks`() {
+    assertFreshSnapshotValidation()
+    assertCaretResetHooks()
+  }
+
+  private fun assertFreshSnapshotValidation() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
     val body = functionBody(source, "suspend fun performInsertText(")
     val refresh = functionBody(body, "fun readFreshSnapshot()")
@@ -117,6 +122,9 @@ class SetTextAcknowledgementOrderTest {
         functionBody(source, signature).contains("rememberedInsert = null"),
       )
     }
+  }
+
+  private fun assertCaretResetHooks() {
     val forget = "textInputController.forgetRememberedInsert()"
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     for (signature in

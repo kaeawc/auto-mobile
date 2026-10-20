@@ -1225,10 +1225,7 @@ describe("Simctl", function () {
           }
           expect(commands).toEqual([
             ["xcrun", "simctl", "shutdown", mockDevice.deviceId],
-            ...Array.from({ length: 10 }, () => [
-              ["xcrun", "simctl", "list", "devices", "--json"],
-              ["xcrun", "simctl", "io", mockDevice.deviceId, "enumerate"],
-            ]).flat(),
+            ...Array.from({ length: 10 }, () => ["xcrun", "simctl", "list", "devices", "--json"]),
             [
               "pgrep",
               "-f",
@@ -1334,10 +1331,10 @@ describe("Simctl", function () {
           "",
         );
       simctl = new Simctl(null, mockExecAsync, { timer });
-      const reads = spyOn(simctl, "listSimulatorImages");
+      const reads = spyOn(simctl, "readSimulatorTarget");
       try {
         await expect(simctl.killSimulator(mockDevice)).resolves.toBeUndefined();
-        expect(reads.mock.calls.map(([timeoutMs]) => timeoutMs)).toEqual([
+        expect(reads.mock.calls.map(([_udid, timeoutMs]) => timeoutMs)).toEqual([
           10_000, 9_000, 8_000, 7_000, 6_000, 5_000, 4_000, 3_000, 2_000, 1_000,
         ]);
         expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
@@ -1354,12 +1351,17 @@ describe("Simctl", function () {
         mockExecAsync = async (): Promise<ExecResult> => createExecResult("", "");
         simctl = new Simctl(null, mockExecAsync, { timer });
         const failure = new Error("state probe unavailable");
-        const reads = spyOn(simctl, "listSimulatorImages").mockImplementation(async () => {
+        const reads = spyOn(simctl, "readSimulatorTarget").mockImplementation(async () => {
           if (timer.now() >= 9_000) {
             timer.advanceTime(1_000 - remainingMs);
             throw failure;
           }
-          return [{ ...mockDevice, state: "Shutdown", isRunning: false }];
+          return {
+            name: mockDevice.name,
+            udid: mockDevice.deviceId,
+            state: "Shutdown",
+            isAvailable: true,
+          };
         });
         const debug = spyOn(logger, "debug");
         try {
@@ -1383,12 +1385,17 @@ describe("Simctl", function () {
       mockExecAsync = async (): Promise<ExecResult> => createExecResult("", "");
       simctl = new Simctl(null, mockExecAsync, { timer });
       const failure = new Error("state probe unavailable");
-      const reads = spyOn(simctl, "listSimulatorImages").mockImplementation(async () => {
+      const reads = spyOn(simctl, "readSimulatorTarget").mockImplementation(async () => {
         if (timer.now() >= failAtMs) {
           timer.advanceTime(advanceMs);
           throw failure;
         }
-        return [{ ...mockDevice, state: "Shutdown", isRunning: false }];
+        return {
+          name: mockDevice.name,
+          udid: mockDevice.deviceId,
+          state: "Shutdown",
+          isAvailable: true,
+        };
       });
       try {
         await expect(simctl.killSimulator(mockDevice)).rejects.toBe(failure);
@@ -1430,7 +1437,8 @@ describe("Simctl", function () {
         name: "iPhone 17",
       });
       expect(await simctl.getBootedSimulatorsChecked()).toEqual([]);
-      expect(reads).toBe(11);
+      // Initial inventory + ten raw shutdown probes + refreshed inventory.
+      expect(reads).toBe(12);
       expect(timer.now()).toBe(10_000);
     });
 

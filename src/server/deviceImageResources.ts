@@ -4,6 +4,7 @@ import {
 } from "../constants/deviceResourceUris";
 export { DEVICE_IMAGE_RESOURCE_URIS, ANDROID_INVENTORY_RETRY_AFTER_MS };
 import { registerAndroidInventoryCatalogInvalidator } from "../utils/AndroidInventoryInvalidation";
+import { registerDeviceResourceInvalidation } from "../daemon/deviceResourceInvalidation";
 export { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -94,6 +95,8 @@ export function resetAndroidDeviceImageResourceCache(): void {
   resetAndroidInventoryEnrichmentCache();
   resetAndroidResourceCacheStates();
 }
+
+registerDeviceResourceInvalidation({ resetAndroidDeviceImageResourceCache });
 
 function resetAndroidResourceCacheStates(): void {
   for (const reference of androidImageCacheStates) {

@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import android.util.Log
 
@@ -26,11 +25,7 @@ class PermissionManager(private val context: Context) {
   )
 
   fun canDrawOverlays(): Boolean {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      Settings.canDrawOverlays(context)
-    } else {
-      true
-    }
+    return Settings.canDrawOverlays(context)
   }
 
   fun getPermissionState(permission: String?, requestPermission: Boolean = true): PermissionState {
@@ -62,10 +57,6 @@ class PermissionManager(private val context: Context) {
   }
 
   fun requestDrawOverlayPermission(): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-      return false
-    }
-
     return try {
       val intent =
         Intent(
@@ -86,8 +77,8 @@ class PermissionManager(private val context: Context) {
 
   private fun getDrawOverlayState(requestPermission: Boolean): PermissionState {
     val granted = canDrawOverlays()
-    val requiresSettings = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-    val canRequest = requiresSettings && canResolveOverlaySettings()
+    val requiresSettings = true
+    val canRequest = canResolveOverlaySettings()
 
     var requestLaunched = false
     var error: String? = null
@@ -126,10 +117,6 @@ class PermissionManager(private val context: Context) {
   }
 
   private fun canResolveOverlaySettings(): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-      return false
-    }
-
     val intent =
       Intent(
         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,

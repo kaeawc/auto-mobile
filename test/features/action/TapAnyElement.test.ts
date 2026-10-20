@@ -3,7 +3,7 @@ import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { describe, expect, test, spyOn, mock } from "bun:test";
+import { describe, expect, test, spyOn, mock, afterEach } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
@@ -34,6 +34,8 @@ import type {
   A11yTapCoordinatesResult,
   AccessibilityNodeSelector,
 } from "../../../src/features/observe/android/types";
+
+afterEach(() => mock.restore());
 
 const createTapAnyElement = (selector: FakeElementSelector) => {
   return new TapAnyElement(

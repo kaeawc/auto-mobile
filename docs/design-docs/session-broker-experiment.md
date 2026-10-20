@@ -256,7 +256,15 @@ sessions, reset, uncertain state, and unfinished destruction count toward the
 total cap. Failed acquisition with unfinished native work retains session
 capacity too. A full pool must confirm eviction before reserving a replacement;
 there is no temporary burst. Pool selection prefers the most recently returned
-compatible device and evicts the least recently returned idle device.
+compatible device, even after a total-cap reduction, and evicts the least recently
+returned idle device when no compatible idle device is available. A pending
+eviction or transient destroy failure returns `eviction_pending` with
+`retryable: true` and `retryAfterMs: 1000`. Its destroying resource keeps capacity
+reserved for recovery. The failed request ID remains terminal; after cleanup
+frees capacity, retry with a new request ID. Permanent destroy errors remain
+non-retryable `session_preparation_failed` failures.
+Managed provisioning's `cleanup_pending` remains a separate failure: its retryability
+is suppressed while that request's resource cleanup is pending, with no retry delay injected.
 
 ## Consumer contract
 

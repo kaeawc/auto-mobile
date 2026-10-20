@@ -1,7 +1,7 @@
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { buildObserveResult } from "../../helpers/observeFixture";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DragAndDrop, getIosDragTimeoutMs } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -14,6 +14,8 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
+
+afterEach(() => mock.restore());
 
 describe("DragAndDrop", () => {
   const device: BootedDevice = {

@@ -529,6 +529,9 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
       });
       const drain = spyOn(server, "waitForDrain").mockImplementation(async () => {
         order.push("drain");
+        if (drained) {
+          socket.emit("drain");
+        }
         return drained;
       });
       restores.push(() => drain.mockRestore());

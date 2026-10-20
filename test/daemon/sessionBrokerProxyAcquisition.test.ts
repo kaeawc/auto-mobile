@@ -50,11 +50,18 @@ function rig(
     timer.enableAutoAdvance();
   }
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const callOptions: Array<{
+    method: string;
+    timeoutMs: number;
+    signal?: AbortSignal;
+    cancelOnTimeout?: boolean;
+  }> = [];
   const held: Array<{ requestId: string; sessionUuid: string }> = [];
   const ports: SessionBrokerProxyAcquisitionPorts = {
     ensureConnected: async () => {},
-    callDaemonMethod: async (method, params) => {
+    callDaemonMethod: async (method, params, options) => {
       calls.push({ method, params });
+      callOptions.push({ method, ...options });
       return await answer(method, params);
     },
     holdSession: async (requestId, sessionUuid) => {
@@ -65,7 +72,7 @@ function rig(
     livenessOwnerToken: "owner-1",
     timer,
   };
-  return { ports, calls, held, timer };
+  return { ports, calls, callOptions, held, timer };
 }
 
 describe("session broker proxy acquisition", () => {
@@ -127,6 +134,17 @@ describe("session broker proxy acquisition", () => {
     expect(prepare.params).not.toHaveProperty("scope");
     expect(prepare.params).not.toHaveProperty("slot");
     expect(held).toEqual([{ requestId: "request-1", sessionUuid: "session-1" }]);
+  });
+
+  test("the prepare call never cancels the daemon's work when only its reply wait expires (#13800)", async () => {
+    const { ports, callOptions } = rig((method) =>
+      method === "daemon/capabilities" ? { capabilities: ["session-broker/v1"] } : ready,
+    );
+
+    await acquireSessionThroughDaemon(config, ports);
+
+    const prepare = callOptions.find(({ method }) => method === DAEMON_PREPARE_SESSION_METHOD);
+    expect(prepare?.cancelOnTimeout).toBe(false);
   });
 
   test("a lost prepare reply polls only the same durable request", async () => {

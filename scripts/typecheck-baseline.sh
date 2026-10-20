@@ -61,7 +61,7 @@ run_tsc() {
     if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
       eval "$TYPECHECK_TSC_CMD" 2>&1
     else
-      host_heavy_run bunx tsgo --noEmit -p "$TSCONFIG" 2>&1
+      host_heavy_run host_heavy_tsgo "$TSCONFIG" 2>&1
     fi
   )
 }

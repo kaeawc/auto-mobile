@@ -105,7 +105,11 @@ run_oxlint_json() {
   if [[ -n "${OXLINT_JSON_CMD:-}" ]]; then
     eval "$OXLINT_JSON_CMD" || true
   else
-    host_heavy_run bunx oxlint --type-aware --format json 2>/dev/null || true
+    # The exit status is deliberately ignored (see above). `set +e` instead of `|| true` keeps
+    # errexit from being disabled inside host_heavy_run.
+    set +e
+    host_heavy_run host_heavy_oxlint_type_aware
+    set -e
   fi
 }
 

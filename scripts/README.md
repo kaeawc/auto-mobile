@@ -595,3 +595,11 @@ logical core count. `AUTOMOBILE_TEST_LOADAVG_FILE` can inject a load-average
 file (first field is the one-minute value) for deterministic tests. Changed
 mode still delegates selection to Bun with `--changed` and `--shard`; only its
 shard count is capped. Sharing a changed-file list is deferred.
+
+`scripts/typecheck-baseline.sh` and the type-aware stage of `scripts/oxlint-baseline.sh` (`tsgo`, and
+`tsgolint` through `oxlint --type-aware`) run through `scripts/lib/host-heavy-run.sh`, which takes
+`AUTOMOBILE_HEAVY_CHECK_SLOTS` slots (default 4) from the same pool. A run that has the pool to
+itself keeps the tool's default parallelism; alongside another holder, or with fewer slots than it
+asked for, the checker is capped to the slots it holds (`GOMAXPROCS`, `tsgo --checkers`,
+`oxlint --threads`). With no free slot it waits up to `AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS`
+(default 60) and then runs on one thread. `AUTOMOBILE_HOST_TEST_SLOTS=off` disables the cap.

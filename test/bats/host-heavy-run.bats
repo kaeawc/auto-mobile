@@ -76,12 +76,50 @@ hold() {
   [[ "$output" == *"gomaxprocs=1"* ]]
 }
 
-@test "a smaller demand is satisfied from a partly used pool without a cap" {
+@test "a run that got every slot it asked for is still capped while another run holds the pool" {
   cd "$REPO_ROOT"
   hold 2
   AUTOMOBILE_HEAVY_CHECK_SLOTS=2 run heavy bash -c 'echo "gomaxprocs=${GOMAXPROCS:-unset}"'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gomaxprocs=unset"* ]]
+  [[ "$output" == *"gomaxprocs=2"* ]]
+}
+
+@test "the thread cap is the command's last argument, empty for a lone run" {
+  cd "$REPO_ROOT"
+  run heavy bash -c 'echo "threads=[$1]"' _
+  [[ "$output" == *"threads=[]"* ]]
+  hold 3
+  run heavy bash -c 'echo "threads=[$1]"' _
+  [[ "$output" == *"threads=[1]"* ]]
+}
+
+@test "the pool is empty again after a run and after a killed run" {
+  cd "$REPO_ROOT"
+  run heavy true
+  [ -z "$(ls -A "$AUTOMOBILE_COORDINATION_DIR/test-slots" 2> /dev/null)" ]
+  heavy sleep 2 &
+  local runner=$!
+  local attempt
+  for ((attempt = 0; attempt < 100; attempt += 1)); do
+    [[ -n "$(ls -A "$AUTOMOBILE_COORDINATION_DIR/test-slots" 2> /dev/null)" ]] && break
+    sleep 0.05
+  done
+  # The slots belong to the run until its checker ends, even if the starter is signalled.
+  kill -TERM "$runner"
+  wait "$runner" || true
+  for ((attempt = 0; attempt < 100; attempt += 1)); do
+    [[ -z "$(ls -A "$AUTOMOBILE_COORDINATION_DIR/test-slots" 2> /dev/null)" ]] && break
+    sleep 0.1
+  done
+  [ -z "$(ls -A "$AUTOMOBILE_COORDINATION_DIR/test-slots" 2> /dev/null)" ]
+}
+
+@test "waiting for a full pool is announced" {
+  cd "$REPO_ROOT"
+  hold 4
+  AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS=0 run heavy true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"capping checker threads to 1"* ]]
 }
 
 @test "AUTOMOBILE_HOST_TEST_SLOTS=off disables the cap" {

@@ -7,11 +7,13 @@
 #   host_heavy_run <command> [args...]
 #
 # The run asks for AUTOMOBILE_HEAVY_CHECK_SLOTS slots (default 4) from the same pool unit-test
-# workers use. A lone run gets them all and keeps the tool's default parallelism. When fewer were
-# free, the checker's threads are capped to the slots acquired (GOMAXPROCS, which Go checkers
-# honour), and with none free the run waits up to AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS (default
-# 300) before proceeding with one thread, so a stuck pool can never deadlock a gate.
-# AUTOMOBILE_HOST_TEST_SLOTS=off disables the cap, as for test-ts.sh.
+# workers use. When it holds slots alongside another run, or got fewer than it asked for, the
+# checker is capped to the slots it holds: GOMAXPROCS for the Go checkers, plus
+# the thread cap as the command's last argument (empty when uncapped) for tools with their own
+# thread flag (`tsgo --checkers`, `oxlint --threads`). A run with the pool to itself keeps the
+# tool's default parallelism. With no slot free the run waits up to
+# AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS (default 60) and then proceeds with one thread, so a full
+# pool can never deadlock a gate. AUTOMOBILE_HOST_TEST_SLOTS=off disables the cap.
 
 host_heavy_cores() {
   local cores
@@ -20,11 +22,26 @@ host_heavy_cores() {
   printf '%s\n' "$cores"
 }
 
+# Whether another live process holds a slot in the pool (this process's own slots do not count).
+host_heavy_pool_shared() {
+  local coordination path owner
+  coordination="${AUTOMOBILE_COORDINATION_DIR:-${AUTO_MOBILE_COORDINATION_DIR:-${HOME}/.auto-mobile}}"
+  for path in "$coordination"/test-slots/*; do
+    [[ -r "$path/owner.pid" ]] || continue
+    owner=""
+    read -r owner < "$path/owner.pid" || true
+    if [[ "$owner" =~ ^[1-9][0-9]*$ && "$owner" != "$host_slots_owner" ]] && kill -0 "$owner" 2> /dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 host_heavy_run() {
   local root demand wait_seconds
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   demand="${AUTOMOBILE_HEAVY_CHECK_SLOTS:-4}"
-  wait_seconds="${AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS:-300}"
+  wait_seconds="${AUTOMOBILE_HEAVY_CHECK_WAIT_SECONDS:-60}"
   if ! [[ "$demand" =~ ^[1-9][0-9]{0,2}$ ]]; then
     echo "AUTOMOBILE_HEAVY_CHECK_SLOTS must be a positive integer, got: $demand" >&2
     return 2
@@ -37,6 +54,9 @@ host_heavy_run() {
   (
     # shellcheck source=scripts/lib/host-slots.sh
     source "$root/scripts/lib/host-slots.sh"
+    # The slots belong to this subshell, not to the script that started it: if that script is
+    # killed while the checker runs on, the slots must stay booked until the checker is done.
+    host_slots_owner="$(exec sh -c 'echo "$PPID"')"
     trap host_slots_release EXIT
     trap 'exit 143' TERM
     trap 'exit 130' INT
@@ -44,18 +64,38 @@ host_heavy_run() {
     cores="$(host_heavy_cores)"
     waited=0
     while true; do
-      host_slots_acquire "$demand" "$cores" || exit $?
+      acquire_status=0
+      host_slots_acquire "$demand" "$cores" || acquire_status=$?
+      if [[ "$acquire_status" -ne 0 ]]; then exit "$acquire_status"; fi
       if [[ "$host_slots_acquired" -gt 0 || "$waited" -ge "$wait_seconds" ]]; then break; fi
+      if [[ "$waited" -eq 0 ]]; then
+        echo "host-heavy-run: waiting up to ${wait_seconds}s for a free host slot" >&2
+      fi
       sleep 2
       waited=$((waited + 2))
     done
-    if [[ "$host_slots_acquired" -lt "$demand" ]]; then
+    threads=""
+    if [[ "${AUTOMOBILE_HOST_TEST_SLOTS:-}" != off ]] &&
+      { [[ "$host_slots_acquired" -lt "$demand" ]] || host_heavy_pool_shared; }; then
       threads="$host_slots_acquired"
       if [[ "$threads" -lt 1 ]]; then threads=1; fi
-      printf 'host-heavy-run: %s of %s slots free after %ss; capping checker threads to %s\n' \
+      printf 'host-heavy-run: holding %s of %s slots (waited %ss); capping checker threads to %s\n' \
         "$host_slots_acquired" "$demand" "$waited" "$threads" >&2
       export GOMAXPROCS="$threads"
     fi
-    "$@"
+    "$@" "$threads"
   )
+}
+
+# The checkers themselves, run through host_heavy_run (the cap is their last argument). A capped
+# run also bounds tsgo's checker count (so its memory, not just its CPU) and oxlint's own threads.
+host_heavy_tsgo() {
+  local tsconfig="$1" threads="$2"
+  bunx tsgo --noEmit -p "$tsconfig" ${threads:+--checkers "$threads"}
+}
+
+# Only the linter's own stderr is dropped, so the helper's messages stay visible.
+host_heavy_oxlint_type_aware() {
+  local threads="$1"
+  bunx oxlint --type-aware --format json ${threads:+--threads "$threads"} 2> /dev/null
 }

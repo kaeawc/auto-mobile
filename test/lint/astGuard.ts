@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, type Dirent } from "node:fs";
+import { readdirSync, readFileSync, statSync, type BigIntStats, type Dirent } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -86,32 +86,57 @@ export function unwrapCallee(callee: Expression): Expression {
 }
 
 // Cache data, never Programs: Oxc's materialized trees dwarf the source strings.
-const sources = new Map<string, { version: string; source: string }>();
 const syntaxCheckedSources = new Map<string, string>();
 const directories = new Map<string, { version: string; entries: Dirent[] }>();
 const inventories = new Map<string, { entries: Dirent[]; children: string[][]; files: string[] }>();
 
-function fileVersion(file: string): string {
-  const stat = statSync(file, { bigint: true });
+type GuardStatIdentity = Pick<BigIntStats, "dev" | "ino" | "mtimeNs" | "ctimeNs" | "size">;
+
+interface GuardSourceReaderOptions {
+  platform: NodeJS.Platform;
+  stat: (file: string) => GuardStatIdentity;
+  readFile: (file: string) => string;
+}
+
+function fileVersion(stat: GuardStatIdentity): string {
   // ctime catches same-size rewrites with restored mtimes; inode/device catch replacements.
   return `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.size}`;
 }
 
-export function readGuardFile(file: string | URL): string {
-  const absolute = path.resolve(typeof file === "string" ? file : fileURLToPath(file));
-  const version = fileVersion(absolute);
-  const cached = sources.get(absolute);
-  if (cached?.version === version) {
-    return cached.source;
-  }
-  const source = readFileSync(absolute, "utf8");
-  sources.set(absolute, { version, source });
-  return source;
+export function createGuardSourceReader(options: GuardSourceReaderOptions) {
+  const sources = new Map<string, { version: string | undefined; source: string }>();
+  return (file: string | URL): string => {
+    const absolute = path.resolve(typeof file === "string" ? file : fileURLToPath(file));
+    // Windows/Bun can preserve every stat field across a same-size rewrite (#13843).
+    const version = options.platform === "win32" ? undefined : fileVersion(options.stat(absolute));
+    const cached = sources.get(absolute);
+    if (version !== undefined && cached?.version === version) {
+      return cached.source;
+    }
+    const source = options.readFile(absolute);
+    if (cached?.source === source) {
+      cached.version = version;
+      return cached.source;
+    }
+    sources.set(absolute, { version, source });
+    return source;
+  };
 }
+
+export const readGuardFile = createGuardSourceReader({
+  platform: process.platform,
+  stat: (file) => statSync(file, { bigint: true }),
+  readFile: (file) => readFileSync(file, "utf8"),
+});
 
 function directoryEntries(dir: string): Dirent[] {
   const absolute = path.resolve(dir);
-  const version = fileVersion(absolute);
+  // Directory identities have the same Windows limitation. Re-list there so inventories
+  // see creates/removes/renames, including changes below an unchanged root directory.
+  if (process.platform === "win32") {
+    return readdirSync(absolute, { withFileTypes: true });
+  }
+  const version = fileVersion(statSync(absolute, { bigint: true }));
   const cached = directories.get(absolute);
   if (cached?.version === version) {
     return cached.entries;

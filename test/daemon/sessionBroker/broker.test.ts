@@ -5,7 +5,7 @@ import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/se
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
-import { drainUntil } from "../../helpers/fakeTimerStepping";
+import { drainUntil, drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   openSqliteBindingRegistry,
@@ -13,6 +13,8 @@ import {
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { BindingProcessIdentity } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { parseSessionConfig, type SessionConfig } from "../../../src/devices/sessionConfig";
+import { logger } from "../../../src/utils/logger";
+import type { SessionBrokerReleaseResult } from "../../../src/devices/sessionBrokerResult";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
@@ -643,6 +645,383 @@ describe("session-only broker lifecycle", () => {
     await expect(broker.prepare(config("late"), "owner-token")).rejects.toThrow("stopping");
   });
 
+  describe("bounded release reply", () => {
+    const replyBudgetMs = 20;
+    let timer: FakeTimer;
+
+    beforeEach(() => {
+      timer = new FakeTimer();
+      broker = new SessionBroker({ ...options, timer, releaseReplyBudgetMs: replyBudgetMs });
+    });
+
+    async function replyAfterBudget(pending: Promise<SessionBrokerReleaseResult>) {
+      let result: SessionBrokerReleaseResult | undefined;
+      const observed = pending.then((value) => {
+        result = value;
+      });
+      await drainUntilQuiescent(timer);
+      timer.advanceTime(replyBudgetMs);
+      await drainUntil(() => result !== undefined, { description: "bounded release reply" });
+      await observed;
+      return result;
+    }
+
+    test.each(["active", "releasing"] as const)(
+      "recovery keeps its slot on full cleanup for %s requests beyond the RPC budget",
+      async (state) => {
+        options.limits = { totalDeviceCap: 2, sessionCap: 2 };
+        options.sessionDisposition = () => "gone";
+        broker = new SessionBroker({
+          ...options,
+          timer,
+          releaseReplyBudgetMs: replyBudgetMs,
+          cleanupConcurrency: 1,
+          cleanupWaitMs: 100,
+        });
+        const first = await ready("a-recovery");
+        const second = await ready("b-recovery");
+        if (state === "releasing") {
+          await options.store.beginRelease(first, OWNER);
+          await options.store.beginRelease(second, OWNER);
+        }
+        const entered = Promise.withResolvers<void>();
+        const complete = Promise.withResolvers<void>();
+        devices.releaseHook = async () => {
+          entered.resolve();
+          await complete.promise;
+        };
+        let recovered = false;
+        const recovering = broker.recover().then(() => {
+          recovered = true;
+        });
+        await entered.promise;
+        try {
+          await drainUntilQuiescent(timer);
+          timer.advanceTime(replyBudgetMs * 2);
+          await drainUntilQuiescent(timer);
+          expect(devices.released).toEqual([first]);
+          expect(recovered).toBe(false);
+          expect(timer.getPendingTimeouts()).toEqual([100]);
+          // End the pass's own wait. The occupied native slot must survive into later passes.
+          timer.advanceTime(100);
+          await recovering;
+          expect(recovered).toBe(true);
+          await broker.recoverCleanup();
+          expect(devices.released).toEqual([first]);
+        } finally {
+          complete.resolve();
+          await recovering;
+          await broker.joinReleases();
+        }
+        await broker.recoverCleanup();
+        expect(devices.released).toEqual([first, second]);
+        expect(await broker.status("b-recovery")).toMatchObject({ outcome: "released" });
+      },
+    );
+
+    test("an RPC joins recovery's full release and close preserves its abort signal", async () => {
+      broker = new SessionBroker({ ...options, timer, cleanupWaitMs: 100 });
+      const uuid = await ready("recovery-rpc");
+      await options.store.beginRelease(uuid, OWNER);
+      const entered = Promise.withResolvers<AbortSignal>();
+      const complete = Promise.withResolvers<void>();
+      const destroy = spyOn(options.devices, "destroy").mockImplementation(
+        async (_resource, signal) => {
+          if (!signal) {
+            throw new Error("Recovery destroy lost its abort signal");
+          }
+          entered.resolve(signal);
+          await complete.promise;
+          signal.throwIfAborted();
+          return "pending";
+        },
+      );
+      const recovering = broker.recoverCleanup();
+      const signal = await entered.promise;
+      let closing: Promise<void> | undefined;
+      try {
+        const reply = broker.release(uuid, undefined, { replyBudgetMs });
+        expect(await replyAfterBudget(reply)).toMatchObject({ outcome: "cleanup_pending" });
+        expect(destroy).toHaveBeenCalledTimes(1);
+        expect(devices.released).toEqual([uuid]);
+        let closed = false;
+        closing = broker.close().then(() => {
+          closed = true;
+        });
+        await drainUntil(() => signal.aborted, { description: "recovery cleanup aborted" });
+        await drainUntilQuiescent(timer);
+        expect(closed).toBe(false);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        complete.resolve();
+        await recovering;
+        await closing;
+        await broker.joinReleases();
+        destroy.mockRestore();
+      }
+      expect(await broker.status("recovery-rpc")).toMatchObject({ cleanupPending: true });
+    });
+
+    test("per-call reply budgets bound concurrent callers independently", async () => {
+      const uuid = await ready("per-call");
+      const entered = Promise.withResolvers<void>();
+      const complete = Promise.withResolvers<void>();
+      devices.releaseHook = async () => {
+        entered.resolve();
+        await complete.promise;
+      };
+      const short = broker.release(uuid, undefined, { replyBudgetMs: 5 });
+      await entered.promise;
+      let longReplied = false;
+      const long = broker.release(uuid, undefined, { replyBudgetMs: 10 }).then((result) => {
+        longReplied = true;
+        return result;
+      });
+      try {
+        await drainUntilQuiescent(timer);
+        expect(timer.getPendingTimeouts()).toEqual([5, 10]);
+        timer.advanceTime(5);
+        expect(await short).toEqual({ sessionUuid: uuid, outcome: "cleanup_pending" });
+        expect(longReplied).toBe(false);
+        timer.advanceTime(5);
+        expect(await long).toEqual({ sessionUuid: uuid, outcome: "cleanup_pending" });
+        expect(devices.released).toEqual([uuid]);
+      } finally {
+        complete.resolve();
+        await Promise.all([short, long, broker.joinReleases()]);
+      }
+    });
+
+    test.each(["reset", "destroy"] as const)(
+      "hanging %s replies pending, keeps durable ownership, and joins cleanup",
+      async (operation) => {
+        broker = new SessionBroker({
+          ...options,
+          timer,
+          releaseReplyBudgetMs: replyBudgetMs,
+          reuseCleanDevices: operation === "reset",
+        });
+        const uuid = await ready("bounded");
+        const entered = Promise.withResolvers<void>();
+        const complete = Promise.withResolvers<void>();
+        const reset = devices.reset.bind(devices);
+        const destroy = devices.destroy.bind(devices);
+        const resetSpy = spyOn(devices, "reset").mockImplementation(async (resource) => {
+          if (operation === "reset") {
+            entered.resolve();
+            await complete.promise;
+          }
+          return reset(resource);
+        });
+        const destroySpy = spyOn(devices, "destroy").mockImplementation(async (resource) => {
+          if (operation === "destroy") {
+            entered.resolve();
+            await complete.promise;
+          }
+          return destroy(resource);
+        });
+        const pending = broker.release(uuid);
+        await entered.promise;
+        let joined = false;
+        const joining = broker.joinReleases().then(() => {
+          joined = true;
+        });
+        try {
+          expect(await replyAfterBudget(pending)).toEqual({
+            sessionUuid: uuid,
+            outcome: "cleanup_pending",
+          });
+          expect(joined).toBe(false);
+          expect((await options.store.getRequest("bounded"))?.state).toBe("releasing");
+          expect((await options.store.listResources())[0].state).toBe(
+            operation === "reset" ? "resetting" : "destroying",
+          );
+          expect(operation === "reset" ? resetSpy : destroySpy).toHaveBeenCalledTimes(1);
+        } finally {
+          complete.resolve();
+          await joining;
+          resetSpy.mockRestore();
+          destroySpy.mockRestore();
+        }
+        expect(await broker.status("bounded")).toMatchObject({
+          outcome: "released",
+          cleanupPending: false,
+        });
+        expect(await broker.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+
+    test("work completing within the reply budget returns released and clears its timer", async () => {
+      const uuid = await ready("quick");
+      expect(await broker.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(await broker.status("quick")).toMatchObject({ outcome: "released" });
+    });
+
+    test("concurrent and later callers get bounded replies from the same native work", async () => {
+      const uuid = await ready("concurrent");
+      const entered = Promise.withResolvers<void>();
+      const complete = Promise.withResolvers<void>();
+      devices.releaseHook = async () => {
+        entered.resolve();
+        await complete.promise;
+      };
+      const first = broker.release(uuid);
+      await entered.promise;
+      const second = broker.release(uuid);
+      try {
+        expect(
+          await replyAfterBudget(
+            Promise.all([first, second]).then(([result, other]) => {
+              expect(other).toEqual(result);
+              return result;
+            }),
+          ),
+        ).toEqual({ sessionUuid: uuid, outcome: "cleanup_pending" });
+        expect(await replyAfterBudget(broker.release(uuid))).toEqual({
+          sessionUuid: uuid,
+          outcome: "cleanup_pending",
+        });
+        expect(devices.released).toEqual([uuid]);
+      } finally {
+        complete.resolve();
+        await broker.joinReleases();
+      }
+    });
+
+    test("a late release rejection is warned, handled, and removed from tracking", async () => {
+      const uuid = await ready("late-failure");
+      const entered = Promise.withResolvers<void>();
+      const complete = Promise.withResolvers<void>();
+      devices.releaseHook = async () => {
+        entered.resolve();
+        await complete.promise;
+      };
+      // Native errors already have their own warn-and-recover paths. Fail a durable cleanup
+      // read to exercise a rejection of the tracked release promise itself.
+      const error = new Error("late receipt read failed");
+      const read = spyOn(options.store, "getResource");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
+      const pending = broker.release(uuid);
+      await entered.promise;
+      try {
+        expect(await replyAfterBudget(pending)).toMatchObject({ outcome: "cleanup_pending" });
+        read.mockRejectedValue(error);
+        complete.resolve();
+        await broker.joinReleases();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("release failed"), error);
+        read.mockRestore();
+        // A stale rejected entry would reject this retry instead of finishing cleanup.
+        expect(await broker.release(uuid)).toMatchObject({ outcome: "released" });
+        // Unhandled-rejection reporting needs an event-loop turn after the late rejection.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(unhandled).toEqual([]);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        complete.resolve();
+        read.mockRestore();
+        await broker.joinReleases();
+        warn.mockRestore();
+        process.off("unhandledRejection", onUnhandled);
+      }
+    });
+
+    test.each(["commit", "cleanup"] as const)(
+      "%s rejection before the reply budget still propagates",
+      async (stage) => {
+        const uuid = await ready("early-failure");
+        const error = new Error("begin release failed");
+        const begin = spyOn(options.store, "beginRelease");
+        const read = spyOn(options.store, "getResource");
+        if (stage === "commit") {
+          begin.mockRejectedValueOnce(error);
+        } else {
+          read.mockRejectedValueOnce(error);
+        }
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          await expect(broker.release(uuid)).rejects.toBe(error);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+          expect((await options.store.getRequest("early-failure"))?.state).toBe(
+            stage === "commit" ? "active" : "releasing",
+          );
+        } finally {
+          begin.mockRestore();
+          read.mockRestore();
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test("reply budget cannot acknowledge a release before its durable commit", async () => {
+      const uuid = await ready("slow-commit");
+      const complete = Promise.withResolvers<void>();
+      const original = options.store.beginRelease.bind(options.store);
+      const begin = spyOn(options.store, "beginRelease").mockImplementation(async (...args) => {
+        await complete.promise;
+        return original(...args);
+      });
+      let replied = false;
+      const pending = broker.release(uuid).then((result) => {
+        replied = true;
+        return result;
+      });
+      try {
+        timer.advanceTime(replyBudgetMs);
+        expect((await options.store.getRequest("slow-commit"))?.state).toBe("active");
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(replied).toBe(false);
+      } finally {
+        complete.resolve();
+        await pending;
+        begin.mockRestore();
+      }
+      expect(await pending).toMatchObject({ outcome: "released" });
+    });
+
+    test("close joins native work even after a pending reply", async () => {
+      const uuid = await ready("close-pending");
+      const entered = Promise.withResolvers<void>();
+      const complete = Promise.withResolvers<void>();
+      devices.releaseHook = async () => {
+        entered.resolve();
+        await complete.promise;
+      };
+      const pending = broker.release(uuid);
+      await entered.promise;
+      let closed = false;
+      let closing: Promise<void> | undefined;
+      const snapshots = spyOn(options.store, "listRecoverableRequests");
+      try {
+        expect(await replyAfterBudget(pending)).toMatchObject({ outcome: "cleanup_pending" });
+        closing = broker.close().then(() => {
+          closed = true;
+        });
+        // Finish the handoff scan: close has reached its join, not merely its first await.
+        await drainUntil(() => snapshots.mock.calls.length === 3, {
+          description: "close release join",
+        });
+        timer.advanceTime(replyBudgetMs);
+        await options.store.listRecoverableRequests();
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(closed).toBe(false);
+      } finally {
+        complete.resolve();
+        await closing;
+        await broker.joinReleases();
+        snapshots.mockRestore();
+      }
+      expect(closed).toBe(true);
+      expect(await broker.status("close-pending")).toMatchObject({ outcome: "released" });
+    });
+  });
+
   test("duplicate release joins the same in-flight drain", async () => {
     const first = await ready("first");
     const entered = Promise.withResolvers<void>();
@@ -656,7 +1035,7 @@ describe("session-only broker lifecycle", () => {
     const a = broker.release(first);
     await entered.promise;
     const b = broker.release(first);
-    expect(b).toBe(a);
+    // Each caller may have its own bounded wait; the native drain remains shared.
     complete.resolve();
     expect(await a).toMatchObject({ outcome: "released" });
     expect(await b).toMatchObject({ outcome: "released" });

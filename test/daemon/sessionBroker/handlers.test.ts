@@ -772,6 +772,42 @@ describe("session broker daemon handlers", () => {
     ]);
   });
 
+  test.each([
+    { input: undefined, expected: undefined },
+    { input: 750, expected: 750 },
+    { input: 0, expected: 0 },
+    { input: -10, expected: 0 },
+    { input: 40_000, expected: 30_000 },
+    { input: Number.NaN, expected: undefined },
+    { input: Number.POSITIVE_INFINITY, expected: undefined },
+    { input: Number.NEGATIVE_INFINITY, expected: undefined },
+  ])("release parses and clamps replyBudgetMs=$input to $expected", async ({ input, expected }) => {
+    broker.sessionOwners.set(SESSION, TOKEN);
+    const release = spyOn(broker, "release");
+    try {
+      expect(
+        await handleReleaseBrokerSession(
+          request({ sessionId: SESSION, livenessOwnerToken: TOKEN, replyBudgetMs: input }),
+          state,
+        ),
+      ).toMatchObject({ success: true });
+      expect(release).toHaveBeenCalledWith(SESSION, undefined, { replyBudgetMs: expected });
+    } finally {
+      release.mockRestore();
+    }
+  });
+
+  test.each(["500", null, {}])("release rejects a non-number replyBudgetMs=%p", async (input) => {
+    broker.sessionOwners.set(SESSION, TOKEN);
+    expect(
+      await handleReleaseBrokerSession(
+        request({ sessionId: SESSION, livenessOwnerToken: TOKEN, replyBudgetMs: input }),
+        state,
+      ),
+    ).toMatchObject({ success: false });
+    expect(broker.releaseCalls).toEqual([]);
+  });
+
   test("registration binds only when receipt, session, and live owner token agree", async () => {
     broker.statuses.set(`request-1:${TOKEN}`, result("request-1", "ready", SESSION));
     tokens.set(SESSION, TOKEN);

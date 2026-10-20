@@ -25,6 +25,10 @@ const BROKER_RELEASE_RETRY_MAX_MS = 5_000;
 const BROKER_RELEASE_RETRY_MIN_CALL_MS = 50;
 // Acquisition cleanup can wait one daemon recovery cadence plus a round trip and slack.
 const BROKER_PREPARED_RELEASE_TIMEOUT_MS = 7_000;
+export const BROKER_RELEASE_REPLY_BUDGET_MS = Math.max(
+  250,
+  BROKER_EXECUTION_RELEASE_TIMEOUT_MS - 500,
+);
 
 /** Release is idempotent, but only the explicit restart-handoff refusal permits a retry. */
 function releaseRetryDelay(value: unknown): number | undefined {
@@ -317,6 +321,7 @@ export class BrokerSessions {
             sessionId: sessionUuid,
             livenessOwnerToken: this.deps.livenessOwnerToken,
             ...(reason ? { reason } : {}),
+            replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
           },
           { timeoutMs },
         ),

@@ -34,6 +34,7 @@ import type { BrokerLimits } from "./admission";
 import { SessionBrokerFailureError, type SessionBrokerDevicePort } from "./devicePort";
 import type { SessionLiveness } from "./sessionDisposition";
 import { nativeProfile, poolProfile } from "./profile";
+import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import {
@@ -66,10 +67,13 @@ export interface SessionBrokerOptions {
   cleanupConcurrency?: number;
   /** Per-item pass wait only; native work retains its slot until it settles. */
   cleanupWaitMs?: number;
+  /** Caller wait after durable release ownership commits; native cleanup keeps running. */
+  releaseReplyBudgetMs?: number;
   timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
 }
 
 export { EXPORT_RETENTION_MS } from "./store";
+export { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./releaseReply";
 
 /**
  * Terminal receipts answer exact replay for 30 days after they become terminal. The protocol
@@ -89,7 +93,7 @@ export const RECEIPT_PRUNE_BATCH = 500;
  * broker ownership until they settle; close aborts/joins them through the native journal seam.
  */
 export class SessionBroker {
-  private readonly releases = new Map<string, Promise<SessionBrokerReleaseResult>>();
+  private readonly releases = new Map<string, TrackedRelease>();
   private readonly preparations = new Map<string, number>();
   private readonly preparationOwners = new Map<
     Promise<SessionBrokerResult>,
@@ -520,7 +524,8 @@ export class SessionBroker {
   }
 
   /**
-   * Ends a session. An ordinary release answers once cleanup settles and records `released`. An
+   * Ends a session with a bounded reply after durable commitment; native work remains tracked
+   * until settlement. Only settled cleanup records `released`; expiry replies `cleanup_pending`. An
    * owner-exit release (#12791) is not the client's release: it terminally records
    * `session_owner_exited` and answers as soon as that receipt is committed, while the session
    * drain and device destruction continue as tracked release work ({@link joinReleases}).
@@ -528,41 +533,46 @@ export class SessionBroker {
   release(
     sessionUuid: string,
     reason?: SessionBrokerReleaseReason,
+    options: { replyBudgetMs?: number } = {},
   ): Promise<SessionBrokerReleaseResult> {
+    if (reason === SESSION_OWNER_EXITED_CODE && !this.releases.has(sessionUuid)) {
+      return this.releaseAfterOwnerExit(sessionUuid);
+    }
+    return boundedReleaseReply(
+      sessionUuid,
+      this.releaseTracked(sessionUuid),
+      options.replyBudgetMs,
+      this.options,
+    );
+  }
+
+  private releaseTracked(sessionUuid: string, signal?: AbortSignal): TrackedRelease {
     const previous = this.releases.get(sessionUuid);
     if (previous) {
       return previous;
     }
-    if (reason === SESSION_OWNER_EXITED_CODE) {
-      return this.releaseAfterOwnerExit(sessionUuid);
-    }
-    return this.trackRelease(sessionUuid, this.releaseOnce(sessionUuid));
-  }
-
-  private trackRelease(
-    sessionUuid: string,
-    pending: Promise<SessionBrokerReleaseResult>,
-  ): Promise<SessionBrokerReleaseResult> {
-    this.releases.set(sessionUuid, pending);
-    // Both handlers terminate; callers still observe the original result/rejection.
-    void pending.then(
-      () => this.releases.delete(sessionUuid),
-      () => this.releases.delete(sessionUuid),
+    const committed = this.options.store.beginRelease(sessionUuid, this.options.owner);
+    return trackRelease(
+      this.releases,
+      sessionUuid,
+      committed.then((request) => this.releaseOnce(sessionUuid, request, signal)),
+      committed,
     );
-    return pending;
   }
 
   private releaseAfterOwnerExit(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
     const committed = this.commitOwnerExit(sessionUuid);
     // Registered synchronously, so a concurrent release joins this cleanup instead of racing it.
     // trackRelease settles its own rejection; the caller observes the committed answer below.
-    void this.trackRelease(
+    void trackRelease(
+      this.releases,
       sessionUuid,
       committed.then((exit) =>
         exit
           ? this.finishOwnerExit(sessionUuid, exit)
           : { sessionUuid, outcome: "unknown_session" },
       ),
+      committed,
     );
     return committed.then(async (exit) =>
       exit
@@ -615,7 +625,7 @@ export class SessionBroker {
 
   /** Daemon shutdown joins callers; unfinished native work retains journal ownership. */
   async joinReleases(): Promise<void> {
-    await Promise.allSettled([...this.releases.values()]);
+    await Promise.allSettled([...this.releases.values()].map((release) => release.pending));
   }
 
   async close(): Promise<void> {
@@ -641,7 +651,7 @@ export class SessionBroker {
             request.state === "releasing" &&
             !this.queuedRecoveryReleases.has(request.requestId),
         )
-        .map((request) => this.release(request.sessionId!)),
+        .map((request) => this.releaseTracked(request.sessionId!).pending),
     );
     await this.joinReleases();
     await this.cleanup.join();
@@ -747,8 +757,7 @@ export class SessionBroker {
   ): Promise<void> {
     if (request?.state === "releasing" && request.sessionId) {
       const session = request.sessionId;
-      const previous = this.releases.get(session);
-      await (previous ?? this.trackRelease(session, this.releaseOnce(session, signal)));
+      await this.releaseTracked(session, signal).pending;
       return;
     }
     if (
@@ -833,9 +842,9 @@ export class SessionBroker {
 
   private async releaseOnce(
     sessionUuid: string,
+    request: BrokerRequestRecord | undefined,
     signal?: AbortSignal,
   ): Promise<SessionBrokerReleaseResult> {
-    const request = await this.options.store.beginRelease(sessionUuid, this.options.owner);
     if (!request) {
       return { sessionUuid, outcome: "unknown_session" };
     }
@@ -872,7 +881,7 @@ export class SessionBroker {
     try {
       const inFlightRelease = this.releases.get(sessionUuid);
       if (inFlightRelease) {
-        await inFlightRelease;
+        await inFlightRelease.pending;
       } else {
         await this.options.devices.release(sessionUuid);
       }

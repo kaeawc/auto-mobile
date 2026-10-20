@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { BrokerSessions, type BrokerSessionsPort } from "../../../src/daemon/proxy/BrokerSessions";
+import {
+  BROKER_RELEASE_REPLY_BUDGET_MS,
+  BrokerSessions,
+  type BrokerSessionsPort,
+} from "../../../src/daemon/proxy/BrokerSessions";
 import type { DaemonClientLike } from "../../../src/daemon/client";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResult";
@@ -131,7 +135,11 @@ describe("BrokerSessions", () => {
         if (method !== "daemon/releaseBrokerSession") {
           return ready;
         }
-        expect(params).toEqual({ sessionId: "session-1", livenessOwnerToken: "owner-1" });
+        expect(params).toEqual({
+          sessionId: "session-1",
+          livenessOwnerToken: "owner-1",
+          replyBudgetMs: BROKER_RELEASE_REPLY_BUDGET_MS,
+        });
         expect(brokerSessions.sessions.has("session-1")).toBe(true);
         expect(events).not.toContain("forget:session-1");
         if (++attempts === 1) {
@@ -373,6 +381,43 @@ describe("BrokerSessions", () => {
     expect(brokerSessions.sessions.size).toBe(0);
     expect(brokerSessions.heldBinding()).toBeUndefined();
     expect(events).toContain("forget:session-1");
+  });
+
+  test("releaseAll accepts cleanup_pending and drops the heartbeat hold without retrying", async () => {
+    const { brokerSessions, calls, events } = rig((call) =>
+      call.method === "daemon/releaseBrokerSession"
+        ? { sessionUuid: call.params.sessionId, outcome: "cleanup_pending" }
+        : ready,
+    );
+    await brokerSessions.hold("request-1", "session-1");
+    await brokerSessions.releaseAll();
+    expect(brokerSessions.sessions.size).toBe(0);
+    expect(brokerSessions.heldBinding()).toBeUndefined();
+    expect(events).toContain("forget:session-1");
+    expect(calls.filter((call) => call.method === "daemon/releaseBrokerSession")).toHaveLength(1);
+  });
+
+  test("release requests a reply 500 ms before the proxy deadline", async () => {
+    const harness = rig((call) => {
+      if (call.method !== "daemon/releaseBrokerSession") {
+        return ready;
+      }
+      expect(call.params.replyBudgetMs).toBe(1_000);
+      return new Promise((resolve) => {
+        harness.timer.setTimeout(
+          () => resolve({ sessionUuid: call.params.sessionId, outcome: "cleanup_pending" }),
+          Number(call.params.replyBudgetMs),
+        );
+      });
+    });
+    await harness.brokerSessions.hold("request-1", "session-1");
+    await harness.brokerSessions.releaseAll();
+    expect(harness.timer.now()).toBe(1_000);
+    expect(harness.timer.getPendingTimeoutCount()).toBe(0);
+    expect(harness.brokerSessions.sessions.size).toBe(0);
+    expect(
+      harness.calls.filter((call) => call.method === "daemon/releaseBrokerSession"),
+    ).toHaveLength(1);
   });
 
   test("releaseAll forgets the session even when the daemon is unreachable", async () => {

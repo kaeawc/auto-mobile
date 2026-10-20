@@ -38,10 +38,12 @@ const execResult = (stdout: string): ExecResult => ({
   includes: (value) => stdout.includes(value),
 });
 const staleResult = (timer: FakeTimer): ObserveResult => ({
+  observationId: "restart-cache",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: timer.now(),
   screenSize: { width: 100, height: 100 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  viewHierarchy: { node: {} },
+  viewHierarchy: { hierarchy: {} },
 });
 
 class OrderedAdb extends FakeAdbExecutor {
@@ -121,11 +123,14 @@ function iosInstallHarness(device = simulator, downgrade = false) {
       events.push(args[1]);
       return execResult("");
     },
-    timer,
+    { timer },
   );
   const plist = {
     extractString: async () => appId,
     readXmlBytes: async () => "",
+    readJsonFile: async () => ({}),
+    readJsonBytes: async () => ({}),
+    readXmlFile: async () => "",
     extractRawFile: async () => appId,
   };
   const makeAction = (invalidator: FakeDeviceWindowCacheInvalidator) =>

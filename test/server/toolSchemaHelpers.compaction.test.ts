@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { compactExclusiveSelectorProperties } from "../../src/server/toolSchemaHelpers";
+import { compactExclusiveSelectorProperties } from "../../src/utils/schemaHelpers";
 
 const textBranch = { type: "object", properties: { text: { type: "string" } }, required: ["text"] };
 const idBranch = {
@@ -10,7 +10,7 @@ const idBranch = {
 
 describe("exclusive selector compaction characterization", () => {
   test.each(["anyOf", "oneOf"])("compacts %s and preserves only string descriptions", (keyword) => {
-    const schema = {
+    const schema: Record<string, unknown> = {
       properties: {
         selector: {
           [keyword]: [textBranch, idBranch],
@@ -63,7 +63,7 @@ describe("exclusive selector compaction characterization", () => {
   });
 
   test("preserves the existing error for null branch properties", () => {
-    const schema = {
+    const schema: Record<string, unknown> = {
       properties: {
         selector: { anyOf: [textBranch, { type: "object", properties: null, required: ["text"] }] },
       },

@@ -1,30 +1,17 @@
 package dev.jasonpearson.automobile.desktop.core.testing
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.desktop.core.daemon.ClearKeyValueResult
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStartResult
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStopResult
-import dev.jasonpearson.automobile.desktop.core.daemon.ExecutePlanResult
-import dev.jasonpearson.automobile.desktop.core.daemon.FeatureFlagState
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileDeviceOperations
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileFeatureOperations
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileInputOperations
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileStorageOperations
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileTestOperations
 import dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
-import dev.jasonpearson.automobile.desktop.core.daemon.KillDeviceResult
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResourceContent
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResourceTemplate
 import dev.jasonpearson.automobile.desktop.core.daemon.McpTool
-import dev.jasonpearson.automobile.desktop.core.daemon.ObserveResult
-import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceAuditHistoryResult
-import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueResult
-import dev.jasonpearson.automobile.desktop.core.daemon.SetActiveDeviceResult
-import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueResult
-import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceResult
-import dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery
-import dev.jasonpearson.automobile.desktop.core.daemon.TestRunSummary
-import dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery
-import dev.jasonpearson.automobile.desktop.core.daemon.TestTimingSummary
-import dev.jasonpearson.automobile.desktop.core.daemon.UpdateServiceResult
-import dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -34,74 +21,65 @@ import kotlinx.serialization.json.JsonObject
  * All methods record their call name in [calls] and return configurable values. Resource responses
  * can be set per-URI via [setResourceResponseWithText].
  */
-class FakeAutoMobileClient : AutoMobileClient {
+class FakeAutoMobileClient private constructor(private val state: FakeAutoMobileClientState) :
+  AutoMobileClient,
+  AutoMobileDeviceOperations by FakeDeviceOperations(state),
+  AutoMobileTestOperations by FakeTestOperations(state),
+  AutoMobileInputOperations by FakeInputOperations(state),
+  AutoMobileStorageOperations by FakeStorageOperations(state),
+  AutoMobileFeatureOperations by FakeFeatureOperations(state) {
+  constructor() : this(FakeAutoMobileClientState())
 
   /** Ordered list of method names that were called. */
-  val calls = mutableListOf<String>()
+  val calls by state::calls
 
   // -- Configurable return values --
 
-  override var transportName: String = "fake"
-  override var connectionDescription: String = "Fake client for testing"
+  override var transportName by state::transportName
+  override var connectionDescription by state::connectionDescription
 
-  var pingResult: () -> Unit = {}
-  var listResourcesResult: List<McpResource> = emptyList()
-  var listResourceTemplatesResult: List<McpResourceTemplate> = emptyList()
-  var listToolsResult: List<McpTool> = emptyList()
-  var getNavigationGraphResult: JsonElement = JsonObject(emptyMap())
-  var listFeatureFlagsResult: List<FeatureFlagState> = emptyList()
-  var setFeatureFlagResult: FeatureFlagState =
-    FeatureFlagState(key = "", label = "", enabled = false)
-  var listPerformanceAuditResultsResult: PerformanceAuditHistoryResult =
-    PerformanceAuditHistoryResult()
-  var getTestTimingsResult: TestTimingSummary = TestTimingSummary()
-  var getTestRunsResult: TestRunSummary = TestRunSummary()
-  var startDeviceGestureRecordingResult: DeviceGestureRecordingStartResult =
-    DeviceGestureRecordingStartResult(recordingId = "fake-id", startedAt = "2025-01-01T00:00:00Z")
-  var stopDeviceGestureRecordingResult: DeviceGestureRecordingStopResult =
-    DeviceGestureRecordingStopResult(
-      recordingId = "fake-id",
-      startedAt = "2025-01-01T00:00:00Z",
-      stoppedAt = "2025-01-01T00:00:01Z",
-      durationMs = 1000,
-      planName = "fake-plan",
-      planContent = "",
-      stepCount = 0,
-    )
-  var executePlanResult: ExecutePlanResult =
-    ExecutePlanResult(success = true, executedSteps = 0, totalSteps = 0)
-  var startDeviceResult: StartDeviceResult = StartDeviceResult(success = true)
+  var pingResult by state::pingResult
+  var listResourcesResult by state::listResourcesResult
+  var listResourceTemplatesResult by state::listResourceTemplatesResult
+  var listToolsResult by state::listToolsResult
+  var getNavigationGraphResult by state::getNavigationGraphResult
+  var listFeatureFlagsResult by state::listFeatureFlagsResult
+  var setFeatureFlagResult by state::setFeatureFlagResult
+  var listPerformanceAuditResultsResult by state::listPerformanceAuditResultsResult
+  var getTestTimingsResult by state::getTestTimingsResult
+  var getTestRunsResult by state::getTestRunsResult
+  var startDeviceGestureRecordingResult by state::startDeviceGestureRecordingResult
+  var stopDeviceGestureRecordingResult by state::stopDeviceGestureRecordingResult
+  var executePlanResult by state::executePlanResult
+  var startDeviceResult by state::startDeviceResult
 
   /** Results returned (in order) before falling back to [startDeviceResult]. */
-  val queuedStartDeviceResults: ArrayDeque<StartDeviceResult> = ArrayDeque()
-  var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
-  var observeResult: ObserveResult = ObserveResult()
-  var observeError: Throwable? = null
-  var killDeviceResult: KillDeviceResult = KillDeviceResult(success = true)
+  val queuedStartDeviceResults by state::queuedStartDeviceResults
+  var setActiveDeviceResult by state::setActiveDeviceResult
+  var observeResult by state::observeResult
+  var observeError by state::observeError
+  var killDeviceResult by state::killDeviceResult
 
   /** The `force` flag of every killDevice call, in order (auto-mobile #6864). */
-  val killDeviceForceRequests: MutableList<Boolean> = mutableListOf()
-  var getDaemonStatusResult: DaemonStatusResponse = DaemonStatusResponse()
+  val killDeviceForceRequests by state::killDeviceForceRequests
+  var getDaemonStatusResult by state::getDaemonStatusResult
   // When set, getDaemonStatus throws it instead of returning — models a wedged daemon whose
   // ide/status hang ceiling closed the socket, so the health probe reads UNHEALTHY (#6082).
-  var getDaemonStatusError: Throwable? = null
-  var updateServiceResult: UpdateServiceResult = UpdateServiceResult(success = true)
-  var inputTapResult: InputActionResult = InputActionResult(action = "input/tap", success = true)
-  var inputSwipeResult: InputActionResult =
-    InputActionResult(action = "input/swipe", success = true)
-  var inputPressButtonResult: InputActionResult =
-    InputActionResult(action = "input/pressButton", success = true)
-  var inputTypeTextResult: InputActionResult =
-    InputActionResult(action = "input/typeText", success = true)
-  var inputKeyResult: InputActionResult = InputActionResult(action = "input/key", success = true)
-  var setKeyValueResult: SetKeyValueResult = SetKeyValueResult(success = true)
-  var removeKeyValueResult: RemoveKeyValueResult = RemoveKeyValueResult(success = true)
-  var clearKeyValueFileResult: ClearKeyValueResult = ClearKeyValueResult(success = true)
+  var getDaemonStatusError by state::getDaemonStatusError
+  var updateServiceResult by state::updateServiceResult
+  var inputTapResult by state::inputTapResult
+  var inputSwipeResult by state::inputSwipeResult
+  var inputPressButtonResult by state::inputPressButtonResult
+  var inputTypeTextResult by state::inputTypeTextResult
+  var inputKeyResult by state::inputKeyResult
+  var setKeyValueResult by state::setKeyValueResult
+  var removeKeyValueResult by state::removeKeyValueResult
+  var clearKeyValueFileResult by state::clearKeyValueFileResult
 
   /** Runs inside each blocking key-value mutation, allowing tests to coordinate cancellation. */
-  var onKeyValueMutation: (() -> Unit)? = null
-  var callToolResult: JsonElement = JsonObject(emptyMap())
-  var throwOnReadResource: Exception? = null
+  var onKeyValueMutation by state::onKeyValueMutation
+  var callToolResult by state::callToolResult
+  var throwOnReadResource by state::throwOnReadResource
 
   // -- Resource response mapping --
 
@@ -191,28 +169,27 @@ class FakeAutoMobileClient : AutoMobileClient {
     val frameContext: String? = null,
   )
 
-  val setKeyValueCalls = mutableListOf<SetKeyValueCall>()
-  val removeKeyValueCalls = mutableListOf<RemoveKeyValueCall>()
-  val clearKeyValueFileCalls = mutableListOf<ClearKeyValueFileCall>()
-  val inputTapCalls = mutableListOf<InputTapCall>()
-  val inputSwipeCalls = mutableListOf<InputSwipeCall>()
-  val inputPressButtonCalls = mutableListOf<InputPressButtonCall>()
-  val inputTypeTextCalls = mutableListOf<InputTypeTextCall>()
-  val inputKeyCalls = mutableListOf<InputKeyCall>()
-  val toolCalls = mutableListOf<ToolCall>()
+  val setKeyValueCalls by state::setKeyValueCalls
+  val removeKeyValueCalls by state::removeKeyValueCalls
+  val clearKeyValueFileCalls by state::clearKeyValueFileCalls
+  val inputTapCalls by state::inputTapCalls
+  val inputSwipeCalls by state::inputSwipeCalls
+  val inputPressButtonCalls by state::inputPressButtonCalls
+  val inputTypeTextCalls by state::inputTypeTextCalls
+  val inputKeyCalls by state::inputKeyCalls
+  val toolCalls by state::toolCalls
 
   data class ToolCall(val name: String, val arguments: JsonObject)
 
   // -- Streamed gesture support --
 
   /** When false, [openGestureStream] returns null so callers exercise the atomic-swipe fallback. */
-  var gestureStreamSupported: Boolean = true
+  var gestureStreamSupported by state::gestureStreamSupported
 
-  var gestureFrameResult: InputActionResult =
-    InputActionResult(action = "input/gestureStart", success = true)
+  var gestureFrameResult by state::gestureFrameResult
 
   /** Every stream opened via [openGestureStream], newest last, with its recorded frames. */
-  val openedGestureStreams = mutableListOf<RecordingGestureStream>()
+  val openedGestureStreams by state::openedGestureStreams
 
   sealed interface GestureFrame {
     data class Start(val gestureId: String, val x: Double, val y: Double) : GestureFrame
@@ -280,237 +257,13 @@ class FakeAutoMobileClient : AutoMobileClient {
     return resourceResponses[uri] ?: emptyList()
   }
 
-  override fun getNavigationGraph(platform: String): JsonElement {
-    calls.add("getNavigationGraph")
-    return getNavigationGraphResult
-  }
-
-  override fun listFeatureFlags(): List<FeatureFlagState> {
-    calls.add("listFeatureFlags")
-    return listFeatureFlagsResult
-  }
-
-  override fun setFeatureFlag(
-    key: String,
-    enabled: Boolean,
-    config: JsonObject?,
-  ): FeatureFlagState {
-    calls.add("setFeatureFlag")
-    return setFeatureFlagResult
-  }
-
   /** deviceId passed to the most recent [listPerformanceAuditResults] call (null if unscoped). */
-  var lastListPerformanceAuditResultsDeviceId: String? = null
-
-  override fun listPerformanceAuditResults(
-    startTime: String?,
-    endTime: String?,
-    limit: Int?,
-    offset: Int?,
-    deviceId: String?,
-  ): PerformanceAuditHistoryResult {
-    calls.add("listPerformanceAuditResults")
-    lastListPerformanceAuditResultsDeviceId = deviceId
-    // Mirror the performance-results resource's server-side deviceId filter so device-scoped
-    // reads only surface their own device's entries.
-    if (deviceId == null) {
-      return listPerformanceAuditResultsResult
-    }
-    val scoped = listPerformanceAuditResultsResult.results.filter { it.deviceId == deviceId }
-    return listPerformanceAuditResultsResult.copy(results = scoped)
-  }
-
-  override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {
-    calls.add("getTestTimings")
-    return getTestTimingsResult
-  }
-
-  override fun getTestRuns(query: TestRunQuery): TestRunSummary {
-    calls.add("getTestRuns")
-    return getTestRunsResult
-  }
-
-  override fun startDeviceGestureRecording(platform: String): DeviceGestureRecordingStartResult {
-    calls.add("startDeviceGestureRecording")
-    return startDeviceGestureRecordingResult
-  }
-
-  override fun stopDeviceGestureRecording(
-    recordingId: String?,
-    planName: String?,
-  ): DeviceGestureRecordingStopResult {
-    calls.add("stopDeviceGestureRecording")
-    return stopDeviceGestureRecordingResult
-  }
-
-  override fun executePlan(
-    planContent: String,
-    platform: String,
-    startStep: Int?,
-    sessionUuid: String?,
-  ): ExecutePlanResult {
-    calls.add("executePlan")
-    return executePlanResult
-  }
-
-  override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
-    calls.add("startDevice")
-    return queuedStartDeviceResults.removeFirstOrNull() ?: startDeviceResult
-  }
-
-  override fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult {
-    calls.add("setActiveDevice")
-    return setActiveDeviceResult
-  }
-
-  override fun observe(platform: String): ObserveResult {
-    calls.add("observe")
-    observeError?.let { throw it }
-    return observeResult
-  }
-
-  override fun killDevice(
-    name: String,
-    deviceId: String,
-    platform: String,
-    force: Boolean,
-  ): KillDeviceResult {
-    calls.add("killDevice")
-    killDeviceForceRequests.add(force)
-    return killDeviceResult
-  }
-
-  override fun getDaemonStatus(): DaemonStatusResponse {
-    calls.add("getDaemonStatus")
-    getDaemonStatusError?.let { throw it }
-    return getDaemonStatusResult
-  }
-
-  override fun updateService(deviceId: String, platform: String): UpdateServiceResult {
-    calls.add("updateService")
-    return updateServiceResult
-  }
-
-  override fun inputTap(
-    x: Double,
-    y: Double,
-    platform: String,
-    deviceId: String?,
-    duration: Int?,
-    frameContext: String?,
-  ): InputActionResult {
-    calls.add("inputTap")
-    inputTapCalls.add(InputTapCall(x, y, platform, deviceId, duration, frameContext))
-    return inputTapResult
-  }
-
-  override fun inputSwipe(
-    startX: Double,
-    startY: Double,
-    endX: Double,
-    endY: Double,
-    platform: String,
-    deviceId: String?,
-    durationMs: Int?,
-    frameContext: String?,
-  ): InputActionResult {
-    calls.add("inputSwipe")
-    inputSwipeCalls.add(
-      InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs, frameContext),
-    )
-    return inputSwipeResult
-  }
-
-  override fun inputPressButton(
-    button: String,
-    platform: String,
-    deviceId: String?,
-    frameContext: String?,
-  ): InputActionResult {
-    calls.add("inputPressButton")
-    inputPressButtonCalls.add(InputPressButtonCall(button, platform, deviceId, frameContext))
-    return inputPressButtonResult
-  }
-
-  override fun inputTypeText(
-    text: String,
-    platform: String,
-    deviceId: String?,
-    submit: Boolean?,
-    append: Boolean,
-    frameContext: String?,
-  ): InputActionResult {
-    calls.add("inputTypeText")
-    inputTypeTextCalls.add(
-      InputTypeTextCall(text, platform, deviceId, submit, append, frameContext),
-    )
-    return inputTypeTextResult
-  }
-
-  override fun inputKey(
-    key: String,
-    platform: String,
-    deviceId: String?,
-    frameContext: String?,
-  ): InputActionResult {
-    calls.add("inputKey")
-    inputKeyCalls.add(InputKeyCall(key, platform, deviceId, frameContext))
-    return inputKeyResult
-  }
+  var lastListPerformanceAuditResultsDeviceId by state::lastListPerformanceAuditResultsDeviceId
 
   override fun openGestureStream(platform: String, deviceId: String?): GestureInputStream? {
     calls.add("openGestureStream")
     if (!gestureStreamSupported) return null
     return RecordingGestureStream().also { openedGestureStreams.add(it) }
-  }
-
-  override fun setKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-    platform: String,
-    sessionUuid: String?,
-  ): SetKeyValueResult {
-    calls.add("setKeyValue")
-    setKeyValueCalls.add(
-      SetKeyValueCall(deviceId, appId, fileName, key, value, type, platform, sessionUuid),
-    )
-    onKeyValueMutation?.invoke()
-    return setKeyValueResult
-  }
-
-  override fun removeKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    platform: String,
-    sessionUuid: String?,
-  ): RemoveKeyValueResult {
-    calls.add("removeKeyValue")
-    removeKeyValueCalls.add(
-      RemoveKeyValueCall(deviceId, appId, fileName, key, platform, sessionUuid),
-    )
-    onKeyValueMutation?.invoke()
-    return removeKeyValueResult
-  }
-
-  override fun clearKeyValueFile(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    platform: String,
-    sessionUuid: String?,
-  ): ClearKeyValueResult {
-    calls.add("clearKeyValueFile")
-    clearKeyValueFileCalls.add(
-      ClearKeyValueFileCall(deviceId, appId, fileName, platform, sessionUuid),
-    )
-    onKeyValueMutation?.invoke()
-    return clearKeyValueFileResult
   }
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {

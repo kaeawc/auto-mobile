@@ -1,138 +1,144 @@
-import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
-import {
-  runWithPostActionCaptureScope,
-  postActionCaptures,
-} from "../utils/PostActionCaptureContext";
-import { toActionableError } from "../models/ActionableError";
+import type { z, ZodType } from "zod/v4";
+import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import {
   clearToolTransportRecovery,
   setToolTransportRecovery,
   type ToolTransportRecovery,
-} from "./toolTransportRecovery";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+} from "../daemon/toolTransportRecovery";
 import { ActionableError, BootedDevice } from "../models";
+import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import {
+  postActionCaptures,
+  runWithPostActionCaptureScope,
+} from "../utils/PostActionCaptureContext";
 import { serverConfig } from "../utils/ServerConfig";
+import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
+import { ToolDefinitionListing } from "./ToolDefinitionListing";
+import { toolExecutionError } from "./toolExecutionError";
+import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
 
 import { logger, type Logger } from "../utils/logger";
+import "./featureWiring";
 import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
 
-import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
-import { ToolCallRepository } from "../db/toolCallRepository";
-import type { Environment } from "../daemon/poolConfig";
 import { runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
-import { isDebugModeEnabled } from "../utils/debug";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { markInternalToolCall } from "./internalToolCall";
-import { ListChangedBroadcaster } from "./listChangedBroadcast";
-import { StructuredToolResponse } from "../utils/toolUtils";
+import { executionTracker } from "../daemon/executionTracker";
+import { markInternalToolCall } from "../daemon/internalToolCall";
 import {
-  InternalToolName,
-  InternalToolPayloads,
-  narrowInternalToolEnvelope,
-} from "./internalToolPayloads";
+  ListChangedBroadcaster,
+  type ServerRegistrationOptions,
+} from "../daemon/listChangedBroadcast";
+import type { Environment } from "../daemon/poolConfig";
+import { ToolCallRepository } from "../db/toolCallRepository";
 import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
-import { nonBlankSessionUuid } from "./planCallerIdentity";
-import { executionTracker } from "./executionTracker";
-import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
+import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
+import { isDebugModeEnabled } from "../utils/debug";
+import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import {
+  InternalToolName,
+  InternalToolPayloads,
+  narrowInternalToolEnvelope,
+} from "../utils/internalToolPayloads";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { StructuredToolResponse } from "../utils/toolUtils";
+import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
+import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
+import {
+  addSpillArtifactToAdvertisedOutputSchema,
   applyInheritedPlanRequestParams,
   toAdvertisedJsonSchema,
-  addSpillArtifactToAdvertisedOutputSchema,
 } from "./pipeline/advertisedSchema";
 import {
-  ExecutionTargetResolver,
-  DefaultExecutionTargetResolver,
-} from "./pipeline/executionTarget";
+  AfterToolCallHandler,
+  DefaultAfterToolCallHandler,
+  isToolResponseFailure,
+} from "./pipeline/afterToolCall";
 import { AuditRunner, DefaultAuditRunner } from "./pipeline/audit";
 import {
-  NavigationToolCallRecorder,
+  assertInternalCallWithinBrokerGrant,
+  deviceAwareHandlerArgs,
+  invokeResolvedDeviceHandler,
+  refuseInternalControlOnForeignOwnedSession,
+  sessionDisplayPinnedHandler,
+} from "./pipeline/deviceCallDispatch";
+import {
+  DefaultExecutionTargetResolver,
+  ExecutionTargetResolver,
+} from "./pipeline/executionTarget";
+import {
   DefaultNavigationToolCallRecorder,
+  NavigationToolCallRecorder,
 } from "./pipeline/navigationRecording";
 import {
-  AfterToolCallHandler,
-  isToolResponseFailure,
-  DefaultAfterToolCallHandler,
-} from "./pipeline/afterToolCall";
-import {
-  SessionBindingReleaseHandler,
+  DefaultPlanLifecycleManager,
   PlanLifecycleInput,
   PlanLifecycleManager,
-  DefaultPlanLifecycleManager,
+  SessionBindingReleaseHandler,
 } from "./pipeline/planLifecycle";
 import {
+  isDeviceIdControlCall,
   isDeviceReadOnlyCall,
   isReadOnlyCall,
   resolveCallerDeviceIds,
-  isDeviceIdControlCall,
 } from "./pipeline/readTarget";
-import {
-  deviceAwareHandlerArgs,
-  refuseInternalControlOnForeignOwnedSession,
-  assertInternalCallWithinBrokerGrant,
-  sessionDisplayPinnedHandler,
-  invokeResolvedDeviceHandler,
-} from "./pipeline/deviceCallDispatch";
+import { nonBlankSessionUuid } from "./planCallerIdentity";
+import { holdSessionForCurrentTask } from "./tasks/runAsTask";
+import { runRecordedToolCall, toolCallOutcome } from "./toolCallRecording";
 
-export type { AuditRunnerInput } from "./pipeline/audit";
-export { stripNavigationInternalParams } from "./pipeline/navigationRecording";
 export {
   AUTOMATIC_TOOL_OUTPUT_RETENTION,
   DefaultAfterToolCallHandler,
 } from "./pipeline/afterToolCall";
-export type {
-  SessionBindingReleaseHandler,
-  PlanLifecycleInput,
-  PlanCleanupFailure,
-  PlanCleanupOutcome,
-} from "./pipeline/planLifecycle";
-export { DefaultAuditRunner } from "./pipeline/audit";
 export type { SettleObserveFactory } from "./pipeline/afterToolCall";
+export { DefaultAuditRunner, type AuditRunnerInput } from "./pipeline/audit";
+export { isRecord } from "./pipeline/isRecord";
+export { stripNavigationInternalParams } from "./pipeline/navigationRecording";
 export {
+  DefaultPlanLifecycleManager,
   PLAN_APP_CLEANUP_CAP_MS,
   PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
-  DefaultPlanLifecycleManager,
+  type PlanCleanupFailure,
+  type PlanCleanupOutcome,
+  type PlanLifecycleInput,
+  type SessionBindingReleaseHandler,
 } from "./pipeline/planLifecycle";
+export { toolHasOutputSchema } from "./toolRegistryTypes";
+export type {
+  DeviceAwareToolHandler,
+  DeviceAwareToolOptions,
+  PlainToolOptions,
+  ProgressCallback,
+  RegisteredTool,
+  SessionlessDeviceRead,
+  ToolRegistryCollaborators,
+  ToolTraits,
+} from "./toolRegistryTypes";
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 
+import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
+import { installDaemonToolRegistryPort } from "../daemon/toolRegistryPort";
 import {
-  ProgressCallback,
-  ToolHandler,
+  CachedToolDefinitionSchemas,
   DeviceAwareToolHandler,
+  DeviceAwareToolOptions,
+  deviceReadOnlyMetadata,
   InternalToolCallOptions,
   InternalToolInvocationContext,
-  PLAN_ONLY_GATE_REASON,
-  shadowedSdkToolCallback,
-  PlainToolOptions,
   pickToolTraits,
-  DeviceAwareToolOptions,
-  ToolListingOptions,
-  CachedToolDefinitionSchemas,
+  PlainToolOptions,
+  PLAN_ONLY_GATE_REASON,
+  ProgressCallback,
   RegisteredTool,
-  deviceReadOnlyMetadata,
+  shadowedSdkToolCallback,
+  ToolHandler,
   toolHasOutputSchema,
+  ToolListingOptions,
   ToolRegistryCollaborators,
   ToolRegistryPipelineOverrides,
-  withItemsEnum,
 } from "./toolRegistryTypes";
-export type {
-  ProgressCallback,
-  DeviceAwareToolHandler,
-  PlainToolOptions,
-  SessionlessDeviceRead,
-  ToolTraits,
-  DeviceAwareToolOptions,
-  RegisteredTool,
-  ToolRegistryCollaborators,
-} from "./toolRegistryTypes";
-export { toolHasOutputSchema } from "./toolRegistryTypes";
-export { isRecord } from "./pipeline/isRecord";
 
 // The registry that holds all tools
 export class ToolRegistryClass {
@@ -142,7 +148,10 @@ export class ToolRegistryClass {
   // fan out to ALL live sessions — a single retained server would be
   // last-writer-wins (issue #3223). Entries are pruned via the underlying
   // server's onclose hook when a session's transport closes.
-  private servers: Set<McpServer> = new Set();
+  private servers: Set<ToolRegistryHost> = new Set();
+  // Per-request servers (#4678), tracked only until they close and never sent
+  // list_changed; see ServerRegistrationOptions.
+  private ephemeralServers: Set<ToolRegistryHost> = new Set();
   // Per-transport server-side session-binding teardown handlers (issue #4611 Gap
   // D). `createMcpServer` registers one per loopback transport; the plan-release
   // path fans a released session UUID out to all of them so each transport's
@@ -154,7 +163,7 @@ export class ToolRegistryClass {
   private readonly sessionBindingReleaseNotifier: SessionBindingReleaseHandler = {
     onSessionReleased: (sessionUuid) => this.notifySessionBindingReleased(sessionUuid),
   };
-  private deviceSessionManager: DeviceSessionManager;
+  private deviceSessionManager: DeviceReadiness;
   private cleanupService: AppCleanupService;
   private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
@@ -168,9 +177,11 @@ export class ToolRegistryClass {
   private readonly isResponseFailure = (response: unknown): boolean =>
     isToolResponseFailure(response);
   private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
+  private toolDefinitionSchemaBuilds = 0;
+  private removalEpoch = 0;
 
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
-    this.deviceSessionManager = DeviceSessionManager.getInstance();
+    this.deviceSessionManager = DeviceReadiness.getInstance();
     this.cleanupService = new DefaultAppCleanupService();
     this.toolCallRepository = new ToolCallRepository();
     this.timer = timer;
@@ -207,14 +218,13 @@ export class ToolRegistryClass {
    * `setPipelineOverridesForTesting`.
    */
   setCollaboratorsForTesting(overrides: {
-    deviceSessionManager?: Partial<DeviceSessionManager>;
+    deviceSessionManager?: Partial<DeviceReadiness>;
     toolCallRepository?: Pick<ToolCallRepository, "recordToolCall">;
     timer?: Timer;
     navigationToolCallRecorder?: Partial<NavigationToolCallRecorder>;
   }): void {
     this.deviceSessionManager =
-      (overrides.deviceSessionManager as DeviceSessionManager | undefined) ??
-      this.deviceSessionManager;
+      (overrides.deviceSessionManager as DeviceReadiness | undefined) ?? this.deviceSessionManager;
     this.toolCallRepository = overrides.toolCallRepository ?? this.toolCallRepository;
     this.timer = overrides.timer ?? this.timer;
     this.navigationToolCallRecorder =
@@ -261,13 +271,14 @@ export class ToolRegistryClass {
   }
 
   // Register a new tool
-  register(
+  register<S extends ZodType>(
     name: string,
     description: string,
-    schema: any,
-    handler: ToolHandler,
-    options: PlainToolOptions = {},
+    inSchema: S,
+    inHandler: ToolHandler<z.output<S>>,
+    inOptions: PlainToolOptions<z.output<S>> = {},
   ): void {
+    const { schema, handler, options } = erasePlain(inSchema, inHandler, inOptions);
     this.invalidateToolDefinitionSchemaCache();
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, options.transportRecovery);
@@ -299,6 +310,7 @@ export class ToolRegistryClass {
   /** Remove one test-only or dynamically registered tool without disturbing the registry. */
   unregister(name: string): void {
     this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, undefined);
     }
@@ -333,13 +345,14 @@ export class ToolRegistryClass {
   }
 
   // Register a device-aware tool
-  registerDeviceAware(
+  registerDeviceAware<S extends ZodType>(
     name: string,
     description: string,
-    schema: any,
-    handler: DeviceAwareToolHandler,
-    options: DeviceAwareToolOptions = {},
+    inSchema: S,
+    inHandler: DeviceAwareToolHandler<z.output<S>>,
+    inOptions: DeviceAwareToolOptions<z.output<S>> = {},
   ): void {
+    const { schema, handler, options } = eraseDeviceAware(inSchema, inHandler, inOptions);
     const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler });
     const traits = pickToolTraits(options);
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
@@ -352,123 +365,125 @@ export class ToolRegistryClass {
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
       const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext, name);
-      const toolStartMs = this.timer.now();
-      const toolCallTimestamp = new Date().toISOString();
-      let toolDurationMs: number | undefined;
-      let sessionUuid =
-        typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined;
-
-      try {
-        await assertSessionBrokerToolCall(name, true, handlerArgs);
-        const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
-          name,
-          args: handlerArgs,
-          options,
-          deviceSessionManager: this.deviceSessionManager,
-          signal,
-          timer: this.timer,
-        });
-        signal?.throwIfAborted();
-        sessionUuid = resolvedTarget.sessionUuid;
-        if (selectionContext?.execution && !selectionContext.deviceAwareDispatch && !sessionUuid) {
-          executionTracker.setResolvedAutolockSessionUuid(
-            selectionContext.execution.executionId,
-            undefined,
-          );
-        }
-        const captures = postActionCaptures(signal, resolvedTarget.internalCall, name);
-        return await runWithToolSelectionContext(
-          // Bind the ROUTING session, not the selection profile, so
-          // nested calls re-inject the correct derived routing UUID.
-          {
-            deviceAwareDispatch: true,
-            routingSessionUuid: resolvedTarget.sessionUuid,
-            toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
-            // Handlers read this to stay on their read-only path (observe, snapshotOf).
-            explicitObserveDeviceRead:
-              (selectionContext?.explicitObserveDeviceRead === true && !handlerArgs.sessionUuid) ||
-              resolvedTarget.deviceRead !== undefined,
-          },
-          captures(async () => {
-            let succeeded = false;
-            try {
-              let response: any | undefined;
-              if (!resolvedTarget.shouldResolveDevice) {
-                if (!options.nonDeviceHandler) {
-                  throw new ActionableError(`Tool ${name} requires a device.`);
+      return runRecordedToolCall(
+        this.toolCallRepository,
+        this.timer,
+        name,
+        typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
+        async (recording, toolStartMs) => {
+          await assertSessionBrokerToolCall(name, true, handlerArgs);
+          const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
+            name,
+            args: handlerArgs,
+            options,
+            deviceSessionManager: this.deviceSessionManager,
+            signal,
+            timer: this.timer,
+          });
+          recording.deviceId = resolvedTarget.device?.deviceId;
+          signal?.throwIfAborted();
+          recording.sessionUuid = resolvedTarget.sessionUuid;
+          // Under an MCP task, keep this session alive until the task settles (#4668).
+          holdSessionForCurrentTask(recording.sessionUuid);
+          if (
+            selectionContext?.execution &&
+            !selectionContext.deviceAwareDispatch &&
+            !recording.sessionUuid
+          ) {
+            executionTracker.setResolvedAutolockSessionUuid(
+              selectionContext.execution.executionId,
+              undefined,
+            );
+          }
+          const captures = postActionCaptures(signal, resolvedTarget.internalCall, name);
+          return await runWithToolSelectionContext(
+            // Bind the ROUTING session, not the selection profile, so
+            // nested calls re-inject the correct derived routing UUID.
+            {
+              deviceAwareDispatch: true,
+              routingSessionUuid: resolvedTarget.sessionUuid,
+              toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
+              // Handlers read this to stay on their read-only path (observe, snapshotOf).
+              explicitObserveDeviceRead:
+                (selectionContext?.explicitObserveDeviceRead === true &&
+                  !handlerArgs.sessionUuid) ||
+                resolvedTarget.deviceRead !== undefined,
+            },
+            captures(async () => {
+              let succeeded = false;
+              try {
+                let response: unknown;
+                if (!resolvedTarget.shouldResolveDevice) {
+                  if (!options.nonDeviceHandler) {
+                    throw new ActionableError(`Tool ${name} requires a device.`);
+                  }
+                  response = await options.nonDeviceHandler(handlerArgs, progress, signal);
+                } else if (resolvedTarget.device !== undefined) {
+                  response = await invokeResolvedDeviceHandler({
+                    target: { ...resolvedTarget, device: resolvedTarget.device },
+                    name,
+                    args: handlerArgs,
+                    handler: pinnedHandler,
+                    progress,
+                    signal,
+                    auditRunner: this.auditRunner,
+                    navigationRecorder: this.navigationToolCallRecorder,
+                    traits,
+                    isResponseFailure: this.isResponseFailure,
+                  });
+                  if (resolvedTarget.deviceRead) {
+                    signal?.throwIfAborted();
+                    resolvedTarget.deviceRead.assertAuthorized(resolvedTarget.device);
+                  }
                 }
-                response = await options.nonDeviceHandler(handlerArgs, progress, signal);
-              } else if (resolvedTarget.device !== undefined) {
-                response = await invokeResolvedDeviceHandler({
-                  target: { ...resolvedTarget, device: resolvedTarget.device },
+
+                // A late device-loss abort cannot replace a completed success.
+                // A resolved failure can have swallowed device-loss cancellation,
+                // so it is checked after the response is finalized below.
+
+                const afterToolCallResult = await this.afterToolCall.handle({
+                  name,
+                  traits,
+                  outputSchema: this.getToolOutputSchema(name),
+                  args: handlerArgs,
+                  device: resolvedTarget.device,
+                  internalCall: resolvedTarget.internalCall,
+                  response,
+                  sessionUuid: resolvedTarget.sessionUuid,
+                  shouldResolveDevice: resolvedTarget.shouldResolveDevice,
+                  signal,
+                  timer: this.timer,
+                  toolStartMs,
+                });
+                recording.durationMs = afterToolCallResult.durationMs;
+                if (this.isResponseFailure(afterToolCallResult.finalizedResponse)) {
+                  throwDeviceLostFromAbortSignal(signal);
+                }
+                succeeded = !this.isResponseFailure(afterToolCallResult.finalizedResponse);
+                recording.outcome = toolCallOutcome(afterToolCallResult, name, succeeded);
+                return afterToolCallResult.finalizedResponse;
+              } catch (error) {
+                recording.executionError = { error };
+                throwDeviceLostFromAbortSignal(signal);
+                const transportFailure = findDeviceTransportUnavailable(error);
+                if (transportFailure) {
+                  // Record the typed code (device_transport_unavailable), not the wrapper.
+                  recording.executionError = { error: transportFailure };
+                }
+                throw toolExecutionError(error, name, resolvedTarget.device);
+              } finally {
+                await this.afterPlanLifecycle({
+                  ...resolvedTarget,
                   name,
                   args: handlerArgs,
-                  handler: pinnedHandler,
-                  progress,
-                  signal,
-                  auditRunner: this.auditRunner,
-                  navigationRecorder: this.navigationToolCallRecorder,
-                  traits,
-                  isResponseFailure: this.isResponseFailure,
+                  nestedInPlan: selectionContext?.planRequest !== undefined,
+                  succeeded,
                 });
-                if (resolvedTarget.deviceRead) {
-                  signal?.throwIfAborted();
-                  resolvedTarget.deviceRead.assertAuthorized(resolvedTarget.device);
-                }
               }
-
-              // A late device-loss abort cannot replace a completed success.
-              // A resolved failure can have swallowed device-loss cancellation,
-              // so it is checked after the response is finalized below.
-
-              const afterToolCallResult = await this.afterToolCall.handle({
-                name,
-                traits,
-                outputSchema: this.getToolOutputSchema(name),
-                args: handlerArgs,
-                device: resolvedTarget.device,
-                internalCall: resolvedTarget.internalCall,
-                response,
-                sessionUuid: resolvedTarget.sessionUuid,
-                shouldResolveDevice: resolvedTarget.shouldResolveDevice,
-                signal,
-                timer: this.timer,
-                toolStartMs,
-              });
-              toolDurationMs = afterToolCallResult.durationMs;
-              if (this.isResponseFailure(afterToolCallResult.finalizedResponse)) {
-                throwDeviceLostFromAbortSignal(signal);
-              }
-              succeeded = !this.isResponseFailure(afterToolCallResult.finalizedResponse);
-              return afterToolCallResult.finalizedResponse;
-            } catch (error) {
-              throwDeviceLostFromAbortSignal(signal);
-              if (error instanceof ActionableError || isDeviceLostError(error)) {
-                throw error;
-              }
-              const deviceContext = resolvedTarget.device
-                ? ` on device ${resolvedTarget.device.deviceId}`
-                : "";
-              throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
-            } finally {
-              await this.afterPlanLifecycle({
-                ...resolvedTarget,
-                name,
-                args: handlerArgs,
-                nestedInPlan: selectionContext?.planRequest !== undefined,
-                succeeded,
-              });
-            }
-          }),
-        );
-      } finally {
-        this.recordCompletedCall(
-          name,
-          toolCallTimestamp,
-          sessionUuid,
-          toolDurationMs ?? this.timer.now() - toolStartMs,
-        );
-      }
+            }),
+          );
+        },
+      );
     };
 
     this.tools.set(name, {
@@ -494,26 +509,6 @@ export class ToolRegistryClass {
       appUiResourceUri: options.appUiResourceUri,
       ...deviceReadOnlyMetadata(options.deviceReadOnly, options.deviceReadOnlyArgs),
     });
-  }
-
-  private recordCompletedCall(
-    name: string,
-    timestamp: string,
-    sessionUuid: string | undefined,
-    durationMs: number,
-  ): void {
-    void Promise.resolve()
-      .then(() =>
-        this.toolCallRepository.recordToolCall({
-          toolName: name,
-          timestamp,
-          sessionUuid,
-          durationMs,
-        }),
-      )
-      .catch((error: unknown) => {
-        logger.warn(`[ToolRegistry] Failed to record tool call for ${name}: ${error}`);
-      });
   }
 
   // Get all registered tools
@@ -608,7 +603,7 @@ export class ToolRegistryClass {
     progress?: ProgressCallback,
     signal?: AbortSignal,
     options: InternalToolCallOptions = {},
-  ): Promise<any> {
+  ): Promise<unknown> {
     const resolved =
       typeof tool === "string"
         ? options.forPlan
@@ -697,7 +692,7 @@ export class ToolRegistryClass {
     progress: ProgressCallback | undefined,
     signal: AbortSignal | undefined,
     targetDevice: BootedDevice | undefined,
-  ): Promise<any> {
+  ): Promise<unknown> {
     if (targetDevice && tool.deviceAwareHandler) {
       const pinnedHandler = sessionDisplayPinnedHandler({
         name: tool.name,
@@ -709,18 +704,14 @@ export class ToolRegistryClass {
     return tool.handler(markInternalToolCall(args), progress, signal);
   }
 
-  // Typed variant of `callInternal` for the handful of internally-consumed tools
-  // whose envelope a caller then reads (issue #3222). Threads the concrete
-  // payload type from `InternalToolPayloads` through the registry seam so
-  // `callInternalTyped("swipeOn", …)` resolves to
-  // `StructuredToolResponse<SwipeOnToolPayload> | undefined` instead of the
-  // untyped `Promise<any>` — reading a non-hoisted field off the envelope top
-  // level is a compile error and `getStructuredField` keys are checked against
-  // the payload. It delegates to `callInternal` (so the #3108 `markInternalToolCall`
-  // guarantee is preserved) and validates the shape at runtime via
-  // `narrowInternalToolEnvelope` — there is NO unchecked `any`→typed cast. A
-  // response that is not envelope-shaped narrows to `undefined`, which the read
-  // sites already handle (`getStructuredField(undefined, …)` is `undefined`).
+  // Typed variant of `callInternal` for internally-consumed tools whose envelope a caller then
+  // reads (issue #3222): threads the concrete `InternalToolPayloads` type through the registry
+  // seam, so `callInternalTyped("swipeOn", …)` resolves to
+  // `StructuredToolResponse<SwipeOnToolPayload> | undefined` instead of the untyped `Promise<any>`
+  // and `getStructuredField` keys are checked against the payload. It delegates to `callInternal`
+  // (keeping the #3108 `markInternalToolCall` guarantee) and validates the shape at runtime via
+  // `narrowInternalToolEnvelope` — there is NO unchecked `any`→typed cast. A response that is not
+  // envelope-shaped narrows to `undefined`, which the read sites already handle.
   async callInternalTyped<K extends InternalToolName>(
     name: K,
     args: Record<string, unknown>,
@@ -760,12 +751,12 @@ export class ToolRegistryClass {
   // capability and schemas only: the server's one `tools/call` handler is
   // installed by `installToolCallDispatcher` (#6545) and replaces the SDK's
   // per-tool dispatch, so the callback below is never live.
-  registerWithServer(server: McpServer): void {
+  registerWithServer(server: ToolRegistryHost, options: ServerRegistrationOptions = {}): void {
     // Retained so runtime changes that alter tool definitions can emit
     // notifications/tools/list_changed (issue #2963) to EVERY live session, not
     // just the most recently created one (issue #3223), mirroring how
     // ResourceRegistry retains its servers for resources/list_changed.
-    this.trackServer(server);
+    this.trackServer(server, options.ephemeral === true);
 
     this.tools.forEach((tool) => {
       if (!this.toolReachable(tool, "register")) {
@@ -776,10 +767,8 @@ export class ToolRegistryClass {
         tool.name,
         {
           description: tool.description,
-          inputSchema: tool.schema,
-          ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
-            _meta: { "anthropic/alwaysLoad": true },
-          }),
+          inputSchema: erased<ToolRegistrySchema>(tool.schema),
+          ...(isAlwaysLoadToolsEnabled() && { _meta: { "anthropic/alwaysLoad": true } }),
         },
         shadowedSdkToolCallback,
       );
@@ -790,32 +779,73 @@ export class ToolRegistryClass {
   // transport closes. The underlying Protocol preserves a pre-set `onclose`
   // (both the transport's and the server's), so chaining here cannot clobber
   // other lifecycle hooks — and vice versa.
-  private trackServer(server: McpServer): void {
-    if (this.servers.has(server)) {
+  private trackServer(server: ToolRegistryHost, ephemeral: boolean): void {
+    if (this.servers.has(server) || this.ephemeralServers.has(server)) {
       return;
     }
-    this.servers.add(server);
+    const tracked = ephemeral ? this.ephemeralServers : this.servers;
+    tracked.add(server);
     const underlying = server.server;
     const existingOnClose = underlying.onclose;
     underlying.onclose = () => {
-      this.servers.delete(server);
+      tracked.delete(server);
       existingOnClose?.();
     };
+  }
+
+  /**
+   * Stop tracking a server without waiting for its transport to close. A server
+   * closed before it ever connected has no transport, so the SDK never fires its
+   * `onclose` and the prune hook installed by `trackServer` would not run.
+   */
+  untrackServer(server: ToolRegistryHost): void {
+    this.servers.delete(server);
+    this.ephemeralServers.delete(server);
   }
 
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+    this.ephemeralServers.clear();
+  }
+
+  /** Test-only: how many live servers are tracked, so suites can prove none leak. */
+  trackedServerCountsForTesting(): { notified: number; ephemeral: number } {
+    return { notified: this.servers.size, ephemeral: this.ephemeralServers.size };
   }
 
   /** Test-only: forget every registered tool so a suite can register just the tools it exercises. */
   clearToolsForTesting(): void {
+    this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     this.tools.clear();
+  }
+
+  /** Test-only: put a previously captured tool back under its own name, replacing any current one. */
+  setRegisteredToolForTesting(tool: RegisteredTool): void {
+    this.invalidateToolDefinitionSchemaCache();
+    this.tools.set(tool.name, tool);
   }
 
   /** Test-only: unregister one tool by name; a no-op when it was never registered. */
   removeToolForTesting(name: string): void {
+    this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     this.tools.delete(name);
+  }
+
+  /**
+   * Counts every removal from the registry. A caller that registered a fixed tool
+   * set once (see `registerMcpTools`) re-registers only when this has moved,
+   * since a removal is the one way that set can stop being present.
+   */
+  get removalEpochForRegistration(): number {
+    return this.removalEpoch;
+  }
+
+  /** Test-only: how many per-tool schema builds `getToolDefinitions` has performed. */
+  schemaBuildCountForTesting(): number {
+    return this.toolDefinitionSchemaBuilds;
   }
 
   // Register a per-transport server-side session-binding teardown handler (issue
@@ -844,6 +874,11 @@ export class ToolRegistryClass {
         );
       }
     }
+  }
+
+  /** Test-only: how many session-binding release handlers are live, so suites can prove none leak. */
+  sessionBindingReleaseHandlerCountForTesting(): number {
+    return this.sessionBindingReleaseHandlers.size;
   }
 
   // Test-only: drop registered session-binding release handlers so suites sharing
@@ -880,143 +915,12 @@ export class ToolRegistryClass {
     }
     ListChangedBroadcaster.emit("tools");
   }
-
-  // Get tools in MCP format
   getToolDefinitions(options: ToolListingOptions = {}) {
-    const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
-    // When tool results are stripped of `structuredContent` (issue #2899), do not
-    // advertise an `outputSchema` in `tools/list`: an MCP server that declares an
-    // output schema is expected to return matching `structuredContent`, so keeping
-    // both consistent avoids advertising output the finalize step will strip.
-    const suppressOutputSchema =
-      options.suppressOutputSchema ?? serverConfig.isToolResultsNoStructuredContentEnabled();
-    // Bounds compaction is now an unconditional default, so the tuple arm is always
-    // emitted and therefore always advertised — keeping the advertised shape in sync
-    // with the wire (issue #2990), the same way `suppressOutputSchema` above keeps the
-    // two in sync for the strip flag.
-    const compactBounds = true;
-    const listedTools = this.getAllTools(options);
-    const configurableToolNames = listedTools
-      .filter((tool) => this.isUserConfigurableTool(tool.name))
-      .map((tool) => tool.name)
-      .sort();
-    return listedTools.map((tool) => {
-      const { inputSchema, outputSchema } = this.getCachedToolDefinitionSchemas(
-        tool,
-        suppressOutputSchema,
-        compactBounds,
-      );
-
-      const definition: {
-        name: string;
-        description: string;
-        inputSchema: Record<string, unknown>;
-        outputSchema?: Record<string, unknown>;
-        _meta?: {
-          "anthropic/alwaysLoad"?: boolean;
-          "automobile/debugOnly"?: boolean;
-          "automobile/embeddedSdkOnly"?: boolean;
-          "automobile/planOnly"?: boolean;
-          "automobile/deviceReadOnly"?: boolean;
-          "automobile/deviceReadOnlyArgs"?: readonly DeviceReadOnlyArgShape[];
-          ui?: { resourceUri: string };
-        };
-      } = {
-        name: tool.name,
-        description: tool.description,
-        inputSchema,
-      };
-      // Keep the compact enabled-tool profile while making optional capabilities
-      // discoverable through the always-listed selection control (#6797).
-      // Copy the cached schema: availability can change between listings.
-      definition.inputSchema = this.withConfigurableToolVocabulary(
-        tool.name,
-        inputSchema,
-        configurableToolNames,
-      );
-      if (outputSchema) {
-        definition.outputSchema = outputSchema;
-      }
-      if (alwaysLoad) {
-        definition._meta = { ...definition._meta, "anthropic/alwaysLoad": true };
-      }
-      // The committed static catalog includes unavailable tools for schema
-      // completeness. Preserve enough generated metadata for the proxy to
-      // exclude plan-only tools after a live connection is available.
-      if (tool.planOnly) {
-        definition._meta = { ...definition._meta, "automobile/planOnly": true };
-      }
-      if (tool.debugOnly) {
-        definition._meta = { ...definition._meta, "automobile/debugOnly": true };
-      }
-      if (tool.embeddedSdkOnly) {
-        definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
-      }
-      // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
-      if (tool.deviceReadOnly === true) {
-        definition._meta = { ...definition._meta, "automobile/deviceReadOnly": true };
-      } else if (tool.deviceReadOnlyArgs?.length) {
-        definition._meta = {
-          ...definition._meta,
-          "automobile/deviceReadOnlyArgs": tool.deviceReadOnlyArgs,
-        };
-      }
-      // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
-      if (tool.appUiResourceUri) {
-        definition._meta = { ...definition._meta, ui: { resourceUri: tool.appUiResourceUri } };
-      }
-      return definition;
-    });
-  }
-
-  /**
-   * Decorate the advertised schema with the enum of tool names this listing
-   * accepts, so a schema-driven client cannot build a call the handler rejects.
-   *
-   * Two fields carry that vocabulary: `setToolEnabled`'s `toolName`/`toolNames`
-   * (#6797, #6869) and the `enableTools` array the device-acquisition tools
-   * (`getAndroid`, `getApple`, `provisionDevice`) take so acquisition and
-   * capability declaration are one call. `resolveRequestedEnableTools` rejects
-   * every unknown or non-configurable name before any device work starts, so
-   * advertising "any non-empty string" there both allowed schema-valid calls
-   * that invocation refuses and hid the vocabulary of the one-call flow
-   * (#6886 review). Detected by the field's presence rather than a hardcoded
-   * tool list, so a future acquisition tool is covered by declaring the field.
-   */
-  private withConfigurableToolVocabulary(
-    toolName: string,
-    inputSchema: Record<string, unknown>,
-    configurableToolNames: string[],
-  ): Record<string, unknown> {
-    const properties = inputSchema.properties as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    if (!properties) {
-      return inputSchema;
-    }
-    if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
-      return {
-        ...inputSchema,
-        properties: {
-          ...properties,
-          toolName: { ...properties.toolName, enum: configurableToolNames },
-          // #6869 — the batch spelling carries the same vocabulary, so a
-          // client declaring a whole toolset in one call reads the choices
-          // from the field it is actually filling in.
-          toolNames: withItemsEnum(properties.toolNames, configurableToolNames),
-        },
-      };
-    }
-    if (!properties.enableTools) {
-      return inputSchema;
-    }
-    return {
-      ...inputSchema,
-      properties: {
-        ...properties,
-        enableTools: withItemsEnum(properties.enableTools, configurableToolNames),
-      },
-    };
+    return new ToolDefinitionListing(
+      (options) => this.getAllTools(options),
+      (name) => this.isUserConfigurableTool(name),
+      (tool, suppress, compact) => this.getCachedToolDefinitionSchemas(tool, suppress, compact),
+    ).getToolDefinitions(options);
   }
 
   private getCachedToolDefinitionSchemas(
@@ -1026,6 +930,7 @@ export class ToolRegistryClass {
   ): { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | undefined } {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
+      this.toolDefinitionSchemaBuilds++;
       cached = {
         inputSchema: toAdvertisedJsonSchema(tool.schema, {
           constrainAppIds: true,
@@ -1058,20 +963,12 @@ export class ToolRegistryClass {
   }
 
   private invalidateToolDefinitionSchemaCache(): void {
+    ListChangedBroadcaster.invalidate("tools");
     this.toolDefinitionSchemaCache.clear();
   }
 
-  // Get a map of all schema
-  getSchemaMap(): Record<string, any> {
-    const schemaMap: Record<string, any> = {};
-    this.getAllTools().forEach((tool) => {
-      schemaMap[tool.name] = tool.schema;
-    });
-    return schemaMap;
-  }
-
   // Get the device session manager
-  getDeviceSessionManager(): DeviceSessionManager {
+  getDeviceSessionManager(): DeviceReadiness {
     return this.deviceSessionManager;
   }
 
@@ -1123,6 +1020,7 @@ export class ToolRegistryClass {
   // Clear all registered tools (for testing)
   clearTools(): void {
     this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     this.tools.clear();
     if (this === ToolRegistry) {
       clearToolTransportRecovery();
@@ -1134,38 +1032,21 @@ export class ToolRegistryClass {
   }
 }
 
-// Export a singleton instance
-export const ToolRegistry = new ToolRegistryClass();
+// Install one instance; the exported value below also enforces its typed payload contract.
+const installedToolRegistry = installDaemonToolRegistryPort(new ToolRegistryClass());
 
 // --- Compile-time enforcement of AC1 (issue #3222) ---
-// AC1 is a *type* guarantee: `callInternalTyped(name, …)` must thread the concrete
-// payload type from `InternalToolPayloads` through the registry seam rather than
-// collapse back to the untyped `Promise<any>` of `callInternal`. The runtime tests
-// in `test/server/internalToolPayloads.test.ts` cannot pin this — bun's test runner
-// does not typecheck, and the `bun run typecheck` gate compiles only `src`
-// (`tsconfig.json` include), so an assertion in `test/` is never checked and would
-// pass even against an `any` regression. These type-only aliases live in `src` (and
-// beside the method they guard, to avoid a type-resolution cycle) so the gate DOES
-// fail if the seam regresses; they erase at build time (zero runtime cost).
-type _IsAny<T> = 0 extends 1 & T ? true : false;
-
-type _AssertTrue<T extends true> = T;
-
-type _ResolvedTypedEnvelope = NonNullable<
-  Awaited<ReturnType<typeof ToolRegistry.callInternalTyped>>
+// This contract is checked by the src typecheck gate. It rejects both an `any`
+// result and a result that no longer carries the concrete internal-tool payload.
+type IsAny<T> = 0 extends 1 & T ? true : false;
+type ResolvedTypedEnvelope = NonNullable<
+  Awaited<ReturnType<typeof installedToolRegistry.callInternalTyped>>
 >;
-// The aliases are referenced only by the compiler (their constraint check IS the
-// guard); they are intentionally unused at runtime, hence the disable.
-/* eslint-disable @typescript-eslint/no-unused-vars */
+type ValidatedToolRegistry =
+  IsAny<ResolvedTypedEnvelope> extends true
+    ? never
+    : ResolvedTypedEnvelope extends StructuredToolResponse<InternalToolPayloads[InternalToolName]>
+      ? typeof installedToolRegistry
+      : never;
 
-// Fails to compile if the resolved envelope widens to `any` (the seam stopped
-// threading the payload type)...
-type _Ac1ResultIsNotAny = _AssertTrue<_IsAny<_ResolvedTypedEnvelope> extends true ? false : true>;
-
-// ...or if it is no longer the concrete `StructuredToolResponse<…Payload>` envelope.
-type _Ac1ResultIsConcreteEnvelope = _AssertTrue<
-  _ResolvedTypedEnvelope extends StructuredToolResponse<InternalToolPayloads[InternalToolName]>
-    ? true
-    : false
->;
-/* eslint-enable @typescript-eslint/no-unused-vars */
+export const ToolRegistry = installedToolRegistry satisfies ValidatedToolRegistry;

@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { recordObservationRead } from "../../../../src/features/observe/observationReadScope";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -6,7 +7,6 @@ import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResol
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
-import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
@@ -16,11 +16,17 @@ import { FakeOverlayDetector } from "../../../fakes/FakeOverlayDetector";
 import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessibilityService";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
-import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../../src/models";
 import type {
   OverlayCandidate,
   SwipeOnResolvedOptions,
 } from "../../../../src/features/action/swipeon/types";
+import { spyOnIosExistingInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
 const DEVICE: BootedDevice = {
   name: "test-device",
@@ -31,11 +37,13 @@ const DEVICE: BootedDevice = {
 const SCREEN_SIZE = { width: 400, height: 900 };
 
 const makeObserveResult = (hierarchyId: number = 0): ObserveResult => ({
-  timestamp: 0,
+  updatedAt: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: SCREEN_SIZE,
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: {
-    hierarchy: { node: { $: { _id: String(hierarchyId) } } },
+    hierarchy: { node: createFlatNodeForTest({ $: { _id: String(hierarchyId) } }) },
   },
 });
 
@@ -43,14 +51,14 @@ const CONTAINER_ELEMENT: Element = {
   bounds: { left: 0, top: 0, right: 400, bottom: 900 },
   "resource-id": "test:id/list",
   scrollable: true,
-} as unknown as Element;
+};
 
 const TARGET_ELEMENT: Element = {
   bounds: { left: 10, top: 200, right: 390, bottom: 250 },
   "resource-id": "test:id/target",
   text: "Skills",
   scrollable: false,
-} as unknown as Element;
+};
 
 function makeScrollUntilVisible({
   accessibilityDetector,
@@ -114,10 +122,10 @@ function makeScrollUntilVisible({
     device,
     resolver: resolver ?? scrollResolver,
     geometry: geometry ?? fakeGeometry,
-    observeScreen: fakeObserveScreen as any,
+    observeScreen: fakeObserveScreen,
     accessibilityService,
     accessibilityDetector,
-    adb: new FakeAdbClient() as any,
+    adb: new FakeAdbClient(),
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
     voiceOverExecutor: talkBackExecutor,
@@ -173,13 +181,13 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     try {
       const hierarchy = {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             bounds: { left: 0, top: 0, right: 100, bottom: 50 },
             class: "android.widget.EditText",
             text: "5551234",
             "hint-text": "Phone",
             focusable: true,
-          },
+          }),
         },
       };
       expect(scroll.resolveElement(hierarchy, { text: "Phone" }, "inspect", true)).toBeNull();
@@ -306,7 +314,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       ...makeObserveResult(),
       viewHierarchy: {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             bounds: { left: 0, top: 0, right: 400, bottom: 900 },
             "resource-id": "feed",
             scrollable: true,
@@ -317,7 +325,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
                 scrollable: true,
               },
             ],
-          },
+          }),
         },
       },
     };
@@ -340,22 +348,20 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       ...makeObserveResult(),
       viewHierarchy: {
         hierarchy: {
-          node: {
+          node: createFlatNodeForTest({
             bounds: { left: 0, top: 0, right: 400, bottom: 900 },
             "resource-id": "app:id/feed",
             scrollable: true,
-          },
+          }),
         },
         windows: [
           {
             windowLayer: 10,
-            hierarchy: {
-              node: {
-                bounds: { left: 0, top: 700, right: 400, bottom: 900 },
-                "resource-id": "ime:id/suggestions",
-                scrollable: true,
-              },
-            },
+            hierarchy: createFlatNodeForTest({
+              bounds: { left: 0, top: 700, right: 400, bottom: 900 },
+              "resource-id": "ime:id/suggestions",
+              scrollable: true,
+            }),
           },
         ],
       },
@@ -485,7 +491,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(
       observedInteractionOptions.every((options) => options.deferPostActionScreenshot === true),
     ).toBe(true);
-    expect(terminalEvidence).toEqual([result.observation]);
+    expect<unknown>(terminalEvidence).toEqual([result.observation]);
   });
 
   test("switches to opposite direction after forward end-of-list", async () => {
@@ -726,10 +732,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       device: DEVICE,
       resolver: fakeResolver,
       geometry: fakeGeometry,
-      observeScreen: fakeObserveScreen as any,
+      observeScreen: fakeObserveScreen,
       accessibilityService: fakeAccessibilityService,
       accessibilityDetector: fakeDetector,
-      adb: new FakeAdbClient() as any,
+      adb: new FakeAdbClient(),
       overlayDetector: fakeOverlayDetector,
       talkBackExecutor: fakeTalkBack,
       timer: fakeTimer,
@@ -1014,9 +1020,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     talkBackExecutor.setFailureResult({ success: false, outcomeIndeterminate: true, error });
     const terminalEvidence: ObserveResult[] = [];
     const cacheInvalidations: string[] = [];
-    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+    const existing = spyOnIosExistingInstance({
       invalidateCache: () => cacheInvalidations.push("ios"),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
       scrollResolver,
@@ -1046,9 +1052,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
     const cacheInvalidations: string[] = [];
-    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+    const existing = spyOnIosExistingInstance({
       invalidateCache: () => cacheInvalidations.push("ios"),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
       scrollResolver,
@@ -1097,107 +1103,138 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 });
 
+// Only the shared (real) ElementResolver is exercised; every other collaborator is an inert fake.
+const resolverOnlyScroll = () =>
+  makeScrollUntilVisible({
+    accessibilityDetector: new FakeAccessibilityDetector(),
+    scrollResolver: new FakeScrollElementResolver(new ScriptedElementLookup()),
+    timer: new FakeTimer(),
+    accessibilityService: new FakeScrollAccessibilityService(),
+    observeResults: [makeObserveResult()],
+    talkBackExecutor: new FakeTalkBackSwipeExecutor(),
+    resolver: new ElementResolver(),
+  });
+
 describe("ScrollUntilVisible shared resolver identity", () => {
-  const hierarchy = (ids: string[]) => ({
+  const hierarchy = (ids: string[]): ViewHierarchyResult => ({
     hierarchy: {
-      node: ids.map((id, index) => ({
-        "resource-id": id,
-        bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
-      })),
+      node: createFlatNodeForTest({
+        node: ids.map((id, index) => ({
+          "resource-id": id,
+          bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
+        })),
+      }),
     },
   });
   test("bare lookFor ID rejects substring near misses", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = resolverOnlyScroll();
     const result = await scroll.findElementInHierarchy(
       { elementId: "btn_login" },
-      hierarchy(["com.app:id/btn_login_help"]) as any,
+      hierarchy(["com.app:id/btn_login_help"]),
     );
     expect(result).toBeNull();
   });
   test("bare lookFor ID reports candidate packages when ambiguous", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = resolverOnlyScroll();
     await expect(
       scroll.findElementInHierarchy(
         { elementId: "btn_login" },
-        hierarchy(["com.one:id/btn_login", "com.two:id/btn_login"]) as any,
+        hierarchy(["com.one:id/btn_login", "com.two:id/btn_login"]),
       ),
     ).rejects.toThrow(/com.one:id\/btn_login.*com.two:id\/btn_login/);
   });
   test("text lookFor keeps the matched label rather than its clickable row", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = resolverOnlyScroll();
     const label = {
       "resource-id": "com.app:id/target_label",
       text: "Target",
       bounds: { left: 0, top: 80, right: 100, bottom: 100 },
     };
-    const found = await scroll.findElementInHierarchy({ text: "Target" }, {
-      hierarchy: {
-        node: {
-          "resource-id": "com.app:id/target_row",
-          clickable: true,
-          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-          node: [label],
+    const found = await scroll.findElementInHierarchy(
+      { text: "Target" },
+      {
+        hierarchy: {
+          node: createFlatNodeForTest({
+            "resource-id": "com.app:id/target_row",
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            node: [label],
+          }),
         },
       },
-    } as any);
+    );
     expect(found?.["resource-id"]).toBe("com.app:id/target_label");
     expect(found?.bounds).toEqual(label.bounds);
   });
   test("explicit text swipe keeps matched label bounds, while ID uses the selected row", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = resolverOnlyScroll();
     const label = { text: "Target", bounds: { left: 20, top: 40, right: 80, bottom: 60 } };
-    const viewHierarchy = {
+    const viewHierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "row",
           clickable: true,
           bounds: { left: 0, top: 0, right: 100, bottom: 100 },
           node: [label],
-        },
+        }),
       },
-    } as any;
+    };
     expect(
-      (await scroll.findTargetElement({ container: { text: "Target" } } as any, viewHierarchy))
-        .bounds,
+      (
+        await scroll.findTargetElement(
+          { direction: "up", container: { text: "Target" } },
+          viewHierarchy,
+        )
+      ).bounds,
     ).toEqual(label.bounds);
     expect(
-      (await scroll.findTargetElement({ container: { elementId: "row" } } as any, viewHierarchy))
-        .bounds,
+      (
+        await scroll.findTargetElement(
+          { direction: "up", container: { elementId: "row" } },
+          viewHierarchy,
+        )
+      ).bounds,
     ).toEqual({ left: 0, top: 0, right: 100, bottom: 100 });
   });
   test("text lookFor skips unrelated text on the promoted row", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = resolverOnlyScroll();
     const target = { text: "Target", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
-    const found = await scroll.findElementInHierarchy({ text: "Target" }, {
-      hierarchy: {
-        node: {
-          "content-desc": "Unrelated row label",
-          clickable: true,
-          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-          node: [target],
+    const found = await scroll.findElementInHierarchy(
+      { text: "Target" },
+      {
+        hierarchy: {
+          node: createFlatNodeForTest({
+            "content-desc": "Unrelated row label",
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            node: [target],
+          }),
         },
       },
-    } as any);
+    );
     expect(found?.bounds).toEqual(target.bounds);
   });
   test("text lookFor preserves curly-quote matching source geometry", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = resolverOnlyScroll();
     const target = { text: "It’s here", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
-    const found = await scroll.findElementInHierarchy({ text: "It's here" }, {
-      hierarchy: {
-        node: {
-          clickable: true,
-          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-          node: [target],
+    const found = await scroll.findElementInHierarchy(
+      { text: "It's here" },
+      {
+        hierarchy: {
+          node: createFlatNodeForTest({
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            node: [target],
+          }),
         },
       },
-    } as any);
+    );
     expect(found?.bounds).toEqual(target.bounds);
   });
 });
 
 test("lookFor treats a temporarily missing container as a miss and retries within its scope", async () => {
-  const scroll = new ScrollUntilVisible({} as any);
+  const scroll = resolverOnlyScroll();
   const target = {
     "resource-id": "com.app:id/login",
     bounds: { left: 0, top: 0, right: 100, bottom: 40 },
@@ -1208,7 +1245,7 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
       { elementId: "login" },
       {
         hierarchy: { node: target },
-      } as any,
+      },
       scope,
     ),
   ).toBeNull();
@@ -1216,13 +1253,13 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
     { elementId: "login" },
     {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           "resource-id": "com.app:id/panel",
           bounds: { left: 0, top: 0, right: 200, bottom: 200 },
           node: [target],
-        },
+        }),
       },
-    } as any,
+    },
     scope,
   );
   expect(found?.["resource-id"]).toBe("com.app:id/login");

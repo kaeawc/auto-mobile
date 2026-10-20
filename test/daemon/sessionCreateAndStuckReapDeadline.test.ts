@@ -4,7 +4,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import {
   SESSION_CREATION_TIMEOUT_CODE,
   SessionCreationTimeoutError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
 import {
   STUCK_REAP_WARN_MS,
@@ -16,7 +16,6 @@ import {
   SessionManager,
 } from "../../src/daemon/sessionManager";
 import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -44,9 +43,11 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkCreate: Promise<void> | undefined;
   parkRelease: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkCreate;
-    await super.upsertActiveSession(record);
+    return super.upsertActiveSession(...args);
   }
 
   override async markReleased(
@@ -115,7 +116,13 @@ describe("a wedged create-time DB write is bounded (#10963)", () => {
       const createGate = Promise.withResolvers<void>();
       h.persistence.parkCreate = createGate.promise;
 
-      const bind = track(h.pool.bindOrReuseDeviceSession("wedged", first.deviceId, "android"));
+      const bind = track(
+        h.pool.bindOrReuseDeviceSession({
+          sessionId: "wedged",
+          deviceId: first.deviceId,
+          platform: "android",
+        }),
+      );
       await flush();
       // Only the bind's own write is wedged; it already waits on the gate.
       h.persistence.parkCreate = undefined;
@@ -157,7 +164,11 @@ describe("a reap stuck past its deadline frees the device (#10963)", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const h = await harness();
-      await h.pool.bindOrReuseDeviceSession("stuck", first.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "stuck",
+        deviceId: first.deviceId,
+        platform: "android",
+      });
       const forced: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
         h.manager,
@@ -198,7 +209,11 @@ describe("a reap stuck past its deadline frees the device (#10963)", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const h = await harness();
-      await h.pool.bindOrReuseDeviceSession("stuck", first.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "stuck",
+        deviceId: first.deviceId,
+        platform: "android",
+      });
       h.persistence.parkRelease = new Promise<void>(() => {});
       const releases: string[] = [];
       h.manager.onSessionRelease((sessionId, _deviceId, reason) => {
@@ -227,7 +242,11 @@ describe("a reap stuck past its deadline frees the device (#10963)", () => {
       await freeing;
       await flush();
       expect(h.pool.getDevice(first.deviceId)?.sessionId ?? null).toBeNull();
-      await h.pool.bindOrReuseDeviceSession("next", first.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: first.deviceId,
+        platform: "android",
+      });
       expect(h.pool.getDevice(first.deviceId)?.sessionId).toBe("next");
       // The fenced UUID never routes again.
       await expect(h.manager.getOrCreateSession("stuck")).rejects.toThrow("terminal");

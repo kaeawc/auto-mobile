@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import type { BootedDevice, ExecutePlanResult, PlanExecutionResult } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import type { VideoRecordingConfig } from "../../src/models/VideoRecording";
@@ -15,7 +15,6 @@ const iosDevice: BootedDevice = {
   deviceId: "AAAA1111-BBBB-2222-CCCC-3333DDDD4444",
   name: "iPhone 15 Sim",
   platform: "ios",
-  status: "booted",
 };
 
 const baseRequest: PlanExecutionRequest = {

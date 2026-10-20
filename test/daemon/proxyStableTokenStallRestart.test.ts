@@ -117,6 +117,7 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -282,6 +283,9 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
 
     await restartDaemon();
     const ownerHeartbeatAtRestart = sessionManager.getSession(HELD)!.lastOwnerHeartbeat;
+    if (ownerHeartbeatAtRestart === undefined) {
+      throw new Error("the held session has recorded no owner heartbeat");
+    }
     await advance(INTERVAL_MS * 2);
 
     // #11018: token resume on reconnect must not adopt before the pinned probe is refused.

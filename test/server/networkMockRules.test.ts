@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   buildNetworkMockRules,
   describeInvalidMockPattern,
   parseMockRuleReport,
-} from "../../src/server/networkMockRules";
+} from "../../src/utils/networkMockRules";
 
 const DEVICE = "emulator-5554";
 

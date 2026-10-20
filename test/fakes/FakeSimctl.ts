@@ -56,6 +56,7 @@ export class FakeSimctl implements SimCtl {
   private deviceInfoError: Error | null = null;
   private runtimesError: Error | null = null;
   private deviceTypesError: Error | null = null;
+  private malformedListings = false;
   private containerPaths = new Map<string, string>();
   private containerErrors = new Map<string, Error>();
   private commandResults = new Map<string, ExecResult>();
@@ -194,6 +195,14 @@ export class FakeSimctl implements SimCtl {
 
   setRuntimesError(error: Error | null): void {
     this.runtimesError = error;
+  }
+
+  /**
+   * Model `simctl list runtimes|devicetypes` returning stdout that is not the expected JSON: the
+   * lenient listings degrade to `[]`, the checked ones throw (as the real parser does).
+   */
+  setMalformedListings(malformed: boolean = true): void {
+    this.malformedListings = malformed;
   }
 
   setDeviceTypesError(error: Error | null): void {
@@ -472,12 +481,30 @@ export class FakeSimctl implements SimCtl {
 
   async getDeviceTypes(): Promise<AppleDeviceType[]> {
     this.recordCall("getDeviceTypes", {});
-    return this.deviceTypes;
+    // The real client runs `simctl list devicetypes`, so a failed command throws; only
+    // unparseable output degrades to [].
+    if (this.deviceTypesError) {
+      throw this.deviceTypesError;
+    }
+    return this.malformedListings ? [] : this.deviceTypes;
   }
 
   async getRuntimes(): Promise<AppleDeviceRuntime[]> {
     this.recordCall("getRuntimes", {});
-    return this.runtimes;
+    if (this.runtimesError) {
+      throw this.runtimesError;
+    }
+    // Mirrors production: the lenient listing keeps only runtimes simctl reports available.
+    return this.malformedListings ? [] : this.runtimes.filter((runtime) => runtime.isAvailable);
+  }
+
+  /** Every available configured runtime; the version bounds are not modelled by this fake. */
+  async resolveRuntimeIdentifiersForBounds(
+    minVersion?: string,
+    maxVersion?: string,
+  ): Promise<string[]> {
+    this.recordCall("resolveRuntimeIdentifiersForBounds", { minVersion, maxVersion });
+    return (await this.getRuntimes()).map((runtime) => runtime.identifier);
   }
 
   async createSimulator(name: string, deviceType: string, runtime: string): Promise<string> {
@@ -591,6 +618,9 @@ export class FakeSimctl implements SimCtl {
     if (this.deviceTypesError) {
       throw this.deviceTypesError;
     }
+    if (this.malformedListings) {
+      throw new Error("simctl device types response does not contain a devicetypes array");
+    }
     return this.deviceTypes;
   }
 
@@ -598,6 +628,9 @@ export class FakeSimctl implements SimCtl {
     this.recordCall("getRuntimesChecked", {});
     if (this.runtimesError) {
       throw this.runtimesError;
+    }
+    if (this.malformedListings) {
+      throw new Error("simctl runtimes response does not contain a runtimes array");
     }
     return this.runtimes;
   }

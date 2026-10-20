@@ -1,7 +1,7 @@
 import { type Kysely, sql } from "kysely";
 
 // #11933: preserve the destination row when both spellings already exist.
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await sql`DELETE FROM feature_flags WHERE key = 'mcp-recording'
     AND EXISTS (SELECT 1 FROM feature_flags WHERE key = 'tool-call-recording')`.execute(db);
   await sql`UPDATE feature_flags SET key = 'tool-call-recording'
@@ -22,7 +22,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     WHERE tool_name = 'startTestRecording'`.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await sql`DELETE FROM feature_flags WHERE key = 'tool-call-recording'
     AND EXISTS (SELECT 1 FROM feature_flags WHERE key = 'mcp-recording')`.execute(db);
   await sql`UPDATE feature_flags SET key = 'mcp-recording'

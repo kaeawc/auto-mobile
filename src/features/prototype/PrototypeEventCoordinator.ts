@@ -11,6 +11,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
+import type { PrototypeRequestCancellation } from "./PrototypeRequestCoordinator";
 
 import { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS } from "./prototypeEventTimeout";
 
@@ -49,6 +50,8 @@ export class PrototypeEventCoordinator {
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
     private readonly store: PrototypeStatusStore,
     private readonly telemetry?: PrototypeEventTelemetry,
+    /** Ends in-flight host-proxied requests (#12527) when their prototype ends. */
+    private readonly requests?: PrototypeRequestCancellation,
   ) {}
 
   /** Subscribe before show dispatch so a push during the request cannot be lost. */
@@ -229,6 +232,7 @@ export class PrototypeEventCoordinator {
     if (event.kind === "dismissed") {
       entry.shown = false;
       entry.terminal = true;
+      this.requests?.cancelPrototype(entry.scope.deviceId, entry.id);
       this.store.dismissed(entry.scope, entry.id);
     }
     for (const notify of [...entry.waiters]) {
@@ -333,6 +337,7 @@ export class PrototypeEventCoordinator {
     entry.buffer.clear();
     entry.shown = false;
     entry.terminal = true;
+    this.requests?.cancelPrototype(entry.scope.deviceId, entry.id);
     for (const notify of [...entry.waiters]) {
       notify();
     }

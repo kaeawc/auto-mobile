@@ -128,7 +128,13 @@ final class PrototypeAgent: NSObject {
         }
         server.onClientCountChanged = { [weak agent] count in agent?.clientCountChanged(count) }
         agent.server = server
+        agent.installRequestDriver()
         server.start()
+    }
+
+    /// Writes any pending stored prototype values; the viewer calls it as the app terminates.
+    static func flushStorage() {
+        instance?.model.flushStorage()
     }
 
     static func retractViewerEndpoint() {
@@ -139,7 +145,7 @@ final class PrototypeAgent: NSObject {
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
     init(mode: PrototypeLifecycleMode = .session) {
-        model = PrototypeModel(mode: mode)
+        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked())
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
@@ -223,8 +229,50 @@ final class PrototypeAgent: NSObject {
         model.onSessionChange?(model.session)
         observeKeyboard()
         observeAssistiveEscape()
+        observeStorageFlush()
         server.start()
         self.server = server
+        installRequestDriver()
+    }
+
+    /// Wires the `request` action (#12529): `via: "host"` calls go out as `prototype_request` frames
+    /// to the most recently authenticated host (one connection only) and come back as
+    /// `prototype_response`; `via: "device"` calls run on a dedicated URLSession client.
+    private func installRequestDriver() {
+        let driver = PrototypeRequestDriver(
+            clock: SystemPrototypeClock(),
+            device: PrototypeURLSessionClient()
+        ) { [weak self] frame in
+            guard let self, connectedClients > 0, let server else { return false }
+            server.sendToHost(frame, requestId: frame["requestId"] as? String ?? "")
+            return true
+        }
+        driver.onHostCancel = { [weak self] frame in
+            self?.server?.cancelHostRequest(frame, requestId: frame["requestId"] as? String ?? "")
+        }
+        driver.onHostSettled = { [weak self] requestId in self?.server?.hostRequestFinished(requestId) }
+        server?.onHostRequestsLost = { [weak driver] ids in driver?.hostRequestsLost(ids) }
+        driver.onComplete = { [weak model] requestId, response in
+            model?.completeRequest(requestId, response)
+        }
+        model.requestDriver = driver
+    }
+
+    /// Stored prototype values are debounced; the app going to the background or ending flushes them.
+    private func observeStorageFlush() {
+        for name in [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(flushStorageNotification(_:)),
+                name: name,
+                object: nil
+            )
+        }
+    }
+
+    @objc
+    private func flushStorageNotification(_: Notification) {
+        model.flushStorage()
     }
 
     /// Selector delivery matches keyboard notifications and stays on the UIKit main actor.
@@ -409,11 +457,12 @@ final class PrototypeAgent: NSObject {
 
     // MARK: Protocol
 
-    private func handle(_ message: [String: Any], reply: @escaping ([String: Any]) -> Void) {
-        let type = message["type"] as? String ?? ""
-        let requestId = message["requestId"] as Any? ?? NSNull()
-        let started = Date()
-        func result(_ success: Bool, _ error: String? = nil, extra: [String: Any] = [:]) {
+    private struct ProtocolResult {
+        let requestId: Any
+        let started: Date
+        let reply: ([String: Any]) -> Void
+
+        func callAsFunction(_ success: Bool, _ error: String? = nil, extra: [String: Any] = [:]) {
             var body: [String: Any] = [
                 "type": "prototype_result",
                 "requestId": requestId,
@@ -423,6 +472,16 @@ final class PrototypeAgent: NSObject {
             if let error { body["error"] = error }
             body.merge(extra) { _, new in new }
             reply(body)
+        }
+    }
+
+    private func handle(_ message: [String: Any], reply: @escaping ([String: Any]) -> Void) {
+        let type = message["type"] as? String ?? ""
+        let result = ProtocolResult(requestId: message["requestId"] as Any? ?? NSNull(), started: Date(), reply: reply)
+        // The host's answer to a `prototype_request` frame is not a request: nothing replies to it.
+        if type == PrototypeRequestWire.responseType {
+            model.requestDriver?.receiveHostResponse(message)
+            return
         }
         if let rejection = PrototypeTestHooks.rejection(requestType: type, enabled: testHooksEnabled) {
             return result(false, rejection)
@@ -436,107 +495,163 @@ final class PrototypeAgent: NSObject {
         do {
             switch type {
             case "simulate_tap":
-                guard let identifier = message["nodeId"] as? String else {
-                    return result(false, "simulate_tap needs a nodeId")
-                }
-                switch model.simulateTap(identifier: identifier) {
-                case .success: result(true)
-                case .failure(.notShown): result(false, "No prototype is shown")
-                case .failure(.notFound): result(false, "No node with testTag \(identifier)")
-                case .failure(.notTappable): result(false, "Node \(identifier) has no onTap")
-                }
+                simulateTap(message, result: result)
             case "show_prototype":
-                let spec = try decode(PrototypeSpec.self, message["spec"])
-                // The host resolves element anchors to bounds (#9316); drawing one that it did not
-                // would silently misplace the node, so the show is refused and nothing changes.
-                if let path = spec.root.unresolvedAnchorPath() {
-                    return result(
-                        false,
-                        "\(path): Element anchors must be resolved to bounds by the host; update the AutoMobile host"
-                    )
-                }
-                guard let appearance = PrototypeAppearanceOverride.parse(message["appearance"]) else {
-                    return result(false, "appearance: Expected device, light or dark")
-                }
-                // The viewer controller owns device appearance; the injected agent reads it here.
-                if !viewerHosted { syncDeviceAppearance() }
-                model.show(
-                    spec,
-                    reset: message["reset"] as? Bool == true,
-                    appearance: appearance,
-                    specBytes: message["spec"].flatMap {
-                        try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed).count
-                    }
-                )
-                if let specJSON = message["spec"] {
-                    viewerSaveBack?.persistIfSaved(specId: spec.id, specJSON: specJSON)
-                }
-                warnAboutFontAssets(for: spec)
-                warnAboutUnknownThemeColors(for: spec)
-                var extra = missingAssetsExtra()
-                extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
-                if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
-                // The host can leave before this queued show runs; nothing would remove it later.
-                if connectedClients == 0 { model.hostDisconnected() }
-                result(true, extra: extra)
+                try showPrototype(message, result: result)
+            case PrototypeAgentProtocol.patchRequest:
+                try patchPrototype(message, result: result)
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
-                // Like Android's PrototypeController: an id that is not the shown prototype fails, and
-                // the dismissal still emits the terminal `dismissed` event that event waiters
-                // settle on.
-                let all = message["all"] as? Bool == true
-                guard all || (model.spec != nil && model.spec?.id == message["id"] as? String) else {
-                    return result(false, "Unknown prototype id: \(message["id"] ?? "nil")")
-                }
-                model.dismiss(reason: .agent)
-                result(true)
-            case "put_prototype_asset":
-                guard let id = message["id"] as? String,
-                      let base64 = message["dataBase64"] as? String,
-                      let data = Data(base64Encoded: base64),
-                      let image = UIImage(data: data)
-                else { return result(false, "Asset must carry an id and a base64 PNG, JPEG or WebP image") }
-                model.putAsset(id, image)
-                result(true)
-            case "remove_prototype_asset":
-                if let id = message["id"] as? String { model.removeAsset(id) }
-                result(true)
-            case "get_prototype_status":
-                for pending in outbox.drainForInspect() {
-                    server?.broadcast(pending)
-                }
-                var status = model.status()
-                status["visible"] = viewerHosted || window?.isHidden == false
-                if model.mode == .standalone {
-                    status["persistent"] = true
-                    status["droppedEvents"] = outbox.droppedEvents
-                }
-                result(true, extra: ["status": status])
-            case "inspect_prototypes" where model.mode == .standalone:
-                for pending in outbox.drainForInspect() {
-                    server?.broadcast(pending)
-                }
-                var status = model.status()
-                status["persistent"] = true
-                result(true, extra: [
-                    "prototypes": model.session.isShown ? [status] : [],
-                    "droppedEvents": outbox.droppedEvents,
-                ])
-            case PrototypeAgentProtocol.hideForCaptureRequest:
-                hideForCapture(
-                    deadlineMs: PrototypeCaptureHold
-                        .clampedDeadlineMs(message["deadlineMs"])
-                ) { hidden, token in
-                    result(true, extra: ["hidden": hidden, "token": token])
-                }
-            case PrototypeAgentProtocol.restoreAfterCaptureRequest:
-                result(true, extra: ["restored": restoreAfterCapture(token: (message["token"] as? NSNumber)?.intValue)])
-            default:
-                result(false, "Unknown request type \(type)")
+                dismissPrototype(message, result: result)
+            case PrototypeAgentProtocol.clearStorageRequest:
+                clearStorage(message, result: result)
+            default: handleAuxiliary(type, message: message, result: result)
             }
         } catch {
             result(false, "Invalid prototype spec: \(error)")
         }
+    }
+
+    private func patchPrototype(_ message: [String: Any], result: ProtocolResult) throws {
+        // Edits the shown prototype in place (#11675); a refusal leaves it untouched.
+        guard let id = message["id"] as? String, !id.isEmpty, let ops = message["ops"] else {
+            return result(false, "patch_prototype needs an id and ops")
+        }
+        let reply = try model.patch(
+            id: id,
+            baseRevision: (message["baseRevision"] as? NSNumber)?.intValue,
+            ops: decode(JSONValue.self, ops)
+        ).reply
+        result(reply.success, reply.error, extra: reply.extra)
+    }
+
+    private func clearStorage(_ message: [String: Any], result: ProtocolResult) {
+        // Wipes the stored values of an id (#12526); the shown prototype is left as it is.
+        guard let id = message["id"] as? String, !id.isEmpty else {
+            return result(false, "clear_prototype_storage needs an id")
+        }
+        do {
+            let cleared = try model.clearStorage(id: id)
+            result(true, extra: ["cleared": cleared])
+        } catch {
+            result(false, "Could not clear stored values for \(id): \(error)")
+        }
+    }
+
+    private func dismissPrototype(_ message: [String: Any], result: ProtocolResult) {
+        // Like Android's PrototypeController: an id that is not the shown prototype fails, and
+        // the dismissal still emits the terminal `dismissed` event that event waiters
+        // settle on.
+        let all = message["all"] as? Bool == true
+        guard all || (model.spec != nil && model.spec?.id == message["id"] as? String) else {
+            return result(false, "Unknown prototype id: \(message["id"] ?? "nil")")
+        }
+        model.dismiss(reason: .agent)
+        result(true)
+    }
+
+    private func simulateTap(_ message: [String: Any], result: ProtocolResult) {
+        guard let identifier = message["nodeId"] as? String else {
+            return result(false, "simulate_tap needs a nodeId")
+        }
+        switch model.simulateTap(identifier: identifier) {
+        case .success: result(true)
+        case .failure(.notShown): result(false, "No prototype is shown")
+        case .failure(.notFound): result(false, "No node with testTag \(identifier)")
+        case .failure(.notTappable): result(false, "Node \(identifier) has no onTap")
+        }
+    }
+
+    private func showPrototype(_ message: [String: Any], result: ProtocolResult) throws {
+        let spec = try decode(PrototypeSpec.self, message["spec"])
+        // The host resolves element anchors to bounds (#9316); drawing one that it did not
+        // would silently misplace the node, so the show is refused and nothing changes.
+        if let path = spec.root.unresolvedAnchorPath() {
+            return result(
+                false,
+                "\(path): Element anchors must be resolved to bounds by the host; update the AutoMobile host"
+            )
+        }
+        guard let appearance = PrototypeAppearanceOverride.parse(message["appearance"]) else {
+            return result(false, "appearance: Expected device, light or dark")
+        }
+        // The viewer controller owns device appearance; the injected agent reads it here.
+        if !viewerHosted { syncDeviceAppearance() }
+        model.show(
+            spec,
+            reset: message["reset"] as? Bool == true,
+            appearance: appearance,
+            specBytes: message["spec"].flatMap {
+                try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed).count
+            }
+        )
+        if let specJSON = message["spec"] {
+            viewerSaveBack?.persistIfSaved(specId: spec.id, specJSON: specJSON)
+        }
+        warnAboutFontAssets(for: spec)
+        warnAboutUnknownThemeColors(for: spec)
+        var extra = missingAssetsExtra()
+        extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
+        if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
+        // The host can leave before this queued show runs; nothing would remove it later.
+        if connectedClients == 0 { model.hostDisconnected() }
+        result(true, extra: extra)
+    }
+
+    private func handleAuxiliary(_ type: String, message: [String: Any], result: ProtocolResult) {
+        switch type {
+        case "put_prototype_asset":
+            putAsset(message, result: result)
+        case "remove_prototype_asset":
+            if let id = message["id"] as? String { model.removeAsset(id) }
+            result(true)
+        case "get_prototype_status":
+            reportStatus(result: result)
+        case "inspect_prototypes" where model.mode == .standalone:
+            for pending in outbox.drainForInspect() {
+                server?.broadcast(pending)
+            }
+            var status = model.status()
+            status["persistent"] = true
+            result(true, extra: [
+                "prototypes": model.session.isShown ? [status] : [],
+                "droppedEvents": outbox.droppedEvents,
+            ])
+        case PrototypeAgentProtocol.hideForCaptureRequest:
+            hideForCapture(
+                deadlineMs: PrototypeCaptureHold
+                    .clampedDeadlineMs(message["deadlineMs"])
+            ) { hidden, token in
+                result(true, extra: ["hidden": hidden, "token": token])
+            }
+        case PrototypeAgentProtocol.restoreAfterCaptureRequest:
+            result(true, extra: ["restored": restoreAfterCapture(token: (message["token"] as? NSNumber)?.intValue)])
+        default:
+            result(false, "Unknown request type \(type)")
+        }
+    }
+
+    private func putAsset(_ message: [String: Any], result: ProtocolResult) {
+        guard let id = message["id"] as? String,
+              let base64 = message["dataBase64"] as? String,
+              let data = Data(base64Encoded: base64),
+              let image = UIImage(data: data)
+        else { return result(false, "Asset must carry an id and a base64 PNG, JPEG or WebP image") }
+        model.putAsset(id, image)
+        result(true)
+    }
+
+    private func reportStatus(result: ProtocolResult) {
+        for pending in outbox.drainForInspect() {
+            server?.broadcast(pending)
+        }
+        var status = model.status()
+        status["visible"] = viewerHosted || window?.isHidden == false
+        if model.mode == .standalone {
+            status["persistent"] = true
+            status["droppedEvents"] = outbox.droppedEvents
+        }
+        result(true, extra: ["status": status])
     }
 
     // MARK: Host connection
@@ -545,7 +660,11 @@ final class PrototypeAgent: NSObject {
     /// is dismissed (`reason: disconnect`) and its assets dropped, as on Android.
     private func clientCountChanged(_ count: Int) {
         connectedClients = count
-        if count < 1 { model.hostDisconnected() }
+        if count < 1 {
+            model.hostDisconnected()
+            // Calls still waiting on the host (a persistent prototype outlives it) cannot be answered.
+            model.requestDriver?.hostDisconnected()
+        }
         for pending in outbox.clientCountChanged(count) {
             server?.broadcast(pending)
         }

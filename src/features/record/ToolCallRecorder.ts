@@ -1,77 +1,26 @@
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/constants";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
+import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
+import { normalizedAxis } from "./normalizedAxis";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 
-/**
- * MCP tool names whose successful calls are recorded as plan steps.
- *
- * The registry carries no per-tool "mutates the device" flag (`planExecutable`
- * only widens which gated tools a plan may run), so this list is hand-kept.
- * Infrastructure tools (device management, recording meta-tools, read-only
- * queries) are excluded. `test/features/record/ToolCallRecorderCoverage.test.ts`
- * requires every tool in `schemas/tool-definitions.json` to be listed here or
- * excluded there with a reason, so a new action tool cannot be silently left
- * out of the exported plan (#9928).
- */
-export const PLAN_RELEVANT_TOOLS = new Set([
-  // App lifecycle
-  "launchApp",
-  "terminateApp",
-  "crashApp",
-  "appLifecycle",
-  // Observation
-  "observe",
-  // Interaction
-  "tapOn",
-  "tapAny",
-  "tapAt",
-  "swipeOn",
-  "swipeAt",
-  "sendKeys",
-  "pressButton",
-  "dragAndDrop",
-  "dragPath",
-  "pinchOn",
-  "multiTouch",
-  "selectAllText",
-  "clipboard",
-  "keyboard",
-  // Navigation and system UI
-  "homeScreen",
-  "recentApps",
-  "openLink",
-  "systemTray",
-  "wakeAndUnlock",
-  // Device state and orientation
-  "rotate",
-  "shake",
-  "setPosture",
-  "setDeviceState",
-  "displayConfig",
-  "changeLocalization",
-  "setAppPermissions",
-  "postNotification",
-  // Form filling
-  "setUIState",
-  // Telephony, biometrics and accessibility services (#9966)
-  "accessibility",
-  "biometricAuth",
-  "phoneCall",
-  "sendSms",
-  // App state and fixtures (#9966). The file-staging tools are recorded only
-  // when every file carries inline content; see referencesHostFile.
-  "setNotificationPolicy",
-  "setPreference",
-  "resetKeychain",
-  "resetAppLogs",
-  "putAppFile",
-  "stageSessionDownloads",
-]);
+/** The registry-declared tool traits the recorder reads (structural subset of `ToolTraits`). */
+export interface RecorderToolTraits {
+  /** Writes caller-supplied files, from a host `sourcePath` or inline content. */
+  stagesFiles?: boolean;
+  /** A successful call is recorded as a plan step (declared on the tool, #11825). */
+  planRelevant?: boolean;
+}
+
+/** Whether the tool declares the `planRelevant` trait, so its successful calls are plan steps. */
+function isPlanRelevant(traits: RecorderToolTraits | undefined): boolean {
+  return traits?.planRelevant === true;
+}
 
 /**
  * Params that reference observation state which cannot outlive the recording
- * session. `tapAt.snapshotId` and `swipeAt.snapshotId` are short-lived observe
+ * session. `tapAt`, `swipeAt` and `dragPath` `snapshotId`s are short-lived observe
  * snapshotReferences that replay rejects as "unknown or evicted"
  * (SnapshotReferenceStore). tapAny, tapOn, swipeOn, dragAndDrop and pinchOn
  * declare no such param.
@@ -79,6 +28,7 @@ export const PLAN_RELEVANT_TOOLS = new Set([
 const SESSION_SCOPED_PARAMS: Readonly<Record<string, readonly string[]>> = {
   tapAt: ["snapshotId"],
   swipeAt: ["snapshotId"],
+  dragPath: ["snapshotId"],
 };
 
 export function stripSessionScopedParams(
@@ -164,9 +114,6 @@ function findOversizedParam(params: Record<string, unknown>): string | undefined
   );
 }
 
-/** Tools that write caller-supplied files, from a host path or inline content. */
-const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set(["putAppFile", "stageSessionDownloads"]);
-
 function hasSourcePath(entry: unknown): boolean {
   return typeof entry === "object" && entry !== null && "sourcePath" in entry;
 }
@@ -178,8 +125,11 @@ function hasSourcePath(entry: unknown): boolean {
  * `contentBase64` are self-contained and are recorded. Covers both the
  * canonical `files[]` shape and the legacy single-file putAppFile shape.
  */
-export function referencesHostFile(toolName: string, params: Record<string, unknown>): boolean {
-  if (!FILE_STAGING_TOOLS.has(toolName)) {
+export function referencesHostFile(
+  traits: RecorderToolTraits | undefined,
+  params: Record<string, unknown>,
+): boolean {
+  if (traits?.stagesFiles !== true) {
     return false;
   }
   return hasSourcePath(params) || (Array.isArray(params.files) && params.files.some(hasSourcePath));
@@ -257,11 +207,11 @@ export class ToolCallRecorder {
     return this.steps.length;
   }
 
-  record(toolName: string, args: Record<string, unknown>): void {
+  record(toolName: string, args: Record<string, unknown>, traits?: RecorderToolTraits): void {
     if (!this.recording) {
       return;
     }
-    if (!PLAN_RELEVANT_TOOLS.has(toolName)) {
+    if (!isPlanRelevant(traits)) {
       return;
     }
 
@@ -269,7 +219,7 @@ export class ToolCallRecorder {
     if (isReadOnlyCall(toolName, params)) {
       return;
     }
-    const skipReason = this.skipReason(toolName, params);
+    const skipReason = this.skipReason(params, traits);
     if (skipReason) {
       const warning = `${toolName} was not recorded (after ${this.steps.length} recorded steps): ${skipReason}`;
       logger.warn(`[ToolCallRecorder] ${warning}`);
@@ -292,6 +242,7 @@ export class ToolCallRecorder {
       logger.warn(`[ToolCallRecorder] ${warning}`);
       this.warnings.push(warning);
     }
+    const recordedParams = this.paramsToStore(toolName, recorded, args);
     if (geometry) {
       const nativeParams = { ...recorded };
       delete nativeParams.image;
@@ -302,13 +253,66 @@ export class ToolCallRecorder {
         geometry,
       });
     } else {
-      this.steps.push({ tool: toolName, params: recorded });
+      this.steps.push({ tool: toolName, params: recordedParams });
     }
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
   }
 
-  private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {
-    if (referencesHostFile(toolName, params)) {
+  private paramsToStore(
+    toolName: string,
+    recorded: Record<string, unknown>,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (toolName !== "swipeAt") {
+      return recorded;
+    }
+    return this.normalizeSwipeAt(
+      recorded,
+      args.__swipeAtRecordingContext as SwipeAtRecordingContext | undefined,
+    );
+  }
+
+  /**
+   * An absolute-coordinate swipeAt replays on the same pixels whatever the screen, so it is stored
+   * as fractions of the screen it was recorded on (#12878). Without that screen the raw pixels stay
+   * and the plan author is warned.
+   */
+  private normalizeSwipeAt(
+    params: Record<string, unknown>,
+    context: SwipeAtRecordingContext | undefined,
+  ): Record<string, unknown> {
+    const { from, to, coordinateSpace } = params as {
+      from?: { x: number; y: number };
+      to?: { x: number; y: number };
+      coordinateSpace?: string;
+    };
+    if (!from || !to || (coordinateSpace ?? "absolute") !== "absolute") {
+      return params;
+    }
+    const screen = context?.screenSize;
+    if (!screen || !(screen.width > 0) || !(screen.height > 0)) {
+      const warning =
+        "swipeAt was recorded without geometry: its absolute pixel endpoints replay on the same pixels on any screen; use coordinateSpace normalized or record again on a single display";
+      logger.warn(`[ToolCallRecorder] ${warning}`);
+      this.warnings.push(warning);
+      return params;
+    }
+    return {
+      ...params,
+      from: {
+        x: normalizedAxis(from.x, screen.width),
+        y: normalizedAxis(from.y, screen.height),
+      },
+      to: { x: normalizedAxis(to.x, screen.width), y: normalizedAxis(to.y, screen.height) },
+      coordinateSpace: "normalized",
+    };
+  }
+
+  private skipReason(
+    params: Record<string, unknown>,
+    traits?: RecorderToolTraits,
+  ): string | undefined {
+    if (referencesHostFile(traits, params)) {
       return "it copies a host file (sourcePath), which a replay on another host cannot resolve; use contentText or contentBase64 to record it";
     }
     const oversized = findOversizedParam(params);

@@ -1,14 +1,14 @@
+import { isDaemonResponse } from "./parseDaemonResponseLine";
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
-import { mock } from "bun:test";
 import {
   SOCKET_REQUEST_DEADLINE_MS,
   connectBounded,
   sendRawSocketRequest,
   sendSocketRequest,
 } from "./socketRequest";
+import { FakeDeviceManager } from "../../fakes/FakeDeviceManager";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../../src/models";
@@ -35,13 +35,14 @@ export const iosDevice: BootedDevice = {
 export function createFakeDeviceManager(
   devices: BootedDevice[],
   succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
-) {
-  return {
-    getBootedDevicesDetailed: mock(async () => ({
-      devices,
-      succeededPlatforms,
-    })),
-  } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
+): FakeDeviceManager {
+  const manager = new FakeDeviceManager([], devices);
+  for (const platform of ["android", "ios"] as const) {
+    if (!succeededPlatforms.has(platform)) {
+      manager.failedPlatforms.add(platform);
+    }
+  }
+  return manager;
 }
 
 export function createFakeSession(
@@ -55,6 +56,7 @@ export function createFakeSession(
     platform,
     createdAt: 0,
     lastUsedAt: 0,
+    activityGeneration: 0,
     expiresAt: 60_000,
     cacheData: {},
     lastHeartbeat: 0,
@@ -62,6 +64,8 @@ export function createFakeSession(
     heartbeatTimeoutMs: 10_000,
     heartbeatTimeoutSource: "default",
     hasReceivedHeartbeat: false,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
   };
 }
 
@@ -80,6 +84,7 @@ export function createFakeDaemonState(
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => autolockSessions.has(sessionId),
       getSession: (sessionId: string) => autolockSessions.get(sessionId) ?? null,
       getSessionForDevice: (deviceId: string) =>
         Array.from(autolockSessions.values()).find((session) => session.assignedDevice === deviceId)
@@ -87,6 +92,7 @@ export function createFakeDaemonState(
       getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -110,7 +116,9 @@ export function createFakeDaemonState(
         }
         const sessionId = mcpAutolockSessions.get(mcpSessionId);
         const session = sessionId ? autolockSessions.get(sessionId) : undefined;
-        return session?.platform === platform ? session.sessionId : undefined;
+        return session !== undefined && session.platform === platform
+          ? session.sessionId
+          : undefined;
       },
     }),
   };
@@ -169,12 +177,19 @@ export async function openPersistentConnection(socketPath: string): Promise<Pers
       if (!line.trim()) {
         continue;
       }
-      const response = JSON.parse(line) as DaemonResponse;
-      const entry = pending.get(response.id);
+      const frame: unknown = JSON.parse(line);
+      if (!isDaemonResponse(frame)) {
+        continue;
+      }
+      const { id } = frame;
+      if (id === null) {
+        continue;
+      }
+      const entry = pending.get(id);
       if (entry) {
-        pending.delete(response.id);
+        pending.delete(id);
         defaultTimer.clearTimeout(entry.deadline);
-        entry.resolve(response);
+        entry.resolve(frame);
       }
     }
   });

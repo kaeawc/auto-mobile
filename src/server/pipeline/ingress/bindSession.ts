@@ -1,20 +1,22 @@
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
+import type { SessionManager } from "../../../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
-import { SessionReleaseBroadcaster } from "../../sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../../daemon/sessionReleaseBroadcast";
 import {
   getActiveDeviceSelectionFromResult,
   isDeviceSessionAcquisitionTool,
-} from "../../deviceSessionResult";
-import { resolveDirectSessionDevice } from "../../directSessionDeviceRegistry";
-import { executionTracker, sessionExecutionMetadataOf } from "../../executionTracker";
+} from "../../../daemon/deviceSessionResult";
+import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRegistry";
+import { executionTracker, sessionExecutionMetadataOf } from "../../../daemon/executionTracker";
 import {
   isSessionOwnedByAnotherConnection,
   namedSessionAccess,
 } from "../../foreignOwnedSessionRefusal";
+import { getAbortSignal } from "../../../utils/AbortContext";
 import { sessionForToolBinding } from "../../sessionForToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../toolSelectionTools";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import type { InvocationPlan } from "./invoke";
 
 /**
@@ -66,13 +68,12 @@ export async function admitNamedSession(
     providedSessionUuid,
     plan.context.requestMcpSessionId,
   );
-  await DaemonState.getInstance()
-    .getSessionManager()
-    .admitIssuedSessionForAutomation(
-      providedSessionUuid,
-      sessionExecutionMetadataOf(execution),
-      namedSessionAccess(input.plainReadCall, namesForeignOwnedSession),
-    );
+  await defaultDaemonContext
+    .requireSessionManager()
+    .admitIssuedSessionForAutomation(providedSessionUuid, sessionExecutionMetadataOf(execution), {
+      ...namedSessionAccess(input.plainReadCall, namesForeignOwnedSession),
+      signal: getAbortSignal(),
+    });
   if (namesForeignOwnedSession) {
     executionTracker.markReadOnlySessionAccess(execution.id);
   } else {
@@ -136,9 +137,7 @@ function isRecordingStopById(name: string, parsedParams: unknown): boolean {
   return params.action === "stop" && typeof params.recordingId === "string";
 }
 
-type DaemonSessionManager = ReturnType<
-  ReturnType<typeof DaemonState.getInstance>["getSessionManager"]
->;
+type DaemonSessionManager = SessionManager;
 
 /** Whether the named session is one this call may bind: admitted for automation, or a direct session. */
 function namedSessionIsBindable(
@@ -200,15 +199,15 @@ export async function bindNamedSession(
 
 async function attachToPool(sessionUuid: string, mcpSessionId: string | undefined): Promise<void> {
   if (mcpSessionId) {
-    await DaemonState.getInstance()
-      .getDevicePool()
+    await defaultDaemonContext
+      .requireDevicePoolWrites()
       .attachExplicitSessionUuidCall(sessionUuid, mcpSessionId);
   }
 }
 
 function ownedByOtherConnection(sessionUuid: string, mcpSessionId: string | undefined): boolean {
-  return DaemonState.getInstance()
-    .getDevicePool()
+  return defaultDaemonContext
+    .requireFullDevicePool()
     .isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId);
 }
 
@@ -259,8 +258,8 @@ function lookupSessionForBinding(
     : undefined;
 }
 
-function currentSessionManager(): DaemonSessionManager | undefined {
-  return DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getSessionManager()
-    : undefined;
+function currentSessionManager(
+  daemon: DaemonContext = defaultDaemonContext,
+): DaemonSessionManager | undefined {
+  return daemon.sessionManager();
 }

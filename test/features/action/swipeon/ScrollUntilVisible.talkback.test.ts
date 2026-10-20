@@ -1,3 +1,4 @@
+import type { SwipeGestureRequest } from "../../../../src/features/action/swipeon/types";
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
@@ -15,7 +16,7 @@ import type {
   TalkBackSwipeRunner,
   VoiceOverSwipeRunner,
 } from "../../../../src/features/action/swipeon/types";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
@@ -30,7 +31,9 @@ const DEVICE: BootedDevice = {
 const SCREEN_SIZE = { width: 400, height: 900 };
 
 const makeObserveResult = (hierarchyId: number = 0): ObserveResult => ({
-  timestamp: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  updatedAt: 0,
   screenSize: SCREEN_SIZE,
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: {
@@ -42,14 +45,14 @@ const CONTAINER_ELEMENT: Element = {
   bounds: { left: 0, top: 0, right: 400, bottom: 900 },
   "resource-id": "test:id/list",
   scrollable: true,
-} as unknown as Element;
+};
 
 const TARGET_ELEMENT: Element = {
   bounds: { left: 10, top: 200, right: 390, bottom: 250 },
   "resource-id": "test:id/target",
   text: "Target Item",
   scrollable: false,
-} as unknown as Element;
+};
 
 function makeScrollUntilVisible({
   accessibilityDetector,
@@ -75,7 +78,7 @@ function makeScrollUntilVisible({
    */
   resolveObservation?: (callIdx: number) => ObserveResult;
   talkBackExecutor: TalkBackSwipeRunner;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   device?: BootedDevice;
   voiceOverExecutor?: VoiceOverSwipeRunner;
 }): ScrollUntilVisible {
@@ -107,10 +110,10 @@ function makeScrollUntilVisible({
     device,
     resolver: scrollResolver,
     geometry: fakeGeometry,
-    observeScreen: fakeObserveScreen as any,
+    observeScreen: fakeObserveScreen,
     accessibilityService,
     accessibilityDetector,
-    adb: new FakeAdbClient() as any,
+    adb: new FakeAdbClient(),
     featureFlags,
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
@@ -246,7 +249,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     test("forwards the injected featureFlags to detectMethod (#3925 regression)", async () => {
       scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       lookup.nextElementByText = TARGET_ELEMENT;
-      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
@@ -395,7 +398,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         bounds: { left: 10, top: 200, right: 390, bottom: 250 },
         text: "Target Item",
         scrollable: false,
-      } as unknown as Element;
+      };
 
       scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       lookup.nextElementByText = elementWithoutId;
@@ -445,20 +448,27 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
     detector.setTalkBackEnabled(true);
     const ctrl = new FakeCtrlProxy();
     const gesture = new FakeGestureExecutor();
-    const executor = new TalkBackSwipeExecutor(
-      DEVICE,
-      gesture,
-      // @ts-expect-error -- Fake supplies the accessibility gesture methods used by the executor.
-      ctrl,
-      detector,
-      new FakeAdbClient(),
-      new FakeTimer(),
-    );
+    const executor = new TalkBackSwipeExecutor({
+      device: DEVICE,
+      executeGesture: gesture,
+      accessibilityService: ctrl,
+      accessibilityDetector: detector,
+      adb: new FakeAdbClient(),
+      timer: new FakeTimer(),
+    });
     expect(
-      await executor.executeSwipeGesture(540, 2114, 540, 505, "up", null, {
-        duration: 300,
-        searchScroll: true,
-        searchScrollBounds: { left: 0, top: 304, right: 1080, bottom: 2316 },
+      await executor.executeSwipeGesture({
+        x1: 540,
+        y1: 2114,
+        x2: 540,
+        y2: 505,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: {
+          duration: 300,
+          searchScroll: true,
+          searchScrollBounds: { left: 0, top: 304, right: 1080, bottom: 2316 },
+        },
       }),
     ).toMatchObject({ success: true });
     expect(ctrl.getTwoFingerSwipeHistory()[0]).toMatchObject({
@@ -504,14 +514,14 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
     // target only after it receives scroll_forward. Anything else (the inverted
     // scroll_backward) leaves the list where it was.
     const gesture = new FakeGestureExecutor();
-    const talkBackExecutor = new TalkBackSwipeExecutor(
-      DEVICE,
-      gesture,
-      fakeCtrlProxy as any,
-      detector,
-      new FakeAdbClient() as any,
+    const talkBackExecutor = new TalkBackSwipeExecutor({
+      device: DEVICE,
+      executeGesture: gesture,
+      accessibilityService: fakeCtrlProxy,
+      accessibilityDetector: detector,
+      adb: new FakeAdbClient(),
       timer,
-    );
+    });
     const scrolledForward = () =>
       fakeCtrlProxy.getActionHistory().some((call) => call.action === "scroll_forward");
     const resolveObservation = (callIdx: number): ObserveResult =>
@@ -559,7 +569,7 @@ describe("ScrollUntilVisible VoiceOver behavior", () => {
     const talkBackExecutor = new FakeTalkBackSwipeExecutor();
     let voiceOverCalls = 0;
     const voiceOverExecutor: VoiceOverSwipeRunner = {
-      async executeSwipeGesture(x1, y1, x2, y2, _direction, _container, gestureOptions) {
+      async executeSwipeGesture({ x1, y1, x2, y2, gestureOptions }: SwipeGestureRequest) {
         voiceOverCalls++;
         return {
           success: false,
@@ -708,15 +718,14 @@ test("review: TalkBack searches three disjoint keyed pages without scroll_backwa
   const scrollResolver = new FakeScrollElementResolver(lookup);
   scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
   lookup.findElementByText = () => (page === 2 ? TARGET_ELEMENT : null);
-  const executor = new TalkBackSwipeExecutor(
-    DEVICE,
-    new FakeGestureExecutor(),
-    // @ts-expect-error -- Fake supplies the accessibility actions used by the executor.
-    ctrl,
-    detector,
-    new FakeAdbClient(),
+  const executor = new TalkBackSwipeExecutor({
+    device: DEVICE,
+    executeGesture: new FakeGestureExecutor(),
+    accessibilityService: ctrl,
+    accessibilityDetector: detector,
+    adb: new FakeAdbClient(),
     timer,
-  );
+  });
   const suv = makeScrollUntilVisible({
     accessibilityDetector: detector,
     scrollResolver,
@@ -725,7 +734,10 @@ test("review: TalkBack searches three disjoint keyed pages without scroll_backwa
     observeResults: [],
     talkBackExecutor: executor,
     resolveObservation: () => ({
-      timestamp: timer.now(),
+      observationId: "test-observation",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: timer.now(),
       screenSize: SCREEN_SIZE,
       viewHierarchy: {
         hierarchy: {

@@ -4,7 +4,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { addSessionUuidToSchema } from "./toolSchemaHelpers";
+import { addSessionUuidToSchema } from "../utils/schemaHelpers";
 import {
   startDeviceGestureRecording,
   getStoppedDeviceGestureRecording,
@@ -13,14 +13,16 @@ import {
   getDeviceGestureRecordingStatus,
   type DeviceGestureRecordingStatus,
   NoUserInputCapturedError,
-} from "./deviceGestureRecordingManager";
+} from "../daemon/deviceGestureRecordingManager";
 import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignBinding,
+} from "./lifecycleDeviceOwnership";
+import {
   lifecycleRequester,
   type LifecycleRequester,
-} from "./lifecycleDeviceOwnership";
-import { DaemonState } from "../daemon/daemonState";
+} from "../features/deviceLifecycle/lifecycleRequester";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { assertDeviceGestureRecordingStartHeldDevice } from "../daemon/deviceGestureRecordingStartAdmission";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -154,12 +156,12 @@ const EXPORT_PLAN_REMEDY =
  */
 function exportRequester(params: object, deviceId: string): LifecycleRequester {
   const requester = lifecycleRequester(params);
-  const daemonState = DaemonState.getInstance();
   const mcpSessionId = requester.mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
-  const held =
-    mcpSessionId && daemonState.isInitialized()
-      ? daemonState.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
-      : undefined;
+  const held = mcpSessionId
+    ? defaultDaemonContext
+        .devicePool()
+        ?.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
+    : undefined;
   return held ? { ...requester, sessionUuid: held } : requester;
 }
 

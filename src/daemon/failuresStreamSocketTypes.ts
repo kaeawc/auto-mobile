@@ -4,7 +4,7 @@ import type {
   PeriodTotals,
   FailureType,
   FailureSeverity,
-} from "../server/failuresResources";
+} from "../models/failureAnalytics";
 import type { SocketRequest } from "./socketServer/SocketServerTypes";
 
 /**

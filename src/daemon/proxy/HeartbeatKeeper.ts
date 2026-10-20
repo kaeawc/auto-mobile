@@ -10,7 +10,7 @@ import {
   type LivenessRecovery,
   type TickLatenessClock,
 } from "../proxyLivenessRecovery";
-import { LifecycleConnectionInFlightError } from "./daemonErrors";
+import { LifecycleConnectionInFlightError } from "./LifecycleConnectionInFlightError";
 import { heartbeatRequestTimeoutMs } from "./heartbeatCadence";
 import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";
 

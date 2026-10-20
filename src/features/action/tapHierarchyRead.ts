@@ -3,7 +3,7 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { Timer } from "../../utils/SystemTimer";
 import type { ViewHierarchy } from "../observe/ViewHierarchy";
-import type { AndroidCtrlProxyClient } from "../observe/android";
+import type { AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
@@ -25,12 +25,16 @@ export function returnsRawHierarchyUnfiltered(
   return Boolean(tree && typeof tree === "object" && "error" in tree && tree.error);
 }
 
+/** The CtrlProxy surface TapOnElement calls: the shared interface plus the client-only hierarchy overload. */
+export type TapOnCtrlProxy = AndroidCtrlProxy &
+  Pick<AndroidCtrlProxyClient, "getAccessibilityHierarchy">;
+
 export interface FreshHierarchyReadDeps {
   device: BootedDevice;
   adb: AdbExecutor;
   timer: Timer;
   /** CtrlProxy client used for the Android read (the two tools hold different fields). */
-  androidService: AndroidCtrlProxyClient;
+  androidService: AndroidCtrlProxy;
   viewHierarchy: ViewHierarchy;
   /** Filter a raw tree for the response (platform-specific, owned by each tool). */
   prepareForResponse: (

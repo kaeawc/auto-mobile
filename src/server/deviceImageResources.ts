@@ -1,4 +1,10 @@
+import {
+  DEVICE_IMAGE_RESOURCE_URIS,
+  ANDROID_INVENTORY_RETRY_AFTER_MS,
+} from "../constants/deviceResourceUris";
+export { DEVICE_IMAGE_RESOURCE_URIS, ANDROID_INVENTORY_RETRY_AFTER_MS };
 import { registerAndroidInventoryCatalogInvalidator } from "../utils/AndroidInventoryInvalidation";
+import { registerDeviceResourceInvalidation } from "../daemon/deviceResourceInvalidation";
 export { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -35,14 +41,17 @@ import {
   type ConfiguredDeviceInventoryObservation,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
-import { describeDevice, projectConfiguredImage, type ConfiguredImage } from "./deviceDescription";
+import {
+  describeDevice,
+  projectConfiguredImage,
+  type ConfiguredImage,
+} from "../daemon/deviceDescription";
 import { TTLCache } from "../utils/cache/Cache";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 
 /** Per-read response budget; the shared fetch has its own lifecycle and hard cap. */
 export const ANDROID_PROVISIONING_CATALOG_BUDGET_MS = 9_000;
 export const ANDROID_INVENTORY_BACKGROUND_CAP_MS = 30_000;
-export const ANDROID_INVENTORY_RETRY_AFTER_MS = 1_000;
 // The stage includes configured images, so it uses the same 2.5s freshness bound.
 export const ANDROID_INVENTORY_STAGE_TTL_MS = 2_500;
 
@@ -87,6 +96,8 @@ export function resetAndroidDeviceImageResourceCache(): void {
   resetAndroidResourceCacheStates();
 }
 
+registerDeviceResourceInvalidation({ resetAndroidDeviceImageResourceCache });
+
 function resetAndroidResourceCacheStates(): void {
   for (const reference of androidImageCacheStates) {
     const state = reference.deref();
@@ -99,10 +110,6 @@ function resetAndroidResourceCacheStates(): void {
 }
 
 // Resource URIs
-export const DEVICE_IMAGE_RESOURCE_URIS = {
-  ALL_IMAGES: "automobile:devices/images",
-  PLATFORM_TEMPLATE: "automobile:devices/images/{platform}",
-} as const;
 
 // Device image info for resource response
 export type DeviceImageInfo = ConfiguredImage;
@@ -220,10 +227,19 @@ export interface DeviceImagesResourceContent {
   images: DeviceImageInfo[];
 }
 
+/** The slice of the platform device manager the resource reads; fakes implement just this. */
+type DeviceImageDiscoveryManager = Pick<PlatformDeviceManager, "getDeviceImagesDetailed">;
+
+/** The slice of the AVD manager the resource reads; fakes implement just this. */
+type DeviceImageAvdManager = Pick<
+  AvdManager,
+  "listDeviceImages" | "listInstalledSystemImages" | "listDevices"
+>;
+
 // Dependencies interface for dependency injection
 interface DeviceImageResourcesDependencies {
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked">;
   timer: Timer;
   androidCatalogBudgetMs: number;
@@ -347,8 +363,8 @@ export function createDeviceImageResourcesHandler(
 }
 
 async function buildAndroidImages(
-  deviceManager: PlatformDeviceManager,
-  avdManager: AvdManager,
+  deviceManager: DeviceImageDiscoveryManager,
+  avdManager: DeviceImageAvdManager,
   timer: Timer,
   signal?: AbortSignal,
 ): Promise<AndroidConfiguredInventoryResult> {
@@ -390,14 +406,14 @@ async function buildAndroidImages(
 }
 
 async function readAvdInfo(
-  avdManager: AvdManager,
+  avdManager: DeviceImageAvdManager,
   timer: Timer,
 ): Promise<ReadonlyMap<string, AvdInfo>> {
   return AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer);
 }
 
 async function buildIosImages(
-  deviceManager: PlatformDeviceManager,
+  deviceManager: DeviceImageDiscoveryManager,
 ): Promise<{ images: DeviceImageInfo[]; observation: ConfiguredDeviceInventoryObservation }> {
   try {
     const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
@@ -424,7 +440,7 @@ async function buildIosImages(
 }
 
 async function buildIosResourceResult(
-  deviceManager: PlatformDeviceManager,
+  deviceManager: DeviceImageDiscoveryManager,
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked"> | undefined,
 ): Promise<PlatformResourceResult> {
   const images = await buildIosImages(deviceManager);
@@ -440,8 +456,8 @@ async function buildIosResourceResult(
 
 async function generateAndroidResource(
   state: AndroidImageCacheState,
-  deviceManager: PlatformDeviceManager,
-  avdManager: AvdManager,
+  deviceManager: DeviceImageDiscoveryManager,
+  avdManager: DeviceImageAvdManager,
   timer: Timer,
   budgetMs: number,
 ): Promise<PlatformResourceResult> {
@@ -479,8 +495,8 @@ function startAndroidBackgroundFetch({
   timer,
 }: {
   state: AndroidImageCacheState;
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   timer: Timer;
 }): AndroidBackgroundFetch {
   const controller = new AbortController();
@@ -615,8 +631,8 @@ function incompleteAndroidResource(
 
 async function computeAndroidResource(options: {
   state: AndroidImageCacheState;
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   timer: Timer;
   budgetMs: number;
 }): Promise<PlatformResourceResult> {
@@ -648,8 +664,8 @@ async function buildAndroidResourceResult({
   signal,
   onInventoryComplete,
 }: {
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   timer: Timer;
   signal: AbortSignal;
   onInventoryComplete: (inventory: AndroidConfiguredInventoryResult) => void;

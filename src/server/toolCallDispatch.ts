@@ -1,6 +1,6 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { ActionableError } from "../models";
+import type { CreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 import { logger } from "../utils/logger";
 
 /**
@@ -115,18 +115,56 @@ export async function dispatchToolCall<
   });
 }
 
-type McpRequestHandler = Parameters<McpServer["server"]["setRequestHandler"]>[1];
-/** The SDK's request-handler `extra` for a server-side `tools/call`. */
-export type McpToolCallExtra = Parameters<McpRequestHandler>[1];
-/** What the SDK accepts back from a server-side request handler. */
-export type McpToolCallResult = Awaited<ReturnType<McpRequestHandler>>;
+/**
+ * The v1 SDK request-handler `extra` slice the dispatch envelope and the tool
+ * executors read, adapted from the SDK v2 request context (issue #4678). Keeping
+ * the executors on this narrow shape, rather than on the SDK context, means a
+ * later transport change only rewires {@link toolCallExtraFromContext}.
+ */
+export interface McpToolCallExtra extends ToolCallExtra {
+  readonly signal: AbortSignal;
+  /**
+   * The per-request `_meta` envelope the SDK lifted out of `_meta` (client capabilities,
+   * protocol version); read for the Tasks extension declaration (#4668).
+   */
+  readonly envelope?: Readonly<Record<string, unknown>>;
+  /**
+   * Overrides the transport scope the call's execution registers under. Set only for work
+   * running as an MCP task, which must not be cancelled when its request closes (#4668).
+   */
+  readonly executionScopeId?: string;
+}
+/** What a server-side `tools/call` handler returns. */
+export type McpToolCallResult = CallToolResult;
 
-/** Installs {@link dispatchToolCall} as the server's one `tools/call` handler. */
+/** Adapts an SDK v2 request context to {@link McpToolCallExtra}. */
+export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
+  return {
+    signal: ctx.mcpReq.signal,
+    _meta: ctx.mcpReq._meta,
+    ...(ctx.mcpReq.envelope !== undefined && { envelope: ctx.mcpReq.envelope }),
+    sendNotification: (notification) => ctx.mcpReq.notify(notification),
+  };
+}
+
+/**
+ * Installs {@link dispatchToolCall} as the server's one `tools/call` handler. A backend may
+ * answer with a Tasks-extension `CreateTaskResult` (#4668), but only to a request that
+ * declared the extension.
+ */
 export function installToolCallDispatcher(
   server: McpServer,
-  backend: ToolCallBackend<ToolCallRequest, McpToolCallExtra, McpToolCallResult>,
+  backend: ToolCallBackend<ToolCallRequest, McpToolCallExtra, McpToolCallResult | CreateTaskResult>,
 ): void {
-  server.server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
-    dispatchToolCall(request, extra, backend),
+  server.server.setRequestHandler(
+    "tools/call",
+    // The SDK types `tools/call` as `CallToolResult` only; `createSdkMcpServer` passes a
+    // `CreateTaskResult` through to the wire unchanged.
+    async (request, ctx) =>
+      (await dispatchToolCall(
+        request,
+        toolCallExtraFromContext(ctx),
+        backend,
+      )) as McpToolCallResult,
   );
 }

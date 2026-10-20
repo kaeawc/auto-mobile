@@ -28,7 +28,7 @@ function deviceObservation(
   hierarchy: ViewHierarchyResult,
   screenSize: ObserveResult["screenSize"],
 ): ObserveResult {
-  return { ...observationOf(hierarchy), timestamp: 0, freshness: { isFresh: true }, screenSize };
+  return { ...observationOf(hierarchy), updatedAt: 0, freshness: { isFresh: true }, screenSize };
 }
 
 /** The prototype captures are 1080x2400; the relabelled Recents capture keeps its own size. */
@@ -39,9 +39,7 @@ function harness(
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const ctrl = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    ctrl as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();
   const observation = deviceObservation(hierarchy, screenSize);
@@ -51,13 +49,13 @@ function harness(
     new FakeAdbClient(),
     {
       timer,
+      awaitIdle: new FakeAwaitIdle(),
+      window: new FakeWindow(),
       observeScreen: observe,
       executeGesture: gesture,
       accessibilityDetector: new FakeAccessibilityDetector(),
     },
   );
-  action.awaitIdle = new FakeAwaitIdle() as unknown as typeof action.awaitIdle;
-  action.window = new FakeWindow() as unknown as typeof action.window;
   return { action, gesture };
 }
 

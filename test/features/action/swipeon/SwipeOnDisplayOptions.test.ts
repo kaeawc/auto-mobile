@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import type {
   ObserveResult,
@@ -26,7 +27,14 @@ function tree({
     viewHierarchy: {
       ...observation.viewHierarchy,
       hierarchy: {
-        node: [observation.viewHierarchy?.hierarchy.node, ...nodes.map(($) => ({ $ }))],
+        node: createFlatNodeForTest({
+          node: [
+            ...(observation.viewHierarchy?.hierarchy.node
+              ? [createFlatNodeForTest({ ...observation.viewHierarchy.hierarchy.node })]
+              : []),
+            ...nodes.map(($) => ({ $ })),
+          ],
+        }),
       },
     },
   };
@@ -273,7 +281,11 @@ for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
 for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
   test(`a11y failure has no adb fallback, search=${!!lookFor}`, async () => {
     const h = optionsHarness();
-    h.ctrl.setSwipeResult({ success: false, error: "CtrlProxy display dispatch failed" });
+    h.ctrl.setSwipeResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "CtrlProxy display dispatch failed",
+    });
     h.ctrl.setDragResult({
       success: false,
       error: "CtrlProxy display dispatch failed",
@@ -358,7 +370,7 @@ test("no display retains legacy autoTarget and gesture dispatch", async () => {
   expect(result.success).toBe(true);
   expect(result.warning).toContain('elementId="decoy"');
   expect(h.cached).toHaveBeenCalled();
-  expect(h.gesture.getSwipeCalls()).toEqual([
+  expect<unknown>(h.gesture.getSwipeCalls()).toEqual([
     {
       x1: 40,
       y1: 82,
@@ -509,4 +521,32 @@ test("fromEdge on a display rejects a wrong-way direction before dispatch", asyn
   expect(result.success).toBe(false);
   expect(result.error).toContain("fromEdge");
   expect(h.legs()).toEqual([]);
+});
+
+test("fromEdge on a display validates the resolved finger direction (#12992)", async () => {
+  const h = optionsHarness();
+  // scrollTowardsDirection "left" content movement is a "right" finger swipe,
+  // which is inward from the left edge.
+  const result = await h.action.execute({
+    display: "external",
+    fromEdge: "left",
+    direction: "left",
+    gestureType: "scrollTowardsDirection",
+  });
+  expect(result.success).toBe(true);
+  expect(h.legs()).toHaveLength(1);
+  expect(h.legs()[0].x2).toBeGreaterThan(h.legs()[0].x1);
+});
+
+test("fromEdge on a display still rejects a genuinely wrong-way direction (#12992)", async () => {
+  const h = optionsHarness();
+  const result = await h.action.execute({
+    display: "external",
+    fromEdge: "left",
+    direction: "left",
+    gestureType: "swipeFingerTowardsDirection",
+  });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('finger direction must be "right"');
+  expect(h.legs()).toHaveLength(0);
 });

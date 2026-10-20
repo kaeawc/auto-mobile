@@ -12,7 +12,12 @@ class LayoutInspectorStateScreenshotMetadataTest {
   fun `updateScreenshot defaults metadata to absent when not provided`() {
     val state = LayoutInspectorState()
 
-    state.updateScreenshot(data = byteArrayOf(1), width = 100, height = 200, timestamp = 1L)
+    state.updateScreenshot(
+      data = byteArrayOf(1),
+      width = 100,
+      height = 200,
+      timestamp = 1L,
+    )
 
     assertFalse(state.screenshotFallback)
     assertNull(state.screenshotFallbackReason)
@@ -29,10 +34,13 @@ class LayoutInspectorStateScreenshotMetadataTest {
       width = 100,
       height = 200,
       timestamp = 1L,
-      fallback = true,
-      fallbackReason = "websocket_unavailable",
-      format = "png",
-      captureSource = "android_adb_screencap",
+      options =
+        ScreenshotUpdateOptions(
+          fallback = true,
+          fallbackReason = "websocket_unavailable",
+          format = "png",
+          captureSource = "android_adb_screencap",
+        ),
     )
 
     assertEquals(true, state.screenshotFallback)
@@ -49,11 +57,19 @@ class LayoutInspectorStateScreenshotMetadataTest {
       width = 100,
       height = 200,
       timestamp = 1L,
-      fallback = true,
-      fallbackReason = "websocket_unavailable",
+      options =
+        ScreenshotUpdateOptions(
+          fallback = true,
+          fallbackReason = "websocket_unavailable",
+        ),
     )
 
-    state.updateScreenshot(data = byteArrayOf(2), width = 100, height = 200, timestamp = 2L)
+    state.updateScreenshot(
+      data = byteArrayOf(2),
+      width = 100,
+      height = 200,
+      timestamp = 2L,
+    )
 
     assertFalse(state.screenshotFallback)
     assertNull(state.screenshotFallbackReason)
@@ -69,7 +85,10 @@ class LayoutInspectorStateScreenshotMetadataTest {
       width = 100,
       height = 200,
       timestamp = 1L,
-      deviceId = "emulator-5554",
+      options =
+        ScreenshotUpdateOptions(
+          deviceId = "emulator-5554",
+        ),
     )
     assertEquals("emulator-5554", state.renderedDeviceId)
 
@@ -86,8 +105,11 @@ class LayoutInspectorStateScreenshotMetadataTest {
       width = 2340,
       height = 1080,
       timestamp = 1L,
-      deviceId = "emulator-5554",
-      rotation = 1,
+      options =
+        ScreenshotUpdateOptions(
+          deviceId = "emulator-5554",
+          rotation = 1,
+        ),
     )
     assertEquals(1, state.renderedScreenshotRotation)
     assertEquals(1, state.screenshotFacts?.rotation)
@@ -103,7 +125,10 @@ class LayoutInspectorStateScreenshotMetadataTest {
 
     state.updateHierarchy(
       newHierarchy = LayoutInspectorMockData.mockHierarchy,
-      deviceId = "emulator-5554",
+      options =
+        HierarchyUpdateOptions(
+          deviceId = "emulator-5554",
+        ),
     )
     assertEquals("emulator-5554", state.renderedHierarchyDeviceId)
 
@@ -119,11 +144,17 @@ class LayoutInspectorStateScreenshotMetadataTest {
       width = 100,
       height = 200,
       timestamp = 1L,
-      deviceId = "emulator-5554",
+      options =
+        ScreenshotUpdateOptions(
+          deviceId = "emulator-5554",
+        ),
     )
     state.updateHierarchy(
       newHierarchy = LayoutInspectorMockData.mockHierarchy,
-      deviceId = "emulator-5554",
+      options =
+        HierarchyUpdateOptions(
+          deviceId = "emulator-5554",
+        ),
     )
 
     state.invalidateRenderedDeviceIdentity()
@@ -143,10 +174,13 @@ class LayoutInspectorStateScreenshotMetadataTest {
       width = 100,
       height = 200,
       timestamp = 1L,
-      fallback = true,
-      fallbackReason = "websocket_unavailable",
-      format = "png",
-      captureSource = "android_adb_screencap",
+      options =
+        ScreenshotUpdateOptions(
+          fallback = true,
+          fallbackReason = "websocket_unavailable",
+          format = "png",
+          captureSource = "android_adb_screencap",
+        ),
     )
 
     state.disconnect()

@@ -119,16 +119,16 @@ describe("CtrlProxyExchangeRecorder", () => {
 
   test("the recording factory records what the socket sends and receives", () => {
     const sink = new MemorySink();
-    let socket: FakeWebSocket | null = null;
+    const socket = new FakeWebSocket("ws://x");
     const inner: WebSocketFactory = (url) => {
-      socket = new FakeWebSocket(url);
+      expect(url).toBe("ws://x");
       socket.readyState = 1;
-      return socket as never;
+      return socket;
     };
     const ws = recordingWebSocketFactory(inner, new CtrlProxyExchangeRecorder(sink))("ws://x");
 
     ws.send(JSON.stringify({ type: "request_press_home", requestId: "p1" }));
-    (socket as unknown as FakeWebSocket).simulateMessage(
+    socket.simulateMessage(
       JSON.stringify({ type: "press_home_result", requestId: "p1", success: true }),
     );
 

@@ -6,14 +6,15 @@ import { join } from "node:path";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import { FakeSocket } from "../fakes/FakeNetServer";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
+import { typedFrameSchema } from "../helpers/wireMessageSchemas";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
@@ -220,9 +221,9 @@ describe("live stdio proxy", () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
 
-    // Held side: a call every 110 s keeps the session across five idle windows.
+    // Held side: a call every 110 s keeps the session across three idle windows.
     const callEvery = IDLE_WINDOW_MS - 10_000;
-    for (let call = 0; call < 5; call++) {
+    for (let call = 0; call < 3; call++) {
       expect(await scenario.idleWhileHeld(session, scenario.timer.now() + callEvery, 30_000)).toBe(
         undefined,
       );
@@ -973,7 +974,8 @@ describe("host sleep longer than the idle window (#10661)", () => {
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(["cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
+      const idleExpiry: Array<string | undefined> = ["cleanup-expired"];
+      expect(idleExpiry).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }
@@ -1459,21 +1461,18 @@ class ObservationStreamForScenario extends DeviceDataStreamSocketServer {
     super("/fake/path/matrix.sock", timer, { authorize: () => {} });
   }
 
-  start(): void {
-    (this as unknown as { server: unknown }).server = { listening: true };
-    (this as unknown as { onServerStarted(): void }).onServerStarted();
+  override async start(): Promise<void> {
+    this.server = new FakeListeningNetServer();
+    this.onServerStarted();
   }
 
   stopListening(): void {
-    (this as unknown as { onServerClosing(): void }).onServerClosing();
-    (this as unknown as { server: unknown }).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   async viewerSubscribes(socket: FakeSocket, sessionUuid: string): Promise<void> {
-    await (this as unknown as { processLine(s: Socket, line: string): Promise<void> }).processLine(
-      socket as unknown as Socket,
-      JSON.stringify({ command: "subscribe", sessionUuid }),
-    );
+    await this.processLine(socket, JSON.stringify({ command: "subscribe", sessionUuid }));
   }
 }
 
@@ -1482,12 +1481,12 @@ describe("a viewer stream follows its observer registration (#11076, #11084)", (
   const DESKTOP_BEAT_MS = 2_000;
   // The stream's keepalive pings are not what is asserted on.
   const errorFrames = (socket: FakeSocket) =>
-    socket.getWrittenMessages().filter((message) => message.type === "error");
+    socket.getWrittenMessages(typedFrameSchema).filter((message) => message.type === "error");
 
   test("an observer that heartbeats keeps its observation stream; one that stops has it ended with session_ended", async () => {
     scenario = await LivenessScenario.start();
     const stream = new ObservationStreamForScenario(scenario.timer);
-    stream.start();
+    await stream.start();
     try {
       const registered = await scenario.daemonMethod("daemon/registerSession", {
         sessionId: OBSERVER,
@@ -1682,16 +1681,12 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     const socketPath = join(tmpdir(), `matrix-same-tick-${randomUUID()}.sock`);
     const server = createTestUnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       scenario.daemon.state as never,
       scenario.timer,
     );
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
-      callTool: async (
-        params: { name: string; arguments?: Record<string, unknown> },
-        _schema: unknown,
-      ) => {
+      callTool: async (params: { name: string; arguments?: Record<string, unknown> }) => {
         const connection = String(params.arguments?.__mcpSessionId);
         if (params.name === "getAndroid") {
           await scenario.daemonToolCallWith({ deviceId: DEVICE_A }, "getAndroid", connection);
@@ -1706,6 +1701,9 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       listResources: async () => ({ resources: [] }),
       readResource: async () => ({ contents: [] }),
       listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      request: async () => {
+        throw new Error("this scenario never issues a raw MCP request");
+      },
       close: async () => {},
     });
     await server.start();
@@ -2063,7 +2061,6 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
   const WATCHED_RESOURCE = "automobile:scenario/watched";
   const OTHER_RESOURCE = "automobile:scenario/other";
   /** How long the socket server keeps an unbound, unused loopback transport (its idle close). */
-  const MCP_TRANSPORT_IDLE_CLOSE_MS = 5 * 60_000;
 
   test("an acquisition of a device a peer daemon claims is refused before this daemon looks at the device; once the peer lets go it is acquired", async () => {
     scenario = await LivenessScenario.start({ sharedDeviceClaims: true });
@@ -2169,23 +2166,17 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     expectFreed();
   });
 
-  test("a released session's MCP transport is closed five minutes after the release although its proxy stays connected; a held session's stays open", async () => {
+  test("a forward's MCP client closes when the forward ends, for a held session and after its release (#11820)", async () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
     await scenario.toolCall(session);
 
-    // Held side: the transport is the session's for as long as the session is held.
-    await scenario.idle(IDLE_WINDOW_MS / 2);
+    // Each forward opens its own in-process client and closes it with the forward: a held
+    // session keeps no transport open between calls, and its release has none to let go of.
     expectHeld(session);
-    expect(scenario.sessionsWithOpenTransport).toEqual([session]);
-
-    // Released side: the proxy never calls again and never disconnects, so only the release
-    // itself can let go of the transport.
+    expect(scenario.sessionsWithOpenTransport).toEqual([]);
     const releasedAt = await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(releasedAt).toBeDefined();
-    await scenario.idle(MCP_TRANSPORT_IDLE_CLOSE_MS - RELEASE_SLACK_MS);
-    expect(scenario.sessionsWithOpenTransport).toEqual([session]);
-    await scenario.idle(RELEASE_SLACK_MS);
     expect(scenario.sessionsWithOpenTransport).toEqual([]);
   });
 
@@ -2272,19 +2263,13 @@ test("a connected suspect holder has a truthful bind retry that disappears after
   const remaining = state.getSessionManager().getOwnerLeaseHold(holder)!.remainingMs;
   const clocks = [session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat];
   const bind = () =>
-    pool.bindOrReuseDeviceSession(
-      "rival",
-      DEVICE_A,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "rival-connection",
-    );
+    pool.bindOrReuseDeviceSession({
+      sessionId: "rival",
+      deviceId: DEVICE_A,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "rival-connection",
+    });
   const refused = await bind().catch((error: unknown) => error);
   expect(refused).toBeInstanceOf(InputDeviceOwnedError);
   if (!(refused instanceof InputDeviceOwnedError)) {

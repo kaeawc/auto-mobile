@@ -17,6 +17,16 @@ enum PrototypeScalarText {
         return (value < 0 ? "-" : "") + javascriptDecimal(abs(value))
     }
 
+    /// JavaScript's `String(number)` exactly, for request header and query values: `1e21` is `1e+21`,
+    /// `1.5e-7` stays exponential, `-0` is `0`, and an integer keeps its shortest digits padded with
+    /// zeros (`123456789012345680000`). Unlike `render`, large integers are not spelled out exactly.
+    static func javascriptString(_ value: Double) -> String {
+        if value.isNaN { return "NaN" }
+        if value.isInfinite { return value < 0 ? "-Infinity" : "Infinity" }
+        if value == 0 { return "0" }
+        return (value < 0 ? "-" : "") + javascriptDecimal(abs(value))
+    }
+
     static func render(_ value: Double) -> String {
         // The host would print these as JavaScript does; spec state is JSON, so they cannot occur.
         if value.isNaN { return "NaN" }

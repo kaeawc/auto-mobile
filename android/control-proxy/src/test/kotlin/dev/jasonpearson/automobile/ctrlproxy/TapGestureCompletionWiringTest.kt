@@ -11,12 +11,12 @@ import org.junit.Test
 /** Source guard for gesture callback threading and tap acknowledgement order (#6445). */
 class TapGestureCompletionWiringTest {
   private val source: String
-    get() = maskedSource
+    get() = maskedGestureSource
 
   @Test
   fun `every gesture dispatch supplies the dedicated callback handler`() {
-    val calls = Regex("\\bdispatchGesture\\s*\\(").findAll(source).toList()
-    assertEquals("Guard every CtrlProxy dispatchGesture call site", 2, calls.size)
+    val calls = Regex("\\bhost\\.dispatchGesture\\s*\\(").findAll(source).toList()
+    assertEquals("Guard every GestureController dispatchGesture call site", 2, calls.size)
 
     for (call in calls) {
       val open = source.indexOf('(', call.range.first)
@@ -26,10 +26,20 @@ class TapGestureCompletionWiringTest {
         Regex(",\\s*gestureHandler\\s*,?\\s*$").containsMatchIn(args),
       )
     }
+    // The service's Host forwards the controller's handler to the framework unchanged.
+    assertTrue(
+      "CtrlProxy's GestureController.Host must pass the handler through to dispatchGesture",
+      "this@CtrlProxy.dispatchGesture(gesture, callback, handler)" in maskedServiceSource,
+    )
   }
 
   @Test
   fun `tap settles off main and queues hierarchy before tap result`() {
+    assertCompletionDispatch()
+    assertTapHierarchyOrder()
+  }
+
+  private fun assertCompletionDispatch() {
     val dispatchBody = functionBody("private fun dispatchGestureWithResult(")
     val compactBody = dispatchBody.filterNot { it.isWhitespace() }
     val correlatedLaunch =
@@ -58,20 +68,41 @@ class TapGestureCompletionWiringTest {
       "lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)" in
         dispatchBody,
     )
+  }
 
-    val tapBody = functionBody("private fun performTapCoordinates(")
+  private fun assertTapHierarchyOrder() {
+    val tapBody = functionBody("fun performTapCoordinates(")
     val beforeStart = tapBody.indexOf("beforeCompletedResult = {")
     assertTrue("tap must provide completion work", beforeStart >= 0)
     val beforeOpen = tapBody.indexOf('{', beforeStart)
     val beforeBody = tapBody.substring(beforeOpen, KotlinSourceScan.matchBrace(tapBody, beforeOpen))
     assertTrue(
       "tap must extract after quiescence",
-      "hierarchyDebouncer.extractAfterQuiescenceSuspending(" in beforeBody,
+      "host.settledHierarchy(displayId)" in beforeBody,
+    )
+    val settled = maskedServiceSource.indexOf("override suspend fun settledHierarchy(")
+    assertTrue(
+      "the service's settled hierarchy must wait for quiescence on the requested display",
+      settled >= 0 &&
+        maskedServiceSource
+          .substring(settled, maskedServiceSource.indexOf("override suspend fun publishHierarchy("))
+          .let {
+            "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in it &&
+              "HierarchySnapshotOptions(displayId = displayId)" in it
+          },
+    )
+    assertTrue(
+      "the service must publish the settled hierarchy synchronously",
+      Regex(
+          "override suspend fun publishHierarchy\\(hierarchy: ViewHierarchy\\)\\s*=\\s*" +
+            "hierarchyController\\.broadcastHierarchyUpdate\\(hierarchy, sync = true\\)",
+        )
+        .containsMatchIn(maskedServiceSource),
     )
     assertFalse("tap completion must not runBlocking", "runBlocking" in beforeBody)
 
     val successBranch = tapBody.substring(tapBody.indexOf("if (outcome.completed)"))
-    val hierarchy = successBranch.indexOf("broadcastHierarchyUpdate(it, sync = true)")
+    val hierarchy = successBranch.indexOf("host.publishHierarchy(it)")
     val tapResult = successBranch.indexOf("broadcastTapCoordinatesResult(requestId, true,")
     assertTrue(
       "tap result must follow the hierarchy update in one request coroutine",
@@ -79,30 +110,34 @@ class TapGestureCompletionWiringTest {
     )
     assertTrue(
       "success must use request-correlated background work",
-      successBranch.indexOf("launchRequestScope(requestId)") < hierarchy,
+      successBranch.indexOf("host.launchRequestScope(requestId)") < hierarchy,
     )
   }
 
   private fun functionBody(signature: String): String {
     val start = source.indexOf(signature)
-    if (start < 0) fail("$signature not found in CtrlProxy.kt")
+    if (start < 0) fail("$signature not found in GestureController.kt")
     val parametersOpen = source.indexOf('(', start)
     val open = source.indexOf('{', KotlinSourceScan.matchParen(source, parametersOpen))
-    if (open < 0) fail("$signature body not found in CtrlProxy.kt")
+    if (open < 0) fail("$signature body not found in GestureController.kt")
     return source.substring(open, KotlinSourceScan.matchBrace(source, open))
   }
 
   companion object {
-    private lateinit var maskedSource: String
+    private lateinit var maskedGestureSource: String
+    private lateinit var maskedServiceSource: String
 
     @BeforeClass
     @JvmStatic
     fun loadSource() {
-      maskedSource = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+      maskedGestureSource =
+        KotlinSourceScan.maskLiteralsAndComments(locateSource("GestureController.kt").readText())
+      maskedServiceSource =
+        KotlinSourceScan.maskLiteralsAndComments(locateSource("CtrlProxy.kt").readText())
     }
 
-    private fun locateCtrlProxySource(): File {
-      val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+    private fun locateSource(fileName: String): File {
+      val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
       var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
       while (dir != null) {
         for (candidate in
@@ -115,7 +150,7 @@ class TapGestureCompletionWiringTest {
         }
         dir = dir.parentFile
       }
-      fail("Could not locate CtrlProxy.kt from user.dir=${System.getProperty("user.dir")}")
+      fail("Could not locate $fileName from user.dir=${System.getProperty("user.dir")}")
       error("unreachable")
     }
   }

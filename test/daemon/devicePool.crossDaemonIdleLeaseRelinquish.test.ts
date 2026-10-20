@@ -1,5 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS,
@@ -18,12 +19,9 @@ import {
 } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import type { LockContent } from "../../src/utils/fileLock";
 import { FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS } from "../../src/daemon/inputDeviceOwnership";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // #11349 (owner decision 2026-10-10): a peer daemon that only holds an idle CtrlProxy forwarding
 // lease on a device, with no session and no running tool call, is asked once to relinquish it
@@ -143,21 +141,17 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
     managers.push(sessions);
     const devices = new FakeDeviceManager();
     devices.bootedDevices = [DEVICE];
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, `daemon-${pid}`, {
+    const pool = makePool(sessions, `daemon-${pid}`, {
+      timer,
+      deviceManager: devices,
+      foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
+        pid,
+        files.source(),
+        sockets,
+        () => socketPath,
         timer,
-        deviceManager: devices,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
-          pid,
-          files.source(),
-          sockets,
-          () => socketPath,
-          timer,
-        ),
-      }),
-    );
+      ),
+    });
     await pool.initializeWithDevices([DEVICE]);
     const peer: Peer = { pid, pool, activeExecutions: 0, idleForMs: null };
     sockets.peers.set(socketPath, peer);
@@ -173,10 +167,16 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
     });
 
   const bind = (pool: DevicePool) =>
-    pool.bindOrReuseDeviceSession("a-session", DEVICE_ID, "android").then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    pool
+      .bindOrReuseDeviceSession({
+        sessionId: "a-session",
+        deviceId: DEVICE_ID,
+        platform: "android",
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -208,7 +208,11 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
   test("a lease holder with a session keeps the device, and is never asked to relinquish", async () => {
     const a = await daemon(A_PID, A_SOCKET);
     const b = await daemon(B_PID, B_SOCKET);
-    await b.pool.bindOrReuseDeviceSession("b-session", DEVICE_ID, "android");
+    await b.pool.bindOrReuseDeviceSession({
+      sessionId: "b-session",
+      deviceId: DEVICE_ID,
+      platform: "android",
+    });
     leaseHeldByB();
 
     const refusal = await bind(a.pool);

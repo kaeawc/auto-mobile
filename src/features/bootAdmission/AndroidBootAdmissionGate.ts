@@ -39,9 +39,10 @@ import {
   type PublishedBootAdmission,
 } from "./HostBootAdmissionRegistry";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { ENV } from "../../config/env";
 
 /** Env override: positive integer cap on concurrently booted Android emulators. */
-export const ANDROID_MAX_BOOTED_ENV = "AUTOMOBILE_ANDROID_MAX_BOOTED";
+export const ANDROID_MAX_BOOTED_ENV = ENV.ANDROID_MAX_BOOTED.name;
 
 export interface AndroidBootAdmissionRequest {
   /** Boot budget: bounds the capacity sample and the hand-off window. */

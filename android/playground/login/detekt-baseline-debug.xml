@@ -2,6 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>UnsafeCallOnNullableType:LoginScreen.kt:loginError!!</ID>
   </CurrentIssues>
 </SmellBaseline>

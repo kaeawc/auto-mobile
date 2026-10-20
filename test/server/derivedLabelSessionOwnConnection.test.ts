@@ -7,8 +7,8 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDevice
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
-import { executionTracker } from "../../src/server/executionTracker";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -137,19 +137,13 @@ describe("a connection bound to the base session naming its own derived label se
     tools = new RealToolCallPath([primary, labelled, third]).install();
     // OWNER acquires the base, then its plan publishes the label map and allocates label B, as
     // PlanExecutionOrchestrator.allocateDevices does.
-    await pool.bindOrReuseDeviceSession(
-      BASE,
-      primary.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: BASE,
+      deviceId: primary.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B", "C"], BASE));
     await asPlanAllocation(manager, BASE, [DERIVED], () =>
       pool.assignMultipleDevices([DERIVED], 1_000, "android"),
@@ -197,19 +191,13 @@ describe("a connection bound to the base session naming its own derived label se
           if (!seeded) {
             expect((await tap(owner, { sessionUuid: BASE })).isError).not.toBe(true);
           }
-          await pool.bindOrReuseDeviceSession(
-            "other",
-            third.deviceId,
-            "android",
-            undefined,
-            undefined,
-            undefined,
-            false,
-            undefined,
-            undefined,
-            undefined,
-            OTHER,
-          );
+          await pool.bindOrReuseDeviceSession({
+            sessionId: "other",
+            deviceId: third.deviceId,
+            platform: "android",
+            allowSessionRebind: false,
+            mcpSessionId: OTHER,
+          });
           const before = { ...manager.peekSession(BASE)! };
           const namedBefore = { ...manager.peekSession("other")! };
           const ranBefore = tools.runs.length;
@@ -249,19 +237,13 @@ describe("a connection bound to the base session naming its own derived label se
     ])("a bound connection reads $target without use or rebinding (seeded=$seeded)", (row) =>
       scenario(async () => {
         if (row.live) {
-          await pool.bindOrReuseDeviceSession(
-            row.target,
-            third.deviceId,
-            "android",
-            undefined,
-            undefined,
-            undefined,
-            false,
-            undefined,
-            undefined,
-            undefined,
-            row.target === "foreign-owned" ? OTHER : undefined,
-          );
+          await pool.bindOrReuseDeviceSession({
+            sessionId: row.target,
+            deviceId: third.deviceId,
+            platform: "android",
+            allowSessionRebind: false,
+            mcpSessionId: row.target === "foreign-owned" ? OTHER : undefined,
+          });
         }
         const owner = await connection({
           sessionId: "http-owner",
@@ -315,7 +297,8 @@ describe("a connection bound to the base session naming its own derived label se
             expect(tools.watcherReads).toEqual([third.deviceId]);
           }
           expect(binding).toBeDefined();
-          expect(binding!.boundDeviceSessionUuid("http-owner")).toBe(BASE);
+          // Bindings are keyed on the request's session key, not the transport id (#4678).
+          expect(binding!.boundDeviceSessionUuid(OWNER)).toBe(BASE);
           expect(manager.peekSession(BASE)).toEqual(before);
           expect(namedClocks()).toEqual(namedBefore);
           // Still ownerless: a read that crossed the routing guard did not adopt it.

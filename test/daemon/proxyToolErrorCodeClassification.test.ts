@@ -1,5 +1,5 @@
+import { McpError, ErrorCode } from "../../src/daemon/mcpError";
 import { describe, expect, test } from "bun:test";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { daemonResponseError } from "../../src/daemon/client";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
@@ -10,7 +10,7 @@ import {
   type DaemonResponse,
 } from "../../src/daemon/types";
 import { UnissuedSessionError } from "../../src/daemon/sessionManager";
-import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 
 /**
@@ -38,14 +38,18 @@ function makeProxy(structured: boolean): Classifier {
     autoStartDaemon: false,
   });
   // Bracket access reaches the private classification seams without a type-erasing cast.
-  proxy["structuredToolErrorCodes"] = structured;
+  proxy.getInternalsForTesting().structuredToolErrorCodes = structured;
   return {
     structuredToolErrorCodes: structured,
-    isPreDispatchDaemonSessionError: (error) => proxy["isPreDispatchDaemonSessionError"](error),
-    isUnknownToolError: (error) => proxy["isUnknownToolError"](error),
-    isRecoverableUnknownToolError: (error) => proxy["isRecoverableUnknownToolError"](error),
-    isRecoverableDaemonSessionError: (error) => proxy["isRecoverableDaemonSessionError"](error),
-    frontendRegistersTool: (name) => proxy["frontendRegistersTool"](name),
+    isPreDispatchDaemonSessionError: (error) =>
+      proxy.getInternalsForTesting().errorClassifier.isPreDispatchDaemonSessionError(error),
+    isUnknownToolError: (error) =>
+      proxy.getInternalsForTesting().errorClassifier.isUnknownToolError(error),
+    isRecoverableUnknownToolError: (error) =>
+      proxy.getInternalsForTesting().errorClassifier.isRecoverableUnknownToolError(error),
+    isRecoverableDaemonSessionError: (error) =>
+      proxy.getInternalsForTesting().errorClassifier.isRecoverableDaemonSessionError(error),
+    frontendRegistersTool: (name) => proxy.getInternalsForTesting().frontendRegistersTool(name),
   };
 }
 

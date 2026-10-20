@@ -1,10 +1,9 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { recordWrongWindowEvidence } from "../../../src/features/observe/observationFreshness";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { ActionableError, type ObserveResult } from "../../../src/models";
-import type { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
-import type { Window } from "../../../src/features/observe/Window";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -17,13 +16,16 @@ describe("BaseVisualChange cached freshness", () => {
   let observe: FakeObserveScreen;
   let timer: FakeTimer;
 
-  const observation = (freshness?: ObserveResult["freshness"]): ObserveResult => ({
-    timestamp: 1000,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: {} },
-    freshness,
-  });
+  const observation = (freshness?: ObserveResult["freshness"]): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 1000,
+      observationId: "test-observation",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: {} },
+      freshness,
+    });
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -37,8 +39,8 @@ describe("BaseVisualChange cached freshness", () => {
       { renderedDisplayGeneration: () => undefined },
     );
     instance.observeScreen = observe;
-    instance.awaitIdle = new FakeAwaitIdle() as unknown as AwaitIdle;
-    instance.window = new FakeWindow() as unknown as Window;
+    instance.awaitIdle = new FakeAwaitIdle();
+    instance.window = new FakeWindow();
   });
 
   afterEach(() => timer.reset());
@@ -109,7 +111,7 @@ describe("BaseVisualChange cached freshness", () => {
       recordWrongWindowEvidence(cached);
       const unavailable = observation();
       unavailable.viewHierarchy =
-        failure === "errored hierarchy" ? { hierarchy: { error: "capture failed" } } : null;
+        failure === "errored hierarchy" ? { hierarchy: { error: "capture failed" } } : undefined;
       observe.setObserveSequence([cached, unavailable]);
       if (failure === "throws") {
         observe.setFailureMode("execute", new Error("capture failed"));
@@ -148,7 +150,7 @@ describe("BaseVisualChange cached freshness", () => {
 
   test("missing or errored cache retains unavailable-hierarchy dispatch fallback", async () => {
     const unavailable = observation({ isFresh: false, category: "unavailable" });
-    unavailable.viewHierarchy = null;
+    unavailable.viewHierarchy = undefined;
     observe.setObserveResult(unavailable);
     let dispatched = 0;
     await instance.observedInteraction(
@@ -207,8 +209,8 @@ describe("BaseVisualChange cached freshness", () => {
       { changeExpected: false, usesObservationForResolution: false },
     );
     expect(dispatched).toBe(1);
-    expect(result.observation.freshness?.isFresh).toBe(false);
-    expect(result.observation.freshness?.warning).toContain("Wrong foreground app");
+    expect(result.observation?.freshness?.isFresh).toBe(false);
+    expect(result.observation?.freshness?.warning).toContain("Wrong foreground app");
   });
 
   test("supplied previous observation bypasses cache even when stale", async () => {

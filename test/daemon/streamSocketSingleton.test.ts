@@ -115,7 +115,9 @@ describe("stream singleton characterization", () => {
       ];
       const path = spyOn(row.Server.prototype, "getSocketPath").mockReturnValue("singleton-test");
       const state = spyOn(row.Server.prototype, "isListening").mockImplementation(() => listening);
-      const start = spyOn(row.Server.prototype, "start").mockImplementation(async function () {
+      const start = spyOn(row.Server.prototype, "start").mockImplementation(async function (
+        this: object,
+      ) {
         instances.push(this);
         if (startError) {
           throw startError;

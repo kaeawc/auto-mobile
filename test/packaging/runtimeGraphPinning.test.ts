@@ -37,7 +37,9 @@ describe("runtime dependency graph is pinned (#5421)", () => {
   const INLINED_NOT_RUNTIME = [
     "werift",
     "@anthropic-ai/sdk",
-    "@modelcontextprotocol/sdk",
+    "@modelcontextprotocol/server",
+    "@modelcontextprotocol/client",
+    "@modelcontextprotocol/node",
     "js-tiktoken",
     "ws",
   ];

@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative } from "node:path";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
@@ -47,7 +48,7 @@ function directlyExecutesWebp(source: string): boolean {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);
@@ -66,7 +67,7 @@ describe("webp codec execution boundary (issue #4064)", () => {
       if (repoPath === OWNER || exceptions.has(repoPath)) {
         return [];
       }
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       return directlyExecutesWebp(source)
         ? [
             `${repoPath} directly executes a libwebp tool; route it through ${OWNER} (WebpBinaryProvider.runCwebp/runDwebp) instead.`,
@@ -78,12 +79,12 @@ describe("webp codec execution boundary (issue #4064)", () => {
   });
 
   test("the owner is the single production boundary that resolves and executes the tools", () => {
-    const owner = readFileSync(join(ROOT, OWNER), "utf8");
+    const owner = readGuardFile(join(ROOT, OWNER));
     expect(owner).toContain("async runCwebp(");
     expect(owner).toContain("async runDwebp(");
     expect(owner).toContain("this.processExecutor.spawn(");
 
-    const codec = readFileSync(join(ROOT, "src/utils/image/webp/CliWebpCodec.ts"), "utf8");
+    const codec = readGuardFile(join(ROOT, "src/utils/image/webp/CliWebpCodec.ts"));
     expect(codec).not.toContain(".spawn(");
     expect(codec).toContain("this.binaryResolver.runCwebp(");
     expect(codec).toContain("this.binaryResolver.runDwebp(");

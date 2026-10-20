@@ -1,7 +1,7 @@
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import "../../scripts/manual-test/harnessLogSink";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { BrokerDaemonClient } from "../../scripts/manual-test/brokerDaemonClient";
 import type { BrokerScenarioFakeControls } from "../../scripts/manual-test/brokerScenarios";
 import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";

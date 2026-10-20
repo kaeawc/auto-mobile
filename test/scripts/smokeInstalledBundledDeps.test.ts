@@ -1,6 +1,7 @@
-import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+
 import path from "node:path";
 import {
   collectBundledPackages,
@@ -13,12 +14,7 @@ import {
   smokeInstalledBundledDeps,
 } from "../../scripts/ci/smoke-installed-bundled-deps";
 
-const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+const scratch = useScratchRoot("smokeInstalledBundledDeps-");
 
 test("skip rule distinguishes declarations, commands, and importable entries", () => {
   expect(importSkipReason({ name: "types" }, ["index.d.ts"])).toBe(
@@ -41,8 +37,7 @@ test("skip rule distinguishes declarations, commands, and importable entries", (
 });
 
 test("shared closure traversal imports every nested version from its own directory", async () => {
-  const root = mkdtempSync(path.join(tmpdir(), "bundle-smoke-"));
-  roots.push(root);
+  const root = scratch.next();
   const put = (directory: string, metadata: object) => {
     mkdirSync(path.join(root, directory), { recursive: true });
     writeFileSync(path.join(root, directory, "package.json"), JSON.stringify(metadata));
@@ -100,8 +95,7 @@ test("all import failures are collected with name, version, directory, and error
 });
 
 test("isInsidePackage compares real paths when the install dir is under a symlink", () => {
-  const root = mkdtempSync(path.join(tmpdir(), "smoke-symlink-"));
-  roots.push(root);
+  const root = scratch.next();
   const real = path.join(root, "private", "pkg");
   mkdirSync(real, { recursive: true });
   writeFileSync(path.join(real, "index.js"), "");

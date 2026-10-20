@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
@@ -159,12 +160,14 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
     const rotate = new Rotate(device, adb, timer);
     const observe = new FakeObserveScreen();
     observe.enableAutoVaryHierarchy();
-    observe.setObserveResult(() => ({
-      timestamp: timer.now(),
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { node: {} },
-    }));
+    observe.setObserveResult(() =>
+      buildObserveResult({
+        updatedAt: timer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: {} } },
+      }),
+    );
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
     window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });

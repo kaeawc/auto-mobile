@@ -2,7 +2,7 @@ import type { BootedDevice, ObserveResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../daemon/daemonContext";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -24,6 +24,7 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectedDisplayPin } from "../observe/SessionDisplayContext";
 import { INTERMEDIATE_OBSERVATION_OPTIONS } from "./BaseVisualChange";
+import type { ActionCall } from "./ActionCall";
 
 export { buildDisconnectedPanelMessage } from "../../models/DisplayPanel";
 
@@ -111,12 +112,12 @@ export type RenderedObservationReader = (deviceId: string) =>
 
 export function sessionRenderedObservation(
   deviceId: string,
+  daemon: DaemonContext = defaultDaemonContext,
 ): ReturnType<RenderedObservationReader> {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return undefined;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   if (!sessionId) {
     return undefined;
@@ -133,12 +134,12 @@ export function sessionRenderedObservation(
 function renderedRevision(
   deviceId: string,
   previous: NonNullable<ReturnType<RenderedObservationReader>>,
+  daemon: DaemonContext = defaultDaemonContext,
 ): number | undefined {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return previous.displayRevision;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : previous.displayRevision;
 }
@@ -200,17 +201,27 @@ function targetDisplayRead(display: string, signal?: AbortSignal) {
   } satisfies ObserveScreenExecuteOptions;
 }
 
+/** Optional collaborators and cancellation for {@link prepareTargetDisplayAction}. */
+export interface TargetDisplayCall extends ActionCall {
+  /** Reader for the caller's last rendered observation (defaults to the session reader). */
+  lastRenderedObservation?: RenderedObservationReader;
+  /** Display-transition revision source (defaults to the shared tracker). */
+  transitions?: DisplayTransitionReader;
+}
+
 /** Resolve explicit action targeting against the caller's last visible panel. */
-// oxlint-disable-next-line max-params -- Append the injectable tracker without breaking existing positional reader/signal callers.
 export async function prepareTargetDisplayAction(
   device: BootedDevice,
   display: string,
   observe: Pick<ObserveScreen, "execute">,
   adb: AdbCommandRunner,
-  lastRenderedObservation: RenderedObservationReader = sessionRenderedObservation,
-  signal?: AbortSignal,
-  transitions: DisplayTransitionReader = displayTransitions,
+  call: TargetDisplayCall = {},
 ): Promise<{ observation: ObserveResult; displayId?: number; assertCurrent: () => void }> {
+  const {
+    lastRenderedObservation = sessionRenderedObservation,
+    signal,
+    transitions = displayTransitions,
+  } = call;
   const previous = lastRenderedObservation(device.deviceId);
   const revision = transitions.revision(device.deviceId);
   const { stale, assertCurrent, assertCallerCurrent } = targetRevisionFence(

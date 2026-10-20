@@ -1,3 +1,4 @@
+import { ActionableError } from "../../models/ActionableError";
 import type { Generated } from "kysely";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import type { AdmissionRefusalReason, BrokerLimits, ResourceState } from "./admission";
@@ -57,7 +58,44 @@ export interface BrokerResourcesTable {
   idle_order: number;
 }
 
+/** Maximum age of an unacknowledged export pin; receipt and cleanup guards still apply. */
+export const EXPORT_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+
+export interface BrokerExportIdentity {
+  prepareId: string;
+  requestDigest: string;
+}
+
+export interface BrokerExportRecord extends BrokerExportIdentity {
+  requestId: string;
+  createdAtMs: number;
+  acknowledgedAtMs: number | null;
+}
+
+export interface BrokerExportsTable {
+  prepare_id: string;
+  request_id: string;
+  request_digest: string;
+  created_at_ms: number;
+  acknowledged_at_ms: number | null;
+}
+
+export class SessionExportIdentityMismatchError extends ActionableError {
+  readonly code = "session_export_identity_mismatch";
+
+  constructor() {
+    super("Session export identity, digest, or liveness owner does not match the request");
+  }
+}
+
+export interface BrokerReceiptTables {
+  session_broker_requests: BrokerRequestsTable;
+  session_broker_resources: BrokerResourcesTable;
+  session_broker_exports: BrokerExportsTable;
+}
+
 export interface BrokerAdmissionInput {
+  export?: BrokerExportIdentity;
   requestId: string;
   /** Canonical requirements + initialization + consumer ownership, excluding transport details. */
   fingerprint: string;

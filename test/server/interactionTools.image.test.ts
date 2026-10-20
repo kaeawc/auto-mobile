@@ -2,16 +2,16 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { afterEach, beforeAll, expect, test } from "bun:test";
 import {
+  type InteractionToolDependencies,
   tapAtSchema,
   hitTestSchema,
   tapAtHandler,
-  setTapAtElementFactory,
-  resetTapAtElementFactory,
   registerInteractionTools,
 } from "../../src/server/interactionTools";
 import type { TapAtOptions } from "../../src/models/TapAtOptions";
 import { cropSource } from "../helpers/imageRelativePoint";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 
 const screenshot = {
@@ -20,7 +20,9 @@ const screenshot = {
 };
 const image = { unit: "normalized" as const, x: 0.25, y: 0.5, source: { screenshot } };
 const args = { image };
-afterEach(resetTapAtElementFactory);
+afterEach(() => {
+  delete interactionDeps.tapAtElementFactory;
+});
 
 beforeAll(async () => {
   // One-time cold-start work (lazy zod schema build, registering and JSON-schema-converting the
@@ -37,7 +39,7 @@ beforeAll(async () => {
     { width: 300, height: 600 },
     { left: -10, top: 20, right: 60, bottom: 100 },
   );
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   ToolRegistry.getToolDefinitions({ includeUnavailable: true });
   ToolRegistry.clearTools();
 });
@@ -66,7 +68,7 @@ test("strict image argument schema preserves the bare coordinate and hitTest for
   ).toBe(true);
 });
 
-test.each([
+const malformedTapAtInputs: unknown[] = [
   {},
   { x: 10 },
   { y: 20 },
@@ -91,7 +93,9 @@ test.each([
       source: { screenshot: { ...screenshot, screenSize: { ...screenshot.screenSize, extra: 1 } } },
     },
   },
-])("rejects malformed or ambiguous shape %j", (value) => {
+];
+
+test.each(malformedTapAtInputs)("rejects malformed or ambiguous shape %j", (value) => {
   expect(tapAtSchema.safeParse(value).success).toBe(false);
 });
 
@@ -121,15 +125,18 @@ test("schema pixel range is half-open and names pixels", () => {
 
 test("tapAtHandler forwards image, snapshot, action and duration and reports native result", async () => {
   const calls: TapAtOptions[] = [];
-  setTapAtElementFactory(() => ({
+  interactionDeps.tapAtElementFactory = () => ({
     execute: async (options) => {
       calls.push(options);
       return { success: true, x: 25, y: 100, action: options.action };
     },
-  }));
+  });
   const response = await tapAtHandler(
     { deviceId: "fake", name: "Fake", platform: "ios" },
     { ...args, snapshotId: "same-frame", action: "longPress", durationMs: 750 },
+    undefined,
+    undefined,
+    interactionDeps,
   );
   expect(calls).toEqual([
     { image, display: undefined, snapshotId: "same-frame", action: "longPress", durationMs: 750 },
@@ -138,7 +145,7 @@ test("tapAtHandler forwards image, snapshot, action and duration and reports nat
 });
 
 test("advertised tapAt schema retains image metadata and the original argument fields", () => {
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   try {
     const tool = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
       (tool) => tool.name === "tapAt",

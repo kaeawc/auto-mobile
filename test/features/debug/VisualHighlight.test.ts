@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  VisualHighlight,
-  VisualHighlightClient,
-} from "../../../src/features/debug/VisualHighlight";
+import { VisualHighlight } from "../../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../../src/features/debug/VisualHighlightClient";
 import type { HighlightDeviceClient } from "../../../src/features/debug/VisualHighlight";
 import type { BootedDevice, HighlightOperationResult, HighlightShape } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -11,7 +9,6 @@ describe("VisualHighlight", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   const iosDevice: BootedDevice = {
@@ -41,11 +38,11 @@ describe("VisualHighlight", () => {
       success: true,
     };
 
-    const fakeClient = {
+    const fakeClient: HighlightDeviceClient = {
       requestAddHighlight: async () => response,
     };
 
-    const highlight = new VisualHighlight(androidDevice, null, fakeClient as any);
+    const highlight = new VisualHighlight(androidDevice, null, fakeClient);
     const result = await highlight.addHighlight("highlight-1", highlightShape);
 
     expect(result.success).toBe(true);
@@ -56,11 +53,11 @@ describe("VisualHighlight", () => {
       success: true,
     };
 
-    const fakeClient = {
+    const fakeClient: HighlightDeviceClient = {
       requestAddHighlight: async () => response,
     };
 
-    const highlight = new VisualHighlight(androidDevice, null, fakeClient as any);
+    const highlight = new VisualHighlight(androidDevice, null, fakeClient);
     const result = await highlight.addHighlight("path-1", pathShape);
 
     expect(result.success).toBe(true);
@@ -88,14 +85,14 @@ describe("VisualHighlight", () => {
     {
       dimension: "width",
       invalidShape: {
-        type: "box" as const,
+        type: "circle" as const,
         bounds: { x: 10, y: 20, width: 0, height: 80 },
       },
     },
     {
       dimension: "height",
       invalidShape: {
-        type: "box" as const,
+        type: "circle" as const,
         bounds: { x: 10, y: 20, width: 100, height: 0 },
       },
     },
@@ -103,12 +100,12 @@ describe("VisualHighlight", () => {
     "addHighlight names the invalid bounds $dimension before contacting the client",
     async ({ dimension, invalidShape }) => {
       let requests = 0;
-      const fakeClient = {
+      const fakeClient: HighlightDeviceClient = {
         requestAddHighlight: async () => {
           requests += 1;
           return { success: true };
         },
-      } as unknown as HighlightDeviceClient;
+      };
 
       const highlight = new VisualHighlight(androidDevice, null, fakeClient);
       const error = await highlight
@@ -122,13 +119,12 @@ describe("VisualHighlight", () => {
   );
 
   test("addHighlight rejects invalid highlight responses", async () => {
-    const fakeClient = {
-      requestAddHighlight: async () => ({
-        invalid: true,
-      }),
+    const fakeClient: HighlightDeviceClient = {
+      // The malformed payload a misbehaving client could return.
+      requestAddHighlight: async () => ({ invalid: true }),
     };
 
-    const highlight = new VisualHighlight(androidDevice, null, fakeClient as any);
+    const highlight = new VisualHighlight(androidDevice, null, fakeClient);
     await expect(highlight.addHighlight("highlight-1", highlightShape)).rejects.toThrow(
       "Invalid highlight response",
     );
@@ -139,7 +135,6 @@ describe("VisualHighlightClient", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   const iosDevice: BootedDevice = {
@@ -170,7 +165,7 @@ describe("VisualHighlightClient", () => {
       }),
     };
 
-    const client = new VisualHighlightClient(fakeSessionManager as any, () => fakeHighlight as any);
+    const client = new VisualHighlightClient(fakeSessionManager, () => fakeHighlight);
 
     await expect(
       client.addHighlight("highlight-1", highlightShape, {
@@ -189,10 +184,13 @@ describe("VisualHighlightClient", () => {
       },
     };
 
-    const client = new VisualHighlightClient({} as any, (device) => {
-      calls.push({ device, shape: highlightShape });
-      return fakeHighlight as any;
-    });
+    const client = new VisualHighlightClient(
+      { ensureDeviceReady: async () => iosDevice },
+      (device) => {
+        calls.push({ device, shape: highlightShape });
+        return fakeHighlight;
+      },
+    );
 
     const result = await client.addHighlight("highlight-1", highlightShape, {
       device: iosDevice,

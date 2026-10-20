@@ -1,3 +1,4 @@
+import { toolIsError, toolJson } from "../helpers/toolResponse";
 import { DisplayConfig } from "../../src/features/utility/DisplayConfig";
 import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
 import { SystemConfigurationManager } from "../../src/features/utility/SystemConfigurationManager";
@@ -138,8 +139,8 @@ describe("displayConfig handler", () => {
       const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
         fontScale: 1.3,
       });
-      expect(response.isError).not.toBe(true);
-      expect(JSON.parse(response.content[0].text!)).toMatchObject({
+      expect(toolIsError(response)).toBe(false);
+      expect(toolJson(response)).toMatchObject({
         success: true,
         applied: { fontScale: 1.3 },
         message: "Applied display configuration",
@@ -165,7 +166,7 @@ describe("displayConfig handler", () => {
       const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
         density: 100000,
       });
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
       expect(
         adbFactory
           .getFakeClient()
@@ -185,8 +186,8 @@ describe("displayConfig handler", () => {
         device,
         args,
       );
-      expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
-      expect(response.isError).not.toBe(true);
+      expect(toolJson(response)).toMatchObject(result);
+      expect(toolIsError(response)).toBe(false);
       expect(get).toHaveBeenCalledTimes(1);
       expect(set).not.toHaveBeenCalled();
     } finally {
@@ -206,8 +207,8 @@ describe("displayConfig handler", () => {
         device,
         args,
       );
-      expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
-      expect(response.isError).not.toBe(true);
+      expect(toolJson(response)).toMatchObject(result);
+      expect(toolIsError(response)).toBe(false);
       expect(set).toHaveBeenCalledWith(args);
       expect(get).not.toHaveBeenCalled();
     } finally {
@@ -223,8 +224,8 @@ describe("displayConfig handler", () => {
       const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
         reset: true,
       });
-      expect(response.isError).toBe(true);
-      expect(JSON.parse(response.content[0].text!)).toMatchObject({
+      expect(toolIsError(response)).toBe(true);
+      expect(toolJson(response)).toMatchObject({
         ...failure,
         message: failure.error,
       });
@@ -245,8 +246,8 @@ describe("displayConfig handler", () => {
       const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
         reset: true,
       });
-      expect(response.isError).not.toBe(true);
-      expect(JSON.parse(response.content[0].text!).message).toBe(resetResult.message);
+      expect(toolIsError(response)).toBe(false);
+      expect(toolJson(response).message).toBe(resetResult.message);
     } finally {
       set.mockRestore();
     }

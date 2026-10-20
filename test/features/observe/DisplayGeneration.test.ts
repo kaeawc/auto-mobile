@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,18 +12,17 @@ import { ObservedAndroidDisplayCache } from "../../../src/features/observe/Obser
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { SafeAreaAuditor } from "../../../src/features/observe/audits/SafeAreaAuditor";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import type { BootedDevice, DisplayRef, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const fixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
@@ -77,24 +77,25 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
   const ids = new FakeIdGenerator();
   const client = new FakeIOSCtrlProxy(timer);
   if (platform === "ios") {
-    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const instance = spyOnIosClientInstance(client);
     restores.push(() => instance.mockRestore());
   }
   let timestamp = 0;
   const panel = (key: "inner" | "cover", extra: Partial<ViewHierarchyResult> = {}) => {
     const width = key === "inner" ? 200 : 100;
     const height = key === "inner" ? 300 : 150;
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: `Display id 0: DisplayInfo{uniqueId "local:${key}" type INTERNAL, real ${width} x ${height}}`,
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state print-states", { stdout: states, stderr: "" });
-    adb.setCommandResponse("shell cmd device_state state", {
-      stdout: key === "inner" ? opened : closed,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        `Display id 0: DisplayInfo{uniqueId "local:${key}" type INTERNAL, real ${width} x ${height}}`,
+        "",
+      ),
+    );
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(states, ""));
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(key === "inner" ? opened : closed, ""),
+    );
     ObservedAndroidDisplayCache.clear(device.deviceId);
     hierarchy.configureHierarchy({
       hierarchy: { node: {} },
@@ -392,17 +393,11 @@ test("capture sequences 7, absent, 3 and CtrlProxy client replacement never rewi
   h.panel("cover");
   const folded = await h.screen.execute(options);
   expect(folded.display.generation).toBe(1);
-  AndroidCtrlProxyClient.registerForTesting(
-    new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
-    h.device.deviceId,
-  );
+  AndroidCtrlProxyClient.getInstance(h.device, new FakeAdbClientFactory(new FakeAdbExecutor()));
   for (const sequence of [7, undefined, 3]) {
     if (sequence === undefined) {
       AndroidCtrlProxyClient.removeInstance(h.device.deviceId);
-      AndroidCtrlProxyClient.registerForTesting(
-        new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
-        h.device.deviceId,
-      );
+      AndroidCtrlProxyClient.getInstance(h.device, new FakeAdbClientFactory(new FakeAdbExecutor()));
     }
     h.panel("cover", { captureSequence: sequence });
     const result = await h.screen.execute(options);
@@ -419,9 +414,7 @@ test("iOS capture sequences and runner client replacement preserve the current g
   expect((await h.screen.execute(options)).display.generation).toBe(1);
   for (const sequence of [7, undefined, 3]) {
     if (sequence === undefined) {
-      spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeIOSCtrlProxy(h.timer) as unknown as IOSCtrlProxyClient,
-      );
+      spyOnIosClientInstance(new FakeIOSCtrlProxy(h.timer));
     }
     h.panel("cover", { captureSequence: sequence });
     const result = await h.screen.execute(options);
@@ -462,6 +455,7 @@ test("action prepared at surfaced generation N is rejected after transition to N
     action.observedInteraction(
       async () => {
         dispatched = true;
+        return { success: true };
       },
       {
         changeExpected: false,
@@ -532,6 +526,7 @@ for (const platform of ["android", "ios"] as const) {
       action.observedInteraction(
         async () => {
           dispatched = true;
+          return { success: true };
         },
         { changeExpected: false, predictionContext: { toolName: "dragAndDrop", toolArgs: {} } },
       ),

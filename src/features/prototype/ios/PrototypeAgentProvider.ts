@@ -19,6 +19,7 @@ import { type Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { VerifiedArtifactCache } from "../../../utils/VerifiedArtifactCache";
 import { ensureSecureTempDirSync, getTempDir } from "../../../utils/tempDir";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../../utils/workingDirectory";
+import { ENV } from "../../../config/env";
 
 const CACHE_SUBDIR = "prototype-agent";
 const SECURE_DIR_MODE = 0o700;
@@ -27,9 +28,9 @@ const SECURE_FILE_MODE = 0o600;
 export const PROTOTYPE_AGENT_DOWNLOAD_TIMEOUT_MS = 30_000;
 
 /** Absolute path to a locally built prototype-agent dylib (repo checkouts, local builds). */
-export const IOS_PROTOTYPE_AGENT_ENV = "AUTOMOBILE_IOS_PROTOTYPE_AGENT";
+export const IOS_PROTOTYPE_AGENT_ENV = ENV.IOS_PROTOTYPE_AGENT.name;
 /** Set to `1`/`true` to forbid the release download (offline and air-gapped use). */
-export const SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD_ENV = "AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD";
+export const SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD_ENV = ENV.SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD.name;
 
 export const PROTOTYPE_AGENT_CACHE_FILENAME = PROTOTYPE_AGENT_DYLIB_FILENAME;
 export const PROTOTYPE_AGENT_METADATA_FILENAME = "AutoMobilePrototypeAgent.json";

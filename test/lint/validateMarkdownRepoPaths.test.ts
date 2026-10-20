@@ -1,6 +1,7 @@
+import { readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 import {
   markdownRepoFiles,
@@ -32,7 +33,7 @@ beforeAll(() => {
   failures = [];
   for (const file of files) {
     for (const reference of scanMarkdownRepoPaths(
-      readFileSync(path.join(root, file), "utf8"),
+      readGuardFile(path.join(root, file)),
       file,
       exists,
       allowlist,

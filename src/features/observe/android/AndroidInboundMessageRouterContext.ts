@@ -5,7 +5,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type {
   NavigationEvent,
-  NavigationGraphManager,
+  NavigationGraphService,
 } from "../../navigation/NavigationGraphManager";
 import type { StorageChangedEvent } from "../../storage/storageTypes";
 import type { SdkAnrPayload, SdkCrashPayload } from "../crash/sdkCrashIngestion";
@@ -94,7 +94,7 @@ interface InboundNavigationContext {
   ensureBuildContext(appId: string): void;
   attachRecentInteraction(event: NavigationEvent): void;
   enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void>;
-  getNavigationGraphManager(): Pick<NavigationGraphManager, "updateNodeScreenshot">;
+  getNavigationGraphManager(): Pick<NavigationGraphService, "updateNodeScreenshot">;
   pruneStaleInteractions(now: number): void;
   notifyInteractionListeners(event: InteractionEvent): void;
 }
@@ -102,7 +102,10 @@ interface InboundNavigationContext {
 interface InboundDelegateContext {
   readonly certificates: Pick<CtrlProxyCertificates, "handleCaCertRemovalResult">;
   readonly focus: Pick<CtrlProxyFocus, "convertAccessibilityNodeToElement">;
-  readonly prototypes: Pick<CtrlProxyPrototypes, "handlePrototypeEvent">;
+  readonly prototypes: Pick<
+    CtrlProxyPrototypes,
+    "handlePrototypeEvent" | "handlePrototypeRequest" | "handlePrototypeRequestCancel"
+  >;
   readonly storage: { notifyStorageChangeListeners(event: StorageChangedEvent): void };
 }
 

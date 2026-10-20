@@ -4,8 +4,7 @@ import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import {
   compareProcessGenerationTokens,
-  readDarwinProcessGenerationToken,
-  readLinuxProcessGenerationToken,
+  readProcessGenerationTokenForPid,
 } from "./processGeneration";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
 import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
@@ -17,9 +16,11 @@ import { releaseVersion } from "../utils/mcpVersion";
 import { isProcessRunning } from "../utils/processLiveness";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { sortedReaddirSync } from "../utils/io";
+import { ENV, readEnvRaw } from "../config/env";
 
 export {
   compareProcessGenerationTokens,
+  readProcessGenerationTokenForPid,
   type ProcessGenerationTokenComparison,
 } from "./processGeneration";
 
@@ -106,8 +107,7 @@ export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
 };
 
 export function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
-  const override =
-    env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
+  const override = readEnvRaw(ENV.WEBRTC_STREAM_SOCKET_PATH, env);
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override)
     : path.join(resolveAuxSocketDir(env), "webrtc-stream.sock");
@@ -668,16 +668,6 @@ export interface PidFileLiveDaemonSessionIdProviderDependencies {
   readPidFile?: (pidFilePath?: string) => LiveDaemonPidFileRead;
   isProcessRunning?: (pid: number) => boolean;
   readProcessGenerationToken?: (pid: number) => string | undefined;
-}
-
-export function readProcessGenerationTokenForPid(pid: number): string | undefined {
-  if (process.platform === "darwin") {
-    return readDarwinProcessGenerationToken(pid);
-  }
-  if (process.platform === "linux") {
-    return readLinuxProcessGenerationToken(pid);
-  }
-  return undefined;
 }
 
 /**

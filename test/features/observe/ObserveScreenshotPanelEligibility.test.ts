@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
@@ -45,11 +46,13 @@ function setup(displays: BootedDevice["displays"], display: string | undefined) 
   const cacheStore = new FakeObserveCacheStore(timer);
   const store = new FakeScreenshotStateStore(timer);
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout:
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   let captureFails = false;
   const screen = new RealObserveScreen(
     { deviceId, name: "Fake", platform: "android", displays },

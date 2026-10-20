@@ -341,7 +341,7 @@ describe("Darwin sysctl process starts", () => {
     createDarwinProcessGenerationTokenReader,
     DARWIN_PS_LSTART_ENV,
   } = processGeneration;
-  const samples = DARWIN_SYSCTL_START_FIXTURES.samples;
+  const samples = [...DARWIN_SYSCTL_START_FIXTURES.samples];
 
   test.each(samples)("formats captured epoch $startSeconds as canonical ps lstart", (sample) => {
     expect(formatDarwinLstartUtc(sample.startSeconds)).toBe(

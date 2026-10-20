@@ -32,6 +32,9 @@
 -keep class dev.jasonpearson.automobile.** extends android.app.Activity { *; }
 
 # Ktor, coroutines, kotlinx.serialization and OkHttp supply their own consumer rules.
+# Retrofit supplies its consumer rules too; the prototype request service is only ever reached through
+# Retrofit's runtime proxy, so its annotated methods must survive shrinking.
+-keep interface dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpService { *; }
 # Missing-class suppressions (R8 diagnostics)
 # Circuit is an optional SDK compileOnly integration (consumer-kept sdk.adapters.CircuitAdapter) CtrlProxy never calls.
 -dontwarn com.slack.circuit.runtime.screen.Screen

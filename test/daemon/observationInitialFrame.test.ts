@@ -102,6 +102,10 @@ interface ScreenshotUpdate {
   frameContext?: string;
 }
 
+/** A runner hierarchy that may also carry the frame context it was captured under. */
+type AndroidFrameHierarchy = AccessibilityHierarchy & { frameContext?: string };
+type IosFrameHierarchy = CtrlProxyHierarchy & { frameContext?: string };
+
 class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
   readonly latestHierarchyCalls: Array<{
     waitForFresh?: boolean;
@@ -117,8 +121,8 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
 
   constructor(
     private readonly connected: boolean,
-    private readonly latestHierarchy: AccessibilityHierarchy | null,
-    private readonly syncHierarchy: AccessibilityHierarchy | null = latestHierarchy,
+    private readonly latestHierarchy: AndroidFrameHierarchy | null,
+    private readonly syncHierarchy: AndroidFrameHierarchy | null = latestHierarchy,
     private readonly latestHierarchyFresh: boolean = true,
     private readonly screenshot: ScreenshotCaptureResult = {
       success: true,
@@ -160,7 +164,9 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
 
   convertToViewHierarchyResult(hierarchy: AccessibilityHierarchy): ViewHierarchyResult {
     return {
-      hierarchy: { node: hierarchy.hierarchy },
+      hierarchy: {
+        node: { text: hierarchy.hierarchy.text, bounds: hierarchy.hierarchy.bounds },
+      },
       packageName: hierarchy.packageName,
       updatedAt: hierarchy.updatedAt,
       screenWidth: hierarchy.screenWidth,
@@ -222,8 +228,8 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
 
   constructor(
     private readonly connected: boolean,
-    private readonly latestHierarchy: CtrlProxyHierarchy | null,
-    private readonly syncHierarchy: CtrlProxyHierarchy | null = latestHierarchy,
+    private readonly latestHierarchy: IosFrameHierarchy | null,
+    private readonly syncHierarchy: IosFrameHierarchy | null = latestHierarchy,
     private readonly screenshot: CtrlProxyScreenshotResult = {
       success: true,
       data: "ios-shot",
@@ -264,12 +270,7 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
     return this.syncHierarchy ? { hierarchy: this.syncHierarchy } : null;
   }
 
-  convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult {
-    const typedHierarchy = hierarchy as CtrlProxyHierarchy & {
-      nativeScale?: number;
-      pixelWidth?: number;
-      pixelHeight?: number;
-    };
+  convertToViewHierarchyResult(typedHierarchy: IosFrameHierarchy): ViewHierarchyResult {
     return {
       hierarchy: { node: { $: { text: typedHierarchy.hierarchy.text } } },
       packageName: typedHierarchy.packageName,
@@ -481,7 +482,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenHeight: 3120,
         hierarchy: { text: "Home" },
         frameContext: "android-hierarchy",
-      } as any,
+      },
       undefined,
       true,
       {
@@ -515,7 +516,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenHeight: 3120,
         hierarchy: { text: "Screen A" },
         frameContext: "android-screen-a",
-      } as any,
+      },
       undefined,
       true,
       {
@@ -821,7 +822,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenScale: 3,
         hierarchy: { text: "Home" },
         frameContext: "ios-hierarchy",
-      } as any,
+      },
       undefined,
       { success: true, data: "ios-shot", format: "png", frameContext: "ios-hierarchy" },
     );
@@ -851,7 +852,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenScale: 3,
         hierarchy: { text: "Screen A" },
         frameContext: "ios-screen-a",
-      } as any,
+      },
       undefined,
       { success: true, data: "ios-shot", format: "png", frameContext: "ios-screen-b" },
     );
@@ -910,7 +911,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       screenScale: 3,
       hierarchy: { text: "Cold start" },
       frameContext: "ios-sync",
-    } as any);
+    });
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
       streamServer,
@@ -1115,7 +1116,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
               }
             : {}),
           hierarchy: { text: "Golden" },
-        } as any);
+        });
 
         await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
           streamServer,
@@ -1230,10 +1231,21 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
   }
 }
 
-function coalescingHarness(maxConcurrency = 2) {
+/** A targeted server whose frame-context generation a test can advance. */
+class GenerationInitialFrameServer extends FakeTargetedInitialFrameServer {
+  generation = 0;
+
+  getCurrentFrameContextGeneration(): number {
+    return this.generation;
+  }
+}
+
+function coalescingHarness(
+  maxConcurrency = 2,
+  server: FakeTargetedInitialFrameServer = new FakeTargetedInitialFrameServer(),
+) {
   const timer = new FakeTimer();
   const coordinator = new DefaultObservationInitialFrameCoordinator(timer, maxConcurrency);
-  const server = new FakeTargetedInitialFrameServer();
   const devices: ObservationStreamDevice[] = Array.from({ length: 5 }, (_, i) => ({
     id: `device-${i}`,
     name: `Pixel ${i}`,
@@ -1484,11 +1496,8 @@ describe("coalesced subscriber initial frames", () => {
   });
 
   it("does not replace newer client geometry when a live hierarchy arrives during initial capture", async () => {
-    const h = coalescingHarness();
-    let generation = 0;
-    const streamServer = Object.assign(h.server, {
-      getCurrentFrameContextGeneration: () => generation,
-    });
+    const streamServer = new GenerationInitialFrameServer();
+    const h = coalescingHarness(2, streamServer);
     const screenshotStarted = deferred<void>();
     const screenshotGate = deferred<void>();
     class DelayedScreenshotClient extends DeferredConnectionAndroidClient {
@@ -1510,7 +1519,7 @@ describe("coalesced subscriber initial frames", () => {
       },
     });
     await screenshotStarted.promise;
-    generation++;
+    streamServer.generation++;
     screenshotGate.resolve();
     await done;
     expect(client.forwardedInitialHierarchies).toHaveLength(0);

@@ -7,7 +7,8 @@ import {
   type ReportedOwnerHold,
 } from "../proxyLivenessRecovery";
 import type { SessionReleaseSnapshot } from "../sessionManager";
-import { DaemonBoundSessionExpiredError, daemonInternalErrors } from "./daemonErrors";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
+import { HeldSessionNotFoundError } from "./HeldSessionNotFoundError";
 import {
   isLivenessOwnerConflictError,
   isLivenessOwnershipLostError,
@@ -15,8 +16,6 @@ import {
 } from "./livenessErrorPredicates";
 import type { NotFoundAnswerOutcome } from "./notFoundDecision";
 import type { OtherHeldSession } from "./ProxySessionState";
-
-const { HeldSessionNotFoundError } = daemonInternalErrors;
 
 /**
  * Proxy operations the held-session heartbeat outcomes share with binding and release policy:

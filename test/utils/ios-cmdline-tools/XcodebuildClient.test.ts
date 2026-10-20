@@ -145,7 +145,7 @@ describe("XcodebuildClient streaming runner", () => {
       (command, args, options) => {
         calls.push({ command, args, options });
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
     );
 
@@ -193,7 +193,7 @@ describe("XcodebuildClient streaming runner", () => {
       () => {
         spawned = true;
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
     );
 
@@ -237,7 +237,7 @@ describe("XcodebuildClient streaming runner", () => {
       timer,
       () => {
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
     );
 
@@ -261,7 +261,7 @@ describe("XcodebuildClient streaming runner", () => {
       (_command, _args, options) => {
         capturedSpawnOptions = options;
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
     );
 
@@ -289,7 +289,7 @@ describe("XcodebuildClient streaming runner", () => {
       () => {
         startup.abort(reason);
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
       (pid) => {
         groupKills.push(pid);
@@ -315,7 +315,7 @@ describe("XcodebuildClient streaming runner", () => {
       () => {
         startup.abort(reason);
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
       (pid, signal) => {
         groupKills.push({ pid, signal });
@@ -365,7 +365,7 @@ describe("XcodebuildClient streaming runner", () => {
       () => {
         startup.abort(reason);
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
       (pid, signal) => {
         groupKills.push({ pid, signal });
@@ -404,7 +404,7 @@ describe("XcodebuildClient streaming runner", () => {
       (_command, _args, options) => {
         capturedSpawnOptions = options;
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
     );
 
@@ -426,14 +426,15 @@ describe("XcodebuildClient streaming runner", () => {
       (_command, _args, options) => {
         options.signal?.addEventListener("abort", () => child.kill());
         child.simulateSpawn();
-        return child as never;
+        return child;
       },
     );
 
     const requestController = new AbortController();
     let killed = false;
-    (child as unknown as { kill: () => void }).kill = () => {
+    child.kill = () => {
       killed = true;
+      return true;
     };
 
     await runWithAbortSignal(requestController.signal, () =>

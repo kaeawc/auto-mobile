@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { markedHierarchy } from "../helpers/observeFixture";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import type { ScreenshotResult } from "../../src/models/ScreenshotResult";
 import type { TrackedScreenshotService } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
@@ -23,7 +24,7 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
@@ -183,7 +184,7 @@ describe("session screenshot resources", () => {
     );
     const observed: ObserveResult = {
       ...observeScreen.createBaseResult(),
-      viewHierarchy: "only-other-device",
+      viewHierarchy: markedHierarchy("only-other-device"),
     };
     await observeScreen.cacheObserveResult(observed);
     useSessionScreenshotResourceDependencies({
@@ -207,14 +208,14 @@ describe("session screenshot resources", () => {
     );
     const observed: ObserveResult = {
       ...observeScreen.createBaseResult(),
-      viewHierarchy: "direct-mode-session",
+      viewHierarchy: markedHierarchy("direct-mode-session"),
     };
     await observeScreen.cacheObserveResult(observed);
     registerDirectSessionDevice(sessionUuid, sessionDevice);
 
     const content = await readTemplate("automobile:observation/session/session-123/latest");
 
-    expect(JSON.parse(content.text!).viewHierarchy).toBe("direct-mode-session");
+    expect(JSON.parse(content.text!).viewHierarchy.packageName).toBe("direct-mode-session");
   });
 
   test("rejects session resource reads outside the caller's bound session", async () => {
@@ -675,12 +676,12 @@ describe("unscoped latest observation resources", () => {
       cacheTimer,
       observationIdGenerator,
     );
-    const observation = {
+    const observation: ObserveResult = {
       ...observeScreen.createBaseResult(),
       ...(observationId ? { observationId } : {}),
       ...(screenshotCaptureAttempted !== undefined ? { screenshotCaptureAttempted } : {}),
-      viewHierarchy: marker,
-    } as ObserveResult;
+      viewHierarchy: markedHierarchy(marker),
+    };
     await observeScreen.cacheObserveResult(observation);
     return observation;
   }
@@ -1112,7 +1113,7 @@ describe("unscoped latest observation resources", () => {
     const observation = await readLatestObservation();
     const screenshot = await readLatestScreenshot();
 
-    expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-b-hierarchy");
+    expect(JSON.parse(observation.text!).viewHierarchy.packageName).toBe("device-b-hierarchy");
     // Device A's screenshot must never be served for device B's hierarchy.
     expect(screenshot.blob).toBeUndefined();
     expect(screenshot.mimeType).toBe("application/json");
@@ -1183,7 +1184,7 @@ describe("unscoped latest observation resources", () => {
     const observation = await readLatestObservation();
     const screenshot = await readLatestScreenshot();
 
-    expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-a-hierarchy");
+    expect(JSON.parse(observation.text!).viewHierarchy.packageName).toBe("device-a-hierarchy");
     expect(screenshot.mimeType).toBe("image/png");
     expect(readPaths).toEqual(["/tmp/device-a.png"]);
   });
@@ -1207,7 +1208,7 @@ describe("unscoped latest observation resources", () => {
 
     const context: ResourceReadContext = { sessionUuid: "client-1" };
     const observation = await readLatestObservation(context);
-    expect(JSON.parse(observation.text!).viewHierarchy).toBe("device-b-hierarchy");
+    expect(JSON.parse(observation.text!).viewHierarchy.packageName).toBe("device-b-hierarchy");
 
     // Device A completes an observation in between the client's two reads, so a
     // second global "most recent" lookup would now resolve to device A.
@@ -1379,7 +1380,7 @@ describe("unscoped latest observation resources", () => {
 
     const [hierarchy, screenshot] = await Promise.all([hierarchyPromise, screenshotPromise]);
 
-    expect(JSON.parse(hierarchy.text!).viewHierarchy).toBe("device-a-hierarchy");
+    expect(JSON.parse(hierarchy.text!).viewHierarchy.packageName).toBe("device-a-hierarchy");
     expect(screenshot.mimeType).toBe("image/png");
     expect(readPaths).toEqual(["/tmp/device-b.png"]);
   });

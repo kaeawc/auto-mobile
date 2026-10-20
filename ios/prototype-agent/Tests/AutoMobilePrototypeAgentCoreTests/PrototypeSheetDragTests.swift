@@ -58,7 +58,7 @@ final class PrototypeSheetDragTests: XCTestCase {
              "root":{"type":"bottomSheet","openWhen":{"key":"open","equals":\(equals)}}}
             """.utf8))
             var session = PrototypeSession()
-            try session.show(spec)
+            session.show(spec)
             let events = session.closeModal(spec.root)
             XCTAssertEqual(session.state["open"], .bool(!equals))
             XCTAssertEqual(events.map(\.name), ["change"])

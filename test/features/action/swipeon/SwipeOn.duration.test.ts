@@ -12,7 +12,9 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
 
 const observation = (): ObserveResult => ({
-  timestamp: 0,
+  updatedAt: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1000, height: 2000 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: { hierarchy: { node: { $: { _id: "top" } } } },
@@ -29,10 +31,12 @@ describe("SwipeOn durationMs (#12538)", () => {
       executeGesture: gesture,
       observeScreen: observe,
       accessibilityDetector: new FakeAccessibilityDetector(),
+      // Construction-time timer: the boomerang apex pause reads it, so a post-hoc assign would sleep for real.
+      timer,
     });
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
-    Object.assign(swipeOn, { awaitIdle: new FakeAwaitIdle(), window, timer });
+    Object.assign(swipeOn, { awaitIdle: new FakeAwaitIdle(), window });
     return swipeOn;
   };
 
@@ -50,6 +54,27 @@ describe("SwipeOn durationMs (#12538)", () => {
     });
     expect(result.success).toBe(true);
     expect(gesture.getSwipeCalls()[0].options?.duration).toBe(120);
+  });
+
+  test("a single swipe reports velocityPxPerSecond from the dispatched duration (#12968)", async () => {
+    const result = await createSwipeOn().execute({
+      direction: "up",
+      autoTarget: false,
+      durationMs: 120,
+    });
+    const call = gesture.getSwipeCalls()[0];
+    const distance = Math.hypot(call.x2 - call.x1, call.y2 - call.y1);
+    expect(result.velocityPxPerSecond).toBe(Math.round((distance / 120) * 1000));
+  });
+
+  test("a boomerang omits velocityPxPerSecond because duration spans both legs (#12968)", async () => {
+    const result = await createSwipeOn().execute({
+      direction: "up",
+      autoTarget: false,
+      boomerang: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.velocityPxPerSecond).toBeUndefined();
   });
 
   test("speed and durationMs together are rejected before dispatch", async () => {

@@ -75,6 +75,11 @@ enum JSONValue: Codable, Equatable, Sendable {
         if case let .string(value) = self { return value }
         return nil
     }
+
+    var objectFields: [String: JSONValue]? {
+        if case let .object(value) = self { return value }
+        return nil
+    }
 }
 
 struct PrototypeSpec: Decodable {
@@ -86,11 +91,16 @@ struct PrototypeSpec: Decodable {
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
     /// unless the system reduces motion (#10442). See `PrototypeMotion`.
     let motion: String?
+    /// The keys the device keeps across shows of this id (#12522); nil without a usable block.
+    let storage: PrototypeStorageBlock?
     /// The node tree with every `repeat` list template already expanded (see `PrototypeRepeat`).
     let root: PrototypeNode
+    /// The authored `root` before data resolution and repeat expansion, kept so a device data write
+    /// (#12519) can rebuild `root` from the changed data without the host re-sending the spec.
+    let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, data, theme, motion, root
+        case id, window, state, data, theme, motion, root, storage
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -114,29 +124,14 @@ struct PrototypeSpec: Decodable {
         if let data { try PrototypeLimits.guardData(data) }
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
+        // The host validator owns the strict shape; a malformed block means "no storage" here.
+        storage = (try? container.decodeIfPresent(PrototypeStorageBlock.self, forKey: .storage))
         let raw = try container.decode(JSONValue.self, forKey: .root)
-        try PrototypeSizeBounds.validate(.object(["root": raw]))
-        try PrototypeLimits.guardAuthoredTree(raw)
-        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
-        try PrototypeMenus.validateAuthoredText(raw)
-        try PrototypeRepeat.validateEmitContexts(raw, data: data)
-        try PrototypeLimits.guardSubstitutedText(raw, data: data)
-        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
-        try PrototypeLimits.guardTree(resolved)
-        let expanded = PrototypeRepeat.expand(resolved)
-        try PrototypePagerOptions.validate(expanded)
-        try PrototypeSwipe.validate(expanded)
-        try PrototypeCarousel.validate(expanded)
-        try PrototypeRefresh.validate(expanded)
+        authoredRoot = raw
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
-        let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state)) ?? nil
-        try PrototypeMenus.validate(expanded, state: menuState ?? [:])
-        root = try JSONDecoder().decode(
-            DecodedRoot.self,
-            from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
-        ).root
-        root.bindValidity(PrototypeChecks.bindings(root: root))
+        let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
+        root = try Self.buildRoot(raw, data: data, menuState: menuState ?? [:])
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
         // boolean state values, so a null, array or object fails the show everywhere.
@@ -154,6 +149,76 @@ struct PrototypeSpec: Decodable {
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
         try PrototypeStacks.validate(root: root)
         try PrototypeThemeModes.validate(placement: window.placement, root: root)
+    }
+
+    /// Everything between the authored root and the drawn one, in the order the host reports
+    /// errors. It depends on `data` and the initial state only, so a data write reruns it.
+    private static func buildRoot(
+        _ raw: JSONValue, data: [String: JSONValue]?, menuState: [String: JSONValue]
+    )
+        throws -> PrototypeNode
+    {
+        try PrototypeSizeBounds.validate(.object(["root": raw]))
+        try PrototypeLimits.guardAuthoredTree(raw)
+        try PrototypeRequestValidator.validate(raw, state: menuState)
+        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
+        try PrototypeMenus.validateAuthoredText(raw)
+        try PrototypeRepeat.validateEmitContexts(raw, data: data)
+        try PrototypeLimits.guardSubstitutedText(raw, data: data)
+        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        try PrototypeLimits.guardTree(resolved)
+        let expanded = PrototypeRepeat.expand(resolved)
+        try PrototypePagerOptions.validate(expanded)
+        try PrototypeSwipe.validate(expanded)
+        try PrototypeCarousel.validate(expanded)
+        try PrototypeRefresh.validate(expanded)
+        try PrototypeMenus.validate(expanded, state: menuState)
+        let root = try JSONDecoder().decode(
+            DecodedRoot.self,
+            from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
+        ).root
+        root.bindValidity(PrototypeChecks.bindings(root: root))
+        return root
+    }
+
+    private init(
+        replacing spec: PrototypeSpec, data: [String: JSONValue]?, root: PrototypeNode,
+        authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
+    ) {
+        id = spec.id
+        window = spec.window
+        self.state = state ?? spec.state
+        self.data = data
+        theme = spec.theme
+        motion = spec.motion
+        storage = spec.storage
+        self.root = root
+        self.authoredRoot = authoredRoot ?? spec.authoredRoot
+    }
+
+    /// This spec after a host patch (#11675): the authored root, data and state replaced, and the drawn
+    /// tree rebuilt and re-validated the way a show would. Id, window and theme are carried over, as
+    /// the patch grammar cannot address them. Throws what a show of the same content would.
+    func patched(
+        authoredRoot raw: JSONValue, data: [String: JSONValue]?, state: [String: JSONValue]?
+    )
+        throws -> PrototypeSpec
+    {
+        if let data { try PrototypeLimits.guardData(data) }
+        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:])
+        try PrototypeStacks.validate(root: rebuilt)
+        try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
+        return PrototypeSpec(replacing: self, data: data, root: rebuilt, authoredRoot: raw, state: state)
+    }
+
+    /// This spec with `data` replaced and the drawn tree rebuilt from the authored one, so text
+    /// bindings, `repeat` rows and data conditions follow the write. Throws when the changed data
+    /// breaks a limit the show enforces (for example more repeat cells than the tree allows).
+    func replacingData(_ data: [String: JSONValue]) throws -> PrototypeSpec {
+        let rebuilt = try Self.buildRoot(authoredRoot, data: data, menuState: state ?? [:])
+        try PrototypeStacks.validate(root: rebuilt)
+        try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
+        return PrototypeSpec(replacing: self, data: data, root: rebuilt)
     }
 }
 
@@ -245,14 +310,17 @@ enum Dimension: Decodable, Equatable {
     case wrap
     case points(Double)
 
-    private struct Fixed: Decodable { let dp: Double }
+    private struct Fixed: Decodable {
+        let points: Double
+        private enum CodingKeys: String, CodingKey { case points = "dp" }
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let keyword = try? container.decode(String.self) {
             self = keyword == "fill" ? .fill : .wrap
         } else {
-            self = try .points(container.decode(Fixed.self).dp)
+            self = try .points(container.decode(Fixed.self).points)
         }
     }
 }
@@ -448,11 +516,75 @@ struct PrototypeAction: Decodable, Sendable {
     let page: JSONValue?
     let stack: String?
     let screen: String?
+    /// `setData`/`appendData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
+    /// repeat row at expansion (#12519).
+    let path: String?
     let key: String?
+    /// `setState`'s literal; for `setData`/`appendData` the binding object (`{value}`, `{state}`,
+    /// `{data}`), with `item`/`index` already bound to `{value}` by repeat expansion.
     let value: JSONValue?
     /// `increment`/`decrement` step; 1 when omitted.
-    let by: Double?
+    let incrementAmount: Double?
     let requireValid: [String]?
+    // `request` (#12529): method defaults to GET and `via` to host. `headers` and `query` entries
+    // are a literal string or a binding object; `body` is a binding; `url`, `statusKey` and `into`
+    // are bound per repeat row at expansion like the data actions' paths.
+    let method: String?
+    let url: String?
+    let headers: [String: JSONValue]?
+    let query: [String: JSONValue]?
+    let body: JSONValue?
+    let into: String?
+    let statusKey: String?
+    let via: String?
+    let timeoutMs: Double?
+    let onSuccess: [PrototypeAction]?
+    let onError: [PrototypeAction]?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, name, payload, context, pager, page, stack, screen, path, key, value
+        case incrementAmount = "by"
+        case requireValid, method, url, headers, query, body, into, statusKey, via, timeoutMs, onSuccess, onError
+    }
+
+    init(
+        type: String, name: String?, payload: JSONValue?, context: PrototypeEmitContext?, pager: String?,
+        page: JSONValue?, stack: String?, screen: String?, path: String?, key: String?, value: JSONValue?,
+        by incrementAmount: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
+        headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
+        into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
+        onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil
+    ) {
+        self.type = type
+        self.name = name
+        self.payload = payload
+        self.context = context
+        self.pager = pager
+        self.page = page
+        self.stack = stack
+        self.screen = screen
+        self.path = path
+        self.key = key
+        self.value = value
+        self.incrementAmount = incrementAmount
+        self.requireValid = requireValid
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.query = query
+        self.body = body
+        self.into = into
+        self.statusKey = statusKey
+        self.via = via
+        self.timeoutMs = timeoutMs
+        self.onSuccess = onSuccess
+        self.onError = onError
+    }
+
+    /// This action and every action nested in its `onSuccess` / `onError` lists, depth first.
+    var flattened: [PrototypeAction] {
+        [self] + ((onSuccess ?? []) + (onError ?? [])).flatMap(\.flattened)
+    }
 }
 
 /// The shared validator's condition vocabulary (`visibleWhen`, `openWhen`): exactly one form per
@@ -468,7 +600,9 @@ indirect enum Condition: Decodable, Equatable {
     case valid([String], PrototypeValidityContext)
 
     private enum CodingKeys: String, CodingKey {
-        case key, equals, notEquals, gt, lt, all, any, not, valid
+        case key, equals, notEquals, all, any, not, valid
+        case greaterThan = "gt"
+        case lessThan = "lt"
     }
 
     init(from decoder: Decoder) throws {
@@ -493,9 +627,9 @@ indirect enum Condition: Decodable, Equatable {
                 self = .equals(key: key, value: value)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
                 self = .notEquals(key: key, value: value)
-            } else if let value = try container.decodeIfPresent(Double.self, forKey: .gt) {
+            } else if let value = try container.decodeIfPresent(Double.self, forKey: .greaterThan) {
                 self = .greaterThan(key: key, value: value)
-            } else if let value = try container.decodeIfPresent(Double.self, forKey: .lt) {
+            } else if let value = try container.decodeIfPresent(Double.self, forKey: .lessThan) {
                 self = .lessThan(key: key, value: value)
             } else {
                 throw DecodingError.dataCorruptedError(
@@ -529,14 +663,17 @@ enum Detent: Decodable, Equatable {
     case full
     case points(Double)
 
-    private struct Fixed: Decodable { let dp: Double }
+    private struct Fixed: Decodable {
+        let points: Double
+        private enum CodingKeys: String, CodingKey { case points = "dp" }
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let keyword = try? container.decode(String.self) {
             self = keyword == "full" ? .full : .half
         } else {
-            self = try .points(container.decode(Fixed.self).dp)
+            self = try .points(container.decode(Fixed.self).points)
         }
     }
 

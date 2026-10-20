@@ -1,5 +1,6 @@
 import { FakeToolSelectionRepository as FakeRepository } from "../fakes/FakeToolSelectionRepository";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { z } from "zod/v4";
 import { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
@@ -15,6 +16,9 @@ import {
   SET_TOOL_ENABLED_TOOL_NAME,
   setToolEnabledSchema,
 } from "../../src/server/toolSelectionTools";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #6869 — `setToolEnabled` accepted a single `toolName`, so declaring the
@@ -278,7 +282,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
         ["getApple", getAppleSchema],
         ["provisionDevice", provisionDeviceSchema],
       ] as const) {
-        ToolRegistry.register(name, name, schema as any, async () => ({
+        ToolRegistry.register(name, name, schema, async () => ({
           content: [{ type: "text" as const, text: name }],
         }));
       }
@@ -297,7 +301,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
         ["getApple", getAppleSchema],
         ["provisionDevice", provisionDeviceSchema],
       ] as const) {
-        ToolRegistry.register(name, name, schema as any, async () => ({ content: [] }));
+        ToolRegistry.register(name, name, schema, async () => ({ content: [] }));
       }
 
       const definitions = ToolRegistry.getToolDefinitions();
@@ -325,7 +329,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
     });
 
     test("an acquisition call naming an unconfigurable tool fails its advertised schema", () => {
-      ToolRegistry.register("getAndroid", "getAndroid", getAndroidSchema as any, async () => ({
+      ToolRegistry.register("getAndroid", "getAndroid", getAndroidSchema, async () => ({
         content: [{ type: "text" as const, text: "getAndroid" }],
       }));
       const definition = ToolRegistry.getToolDefinitions().find(
@@ -371,8 +375,10 @@ describe("setToolEnabled batch enable (#6869)", () => {
     });
 
     test("still advertises sessionUuid as a top-level property", () => {
-      const properties = (z.toJSONSchema(setToolEnabledSchema, { io: "input" }) as any).properties;
-      expect(Object.keys(properties).sort()).toEqual([
+      const { properties } = parseJsonSchemaNode(
+        z.toJSONSchema(setToolEnabledSchema, { io: "input" }),
+      );
+      expect(Object.keys(properties ?? {}).sort()).toEqual([
         "enabled",
         "sessionUuid",
         "toolName",

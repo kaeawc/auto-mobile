@@ -102,11 +102,11 @@ export async function transportAliasHarness(
   });
   sessions.stopCleanupTimer();
   const tools = new RealToolCallPath([...options.pooledRows, ...(options.iosRows ?? [])]);
-  const registryTimer: unknown = Reflect.get(ToolRegistry, "timer");
+  const registryTimer = ToolRegistry.getCollaboratorsForTesting().timer;
   const dispose = () => {
     PlatformDeviceManagerFactory.setInstance(null);
     tools.uninstall();
-    Reflect.set(ToolRegistry, "timer", registryTimer);
+    ToolRegistry.setCollaboratorsForTesting({ timer: registryTimer });
     DaemonState.getInstance().reset();
     sessions.stopCleanupTimer();
     timer.reset();
@@ -115,7 +115,7 @@ export async function transportAliasHarness(
   cleanups.push(dispose);
   // The ingress lists raw adb rows through the process-wide device manager, as the daemon does.
   PlatformDeviceManagerFactory.setInstance(discovery);
-  Reflect.set(ToolRegistry, "timer", timer);
+  ToolRegistry.setCollaboratorsForTesting({ timer: timer });
   const registry = new FakeBindingRegistry(timer);
   if (options.bindingStableId) {
     await assignBindingDevice(registry, "android", options.bindingStableId, "runner-b");
@@ -159,19 +159,13 @@ export async function transportAliasHarness(
     { deviceReadOnly: true },
   );
   if (options.held) {
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      options.held,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      HOLDER_CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: options.held,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: HOLDER_CONNECTION,
+    });
     sessions.setDeviceReadiness(HOLDER, "automationReady");
     // Keep-awake is device work behind its own adb seam; mark it settled for this session.
     sessions.getSession(HOLDER)!.cacheData.keepScreenAwake = {

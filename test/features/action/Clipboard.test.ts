@@ -1,5 +1,4 @@
 import { expect, describe, test, beforeEach } from "bun:test";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
@@ -22,10 +21,9 @@ import { spyOn } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
 import { wrapCommandError } from "../../../src/utils/CommandError";
 import { errorMessage } from "../../../src/utils/describeUnknownError";
-import {
-  IosRunnerBusyError,
-  IosRunnerStalledError,
-} from "../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerBusyError } from "../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerStalledError } from "../../../src/features/observe/ios/IosRunnerStalledError";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Synthetic focused-value variants of the representative iOS forms fixture, not captures.
 function focusedIOSForm(value?: string): ViewHierarchyResult {
@@ -482,8 +480,8 @@ describe("Clipboard iOS", () => {
       invalidateCache: () => {
         invalidations.push(timer.now());
       },
-    } as IOSCtrlProxyClient;
-    const ios = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    };
+    const ios = spyOnIosClientInstance(client);
     const read = spyOn(ViewHierarchy.prototype, "getViewHierarchy")
       .mockResolvedValueOnce(focusedIOSForm("AB"))
       .mockResolvedValueOnce(focusedIOSForm("Z1"));
@@ -635,7 +633,7 @@ describe("Clipboard Android", () => {
   ])("paste delivery: %s", async (reason) => {
     const adb = new FakeAdbExecutor();
     const factory = new FakeAdbClientFactory(adb);
-    adb.setCommandResponse("shell cmd clipboard get", { stdout: "hello", stderr: "" });
+    adb.setCommandResponse("shell cmd clipboard get", createExecResult("hello", ""));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const undelivered = reason === "WebSocket not connected" || reason === "send failed";

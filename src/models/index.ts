@@ -1,5 +1,6 @@
 export * from "./AccessibilityResult";
 export * from "./ActionableError";
+export * from "./AppNotInstalledError";
 export * from "./ActiveWindowInfo";
 export * from "./AndroidDeviceShellToolResult";
 export * from "./AndroidDeviceResource";
@@ -75,6 +76,7 @@ export * from "./SetTextDirectionResult";
 export * from "./SetTimeZoneResult";
 export * from "./ShakeOptions";
 export * from "./ShakeResult";
+export * from "./PointerOption";
 export * from "./SwipeAtOptions";
 export * from "./SwipeResult";
 export * from "./SwipeOnOptions";

@@ -1,21 +1,22 @@
+import type {
+  CallToolRequest,
+  ReadResourceRequest,
+  CallToolResult,
+  ReadResourceResult,
+  ServerContext,
+} from "@modelcontextprotocol/server";
+import { readToolResponse, toolText } from "../helpers/toolResponse";
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { Client } from "@modelcontextprotocol/client";
+import { Server, type LoggingLevel, InMemoryTransport } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import {
-  CallToolRequestSchema,
-  LoggingMessageNotificationSchema,
-  McpError,
-  ReadResourceRequestSchema,
-  type LoggingLevel,
-} from "@modelcontextprotocol/sdk/types.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
 import {
   livenessHandoverPayload,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
-import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -36,28 +37,29 @@ const stalled: LivenessHandover = {
   lastAcknowledgedHeartbeatAt: 10,
   action: "restart_daemon_then_resume_by_session_uuid",
 };
-const extra = {
-  signal: new AbortController().signal,
-  requestId: 1,
-  sendNotification: async () => {},
-  sendRequest: async () => {
-    throw new Error("Unexpected request");
-  },
-};
+const extra = fakeServerContext({ signal: new AbortController().signal, id: 1 });
 
 /** Exercise the registered handlers without a daemon connection or host process. */
 async function stalledHandlerAnswer(
-  bindings: BindingsResult | undefined,
+  _bindings: undefined,
   surface: "tool" | "resource",
   handover = stalled,
   sessionUuid = SESSION,
 ) {
-  const registration = spyOn(Server.prototype, "setRequestHandler");
+  const registrationTarget: {
+    setRequestHandler(
+      method: "tools/call" | "resources/read",
+      handler: (
+        request: CallToolRequest | ReadResourceRequest,
+        context: ServerContext,
+      ) => CallToolResult | ReadResourceResult | Promise<CallToolResult | ReadResourceResult>,
+    ): void;
+  } = Server.prototype;
+  const registration = spyOn(registrationTarget, "setRequestHandler");
   let harness: ReturnType<typeof createProxyMcpServer>;
   let registrations: typeof registration.mock.calls;
   try {
     harness = createProxyMcpServer({
-      bindings,
       proxyConfig: {
         timer: new FakeTimer(),
         clientFactory: () => new FakeDaemonClient(),
@@ -76,15 +78,15 @@ async function stalledHandlerAnswer(
     surface === "tool" ? "callTool" : "readResource",
   ).mockRejectedValue(refused);
   try {
-    const schema = surface === "tool" ? CallToolRequestSchema : ReadResourceRequestSchema;
-    const handler = registrations.find(([registered]) => registered === schema)?.[1];
-    if (!handler) {
+    const schema = surface === "tool" ? "tools/call" : "resources/read";
+    const handler = registrations.findLast(([registered]) => registered === schema)?.[1];
+    if (typeof handler !== "function") {
       throw new Error("Missing handler");
     }
     if (surface === "tool") {
       const result = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
-      expect(result.isError).toBe(true);
-      return (result.content[0] as { text: string }).text;
+      expect(readToolResponse(result).isError).toBe(true);
+      return toolText(result);
     }
     try {
       await handler({ method: "resources/read", params: { uri: "automobile:hierarchy" } }, extra);
@@ -164,7 +166,7 @@ async function connectStallingHarness(loggingLevel?: LoggingLevel) {
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "liveness-stall-client", version: "0.0.1" });
   const notifications: unknown[] = [];
-  client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+  client.setNotificationHandler("notifications/message", (notification) => {
     notifications.push(notification.params);
   });
   await server.connect(serverTransport);
@@ -252,7 +254,7 @@ describe("proxy server liveness stall reporting", () => {
           arguments: { sessionUuid: "session-1" },
         }),
       );
-      expect(result.isError).toBe(true);
+      expect(readToolResponse(result).isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0].text;
       expect(JSON.parse(text)).toEqual(
         (notifications[0] as { data: unknown }).data as Record<string, unknown>,
@@ -283,7 +285,7 @@ describe("proxy server liveness stall reporting", () => {
           arguments: { sessionUuid: "session-1" },
         }),
       );
-      expect(result.isError).toBe(true);
+      expect(readToolResponse(result).isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0].text;
       expect(JSON.parse(text).error.code).toBe("daemon_stalled");
     } finally {

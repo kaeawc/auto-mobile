@@ -7,6 +7,7 @@ export class FakeIosTunnelClient implements IosTunnelClient {
   alive = false;
   startError: Error | null = null;
   readinessError: Error | null = null;
+  stopError: Error | null = null;
   readonly calls: string[] = [];
   forcedStops = 0;
   readonly starts: IosTunnelStart[] = [];
@@ -37,6 +38,9 @@ export class FakeIosTunnelClient implements IosTunnelClient {
     this.localPort = null;
     if (options.clearDevicePort) {
       this.devicePort = null;
+    }
+    if (this.stopError) {
+      throw this.stopError;
     }
   }
   prepareForcedStop(): ReturnType<IosTunnelClient["prepareForcedStop"]> {

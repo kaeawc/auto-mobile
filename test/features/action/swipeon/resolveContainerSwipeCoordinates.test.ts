@@ -39,15 +39,16 @@ const containerElement = (b: ElementBounds): Element => ({ bounds: b }) as Eleme
 const observe = (
   screenSize: { width: number; height: number },
   insets: { top: number; right: number; bottom: number; left: number },
-): ObserveResult =>
-  ({
-    timestamp: 0,
-    screenSize,
-    systemInsets: insets,
-    viewHierarchy: { hierarchy: {} } as unknown as ViewHierarchyResult,
-  }) as ObserveResult;
+): ObserveResult => ({
+  updatedAt: 0,
+  observationId: "test",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  screenSize,
+  systemInsets: insets,
+  viewHierarchy: { hierarchy: {} },
+});
 
-const emptyHierarchy = { hierarchy: {} } as unknown as ViewHierarchyResult;
+const emptyHierarchy: ViewHierarchyResult = { hierarchy: {} };
 
 const options = (direction: SwipeOnResolvedOptions["direction"]): SwipeOnResolvedOptions =>
   ({ direction }) as SwipeOnResolvedOptions;

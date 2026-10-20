@@ -81,7 +81,7 @@ describe("detectHostAppearance fallback sequence", () => {
     Object.defineProperty(process, "platform", { value: "linux" });
     try {
       expect(await detectHostAppearance(fakeHostDefaults(false, null), executor)).toBe(expected);
-      expect(calls).toEqual(expectedCalls);
+      expect(calls).toEqual([...expectedCalls]);
     } finally {
       Object.defineProperty(process, "platform", platform);
     }

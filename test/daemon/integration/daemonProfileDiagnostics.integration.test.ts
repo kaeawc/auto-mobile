@@ -1,9 +1,9 @@
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Subprocess } from "bun";
 
 const REPOSITORY_ROOT = join(import.meta.dir, "../../..");
@@ -253,7 +253,6 @@ describe("daemon tool-profile diagnostics", () => {
       expect(transport.pid).not.toBeNull();
       const result = await client.callTool(
         { name: "listDevices", arguments: { platform: "android" } },
-        undefined,
         {
           timeout: TEST_TIMEOUT_MS,
         },

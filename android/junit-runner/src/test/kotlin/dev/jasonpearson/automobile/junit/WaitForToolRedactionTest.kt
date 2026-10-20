@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.junit
 
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,9 +23,16 @@ class WaitForToolRedactionTest {
   private class FixedResultClient(private val result: String) : AutoMobileAgent.MCPClient {
     override fun isConnected() = true
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
+
+    override fun disconnect() {
+      disconnectCalls++
+    }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>): String = result
 
@@ -35,9 +43,16 @@ class WaitForToolRedactionTest {
   private class FailingClient : AutoMobileAgent.MCPClient {
     override fun isConnected() = true
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
+
+    override fun disconnect() {
+      disconnectCalls++
+    }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>): String =
       throw AssertionError(
@@ -139,15 +154,23 @@ class WaitForToolRedactionTest {
   /**
    * Throws with a secret echoed in the exception message — mimics DefaultMCPClient's failure mode.
    */
-  private class ThrowingClient(private val message: String) : AutoMobileAgent.MCPClient {
+  private class ThrowingClient(private val failure: Exception) : AutoMobileAgent.MCPClient {
+    constructor(message: String) : this(IllegalStateException(message))
+
     override fun isConnected() = true
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
 
-    override fun callTool(toolName: String, parameters: Map<String, Any>): String =
-      throw RuntimeException(message)
+    override fun disconnect() {
+      disconnectCalls++
+    }
+
+    override fun callTool(toolName: String, parameters: Map<String, Any>): String = throw failure
 
     override fun listAvailableTools(): List<AutoMobileAgent.MCPToolDefinition> = emptyList()
   }
@@ -194,6 +217,37 @@ class WaitForToolRedactionTest {
       null,
       error.cause,
     )
+  }
+
+  @Test
+  fun `both recovery clients preserve checked cancellation and interruption failure mapping`() {
+    val secret = "TOKEN-OK-123"
+    val failures =
+      listOf(
+        Exception(secret, IllegalArgumentException(secret)),
+        CancellationException(secret),
+        InterruptedException(secret),
+        Exception(),
+      )
+    for (failure in failures) {
+      val delegate = ThrowingClient(failure)
+      val clients =
+        listOf(
+          RedactingMCPClient(delegate, listOf(secret)),
+          FailureRedactingMCPClient(delegate, listOf(secret)),
+        )
+      for (client in clients) {
+        val error =
+          assertThrows(IllegalStateException::class.java) { client.callTool("observe", emptyMap()) }
+        assertEquals(
+          if (failure.message == null) "java.lang.Exception" else SecretRedactor.PLACEHOLDER,
+          error.message,
+        )
+        assertEquals(null, error.cause)
+        assertTrue(error.suppressed.isEmpty())
+        assertFalse(error.stackTraceToString().contains(secret))
+      }
+    }
   }
 
   @Test

@@ -33,8 +33,9 @@ class TestServer extends VideoStreamSocketServer {
 // Models Bun leaving end() pending when terminal writes cannot drain to a disconnected peer.
 class PendingEndSocket extends FakeSocket {
   endCalls = 0;
-  override end(): void {
+  override end(): this {
     this.endCalls++;
+    return this;
   }
 }
 class NonReadingSocket extends PendingEndSocket {

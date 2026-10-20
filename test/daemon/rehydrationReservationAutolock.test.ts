@@ -1,13 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { makePool } from "../helpers/makePool";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // #11461 (restart ownership). "At the start of recovery the device of every persisted session is
 // reserved, so no other caller takes it while rows are recovered one by one"
@@ -43,7 +41,7 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
       { autolockEnabled: true },
     );
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
     await persistence.upsertActiveSession({
@@ -63,28 +61,33 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager();
     manager.bootedDevices = [ios(SIM)];
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "reservation-autolock", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(sessions, "reservation-autolock", { timer, deviceManager: manager });
     await pool.initializeWithDevices([ios(SIM)]);
     // Startup rehydration's first step: every persisted row's device is held for that row.
     await pool.reserveDevicesForRehydration([
       { sessionId: ROW, target: { platform: "ios", stableDeviceId: SIM, deviceId: SIM } },
     ]);
     expect(pool.genericAvailability(SIM)).toBe("reserved");
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessions.stopCleanupTimer();
     timer.reset();
   });
 
-  test("another client's autolock does not take the reserved device", async () => {
+  arranged("another client's autolock does not take the reserved device", async () => {
     const outcome = await autolockAsOtherClient().then(
       (sessionId) => `autolocked as ${sessionId === undefined ? "nothing" : "a new session"}`,
       () => "refused",
@@ -96,17 +99,20 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
     });
   });
 
-  test("the reserved row still recovers onto its device after that autolock attempt", async () => {
-    await autolockAsOtherClient().catch(() => undefined);
+  arranged(
+    "the reserved row still recovers onto its device after that autolock attempt",
+    async () => {
+      await autolockAsOtherClient().catch(() => undefined);
 
-    const recovery = await sessions.getOrCreateSession(ROW, pool, "ios", undefined, true).then(
-      (session) => `recovered on ${session.assignedDevice}`,
-      () => "lost",
-    );
+      const recovery = await sessions.getOrCreateSession(ROW, pool, "ios", undefined, true).then(
+        (session) => `recovered on ${session.assignedDevice}`,
+        () => "lost",
+      );
 
-    expect({
-      recovery,
-      terminal: sessions.getTerminalReleaseSnapshot(ROW)?.releaseReason,
-    }).toEqual({ recovery: `recovered on ${SIM}`, terminal: undefined });
-  });
+      expect({
+        recovery,
+        terminal: sessions.getTerminalReleaseSnapshot(ROW)?.releaseReason,
+      }).toEqual({ recovery: `recovered on ${SIM}`, terminal: undefined });
+    },
+  );
 });

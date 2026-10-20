@@ -1,11 +1,10 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DeviceShuttingDownError,
   DeviceTransportOfflineError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -13,9 +12,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 
@@ -37,15 +34,12 @@ async function setup(pooled: boolean) {
   const timer = new FakeTimer();
   sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new FakeDeviceManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      deviceManager: manager,
-      env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   if (pooled) {
     await pool.addDevice(device, image);
   }
@@ -53,7 +47,13 @@ async function setup(pooled: boolean) {
   const kill = spyOn(manager, "killDevice");
   const remove = spyOn(pool, "removeDevice");
   manager.androidListedDeviceStates.set(device.deviceId, "offline");
-  const bind = () => pool.bindOrReuseDeviceSession("owner", device.deviceId, "android", image);
+  const bind = () =>
+    pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: device.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
   const noLossSideEffects = () => {
     expect(kill).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
@@ -95,14 +95,13 @@ describe("exact Android binding during transitional adb presence", () => {
         h.manager.androidListedDeviceStates.set(device.deviceId, state);
       }
       const pending = track(
-        h.pool.bindOrReuseDeviceSession(
-          "owner",
-          device.deviceId,
-          "android",
-          image,
-          undefined,
-          device,
-        ),
+        h.pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+          expectedIdentity: device,
+        }),
       );
       await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
         description: "adopted transport wait",
@@ -132,7 +131,7 @@ describe("exact Android binding during transitional adb presence", () => {
       });
       expect(pending.settled()).toBe(false);
       expect(discovery).toHaveBeenCalledTimes(1);
-      expect((await discovery.mock.results[0]!.value).devices).toEqual([]);
+      expect(await discovery.mock.results[0]!.value).toHaveProperty("devices", []);
       h.unchanged();
       h.manager.bootedDevices = [device];
       h.manager.androidListedDeviceStates.set(device.deviceId, "device");
@@ -140,10 +139,10 @@ describe("exact Android binding during transitional adb presence", () => {
       const sessionId = await pending.result;
       expect(sessionId).toEqual(expect.any(String));
       expect(discovery).toHaveBeenCalledTimes(2);
-      expect((await discovery.mock.results[1]!.value).devices).toEqual([device]);
+      expect(await discovery.mock.results[1]!.value).toHaveProperty("devices", [device]);
       expect(h.timer.now()).toBe(100);
       expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
-      expect(h.entry?.sessionId).toBe(sessionId);
+      expect(sessionId).toBe(h.entry?.sessionId);
       h.noLossSideEffects();
     } finally {
       discovery.mockRestore();
@@ -157,14 +156,13 @@ describe("exact Android binding during transitional adb presence", () => {
     const error = await settleByFakeEvents(
       h.timer,
       track(
-        h.pool.bindOrReuseDeviceSession(
-          "owner",
-          device.deviceId,
-          "android",
-          image,
-          undefined,
-          device,
-        ),
+        h.pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+          expectedIdentity: device,
+        }),
       ).result,
       { description: "adopted transport budget" },
     );
@@ -187,7 +185,7 @@ describe("exact Android binding during transitional adb presence", () => {
     test(`${autolock ? "autolock" : "explicit bind"}: live first-boot process holds offline then absent transport until the same serial returns`, async () => {
       const h = await setup(true);
       const child = new FakeChildProcess(h.timer);
-      const process = child as unknown as ChildProcess;
+      const process = child;
       h.manager.bootedDevices = [device];
       h.manager.androidListedDeviceStates.set(device.deviceId, "device");
       expect(await h.manager.getBootedDevices("android")).toEqual([device]);
@@ -196,7 +194,13 @@ describe("exact Android binding during transitional adb presence", () => {
       const pending = track(
         autolock
           ? h.pool.autolockDevice(device.deviceId, "android", "client", image, process)
-          : h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android", image, process),
+          : h.pool.bindOrReuseDeviceSession({
+              sessionId: "owner",
+              deviceId: device.deviceId,
+              platform: "android",
+              sourceImage: image,
+              childProcess: process,
+            }),
       );
       await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
         description: "first-boot offline wait",
@@ -228,13 +232,13 @@ describe("exact Android binding during transitional adb presence", () => {
       );
       try {
         const pending = track(
-          h.pool.bindOrReuseDeviceSession(
-            "owner",
-            device.deviceId,
-            "android",
-            image,
-            live ? (child as unknown as ChildProcess) : undefined,
-          ),
+          h.pool.bindOrReuseDeviceSession({
+            sessionId: "owner",
+            deviceId: device.deviceId,
+            platform: "android",
+            sourceImage: image,
+            childProcess: live ? child : undefined,
+          }),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
           description: "listing and probe disagreement",
@@ -278,13 +282,13 @@ describe("exact Android binding during transitional adb presence", () => {
       const shutdown = spyOn(h.pool, "markIntentionalShutdown");
       try {
         const pending = track(
-          h.pool.bindOrReuseDeviceSession(
-            "owner",
-            device.deviceId,
-            "android",
-            image,
-            child as unknown as ChildProcess,
-          ),
+          h.pool.bindOrReuseDeviceSession({
+            sessionId: "owner",
+            deviceId: device.deviceId,
+            platform: "android",
+            sourceImage: image,
+            childProcess: child,
+          }),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
           description: "offline wait before absence",
@@ -352,16 +356,15 @@ describe("exact Android binding during transitional adb presence", () => {
     );
     try {
       const pending = track(
-        h.pool.bindOrReuseDeviceSession(
-          "owner",
-          device.deviceId,
-          "android",
-          image,
-          undefined,
-          device,
-          false,
-          new Set([reservation.owner]),
-        ),
+        h.pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+          expectedIdentity: device,
+          allowSessionRebind: false,
+          readinessReservationOwners: new Set([reservation.owner]),
+        }),
       );
       await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
         description: "own-reservation bind wait",
@@ -389,21 +392,20 @@ describe("exact Android binding during transitional adb presence", () => {
       device.name,
       image.name,
     );
-    const entryBefore = { ...h.entry };
+    const entryBefore = { ...h.entry! };
     try {
       const error = await settleByFakeEvents(
         h.timer,
         track(
-          h.pool.bindOrReuseDeviceSession(
-            "owner",
-            device.deviceId,
-            "android",
-            image,
-            undefined,
-            device,
-            false,
-            new Set([reservation.owner]),
-          ),
+          h.pool.bindOrReuseDeviceSession({
+            sessionId: "owner",
+            deviceId: device.deviceId,
+            platform: "android",
+            sourceImage: image,
+            expectedIdentity: device,
+            allowSessionRebind: false,
+            readinessReservationOwners: new Set([reservation.owner]),
+          }),
         ).result,
         { description: "own-reservation offline budget" },
       );
@@ -554,11 +556,16 @@ describe("exact Android binding during transitional adb presence", () => {
     await h.bind();
     h.manager.bootedDevices = [];
     h.manager.androidListedDeviceStates.set(device.deviceId, "offline");
-    const entryBefore = { ...h.entry };
+    const entryBefore = { ...h.entry! };
     const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {
       const pending = track(
-        h.pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image),
+        h.pool.bindOrReuseDeviceSession({
+          sessionId: "other-session",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+        }),
       );
       await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
         description: "foreign-holder bind",
@@ -609,16 +616,15 @@ describe("exact Android binding during transitional adb presence", () => {
                 device,
                 owners,
               )
-            : h.pool.bindOrReuseDeviceSession(
-                "owner",
-                device.deviceId,
-                "android",
-                image,
-                undefined,
-                device,
-                false,
-                owners,
-              ),
+            : h.pool.bindOrReuseDeviceSession({
+                sessionId: "owner",
+                deviceId: device.deviceId,
+                platform: "android",
+                sourceImage: image,
+                expectedIdentity: device,
+                allowSessionRebind: false,
+                readinessReservationOwners: owners,
+              }),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
           description: "own-readiness name bind wait",
@@ -633,7 +639,7 @@ describe("exact Android binding during transitional adb presence", () => {
         expect(sessionId).toEqual(autolock ? expect.any(String) : "owner");
         expect(h.timer.now()).toBe(100);
         expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
-        expect(h.entry?.sessionId).toBe(sessionId);
+        expect(sessionId).toBe(h.entry?.sessionId);
         h.noLossSideEffects();
       } finally {
         probe.mockRestore();
@@ -693,7 +699,7 @@ describe("exact Android binding during transitional adb presence", () => {
     const recovery = h.pool.recoverSessionBoundAndroidDeviceAfterLoss(
       device.deviceId,
       undefined,
-      h.entry,
+      h.entry ?? undefined,
     );
     const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { ActionableError, BootedDevice } from "../../../src/models";
@@ -53,7 +54,7 @@ describe("GrantAndroidPermissions", () => {
       ]);
       adb.setCommandResponseSequence(
         "shell dumpsys package",
-        snapshots(permissionAction, userId).map((stdout) => ({ stdout, stderr: "" })),
+        snapshots(permissionAction, userId).map((stdout) => createExecResult(stdout, "")),
       );
       const action = new GrantAndroidPermissions(
         androidDevice,
@@ -86,17 +87,17 @@ describe("GrantAndroidPermissions", () => {
         { userId: 0, name: "Owner", flags: 0x13, running: true },
         { userId: 10, name: "Work", flags: 0x30, running: true },
       ]);
-      adb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.example.app",
-        stderr: "",
-      });
-      adb.setCommandResponse("shell pm list packages --user 10", {
-        stdout: "package:com.example.other",
-        stderr: "",
-      });
+      adb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult("package:com.example.app", ""),
+      );
+      adb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult("package:com.example.other", ""),
+      );
       adb.setCommandResponseSequence(
         "shell dumpsys package",
-        snapshots(permissionAction, 0).map((stdout) => ({ stdout, stderr: "" })),
+        snapshots(permissionAction, 0).map((stdout) => createExecResult(stdout, "")),
       );
       const action = new GrantAndroidPermissions(
         androidDevice,
@@ -131,10 +132,10 @@ describe("GrantAndroidPermissions", () => {
         { userId: 10, name: "Work", flags: 0x30, running: true },
       ]);
       for (const userId of [0, 10]) {
-        adb.setCommandResponse(`shell pm list packages --user ${userId}`, {
-          stdout: "package:com.example.other",
-          stderr: "",
-        });
+        adb.setCommandResponse(
+          `shell pm list packages --user ${userId}`,
+          createExecResult("package:com.example.other", ""),
+        );
       }
       const perf = new FakeRecordingPerformanceTracker();
       const action = new GrantAndroidPermissions(
@@ -197,10 +198,10 @@ describe("GrantAndroidPermissions", () => {
   test("quotes unrequested permission and package safely without sending pm", async () => {
     const adb = new FakeAdbExecutor();
     const packageName = "com.example.app; id #";
-    adb.setCommandResponse("shell dumpsys package", {
-      stdout: egg.replaceAll("com.android.egg", packageName),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell dumpsys package",
+      createExecResult(egg.replaceAll("com.android.egg", packageName), ""),
+    );
     const action = new GrantAndroidPermissions(
       androidDevice,
       new FakeAdbClientFactory(adb),
@@ -220,7 +221,7 @@ describe("GrantAndroidPermissions", () => {
     adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
     adb.setCommandResponseSequence(
       "shell dumpsys package",
-      snapshots("grant", 0).map((stdout) => ({ stdout, stderr: "" })),
+      snapshots("grant", 0).map((stdout) => createExecResult(stdout, "")),
     );
     const action = new GrantAndroidPermissions(
       androidDevice,
@@ -240,10 +241,10 @@ describe("GrantAndroidPermissions", () => {
 
   test("still refuses a short name the app does not request", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell dumpsys package", {
-      stdout: egg.replaceAll("com.android.egg", "com.example.app"),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell dumpsys package",
+      createExecResult(egg.replaceAll("com.android.egg", "com.example.app"), ""),
+    );
     const action = new GrantAndroidPermissions(
       androidDevice,
       new FakeAdbClientFactory(adb),

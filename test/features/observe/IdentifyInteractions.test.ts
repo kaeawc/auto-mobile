@@ -4,28 +4,38 @@ import { describe, expect, test } from "bun:test";
 import { IdentifyInteractions } from "../../../src/features/observe/IdentifyInteractions";
 import { swipeOnSchema, tapOnSchema } from "../../../src/server/interactionTools";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 import type { Element } from "../../../src/models";
+
+/** A complete observation around the given hierarchy, at the screen size the classifier reads. */
+function observationWith(viewHierarchy: ViewHierarchyResult | undefined): ObserveResult {
+  return {
+    observationId: "identify-interactions-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    updatedAt: 1,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+  };
+}
 
 // Build a minimal Android view hierarchy whose child nodes are the interaction
 // candidates. Each entry becomes a `$`-attributed node with bounds so the
 // element finder and geometry accept it.
 function hierarchyOf(nodes: Array<Record<string, unknown>>): ObserveResult {
   const bounds = (i: number) => ({ left: 10, top: 10 + i * 60, right: 110, bottom: 60 + i * 60 });
-  return {
-    viewHierarchy: {
-      hierarchy: {
-        node: {
-          $: {
-            class: "android.widget.FrameLayout",
-            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
-          },
-          node: nodes.map((attrs, i) => ({ $: { bounds: bounds(i), ...attrs } })),
+  return observationWith({
+    hierarchy: {
+      node: {
+        $: {
+          class: "android.widget.FrameLayout",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
         },
+        node: nodes.map((attrs, i) => ({ $: { bounds: bounds(i), ...attrs } })),
       },
     },
-    screenSize: { width: 1080, height: 1920 },
-  } as unknown as ObserveResult;
+  });
 }
 
 const classifier = new IdentifyInteractions();
@@ -47,59 +57,48 @@ describe("IdentifyInteractions scoring characterization", () => {
 
   test("scores tap args by exact id or normalized text and ignores other tools' args", () => {
     expect(
-      classifier["scoreEdgeMatch"](
+      classifier.scoreEdgeMatch(
         identifiers,
         edge("tapOn", { elementId: "submit", text: "Submit" }),
       ),
     ).toBe(0.95);
-    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { id: "submit" }))).toBe(0.95);
+    expect(classifier.scoreEdgeMatch(identifiers, edge("tapOn", { id: "submit" }))).toBe(0.95);
     expect(
-      classifier["scoreEdgeMatch"](
-        identifiers,
-        edge("tapOn", { elementId: "wrong", id: "submit" }),
-      ),
+      classifier.scoreEdgeMatch(identifiers, edge("tapOn", { elementId: "wrong", id: "submit" })),
     ).toBe(0);
     expect(
-      classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { elementId: 2, id: "submit" })),
+      classifier.scoreEdgeMatch(identifiers, edge("tapOn", { elementId: 2, id: "submit" })),
     ).toBe(0.95);
-    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { text: " SEND " }))).toBe(0.85);
-    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { text: " " }))).toBe(0);
+    expect(classifier.scoreEdgeMatch(identifiers, edge("tapOn", { text: " SEND " }))).toBe(0.85);
+    expect(classifier.scoreEdgeMatch(identifiers, edge("tapOn", { text: " " }))).toBe(0);
     expect(
-      classifier["scoreEdgeMatch"](identifiers, edge("swipeOn", { id: "submit", text: "Submit" })),
+      classifier.scoreEdgeMatch(identifiers, edge("swipeOn", { id: "submit", text: "Submit" })),
     ).toBe(0);
     expect(
-      classifier["scoreEdgeMatch"](identifiers, { ...edge("tapOn"), interaction: undefined }),
+      classifier.scoreEdgeMatch(identifiers, { ...edge("tapOn"), interaction: undefined }),
     ).toBe(0);
   });
 
   test("reads a recorded tapOn's target from args.selector and falls back to top-level keys", () => {
     expect(
-      classifier["scoreEdgeMatch"](
-        identifiers,
-        edge("tapOn", { selector: { elementId: "submit" } }),
-      ),
+      classifier.scoreEdgeMatch(identifiers, edge("tapOn", { selector: { elementId: "submit" } })),
     ).toBe(0.95);
     expect(
-      classifier["scoreEdgeMatch"](
+      classifier.scoreEdgeMatch(
         identifiers,
         edge("tapOn", { selector: { text: " SEND " }, index: 1, action: "tap" }),
       ),
     ).toBe(0.85);
     expect(
-      classifier["scoreEdgeMatch"](
-        identifiers,
-        edge("tapOn", { selector: { elementId: "other" } }),
-      ),
+      classifier.scoreEdgeMatch(identifiers, edge("tapOn", { selector: { elementId: "other" } })),
     ).toBe(0);
     // A selector without a usable target does not hide a legacy top-level target.
     expect(
-      classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { selector: {}, id: "submit" })),
+      classifier.scoreEdgeMatch(identifiers, edge("tapOn", { selector: {}, id: "submit" })),
     ).toBe(0.95);
-    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { selector: "submit" }))).toBe(
-      0,
-    );
+    expect(classifier.scoreEdgeMatch(identifiers, edge("tapOn", { selector: "submit" }))).toBe(0);
     expect(
-      classifier["scoreEdgeMatch"](
+      classifier.scoreEdgeMatch(
         identifiers,
         edge("swipeOn", { selector: { elementId: "submit" } }),
       ),
@@ -111,14 +110,14 @@ describe("IdentifyInteractions scoring characterization", () => {
     selectedEdge.interaction!.uiState = {
       selectedElements: [{ resourceId: "submit", text: "Submit", contentDesc: "Send" }],
     };
-    expect(classifier["scoreEdgeMatch"](identifiers, selectedEdge)).toBe(0);
+    expect(classifier.scoreEdgeMatch(identifiers, selectedEdge)).toBe(0);
     const tapEdge = edge("tapOn", { selector: { elementId: "elsewhere" } });
     tapEdge.interaction!.uiState = { selectedElements: [{ text: "Submit" }] };
-    expect(classifier["scoreEdgeMatch"](identifiers, tapEdge)).toBe(0);
+    expect(classifier.scoreEdgeMatch(identifiers, tapEdge)).toBe(0);
   });
 
   test("confidence retains type floors, identifier weights, boolean/string flags, and cap", () => {
-    const empty: Element = {};
+    const empty: Element = { bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     for (const [type, expected] of [
       ["action", 0.6],
       ["input", 0.85],
@@ -126,27 +125,57 @@ describe("IdentifyInteractions scoring characterization", () => {
       ["scroll", 0.7],
       ["navigation", 0.75],
     ] as const) {
-      expect(classifier["computeConfidence"](empty, type, false)).toBe(expected);
+      expect(classifier.computeConfidence(empty, type, false)).toBe(expected);
     }
     expect(
-      classifier["computeConfidence"]({ clickable: true, "resource-id": "submit" }, "action", true),
+      classifier.computeConfidence(
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          clickable: true,
+          "resource-id": "submit",
+        },
+        "action",
+        true,
+      ),
     ).toBe(0.85);
     expect(
-      classifier["computeConfidence"](
-        { clickable: "true", "content-desc": "Send" },
+      classifier.computeConfidence(
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          clickable: "true",
+          "content-desc": "Send",
+        },
         "action",
         true,
       ),
     ).toBe(0.8);
     expect(
-      classifier["computeConfidence"]({ scrollable: true, "resource-id": "feed" }, "scroll", true),
+      classifier.computeConfidence(
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          scrollable: true,
+          "resource-id": "feed",
+        },
+        "scroll",
+        true,
+      ),
     ).toBe(0.8);
     expect(
-      classifier["computeConfidence"]({ scrollable: "true", text: "Home" }, "navigation", false),
+      classifier.computeConfidence(
+        { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, scrollable: "true", text: "Home" },
+        "navigation",
+        false,
+      ),
     ).toBe(0.85);
     expect(
-      classifier["computeConfidence"](
-        { clickable: true, scrollable: true, "resource-id": "all", "content-desc": "All" },
+      classifier.computeConfidence(
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          clickable: true,
+          scrollable: true,
+          "resource-id": "all",
+          "content-desc": "All",
+        },
         "action",
         true,
       ),
@@ -161,11 +190,11 @@ describe("IdentifyInteractions scoring characterization", () => {
       ["navigation", "Submit navigation", "Navigation option"],
       ["action", "Submit action", "Action"],
     ] as const) {
-      expect(classifier["buildDescription"](type, identifiers)).toBe(labeled);
-      expect(classifier["buildDescription"](type, { className: "button" })).toBe(unlabeled);
+      expect(classifier.buildDescription(type, identifiers)).toBe(labeled);
+      expect(classifier.buildDescription(type, { className: "button" })).toBe(unlabeled);
     }
     expect(
-      classifier["buildDescription"]("action", {
+      classifier.buildDescription("action", {
         text: "",
         contentDescription: "Send",
         resourceId: "submit",
@@ -173,17 +202,32 @@ describe("IdentifyInteractions scoring characterization", () => {
       }),
     ).toBe("Send action");
     expect(
-      classifier["buildDescription"]("action", { resourceId: "submit", className: "button" }),
+      classifier.buildDescription("action", { resourceId: "submit", className: "button" }),
     ).toBe("submit action");
   });
 
   test("builds contiguous ids, admits unlabeled scrolls, and honors optional details", () => {
     const candidates = [
-      { element: { clickable: true }, hasText: false },
-      { element: { scrollable: true }, typeHint: "scroll" as const, hasText: false },
-      { element: { text: "Submit", clickable: true, "resource-id": "submit" }, hasText: true },
+      {
+        element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, clickable: true },
+        hasText: false,
+      },
+      {
+        element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, scrollable: true },
+        typeHint: "scroll" as const,
+        hasText: false,
+      },
+      {
+        element: {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "Submit",
+          clickable: true,
+          "resource-id": "submit",
+        },
+        hasText: true,
+      },
     ];
-    const result = classifier["buildInteractions"](
+    const result = classifier.buildInteractions(
       candidates,
       false,
       false,
@@ -200,7 +244,7 @@ describe("IdentifyInteractions scoring characterization", () => {
         predictedOutcome: { type: "screen_change", destination: "Detail", confidence: 0.95 },
       },
     ]);
-    const noMatch = classifier["buildInteractions"](
+    const noMatch = classifier.buildInteractions(
       candidates,
       true,
       true,
@@ -211,7 +255,7 @@ describe("IdentifyInteractions scoring characterization", () => {
     expect(noMatch[1].element?.resourceId).toBe("submit");
     expect(noMatch[1].predictedOutcome).toBeUndefined();
     expect(
-      classifier["buildInteractions"](
+      classifier.buildInteractions(
         candidates,
         false,
         false,
@@ -225,7 +269,7 @@ describe("IdentifyInteractions scoring characterization", () => {
 describe("IdentifyInteractions", () => {
   test("returns an error when no observation is available", () => {
     const result = classifier.analyze(
-      { screenSize: { width: 1080, height: 1920 } } as unknown as ObserveResult,
+      observationWith(undefined),
       { platform: "android" },
       "HomeScreen",
       [],
@@ -515,8 +559,8 @@ describe("IdentifyInteractions captured Compose editability", () => {
     expect(capturedFields).toHaveLength(3);
     for (const { element } of capturedFields) {
       expect(element.actions).toContain("set_text");
-      expect(classifier["getTypeHint"](element)).toBe("input");
-      expect(classifier["classifyInteraction"](element)).toBe("input");
+      expect(classifier.getTypeHint(element)).toBe("input");
+      expect(classifier.classifyInteraction(element)).toBe("input");
     }
   });
 
@@ -525,8 +569,18 @@ describe("IdentifyInteractions captured Compose editability", () => {
     const field = parser
       .flattenViewHierarchy(fields.viewHierarchy!)
       .find(({ element }) => element.class === "android.widget.EditText")!.element;
-    expect(classifier["getTypeHint"]({ actions: field.actions })).toBe("input");
-    expect(classifier["classifyInteraction"]({ actions: field.actions })).toBe("input");
+    expect(
+      classifier.getTypeHint({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        actions: field.actions,
+      }),
+    ).toBe("input");
+    expect(
+      classifier.classifyInteraction({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        actions: field.actions,
+      }),
+    ).toBe("input");
   });
 
   test.each([
@@ -538,9 +592,10 @@ describe("IdentifyInteractions captured Compose editability", () => {
     { class: "XCUIElementTypeTextView" },
     { password: true },
     { password: "true" },
-  ])("preserves native input class and password signals %j", (element) => {
-    expect(classifier["getTypeHint"](element)).toBe("input");
-    expect(classifier["classifyInteraction"](element)).toBe("input");
+  ])("preserves native input class and password signals %j", (attributes) => {
+    const element = { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, ...attributes };
+    expect(classifier.getTypeHint(element)).toBe("input");
+    expect(classifier.classifyInteraction(element)).toBe("input");
   });
 
   test("focus alone on a captured button never becomes an input candidate", () => {
@@ -549,6 +604,6 @@ describe("IdentifyInteractions captured Compose editability", () => {
       .find(({ element }) => element["resource-id"] === "button_regular")!.element;
     expect(button.focusable).toBe("true");
     expect(button.clickable).toBe("true");
-    expect(classifier["getTypeHint"](button)).toBeUndefined();
+    expect(classifier.getTypeHint(button)).toBeUndefined();
   });
 });

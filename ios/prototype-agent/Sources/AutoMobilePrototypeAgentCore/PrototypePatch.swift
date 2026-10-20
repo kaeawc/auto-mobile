@@ -400,4 +400,118 @@ enum PrototypePatch {
         if case let .object(fields) = result { return fields }
         return spec
     }
+
+    // MARK: Device application (#11675)
+
+    /// The first `/state/<key>` key of every state op, in order and without repeats.
+    static func stateKeys(_ ops: JSONValue) -> [String] {
+        guard case let .array(items) = ops else { return [] }
+        var seen = Set<String>()
+        return items.compactMap { value -> String? in
+            guard case let .object(operation) = value, let path = get(operation, "path")?.stringValue,
+                  path.utf16.starts(with: "/state/".utf16) else { return nil }
+            return PrototypeDataPointer.tokens(String(
+                decoding: path.utf16.dropFirst("/state".utf16.count),
+                as: UTF16.self
+            ))
+            .first
+        }.filter { seen.insert($0).inserted }
+    }
+
+    /// The refusal for a patch that touches state without a usable `baseRevision`, or on a key a device
+    /// write changed after it (the conflict carries those keys' current values); nil when it may proceed.
+    static func stateGuard(
+        ops: JSONValue, baseRevision: Int?, revision: Int, stateRevisions: [String: Int],
+        state: [String: JSONValue]
+    )
+        -> PrototypePatchOutcome?
+    {
+        guard touchesState(ops) else { return nil }
+        guard let baseRevision else {
+            return .rejected(message: "baseRevision is required when a patch has /state ops", revision: revision)
+        }
+        guard baseRevision <= revision else {
+            return .rejected(
+                message: "baseRevision \(baseRevision) is newer than the device revision \(revision)",
+                revision: revision
+            )
+        }
+        let changed = Set(stateKeys(ops).filter { (stateRevisions[$0] ?? 0) > baseRevision })
+        guard !changed.isEmpty else { return nil }
+        return .conflict(
+            revision: revision,
+            state: state.filter { changed.contains($0.key) },
+            baseRevision: baseRevision
+        )
+    }
+
+    /// The UTF-8 size of the parts of `spec` a patch can change outside `/state`: its authored root
+    /// and its data. The difference between two specs is how far a patch moved the size baseline.
+    static func structureBytes(_ spec: PrototypeSpec) -> Int {
+        var parts: [String: JSONValue] = ["root": spec.authoredRoot]
+        if let data = spec.data { parts["data"] = .object(data) }
+        return PrototypeStateValidator.stateBytes(parts)
+    }
+
+    /// Applies `ops` to `spec` with `state` as its live state and rebuilds the spec the way a show
+    /// would, then checks the new state against every bound control. The failure is the message for
+    /// `prototype_result.error`.
+    static func rebuild(
+        _ spec: PrototypeSpec, state: [String: JSONValue], ops: JSONValue, nonStateBytes: Int
+    )
+        -> Result<(PrototypeSpec, [String: JSONValue]), PatchRefusal>
+    {
+        var source: [String: JSONValue] = ["id": .string(spec.id), "root": spec.authoredRoot, "state": .object(state)]
+        if let data = spec.data { source["data"] = .object(data) }
+        switch apply(spec: .object(source), ops: ops) {
+        case let .failure(failure): return .failure(PatchRefusal(message: "\(failure.path): \(failure.message)"))
+        case let .success(.object(fields)):
+            let newState = fields["state"]?.objectFields ?? [:]
+            do {
+                let patched = try spec.patched(
+                    authoredRoot: fields["root"] ?? spec.authoredRoot, data: fields["data"]?.objectFields,
+                    state: newState
+                )
+                if let rejection = PrototypeStateValidator.rejection(
+                    root: patched.root, state: newState, nonStateBytes: nonStateBytes
+                ) {
+                    return .failure(PatchRefusal(message: rejection))
+                }
+                return .success((patched, newState))
+            } catch {
+                return .failure(PatchRefusal(message: "Invalid prototype patch: \(error)"))
+            }
+        case .success: return .failure(PatchRefusal(message: "$: Expected object"))
+        }
+    }
+
+    struct PatchRefusal: Error, Equatable {
+        let message: String
+    }
+}
+
+/// What a `patch_prototype` request reports (#11675); the wire shape is `prototype_result` plus
+/// `revision` on success and `conflict: {revision, state}` on a conflict.
+enum PrototypePatchOutcome: Equatable {
+    case applied(revision: Int)
+    case conflict(revision: Int, state: [String: JSONValue], baseRevision: Int)
+    case rejected(message: String, revision: Int?)
+
+    /// The extra `prototype_result` fields, plus the error text of a refusal.
+    var reply: (success: Bool, error: String?, extra: [String: Any]) {
+        switch self {
+        case let .applied(revision):
+            return (true, nil, ["revision": revision])
+        case let .conflict(revision, state, baseRevision):
+            return (
+                false, "conflict: state changed after baseRevision \(baseRevision)",
+                [
+                    "revision": revision,
+                    "conflict": ["revision": revision, "state": JSONValue.object(state).foundationObject],
+                ]
+            )
+        case let .rejected(message, revision):
+            return (false, message, revision.map { ["revision": $0] } ?? [:])
+        }
+    }
 }

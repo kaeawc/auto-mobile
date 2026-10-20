@@ -212,6 +212,19 @@ bun run benchmark-startup --threshold 1.3
 - Device discovery scenarios run only when `adb` is available and at least one device is connected.
 - The benchmark will run `adb kill-server` when measuring cold ADB startup impact.
 
+## Stateless MCP Endpoint Benchmark
+
+Time sequential requests against the daemon's stateless MCP HTTP endpoint
+(`/auto-mobile/streamable`, #13068) on a loopback port. Device discovery is a
+fake whose cost is modelled by `--discovery-cost-ms`, so no device, emulator,
+simulator or resident daemon is touched; the report counts discovery probes per
+request, which must stay at zero once warm:
+
+```bash
+bun scripts/benchmark-stateless-endpoint.ts --iterations 200 --warmup 30 --discovery-cost-ms 5
+bun scripts/benchmark-stateless-endpoint.ts --max-p50-ms 6 --json
+```
+
 ## NPM Unpacked Size Benchmark
 
 Measure and enforce the NPM unpacked size threshold for the root package:

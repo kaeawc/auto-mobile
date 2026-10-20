@@ -1,11 +1,7 @@
-import * as net from "node:net";
 import { trackAmbient } from "../PerfContext";
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
 import { ActionableError } from "../../models";
-import { logger } from "../logger";
-import { Timer, defaultTimer } from "../SystemTimer";
+export { FileEmulatorConsoleAuthTokenReader } from "./FileEmulatorConsoleAuthTokenReader";
+export { NetEmulatorConsoleTransport } from "./NetEmulatorConsoleTransport";
 
 /**
  * High-level client for the Android emulator console protocol (telnet, port 5554+).
@@ -47,29 +43,6 @@ export interface EmulatorConsoleAuthTokenReader {
   read(): Promise<string | null>;
 }
 
-export class FileEmulatorConsoleAuthTokenReader implements EmulatorConsoleAuthTokenReader {
-  constructor(
-    private readonly tokenPath: string = path.join(os.homedir(), ".emulator_console_auth_token"),
-  ) {}
-
-  async read(): Promise<string | null> {
-    try {
-      const content = await fs.promises.readFile(this.tokenPath, "utf-8");
-      const trimmed = content.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === "ENOENT") {
-        return null;
-      }
-      logger.warn(
-        `Failed to read emulator console auth token from ${this.tokenPath}: ${err.message}`,
-      );
-      return null;
-    }
-  }
-}
-
 export type ConsoleAcknowledgementResult = { ok: true } | { ok: false; reason?: string };
 
 /**
@@ -105,91 +78,6 @@ export function parseConsoleAcknowledgement(
 
   const okCount = commandAcknowledgements.filter((line) => line.type === "ok").length;
   return okCount >= commandCount ? { ok: true } : { ok: false };
-}
-
-export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
-  constructor(
-    private readonly connect: (port: number, host: string) => net.Socket = net.connect,
-    private readonly timeoutMs: number = 5000,
-    private readonly timer: Timer = defaultTimer,
-  ) {}
-
-  execute(
-    host: string,
-    port: number,
-    authToken: string | null,
-    commands: string[],
-    signal?: AbortSignal,
-  ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(signal.reason);
-        return;
-      }
-      let settled = false;
-      let buffer = "";
-
-      const socket = this.connect(port, host);
-      socket.setEncoding("utf-8");
-
-      const finish = (err: Error | null, output?: string) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        signal?.removeEventListener("abort", onAbort);
-        this.timer.clearTimeout(timeoutHandle);
-        socket.removeAllListeners();
-        socket.destroy();
-        if (err) {
-          reject(err);
-        } else {
-          resolve(output ?? buffer);
-        }
-      };
-
-      const timeoutHandle = this.timer.setTimeout(
-        () =>
-          finish(
-            new ActionableError(
-              `Emulator console connection to ${host}:${port} timed out after ${this.timeoutMs}ms`,
-            ),
-          ),
-        this.timeoutMs,
-      );
-      const onAbort = () => finish(new ActionableError("Emulator console command cancelled"));
-      signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted) {
-        onAbort();
-        return;
-      }
-
-      socket.on("error", (err) => {
-        this.timer.clearTimeout(timeoutHandle);
-        finish(
-          new ActionableError(
-            `Emulator console connection to ${host}:${port} failed: ${err.message}`,
-          ),
-        );
-      });
-      socket.on("close", () => {
-        this.timer.clearTimeout(timeoutHandle);
-        finish(null, buffer);
-      });
-      socket.on("data", (chunk) => {
-        buffer += chunk.toString();
-      });
-      socket.on("connect", () => {
-        const lines: string[] = [];
-        if (authToken !== null) {
-          lines.push(`auth ${authToken}`);
-        }
-        lines.push(...commands);
-        lines.push("quit");
-        socket.write(`${lines.join("\n")}\n`);
-      });
-    });
-  }
 }
 
 export function consolePortFromSerial(deviceId: string): number | null {

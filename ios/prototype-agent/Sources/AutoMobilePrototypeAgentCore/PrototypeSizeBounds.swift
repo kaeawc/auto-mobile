@@ -63,27 +63,25 @@ enum PrototypeSizeBounds {
     }
 
     private static func childGroup(_ group: String, key: String, fields: [String: JSONValue]) -> String? {
-        switch (group, key) {
-        case ("spec", "root"), ("node", "child"), ("node", "children"): return "node"
-        case ("spec", "window"): return "window"
-        case ("window", "placement"):
+        if let simple = childGroups[group]?[key] { return simple }
+        if group == "window", key == "placement" {
             if case let .object(placement)? = fields[key], placement["type"]?.stringValue == "sheet" {
                 return "sheet"
             }
             return "placement"
-        case ("node", "style"), ("styleWhen", "style"): return "style"
-        case ("node", "spans"): return "textSpan"
-        case ("textSpan", "style"): return "textSpanStyle"
-        case ("node", "styleWhen"): return "styleWhen"
-        case ("node", "anchor"): return "anchor"
-        case ("node", "detents"): return "detent"
-        case ("anchor", "bounds"): return "bounds"
-        case ("anchor", "offset"), ("placement", "offset"), ("style", "offset"): return "offset"
-        case ("style", "width"), ("style", "height"): return "dimension"
-        case ("style", "padding"): return "padding"
-        case ("style", "border"): return "border"
-        case ("style", "cornerRadius"): return "cornerRadius"
-        default: return nil
         }
+        return nil
     }
+
+    private static let childGroups: [String: [String: String]] = [
+        "spec": ["root": "node", "window": "window"],
+        "node": ["child": "node", "children": "node", "style": "style", "spans": "textSpan",
+                 "styleWhen": "styleWhen", "anchor": "anchor", "detents": "detent"],
+        "styleWhen": ["style": "style"],
+        "textSpan": ["style": "textSpanStyle"],
+        "anchor": ["bounds": "bounds", "offset": "offset"],
+        "placement": ["offset": "offset"],
+        "style": ["offset": "offset", "width": "dimension", "height": "dimension", "padding": "padding",
+                  "border": "border", "cornerRadius": "cornerRadius"],
+    ]
 }

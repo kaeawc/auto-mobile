@@ -10,6 +10,7 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
+import { livePerformanceFrameSchema } from "../helpers/wireMessageSchemas";
 
 /**
  * Test helper that wraps PerformancePushSocketServer to allow injecting fake sockets
@@ -25,18 +26,15 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    * Simulate starting the server without creating real socket file
    */
   async startFake(): Promise<void> {
-    // Mark as listening without creating real socket
-    (this as any).server = { listening: true };
     // Start keepalive using injected timer
-    (this as any).onServerStarted();
+    this.onServerStarted();
   }
 
   /**
    * Simulate closing the server
    */
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
   }
 
   /**
@@ -49,12 +47,11 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
     const socket = new FakeSocket();
 
     // Create subscription directly using protected members
-    const subscriptionId = `performancepush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = `performancepush-${++this.subscriptionCounter}`;
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         deviceSessionUuid: options.deviceSessionUuid ?? null,
         packageName: options.packageName ?? null,
@@ -72,8 +69,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
   simulatePong(subscriptionId: string): void {
     const subscriber = this.subscribers.get(subscriptionId);
     if (subscriber) {
-      const timer = (this as any).timer as FakeTimer;
-      subscriber.lastActivity = timer.now();
+      subscriber.lastActivity = this.timer.now();
     }
   }
 
@@ -100,7 +96,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    * Trigger keepalive check manually
    */
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
 }
 
@@ -190,8 +186,8 @@ describe("PerformancePushSocketServer", () => {
 
     server.pushPerformanceData(testData);
 
-    const msgs1 = socket1.getWrittenMessages<{ type: string; data?: LivePerformanceData }>();
-    const msgs2 = socket2.getWrittenMessages<{ type: string; data?: LivePerformanceData }>();
+    const msgs1 = socket1.getWrittenMessages(livePerformanceFrameSchema);
+    const msgs2 = socket2.getWrittenMessages(livePerformanceFrameSchema);
 
     expect(msgs1).toHaveLength(1);
     expect(msgs1[0].type).toBe("performance_push");
@@ -230,8 +226,8 @@ describe("PerformancePushSocketServer", () => {
 
     server.pushPerformanceData(testData);
 
-    const msgs1 = socket1.getWrittenMessages();
-    const msgs2 = socket2.getWrittenMessages();
+    const msgs1 = socket1.getWrittenMessages(livePerformanceFrameSchema);
+    const msgs2 = socket2.getWrittenMessages(livePerformanceFrameSchema);
 
     expect(msgs1).toHaveLength(1);
     expect(msgs2).toHaveLength(0);
@@ -247,8 +243,8 @@ describe("PerformancePushSocketServer", () => {
 
     server.pushPerformanceData(performanceData("device-1"));
 
-    expect(scoped.socket.getWrittenMessages()).toHaveLength(0);
-    expect(all.socket.getWrittenMessages()).toHaveLength(0);
+    expect(scoped.socket.getWrittenMessages(livePerformanceFrameSchema)).toHaveLength(0);
+    expect(all.socket.getWrittenMessages(livePerformanceFrameSchema)).toHaveLength(0);
   });
 
   it("resumes performance delivery under the same uuid once the quarantine lifts", () => {
@@ -259,7 +255,7 @@ describe("PerformancePushSocketServer", () => {
     resolver.resolveIdentity("device-1");
     server.pushPerformanceData(performanceData("device-1"));
 
-    const msgs = socket.getWrittenMessages<{ data?: LivePerformanceData }>();
+    const msgs = socket.getWrittenMessages(livePerformanceFrameSchema);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].data?.deviceSessionUuid).toBe("uuid-1");
   });
@@ -290,7 +286,7 @@ describe("PerformancePushSocketServer", () => {
       health: "healthy",
     });
 
-    expect(socket.getWrittenMessages()).toHaveLength(0);
+    expect(socket.getWrittenMessages(livePerformanceFrameSchema)).toHaveLength(0);
   });
 
   it("filters pushes by packageName", async () => {
@@ -320,8 +316,8 @@ describe("PerformancePushSocketServer", () => {
 
     server.pushPerformanceData(testData);
 
-    expect(socket1.getWrittenMessages()).toHaveLength(1);
-    expect(socket2.getWrittenMessages()).toHaveLength(0);
+    expect(socket1.getWrittenMessages(livePerformanceFrameSchema)).toHaveLength(1);
+    expect(socket2.getWrittenMessages(livePerformanceFrameSchema)).toHaveLength(0);
   });
 
   it("removes destroyed sockets on push", async () => {

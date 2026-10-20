@@ -3,9 +3,9 @@ import {
   buildPlanHealthSummary,
   reportPlanHealth,
   planHealthWriterFromEnv,
-  FilePlanHealthWriter,
   PLAN_HEALTH_DIR_ENV,
 } from "../../src/server/planHealthSummary";
+import { FilePlanHealthWriter } from "../../src/server/filePlanHealthWriter";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakePlanHealthWriter } from "../fakes/FakePlanHealthWriter";
 
@@ -50,7 +50,13 @@ describe("planHealthWriterFromEnv", () => {
 
 describe("reportPlanHealth for a device-labelled plan", () => {
   const runInfoMs = 700;
-  const labelled = (failed: boolean) => ({
+  const labelled = (
+    failed: boolean,
+  ): NonNullable<Parameters<typeof reportPlanHealth>[1]> & {
+    perDeviceResults: NonNullable<
+      NonNullable<Parameters<typeof reportPlanHealth>[1]>["perDeviceResults"]
+    >;
+  } => ({
     success: !failed,
     totalSteps: 3,
     executedSteps: failed ? 1 : 3,

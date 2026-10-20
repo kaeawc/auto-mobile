@@ -25,6 +25,11 @@ class SavedPrototypeController(
   private val sink: PrototypeResultSink,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   private val pinner: PrototypeShortcutPinner = UnsupportedShortcutPinner,
+  /** Clears the values the deleted prototype's `storage` block kept; returns the keys removed. */
+  private val clearStorage: suspend (String) -> Int = { 0 },
+  /** Silences open saved-prototype screens' storage sessions of a deleted id. */
+  private val storageSessions: PrototypeStorageSessionRegistry =
+    PrototypeStorageSessionRegistry.Shared,
 ) {
   private val json = Json {
     prettyPrint = false
@@ -102,7 +107,32 @@ class SavedPrototypeController(
 
   suspend fun delete(requestId: String?, id: String) =
     reply(requestId) {
-      if (!store.delete(id)) {
+      // Storage goes first and does not depend on the entry: a failed cleanup leaves the entry in
+      // place, and a retry of an entry that is already gone still removes the orphaned values.
+      val held = storageSessions.quiesce(id)
+      try {
+        clearStorage(id)
+      } catch (error: CancellationException) {
+        held.resume()
+        throw error
+      } catch (error: Exception) {
+        held.resume()
+        Log.w(TAG, "Saved prototype storage cleanup failed", error)
+        return@reply refusal(
+          SavedPrototypeErrorCode.STORAGE_FAILURE,
+          "Could not remove the stored values of $id",
+        )
+      }
+      val removed =
+        try {
+          store.delete(id)
+        } catch (error: Throwable) {
+          // The entry stays, so the screen keeps persisting.
+          held.resume()
+          throw error
+        }
+      held.invalidate()
+      if (!removed) {
         refusal(SavedPrototypeErrorCode.NOT_FOUND, "Saved prototype not found: $id")
       } else {
         disableShortcut(id)
@@ -194,7 +224,7 @@ class SavedPrototypeController(
   }
 
   // Build the outcome before calling the sink: even a sink failure cannot cause a second reply.
-  private suspend fun reply(requestId: String?, action: () -> PrototypeResult) {
+  private suspend fun reply(requestId: String?, action: suspend () -> PrototypeResult) {
     val result =
       try {
         withContext(ioDispatcher) { action() }

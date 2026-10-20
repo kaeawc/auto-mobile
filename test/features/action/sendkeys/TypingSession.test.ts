@@ -33,7 +33,7 @@ describe("TypingSession", () => {
       success: false,
       error: expect.stringContaining("known caret"),
     });
-    await executor.key({ action: "key", key: "ARROW_LEFT" });
+    await executor.key({ action: "key", key: "arrow_left" });
     expect(await executor.type({ action: "type", text: "a", mode: "eventOnly" })).toMatchObject({
       success: true,
     });
@@ -45,7 +45,7 @@ describe("TypingSession", () => {
     executor.setTargetPasswordField(true);
     await executor.type({ action: "type", text: "secret", mode: "a11y" });
     expect(executor.isPasswordTarget()).toBe(true);
-    await executor.key({ action: "key", key: "ARROW_LEFT" });
+    await executor.key({ action: "key", key: "arrow_left" });
     expect(executor.isPasswordTarget()).toBe(true);
     executor.setTargetPasswordField(false);
     await executor.type({ action: "type", text: "ordinary", mode: "a11y" });

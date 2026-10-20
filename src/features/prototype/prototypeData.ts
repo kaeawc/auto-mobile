@@ -17,6 +17,18 @@ export function isPrototypeDataPointer(value: unknown): value is string {
   );
 }
 
+/**
+ * A data action or write path is `/data` followed by a non-empty data pointer; the remainder is
+ * checked by {@link isPrototypeDataPointer}, so `/data` alone (the whole document) is refused.
+ */
+export function prototypeDataPathPointer(path: unknown): string | undefined {
+  if (typeof path !== "string" || !path.startsWith("/data/")) {
+    return undefined;
+  }
+  const pointer = path.slice("/data".length);
+  return isPrototypeDataPointer(pointer) ? pointer : undefined;
+}
+
 export function prototypeDataPointerTokens(pointer: string): string[] {
   return isPrototypeDataPointer(pointer)
     ? pointer

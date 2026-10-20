@@ -1,6 +1,6 @@
 import { decodeCtrlProxyMessage } from "../../src/features/observe/ios/decodeCtrlProxyMessage";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -40,7 +40,7 @@ async function realHarness(replies: IosCtrlProxyReplies): Promise<IosCtrlProxyHa
     ...Object.entries(replies).map(([type, response], index) => ({
       fileName: `reply-${index}.json`,
       request: { type },
-      response: response as Record<string, unknown>,
+      response: { ...response },
     })),
   ];
   const replay = createReplayWebSocketFactory(exchanges, timer);

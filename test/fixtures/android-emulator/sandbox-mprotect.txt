@@ -1,0 +1,3 @@
+INFO    | Android emulator version 36.1.9.0
+qemu-system-aarch64: qemu_mprotect__osdep: mprotect failed: Permission denied
+qemu-system-aarch64: hvf is not enabled on this aarch64 host

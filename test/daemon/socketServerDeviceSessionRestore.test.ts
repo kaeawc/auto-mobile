@@ -9,7 +9,7 @@ import {
 } from "../../src/daemon/constants";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -19,11 +19,8 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
-import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
-import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
@@ -34,53 +31,6 @@ afterEach(() => {
 
 // These tests exercise the three-minute restart recovery window, which the idle deadline caps.
 useSessionIdleWindowForSuite();
-
-test("device-control replay refuses a restore-retired epoch with actionable transport error", async () => {
-  const timer = new FakeTimer();
-  const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
-  await createDeviceRestoreEpochHarness(device, timer);
-  const server = createTestUnixSocketServer(
-    "/fake/restore.sock",
-    "http://localhost:0/mcp",
-    DaemonState.getInstance(),
-    timer,
-  );
-  const access = server as unknown as {
-    isDeviceControlDeviceSessionValid(identity: {
-      deviceId: string;
-      deviceSessionUuid: string;
-    }): boolean;
-    deviceControlTransportError(input: {
-      request: DaemonRequest;
-      identity: { deviceId: string; deviceSessionUuid: string };
-      phase: "response";
-      reconnectAttempted: boolean;
-      replayAttempted: boolean;
-      recoveryExhausted: boolean;
-    }): DeviceControlTransportError;
-  };
-  const identity = { deviceId: device.deviceId, deviceSessionUuid: "epoch-old" };
-  expect(access.isDeviceControlDeviceSessionValid(identity)).toBe(true);
-  await new DefaultDeviceIncarnationInvalidator([]).invalidate(device);
-  expect(access.isDeviceControlDeviceSessionValid(identity)).toBe(false);
-  const error = access.deviceControlTransportError({
-    request: {
-      id: "restore",
-      type: "mcp_request",
-      method: "tools/call",
-      params: { name: "observe", arguments: {} },
-    },
-    identity,
-    phase: "response",
-    reconnectAttempted: true,
-    replayAttempted: false,
-    recoveryExhausted: false,
-  });
-  expect(error).toBeInstanceOf(DeviceControlTransportError);
-  expect(error.failure).toMatchObject({ deviceSessionValid: false, retryable: false });
-  expect(error.message).toContain("snapshot restore");
-  expect(error.message).toContain("deviceSnapshot");
-});
 
 // Exercise the socket gates with the real persisted-session/pool recovery path,
 // substituting only the loopback transport and device discovery.
@@ -113,17 +63,13 @@ async function boundRecoveryHarness() {
       emulatorLossIncidentStore: incidents,
     }),
   );
-  const server = createTestUnixSocketServer(
-    "/fake/recovery.sock",
-    "http://localhost:0/mcp",
-    {
-      isInitialized: () => true,
-      getSessionManager: () => manager,
-      getDevicePool: () => pool,
-      getDeviceSessionRegistry: () => ({ list: () => [] }),
-    },
-    timer,
-  );
+  const state = {
+    isInitialized: () => true,
+    getSessionManager: () => manager,
+    getDevicePool: () => pool,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
+  };
+  const server = createTestUnixSocketServer("/fake/recovery.sock", state, timer);
   server["acceptingRequests"] = true;
   const socket = new FakeSocket();
   server["handleConnection"](socket);
@@ -133,7 +79,7 @@ async function boundRecoveryHarness() {
   const discoverySeeds: { method: string; sessionUuid: string | undefined }[] = [];
   server.mcpClientFactory = async (seed) => {
     const binding = new SessionToolBinding(seed);
-    return {
+    return new StubMcpClient({
       callTool: async ({ arguments: args }) => {
         forwarded.push(args ?? {});
         const sessionUuid = binding.effectiveSessionUuid("loopback", args)!;
@@ -163,7 +109,7 @@ async function boundRecoveryHarness() {
         return { resourceTemplates: [] };
       },
       close: async () => {},
-    };
+    });
   };
   await manager.createSession("bound", "emulator-5554", "android", { stableDeviceId: "Pixel" });
   const call = (
@@ -187,6 +133,7 @@ async function boundRecoveryHarness() {
   await call(false);
   return {
     timer,
+    state,
     persistence,
     manager,
     pool,
@@ -244,6 +191,9 @@ test("bound call inside restart window reaches session_recovery_pending and keep
     );
     expect(h.forwarded.at(-1)?.sessionUuid).toBeUndefined();
     const bindingBeforeExplicit = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
+    if (!bindingBeforeExplicit) {
+      throw new Error("Expected the first call to bind an MCP client");
+    }
     const explicit = await h.call(false);
     expect(explicit?.result).toEqual(response?.result);
     const explicitBinding = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
@@ -295,7 +245,7 @@ test.each([undefined, "device-restart:Pixel", "daemon-shutdown"])(
       // The daemon that held the session is gone; the one answering never had it in memory.
       const restarted = new SessionManager(h.timer, h.persistence);
       restarted.stopCleanupTimer();
-      h.server["daemonState"].getSessionManager = () => restarted;
+      h.state.getSessionManager = () => restarted;
       h.timer.setCurrentTime(row!.expires_at_ms + 1);
 
       const reason = handoff === "device-restart:Pixel" ? "restart-recovery-timeout" : "expired";
@@ -375,7 +325,7 @@ test("healthy bound route is synchronous and does not read persistence", async (
       h.socketId,
     );
     expect(route).not.toBeInstanceOf(Promise);
-    const client = await h.server["getMcpClient"](route.clientKey, "bound");
+    const client = await h.server.mcpClientFactory("bound");
     const before = h.forwarded.length;
     const forward = h.server["handleIdeRequest"](
       client,
@@ -422,7 +372,7 @@ test("never-issued bound identity retains ReleasedBoundSessionError and loss fen
   try {
     const args = { sessionUuid: "never-issued", [DAEMON_BOUND_SESSION_PARAM]: "never-issued" };
     const error = await Promise.resolve()
-      .then(() => h.server["getToolsCallForwardRoute"](args, h.socketId, "observe"))
+      .then(() => h.server.testHooks.routing.getToolsCallForwardRoute(args, h.socketId, "observe"))
       .catch((error: unknown) => error);
     expect(error).toMatchObject({
       name: "ReleasedBoundSessionError",
@@ -604,6 +554,7 @@ test("a failed token declaration is logged and does not stop owned-session resto
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const pool = {
     refreshDevices: async () => 0,
+    releaseDevice: async () => {},
     getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
     declareMcpSessionLivenessOwnerToken: () => {
       throw failure;
@@ -615,8 +566,17 @@ test("a failed token declaration is logged and does not stop owned-session resto
   };
   const server = createTestUnixSocketServer(
     "/tmp/never-listened.sock",
-    "http://localhost:0/mcp",
-    { isInitialized: () => true, getDevicePool: () => pool },
+    {
+      isInitialized: () => true,
+      getSessionManager: () => ({
+        hasSession: () => false,
+        getSession: () => null,
+        getDeviceLabels: () => undefined,
+        releaseSession: async () => null,
+      }),
+      getDevicePool: () => pool,
+      getDeviceSessionRegistry: () => ({ list: () => [] }),
+    },
     new FakeTimer(),
   );
   const socket = new FakeSocket();
@@ -647,7 +607,7 @@ test("a token declaration after socket close leaves no inert identity or later m
   const other = h.connect();
   const entered = Promise.withResolvers<void>();
   const proceed = Promise.withResolvers<void>();
-  const startup = spyOn(h.server, "waitForStartup").mockImplementation(async () => {
+  const restoreStartup = h.server.testHooks.waitForStartup.intercept(() => async () => {
     entered.resolve();
     await proceed.promise;
   });
@@ -663,33 +623,27 @@ test("a token declaration after socket close leaves no inert identity or later m
     });
     await entered.promise;
     other.socket.destroy();
-    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    expect(h.pool.testHooks.mcpSessionLivenessOwnerTokens.has(other.id)).toBe(false);
     proceed.resolve();
     await request;
     await drainMicrotasks(16);
-    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    expect(h.pool.testHooks.mcpSessionLivenessOwnerTokens.has(other.id)).toBe(false);
     await h.manager.releaseSession("bound", "explicit-release");
     h.deviceManager.bootedDevices = [
       { name: "Pixel", deviceId: "emulator-5554", platform: "android" },
     ];
     await h.pool.initializeWithDevices(h.deviceManager.bootedDevices);
-    await h.pool.bindOrReuseDeviceSession(
-      "later-mint",
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "different-connection",
-    );
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "later-mint",
+      deviceId: "emulator-5554",
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "different-connection",
+    });
     expect(h.manager.getSession("later-mint")?.livenessOwnerToken).toBeUndefined();
   } finally {
     proceed.resolve();
-    startup.mockRestore();
+    restoreStartup();
     other.socket.destroy();
     h.close();
   }

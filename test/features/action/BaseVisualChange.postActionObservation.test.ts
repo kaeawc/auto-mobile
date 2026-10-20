@@ -9,13 +9,20 @@ import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayErr
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   BaseVisualChange,
+  type DisplayFenceDependencies,
   FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
   FINAL_OBSERVATION_RETRY_BACKOFF_MS,
 } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice, ObserveResult } from "../../../src/models";
+import type {
+  ObservedActionResult,
+  ObservedEnvelope,
+} from "../../../src/features/action/observedInteractionTypes";
+import type { DisplayRef } from "../../../src/models/DisplayPanel";
 import { PortManager } from "../../../src/utils/PortManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -33,6 +40,13 @@ import {
  * errored-hierarchy guard, and the cached-observe fast path — all behaviors that
  * every action tool inherits and that were previously unguarded.
  */
+function requireObservation(envelope: ObservedEnvelope): ObserveResult {
+  if (!envelope.observation) {
+    throw new Error("expected the result to carry an observation");
+  }
+  return envelope.observation;
+}
+
 describe("BaseVisualChange post-action observation", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeAwaitIdle: FakeAwaitIdle;
@@ -41,16 +55,25 @@ describe("BaseVisualChange post-action observation", () => {
   let fakeWindow: FakeWindow;
   let originalActionScreenshotPolicy: string | undefined;
 
-  const makeObserve = (overrides: Record<string, unknown> = {}): ObserveResult =>
-    ({
+  const makeObserve = (
+    overrides: Omit<Partial<ObserveResult>, "display"> & { display?: Partial<DisplayRef> } = {},
+  ): ObserveResult => {
+    const { display, ...rest } = overrides;
+    return {
+      observationId: "test-observation",
       updatedAt: Date.now(),
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0, ...display },
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: { hierarchy: {} },
-      ...overrides,
-    }) as unknown as ObserveResult;
+      ...rest,
+    };
+  };
 
   class TerminalVisualChange extends BaseVisualChange {
+    recordDeferred(result: unknown, observation: ObserveResult) {
+      return this.recordDeferredPredictionOutcome(result, observation);
+    }
     captureTerminal(observation: ObserveResult) {
       return this.captureTerminalObservationScreenshot(observation);
     }
@@ -59,17 +82,15 @@ describe("BaseVisualChange post-action observation", () => {
   function createVisualChange(
     platform: "android" | "ios" = "ios",
     renderedDisplayRevision?: () => number | undefined,
+    extraDeps: Pick<DisplayFenceDependencies, "predictionAnalyzer"> = {},
   ): TerminalVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new TerminalVisualChange(
-      device,
-      fakeAdb as unknown as any,
-      fakeTimer,
-      renderedDisplayRevision,
-    );
-    (instance as any).awaitIdle = fakeAwaitIdle;
-    (instance as any).observeScreen = fakeObserveScreen;
-    (instance as any).window = fakeWindow;
+    const instance = new TerminalVisualChange(device, fakeAdb, fakeTimer, renderedDisplayRevision, {
+      awaitIdle: fakeAwaitIdle,
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+      ...extraDeps,
+    });
     return instance;
   }
 
@@ -229,7 +250,9 @@ describe("BaseVisualChange post-action observation", () => {
     // The returned observation is the LAST attempt's (index 4), not an earlier one.
     expect((result.observation as { updatedAt: number }).updatedAt).toBe(4);
     // After the cap the observation carries the stale warning.
-    expect(result.observation.freshness.warning).toBe("Observation may be stale after interaction");
+    expect(requireObservation(result).freshness?.warning).toBe(
+      "Observation may be stale after interaction",
+    );
   });
 
   test("a revision change rejects coordinates but allows a non-coordinate key action", async () => {
@@ -291,7 +314,7 @@ describe("BaseVisualChange post-action observation", () => {
         .map((o) => o.skipBackStack),
     ).toEqual([true, true]);
     expect(fakeObserveScreen.getCollectDeferredBackStackCallCount()).toBe(1);
-    expect(result.observation.backStack?.capturedAt).toBe(999);
+    expect(requireObservation(result).backStack?.capturedAt).toBe(999);
   });
 
   test("terminal display audit failure keeps delivery and typed display guidance", async () => {
@@ -299,15 +322,18 @@ describe("BaseVisualChange post-action observation", () => {
     fakeObserveScreen.setObserveResult(after);
     const details = { observedGeneration: 1, currentGeneration: 2, retry: "observe" as const };
     fakeObserveScreen.setFailureMode("runAccessibilityAudit", new StaleDisplayError(details));
-    const result = await createVisualChange().observedInteraction(async () => ({ success: true }), {
-      changeExpected: false,
-      display: "inner",
-      previousObservation: after,
-    });
+    const result = await createVisualChange().observedInteraction<ObservedActionResult>(
+      async () => ({ success: true }),
+      {
+        changeExpected: false,
+        display: "inner",
+        previousObservation: after,
+      },
+    );
     expect(result.success).toBe(true);
     expect(result.staleDisplay).toEqual(details);
-    expect(result.observation.settled).toBe(false);
-    expect(result.observation.freshness.warning).toContain("terminal screenshot/audit");
+    expect(requireObservation(result).settled).toBe(false);
+    expect(requireObservation(result).freshness?.warning).toContain("terminal screenshot/audit");
   });
 
   test("typed display retry failure survives the kept post-action capture", async () => {
@@ -320,13 +346,16 @@ describe("BaseVisualChange post-action observation", () => {
       }
       return after;
     });
-    const result = await createVisualChange().observedInteraction(async () => ({ success: true }), {
-      changeExpected: true,
-      display: "inner",
-      previousObservation: before,
-    });
+    const result = await createVisualChange().observedInteraction<ObservedActionResult>(
+      async () => ({ success: true }),
+      {
+        changeExpected: true,
+        display: "inner",
+        previousObservation: before,
+      },
+    );
     expect(result.staleDisplay).toEqual(details);
-    expect(result.observation.settled).toBe(false);
+    expect(requireObservation(result).settled).toBe(false);
   });
 
   test("display retry failure keeps a trustworthy post-action capture", async () => {
@@ -343,9 +372,9 @@ describe("BaseVisualChange post-action observation", () => {
       display: "inner",
       previousObservation: before,
     });
-    expect(result.observation.viewHierarchy).toEqual(after.viewHierarchy);
-    expect(result.observation.freshness.warning).toContain("retry read failed");
-    expect(result.observation.settled).toBe(false);
+    expect(requireObservation(result).viewHierarchy).toEqual(after.viewHierarchy);
+    expect(requireObservation(result).freshness?.warning).toContain("retry read failed");
+    expect(requireObservation(result).settled).toBe(false);
   });
 
   test("display retry failure after a stale read keeps the earlier trustworthy capture", async () => {
@@ -365,9 +394,9 @@ describe("BaseVisualChange post-action observation", () => {
       display: "inner",
       previousObservation: before,
     });
-    expect(result.observation.viewHierarchy).toEqual(after.viewHierarchy);
-    expect(result.observation.freshness.isFresh).toBe(true);
-    expect(result.observation.freshness.warning).toContain("later retry read failed");
+    expect(requireObservation(result).viewHierarchy).toEqual(after.viewHierarchy);
+    expect(requireObservation(result).freshness?.isFresh).toBe(true);
+    expect(requireObservation(result).freshness?.warning).toContain("later retry read failed");
   });
 
   test.each(["display", "legacy", "undispatched"] as const)(
@@ -644,7 +673,7 @@ describe("BaseVisualChange post-action observation", () => {
           },
         );
         expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
-        expect(hasPendingTerminalScreenshot(result.observation)).toBe(true);
+        expect(hasPendingTerminalScreenshot(requireObservation(result))).toBe(true);
         const response = createStructuredToolResponse(result);
         await settleEmbeddedObservationInResponse(response, {
           name: "tapOn",
@@ -657,7 +686,7 @@ describe("BaseVisualChange post-action observation", () => {
         expect(fakeObserveScreen.getCapturedScreenshotObservations()[0]?.observationId).toBe(
           final.observationId,
         );
-        expect(final.updatedAt).toBeGreaterThan(result.observation.updatedAt);
+        expect(final.updatedAt).toBeGreaterThan(Number(requireObservation(result).updatedAt));
       });
     },
   );
@@ -678,9 +707,9 @@ describe("BaseVisualChange post-action observation", () => {
             skipPreviousObserve: true,
             deferPostActionScreenshot: true,
           });
-          await instance.captureTerminal(result.observation);
+          await instance.captureTerminal(requireObservation(result));
           expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(scopeEnabled ? 0 : 1);
-          expect(hasPendingTerminalScreenshot(result.observation)).toBe(scopeEnabled);
+          expect(hasPendingTerminalScreenshot(requireObservation(result))).toBe(scopeEnabled);
         },
         scopeEnabled,
       );
@@ -704,7 +733,7 @@ describe("BaseVisualChange post-action observation", () => {
               skipPreviousObserve: true,
             },
           );
-          expect(hasPendingTerminalScreenshot(result.observation)).toBe(false);
+          expect(hasPendingTerminalScreenshot(requireObservation(result))).toBe(false);
           expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
         },
         false,
@@ -730,7 +759,7 @@ describe("BaseVisualChange post-action observation", () => {
           skipPreviousObserve: true,
         },
       );
-      expect(hasPendingTerminalScreenshot(result.observation)).toBe(true);
+      expect(hasPendingTerminalScreenshot(requireObservation(result))).toBe(true);
       expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
       serverConfig.setAccessibilityAuditConfig(null);
     });
@@ -766,7 +795,7 @@ describe("BaseVisualChange post-action observation", () => {
           { changeExpected: false, skipPreviousObserve: true },
         );
       const first = await perform();
-      expect(hasPendingTerminalScreenshot(first.observation)).toBe(true);
+      expect(hasPendingTerminalScreenshot(requireObservation(first))).toBe(true);
       const second = await perform();
       expect(order).toEqual([
         "gesture-1",
@@ -774,10 +803,10 @@ describe("BaseVisualChange post-action observation", () => {
         "gesture-2",
         "capture-action-2-screen-2",
       ]);
-      expect(first.observation.screenshotPath).toBe("screen-1.png");
-      expect(second.observation.screenshotPath).toBe("screen-2.png");
-      expect(hasPendingTerminalScreenshot(first.observation)).toBe(false);
-      expect(hasPendingTerminalScreenshot(second.observation)).toBe(false);
+      expect(requireObservation(first).screenshotPath).toBe("screen-1.png");
+      expect(requireObservation(second).screenshotPath).toBe("screen-2.png");
+      expect(hasPendingTerminalScreenshot(requireObservation(first))).toBe(false);
+      expect(hasPendingTerminalScreenshot(requireObservation(second))).toBe(false);
     });
     expect(order).toHaveLength(4);
   });
@@ -818,7 +847,7 @@ describe("BaseVisualChange post-action observation", () => {
           skipPreviousObserve: true,
         },
       );
-      expect(hasPendingTerminalScreenshot(result.observation)).toBe(false);
+      expect(hasPendingTerminalScreenshot(requireObservation(result))).toBe(false);
     });
     expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
   });
@@ -869,7 +898,11 @@ describe("BaseVisualChange post-action observation", () => {
       failureMode: "report",
       useBaseline: false,
     });
-    fakeObserveScreen.setObserveResult(makeObserve({ activeWindow: { appId: "com.example.app" } }));
+    fakeObserveScreen.setObserveResult(
+      makeObserve({
+        activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 },
+      }),
+    );
 
     await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,
@@ -903,7 +936,7 @@ describe("BaseVisualChange post-action observation", () => {
       makeObserve({ viewHierarchy: { hierarchy: { error: "no cached hierarchy" } } }),
     );
 
-    await instance.observedInteraction(async () => ({ success: false }), {
+    await instance.observedInteraction<ObservedActionResult>(async () => ({ success: false }), {
       changeExpected: false,
     });
 
@@ -914,33 +947,35 @@ describe("BaseVisualChange post-action observation", () => {
   });
 
   test("records a deferred prediction outcome against the final observation once", async () => {
-    const instance = createVisualChange("ios");
     const initialObservation = makeObserve({ updatedAt: 1 });
     const finalObservation = makeObserve({ updatedAt: 2 });
     const recordedObservations: ObserveResult[] = [];
-    fakeObserveScreen.setObserveResult(initialObservation);
-    (instance as any).buildPredictionContext = () => ({
-      appId: "com.example.app",
-      fromScreen: "Home",
-      toolName: "tapOn",
-      toolArgs: { text: "Continue" },
-    });
-    (instance as any).predictionAnalyzer = {
-      recordOutcomeForAction: async (_previous: ObserveResult | null, actual: ObserveResult) => {
-        recordedObservations.push(actual);
+    const graph = new FakeNavigationGraphManager();
+    graph.setCurrentAppId("com.example.app");
+    graph.setCurrentScreenValue("Home");
+    const instance = createVisualChange("ios", undefined, {
+      predictionAnalyzer: {
+        recordOutcomeForAction: async (_previous: ObserveResult | null, actual: ObserveResult) => {
+          recordedObservations.push(actual);
+        },
       },
-    };
-
-    const result = await instance.observedInteraction(async () => ({ success: true }), {
-      changeExpected: false,
-      skipPreviousObserve: true,
-      deferPredictionOutcome: true,
-      predictionContext: { toolName: "tapOn", toolArgs: { text: "Continue" } },
     });
+    instance.navigationGraphResolver = () => graph;
+    fakeObserveScreen.setObserveResult(initialObservation);
+
+    const result = await instance.observedInteraction<ObservedActionResult>(
+      async () => ({ success: true }),
+      {
+        changeExpected: false,
+        skipPreviousObserve: true,
+        deferPredictionOutcome: true,
+        predictionContext: { toolName: "tapOn", toolArgs: { text: "Continue" } },
+      },
+    );
 
     expect(recordedObservations).toEqual([]);
-    await (instance as any).recordDeferredPredictionOutcome(result, finalObservation);
-    await (instance as any).recordDeferredPredictionOutcome(result, initialObservation);
+    await instance.recordDeferred(result, finalObservation);
+    await instance.recordDeferred(result, initialObservation);
     expect(recordedObservations).toEqual([finalObservation]);
   });
 
@@ -962,7 +997,7 @@ describe("BaseVisualChange post-action observation", () => {
         }),
       );
 
-      const result = await instance.observedInteraction(async () => ({}), {
+      const result = await instance.observedInteraction<ObservedActionResult>(async () => ({}), {
         changeExpected: true,
       });
 
@@ -983,7 +1018,7 @@ describe("BaseVisualChange post-action observation", () => {
         }),
       );
 
-      const result = await instance.observedInteraction(async () => ({}), {
+      const result = await instance.observedInteraction<ObservedActionResult>(async () => ({}), {
         changeExpected: true,
       });
 

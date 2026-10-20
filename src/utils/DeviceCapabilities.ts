@@ -1,3 +1,4 @@
+import type { DeviceCapabilities } from "../models/DeviceCapabilities";
 import { DUMPSYS_MAX_BUFFER } from "./android-cmdline-tools/dumpsysLimits";
 import {
   AdbClientFactory,
@@ -22,10 +23,7 @@ export function clearDeviceCapabilitiesCache(): void {
 /**
  * Device capabilities including refresh rate and display properties
  */
-export interface DeviceCapabilities {
-  refreshRate: number; // Hz (60, 90, 120, etc.)
-  frameTimeMs: number; // Target frame time in ms (16.67 for 60Hz, 8.33 for 120Hz)
-}
+export type { DeviceCapabilities };
 
 /**
  * Utility class to detect device capabilities

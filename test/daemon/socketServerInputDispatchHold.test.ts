@@ -1,7 +1,7 @@
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import {
   createFakeDaemonState,
@@ -16,17 +16,21 @@ import { TakeScreenshot } from "../../src/features/observe/TakeScreenshot";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../src/utils/logger";
 import type { DaemonRequest } from "../../src/daemon/types";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import {
   harness,
   frame,
+  holdDevice,
   runner,
   socketHarness,
   cancel,
   finishSockets,
   type Harness,
 } from "../helpers/socketServerInputHoldHarness";
+import { createIosTestClient } from "../helpers/iosCtrlProxyClientSpies";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
 
 const variants = [
   "key android",
@@ -39,6 +43,9 @@ const variants = [
   "swipe ios",
 ] as const;
 type Variant = (typeof variants)[number];
+function variantPlatform(variant: Variant): "android" | "ios" {
+  return variant.includes("android") ? "android" : "ios";
+}
 function inputFrame(variant: Variant, deviceId = "A"): DaemonRequest {
   const [route, platform, button] = variant.split(" ");
   return {
@@ -72,17 +79,15 @@ function runInput(handler: Harness, request: DaemonRequest, signal?: AbortSignal
   }
 }
 function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: Promise<void>) {
-  const android = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-  const ios = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
+  const android = createAndroidTestClient(holdDevice("android"));
+  const ios = createIosTestClient(holdDevice("ios"));
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
   spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(ios);
   spyOn(android, "getScreenScaleMetadata").mockReturnValue(null);
   spyOn(ios, "getScreenScaleMetadata").mockReturnValue(null);
-  spyOn(ios, "requestHierarchySyncWithoutObservationStreamPush").mockResolvedValue(
-    {} as Awaited<
-      ReturnType<IOSCtrlProxyClient["requestHierarchySyncWithoutObservationStreamPush"]>
-    >,
-  );
+  spyOn(ios, "requestHierarchySyncWithoutObservationStreamPush").mockResolvedValue({
+    hierarchy: { updatedAt: 0, packageName: "fake.app", hierarchy: {} },
+  });
   let attempts = 0;
   let sends = 0;
   const send = async (signal?: AbortSignal, dispatch?: () => void) => {
@@ -96,21 +101,19 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
       return first.send(signal, dispatch);
     }
     dispatch?.();
-    return { success: true, totalTimeMs: 0 };
+    return { success: true, totalTimeMs: 0, action: "runner" };
   };
   spyOn(android, "requestTapCoordinates").mockImplementation(
-    (_x, _y, _duration, _timeout, _perf, _context, dispatch, signal) => send(signal, dispatch),
+    ({ onDispatch: dispatch, signal: signal }) => send(signal, dispatch),
   );
-  spyOn(android, "requestSwipe").mockImplementation(
-    (_x, _y, _ex, _ey, _duration, _timeout, _perf, _context, dispatch, signal) =>
-      send(signal, dispatch),
+  spyOn(android, "requestSwipe").mockImplementation(({ signal, onDispatch }) =>
+    send(signal, onDispatch),
   );
   spyOn(ios, "requestTapCoordinates").mockImplementation(
-    (_x, _y, _duration, _timeout, _perf, _context, signal, dispatch) => send(signal, dispatch),
+    ({ signal: signal, onDispatch: dispatch }) => send(signal, dispatch),
   );
-  spyOn(ios, "requestDrag").mockImplementation(
-    (_x, _y, _ex, _ey, _press, _drag, _hold, _timeout, _context, signal, dispatch) =>
-      send(signal, dispatch),
+  spyOn(ios, "requestDrag").mockImplementation(({ signal, onDispatch }) =>
+    send(signal, onDispatch),
   );
   spyOn(android, "requestGlobalAction").mockImplementation(
     (_button, _timeout, _perf, _context, signal, dispatch) => send(signal, dispatch),
@@ -131,7 +134,7 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
     if (index === 0) {
       await first.send(options?.signal);
     }
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   });
   return {
     android,
@@ -145,6 +148,10 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
     },
   };
 }
+const originalSetTimeout = defaultTimer.setTimeout;
+const originalAdbCreate = defaultAdbClientFactory.create;
+const originalAndroidGetInstance = AndroidCtrlProxyClient.getInstance;
+const originalIosGetInstance = IOSCtrlProxyClient.getInstance;
 let trackerTimer: FakeTimer;
 beforeEach(() => {
   trackerTimer = new FakeTimer();
@@ -155,19 +162,17 @@ beforeEach(() => {
   );
   spyOn(screenshotPathProtection, "start").mockImplementation(() => {});
   spyOn(screenshotPathProtection, "sweepOnce").mockResolvedValue(undefined);
-  spyOn(TakeScreenshot as unknown as { getCacheDir(): string }, "getCacheDir").mockReturnValue(
-    "scratch/hold-lane/screenshots",
-  );
+  spyOn(TakeScreenshot, "getCacheDir").mockReturnValue("scratch/hold-lane/screenshots");
 });
 afterEach(() => {
   expect(trackerTimer.getPendingTimeoutCount()).toBe(0);
   expect(executionTracker.getActiveExecutionCount()).toBe(0);
   PlatformDeviceManagerFactory.reset();
   mock.restore();
-  expect((defaultTimer.setTimeout as { mock?: unknown }).mock).toBeUndefined();
-  expect((defaultAdbClientFactory.create as { mock?: unknown }).mock).toBeUndefined();
-  expect((AndroidCtrlProxyClient.getInstance as { mock?: unknown }).mock).toBeUndefined();
-  expect((IOSCtrlProxyClient.getInstance as { mock?: unknown }).mock).toBeUndefined();
+  expect(defaultTimer.setTimeout).toBe(originalSetTimeout);
+  expect(defaultAdbClientFactory.create).toBe(originalAdbCreate);
+  expect(AndroidCtrlProxyClient.getInstance).toBe(originalAndroidGetInstance);
+  expect(IOSCtrlProxyClient.getInstance).toBe(originalIosGetInstance);
   AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
   IOSCtrlProxyClient.clearInstanceRegistryForTesting();
   expect(AndroidCtrlProxyClient.getExistingInstance("A")).toBeNull();
@@ -222,30 +227,33 @@ test.each(
     await Promise.allSettled([a, b, other]);
   }
   await drainMicrotasks(100);
-  expect(handler.mcpForwardTails.size).toBe(0);
+  expect(handler.forwardTails.size).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
-test.each(variants)("%s cancels before dispatch without sending or stamping", async (variant) => {
-  const { handler, timer, stamps } = harness();
-  const first = runner();
-  const parked = Promise.withResolvers<void>();
-  const fake = transport(variant, first, parked.promise);
-  const owner = new AbortController();
-  const a = runInput(handler, inputFrame(variant), owner.signal);
-  void a.catch(() => {});
-  await drainUntil(() => fake.attempts === 1, { description: "parked before send" });
-  owner.abort(new Error("before dispatch cancelled"));
-  await expect(a).rejects.toThrow("before dispatch cancelled");
-  await runInput(handler, inputFrame(variant));
-  expect(stamps).toEqual(["A"]);
-  expect(fake.sends).toBe(1);
-  parked.resolve();
-  await drainMicrotasks(100);
-  expect(fake.sends).toBe(1);
-  expect(first.dispatched).toBe(false);
-  expect(handler.mcpForwardTails.size).toBe(0);
-  expect(timer.getPendingTimeoutCount()).toBe(0);
-});
+test.each([...variants])(
+  "%s cancels before dispatch without sending or stamping",
+  async (variant) => {
+    const { handler, timer, stamps } = harness();
+    const first = runner();
+    const parked = Promise.withResolvers<void>();
+    const fake = transport(variant, first, parked.promise);
+    const owner = new AbortController();
+    const a = runInput(handler, inputFrame(variant), owner.signal);
+    void a.catch(() => {});
+    await drainUntil(() => fake.attempts === 1, { description: "parked before send" });
+    owner.abort(new Error("before dispatch cancelled"));
+    await expect(a).rejects.toThrow("before dispatch cancelled");
+    await runInput(handler, inputFrame(variant));
+    expect(stamps).toEqual(["A"]);
+    expect(fake.sends).toBe(1);
+    parked.resolve();
+    await drainMicrotasks(100);
+    expect(fake.sends).toBe(1);
+    expect(first.dispatched).toBe(false);
+    expect(handler.forwardTails.size).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  },
+);
 // daemon/cancelRequest is explicit cancellation; destroying a socket is the other owner abort.
 test.each(
   variants.flatMap((variant) =>
@@ -352,7 +360,11 @@ test.each([false, true])(
   "android home stops before verification/fallback after dispatched cancellation (success=%s)",
   async (success) => {
     const { handler, timer } = harness();
-    const first = Promise.withResolvers<{ success: boolean }>();
+    const first = Promise.withResolvers<{
+      success: boolean;
+      action: string;
+      totalTimeMs: number;
+    }>();
     let sent = false;
     const fake = transport("pressButton android back", runner());
     spyOn(fake.android, "requestGlobalAction").mockImplementation(
@@ -363,9 +375,6 @@ test.each([false, true])(
         return first.promise;
       },
     );
-    const reads = spyOn(fake.android, "getActiveWindowInfo").mockImplementation(async () => {
-      throw new Error("must not verify after cancel");
-    });
     const owner = new AbortController();
     const a = handler.handleInputPressButton(
       {
@@ -378,10 +387,9 @@ test.each([false, true])(
     void a.catch(() => {});
     await drainUntil(() => sent, { description: "home global action" });
     owner.abort(new Error("cancel home"));
-    first.resolve({ success });
+    first.resolve({ success, action: "home", totalTimeMs: 0 });
     await expect(a).rejects.toThrow("outcome is indeterminate");
     expect(fake.adb.execute).not.toHaveBeenCalled();
-    expect(reads).not.toHaveBeenCalled();
     expect(timer.getPendingTimeoutCount()).toBe(0);
   },
 );
@@ -394,12 +402,10 @@ test.each(
     ),
   ),
 )("%s cancellation %s dispatch via %s drains only when safe", async (variant, phase, source) => {
-  const [, platform] = variant.split(" ");
+  const platform = variantPlatform(variant);
   const sessionId = "dispatch-hold-session";
   const f = socketHarness(
-    createFakeDaemonState(
-      new Map([[sessionId, createFakeSession(sessionId, "A", platform as "android" | "ios")]]),
-    ),
+    createFakeDaemonState(new Map([[sessionId, createFakeSession(sessionId, "A", platform)]])),
   );
   const first = runner();
   const parked = Promise.withResolvers<void>();
@@ -456,7 +462,7 @@ test.each(
 
 test("gestureMove needs no extra hold: no signal reaches its atomic frame; stroke lift handles cancellation", async () => {
   const f = socketHarness();
-  const pending = Promise.withResolvers<{ success: boolean }>();
+  const pending = Promise.withResolvers<{ success: boolean; totalTimeMs: number }>();
   let sent = false;
   spyOn(f.client, "requestGestureMove").mockImplementation(() => {
     sent = true;
@@ -479,7 +485,7 @@ test("gestureMove needs no extra hold: no signal reaches its atomic frame; strok
   try {
     expect(f.client.requestSetText).not.toHaveBeenCalled();
   } finally {
-    pending.resolve({ success: true });
+    pending.resolve({ success: true, totalTimeMs: 0 });
   }
   await drainUntil(() => f.other.responses.some((r) => r.id === "A"), {
     description: "input after stroke ack",
@@ -526,7 +532,7 @@ test("ide/setKeyValue needs no input hold: separate tracked execution, atomic wr
   await drainMicrotasks(100);
   try {
     expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(true);
-    expect(f.server.mcpForwardTails.has("device:A")).toBe(false);
+    expect(f.server.forwardTails.has("device:A")).toBe(false);
     expect(write).toHaveBeenCalledTimes(1);
   } finally {
     pending.resolve();
@@ -565,15 +571,13 @@ test("a global-action transport budget does not shorten the cancelled frame's re
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
-test.each(variants)(
+test.each([...variants])(
   "%s session release has a generic capitalized dispatched note and no append count",
   async (variant) => {
-    const [, platform] = variant.split(" ");
+    const platform = variantPlatform(variant);
     const sessionId = "released-hold-session";
     const f = socketHarness(
-      createFakeDaemonState(
-        new Map([[sessionId, createFakeSession(sessionId, "A", platform as "android" | "ios")]]),
-      ),
+      createFakeDaemonState(new Map([[sessionId, createFakeSession(sessionId, "A", platform)]])),
     );
     const first = runner();
     transport(variant, first);

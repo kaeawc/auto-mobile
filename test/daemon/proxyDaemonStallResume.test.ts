@@ -1,6 +1,6 @@
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer, noActiveDeviceSessionResult } from "../../src/server/proxyServer";
 import {
   DaemonBoundSessionExpiredError,
@@ -208,6 +208,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

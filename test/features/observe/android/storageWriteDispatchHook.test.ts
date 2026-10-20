@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
@@ -13,7 +14,6 @@ import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 const device: BootedDevice = {
   deviceId: "hunt-storage-device",
   platform: "android",
-  isEmulator: true,
   name: "Hunt Device",
 };
 
@@ -40,9 +40,9 @@ describe("a storage write whose call was cancelled before it was sent", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setScreenState(true);
-    adb.setCommandResponse("pidof", { stdout: "4242\n", stderr: "" });
+    adb.setCommandResponse("pidof", createExecResult("4242\n", ""));
     AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
     AndroidCtrlProxyManager.getInstance(
@@ -50,12 +50,10 @@ describe("a storage write whose call was cancelled before it was sent", () => {
       new FakeAdbClientFactory(),
     ).clearAvailabilityCache();
     let created: CapturingWebSocket | undefined;
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      (url) => (created = new CapturingWebSocket(url, "none", 0, timer)),
+    client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: (url) => (created = new CapturingWebSocket(url, "none", 0, timer)),
       timer,
-    );
+    });
     await client.ensureConnected();
     socket = created!;
     if (socket.readyState !== WebSocketState.OPEN) {

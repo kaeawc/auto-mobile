@@ -1,6 +1,8 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
-import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionTools";
+import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionToolHandlers";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
 const testDevice: BootedDevice = {
@@ -20,8 +22,8 @@ describe("HandleIntentChooser", () => {
   let fakeWindow: FakeWindow;
   let fakeAwaitIdle: FakeAwaitIdle;
 
-  const mockObserveResult: ObserveResult = {
-    timestamp: "2025-01-01T00:00:00.000Z",
+  const mockObserveResult: ObserveResult = buildObserveResult({
+    updatedAt: Date.parse("2025-01-01T00:00:00.000Z"),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: {
@@ -51,8 +53,8 @@ describe("HandleIntentChooser", () => {
           ],
         },
       },
-    } as ViewHierarchyResult,
-  };
+    } satisfies ViewHierarchyResult,
+  });
 
   beforeEach(() => {
     // Create fakes for dependencies
@@ -74,17 +76,19 @@ describe("HandleIntentChooser", () => {
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
     // Create HandleIntentChooser instance
-    handleIntentChooser = new HandleIntentChooser(testDevice, null, () => fakeDeepLinkManager);
-
-    // Replace the internal managers with our fakes
-    (handleIntentChooser as any).observeScreen = fakeObserveScreen;
-    (handleIntentChooser as any).window = fakeWindow;
-    (handleIntentChooser as any).awaitIdle = fakeAwaitIdle;
+    handleIntentChooser = new HandleIntentChooser(
+      testDevice,
+      null,
+      () => fakeDeepLinkManager,
+      undefined,
+      { observeScreen: fakeObserveScreen, window: fakeWindow, awaitIdle: fakeAwaitIdle },
+    );
     // These cases exercise chooser routing. BaseVisualChange's observation and
     // settle contract is covered independently, so invoke the feature block
     // directly with the configured fake observation.
-    (handleIntentChooser as any).observedInteraction = async (block: any) =>
-      block(await fakeObserveScreen.getMostRecentCachedObserveResult());
+    handleIntentChooser.observedInteraction = runBlockWith(() =>
+      fakeObserveScreen.getMostRecentCachedObserveResult(),
+    );
   });
 
   describe("constructor", () => {
@@ -186,10 +190,10 @@ describe("HandleIntentChooser", () => {
 
     test("passes the opened URL to DeepLinkManager", async () => {
       const calls: unknown[][] = [];
-      (fakeDeepLinkManager as any).handleIntentChooser = async (...args: unknown[]) => {
+      spyOn(fakeDeepLinkManager, "handleIntentChooser").mockImplementation(async (...args) => {
         calls.push(args);
         return { success: true, detected: true, action: "custom" };
-      };
+      });
 
       await handleIntentChooser.execute("custom", "com.example.customapp", "example://item");
 
@@ -265,7 +269,7 @@ describe("HandleIntentChooser", () => {
 
       try {
         await handleIntentChooser.execute("always");
-        expect.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (error) {
         expect((error as Error).message).toContain("Cannot perform action without view hierarchy");
       }

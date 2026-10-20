@@ -1,17 +1,15 @@
+import { makePool } from "../helpers/makePool";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { DevicePoolRefresh } from "../../src/daemon/devicePoolRefresh";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
@@ -46,36 +44,32 @@ describe("allocation after a partial refresh failure", () => {
     deviceManager.setBootedDevices("android", [device]);
     let trackingAttempts = 0;
     let clearPool = () => {};
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "allocation-refresh-failure", {
-        timer,
-        deviceManager,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        retryExecutor: new DefaultRetryExecutor(timer),
-        devicePoolRefreshFactory: (port) => {
-          clearPool = () => port.getDevices().clear();
-          return new DevicePoolRefresh({
-            ...port,
-            setDeviceSessionTracking: async () => {
-              if (busy) {
-                port.getDevices().get(device.deviceId)!.status = "busy";
+    const pool = makePool(sessions, "allocation-refresh-failure", {
+      timer,
+      deviceManager,
+      devicePoolRefreshFactory: (port) => {
+        clearPool = () => void pool.removeDevice(device.deviceId);
+        return new DevicePoolRefresh({
+          ...port,
+          setDeviceSessionTracking: async () => {
+            if (busy) {
+              patchDeviceBinding(port.getDevices().get(device.deviceId)!, { status: "busy" });
+            }
+            if (persistentFailure || trackingAttempts++ === 0) {
+              throw new Error(failure);
+            }
+          },
+          // Criteria allocation refreshes again when the target is absent.
+          ...(persistentFailure
+            ? {
+                foldObservationIntoPooledEntry: async () => {
+                  throw new Error(failure);
+                },
               }
-              if (persistentFailure || trackingAttempts++ === 0) {
-                throw new Error(failure);
-              }
-            },
-            // Criteria allocation refreshes again when the target is absent.
-            ...(persistentFailure
-              ? {
-                  foldObservationIntoPooledEntry: async () => {
-                    throw new Error(failure);
-                  },
-                }
-              : {}),
-          });
-        },
-      }),
-    );
+            : {}),
+        });
+      },
+    });
     return { pool, timer, deviceManager, clearPool: () => clearPool() };
   }
 
@@ -281,14 +275,12 @@ describe("daemon/refreshDevices outcome", () => {
       sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const deviceManager = new FakeDeviceUtils();
       deviceManager.setBootedDevices("android", devices);
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "refresh-success", {
-          timer,
-          deviceManager,
-          devicePoolRefreshFactory: (port) =>
-            new DevicePoolRefresh({ ...port, setDeviceSessionTracking: async () => {} }),
-        }),
-      );
+      const pool = makePool(sessions, "refresh-success", {
+        timer,
+        deviceManager,
+        devicePoolRefreshFactory: (port) =>
+          new DevicePoolRefresh({ ...port, setDeviceSessionTracking: async () => {} }),
+      });
       const state = DaemonState.getInstance();
       state.initialize(sessions, pool);
       const response = await handleDaemonRequest(
@@ -314,19 +306,17 @@ describe("daemon/refreshDevices outcome", () => {
     deviceManager.setBootedDevices("android", [
       { deviceId: "refresh-device", name: "Refresh device", platform: "android" },
     ]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "refresh-outcome", {
-        timer,
-        deviceManager,
-        devicePoolRefreshFactory: (port) =>
-          new DevicePoolRefresh({
-            ...port,
-            setDeviceSessionTracking: async () => {
-              throw new Error("tracking persistence unavailable");
-            },
-          }),
-      }),
-    );
+    const pool = makePool(sessions, "refresh-outcome", {
+      timer,
+      deviceManager,
+      devicePoolRefreshFactory: (port) =>
+        new DevicePoolRefresh({
+          ...port,
+          setDeviceSessionTracking: async () => {
+            throw new Error("tracking persistence unavailable");
+          },
+        }),
+    });
     const state = DaemonState.getInstance();
     state.initialize(sessions, pool);
 
@@ -372,12 +362,10 @@ describe("Android discovery failure refresh outcome", () => {
       undefined,
       { listConnectedDevices: async () => ({ devices: [], complete: true }) },
     );
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "android-discovery-failure", {
-        timer,
-        deviceManager,
-      }),
-    );
+    const pool = makePool(sessions, "android-discovery-failure", {
+      timer,
+      deviceManager,
+    });
     DaemonState.getInstance().initialize(sessions, pool);
     return { pool, iosDevice };
   }
@@ -414,11 +402,18 @@ describe("Android discovery failure refresh outcome", () => {
     const refusal = await handler({
       deviceId: "99999999-2222-3333-4444-555555555555",
       sessionUuid: "selection",
-    }).catch((error: unknown) => error as { message: string; code?: string; retryable?: boolean });
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
     expect(refusal).toMatchObject({
       message: "Device '99999999-2222-3333-4444-555555555555' not found in device pool",
     });
-    expect({ code: refusal?.code, retryable: refusal?.retryable }).toEqual({
+    const refusalFields = typeof refusal === "object" && refusal !== null ? refusal : {};
+    expect({
+      code: "code" in refusalFields ? refusalFields.code : undefined,
+      retryable: "retryable" in refusalFields ? refusalFields.retryable : undefined,
+    }).toEqual({
       code: undefined,
       retryable: undefined,
     });
@@ -517,9 +512,9 @@ describe("Android discovery failure refresh outcome", () => {
           { deviceId: "emulator-5600", name: "Pixel", platform: "android" },
         ]);
         const pooled = pool.getDevice("emulator-5600")!;
-        pooled.status = status;
+        patchDeviceBinding(pooled, { status });
         if (status === "busy") {
-          pooled.sessionId = "held-session";
+          patchDeviceBinding(pooled, { sessionId: "held-session" });
           await sessions.createSession("held-session", pooled.id, "android");
         }
         for (let refresh = 0; refresh < 4; refresh++) {

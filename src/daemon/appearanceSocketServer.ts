@@ -11,8 +11,8 @@ import {
   getAppearanceConfig,
   resolveAppearanceMode,
   updateAppearanceConfig,
-} from "../server/appearanceManager";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+} from "./appearanceManager";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
@@ -25,11 +25,11 @@ import {
   executionTracker,
   sessionExecutionMetadataOf,
   type ActiveExecution,
-} from "../server/executionTracker";
+} from "./executionTracker";
 import { admitInputOnHolderSession } from "./inputDeviceOwnership";
 import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import type {
   AppearanceConfig,
   AppearanceConfigInput,
@@ -66,30 +66,21 @@ interface AppearanceTarget {
 
 const defaultDeviceSource: AppearanceDeviceSource = {
   getPooledDevices: () => {
-    const daemonState = DaemonState.getInstance();
-    if (!daemonState.isInitialized()) {
+    const pool = defaultDaemonContext.devicePool();
+    if (!pool) {
       return [];
     }
-    return daemonState
-      .getDevicePool()
-      .getAllDevices()
-      .map((device) => ({
-        deviceId: device.id,
-        name: device.name,
-        platform: device.platform,
-      }));
+    return pool.getAllDevices().map((device) => ({
+      deviceId: device.id,
+      name: device.name,
+      platform: device.platform,
+    }));
   },
-  getCurrentDevice: () => DeviceSessionManager.getInstance().getCurrentDevice(),
+  getCurrentDevice: () => DeviceReadiness.getInstance().getCurrentDevice(),
   getSessionForDevice: (deviceId) => {
-    const daemonState = DaemonState.getInstance();
-    return daemonState.isInitialized()
-      ? daemonState.getSessionManager().getSessionForDevice(deviceId)
-      : null;
+    return defaultDaemonContext.sessionManager()?.getSessionForDevice(deviceId) ?? null;
   },
-  getSessionManager: () => {
-    const daemonState = DaemonState.getInstance();
-    return daemonState.isInitialized() ? daemonState.getSessionManager() : undefined;
-  },
+  getSessionManager: () => defaultDaemonContext.sessionManager(),
 };
 
 export interface AppearanceSocketServerDependencies {
@@ -125,7 +116,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   constructor(
     socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+    protected readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "appearance",
       // An observer may store its own config; it applies once the observer holds a device (#10976).
       { allowObserverSessions: true },

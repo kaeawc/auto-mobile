@@ -55,7 +55,7 @@ function createClient(
   };
 
   return {
-    simctl: new SimCtlClient(null, execAsync, new FakeTimer(), "darwin"),
+    simctl: new SimCtlClient(null, execAsync, { timer: new FakeTimer(), platform: "darwin" }),
     calls,
     signals,
   };

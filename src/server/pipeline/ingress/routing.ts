@@ -1,25 +1,29 @@
 import { brokerConnectionPlatformRefusal } from "../../../daemon/sessionBroker/connectionScope";
-import { DaemonState } from "../../../daemon/daemonState";
+import {
+  defaultDaemonContext,
+  type DaemonContext,
+  type DevicePoolReads,
+} from "../../../daemon/daemonContext";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
 } from "../../../features/toolSelection/selectionSessionResolver";
-import { getRemovedToolHint } from "../../../models/removedTools";
+import { getRemovedToolHint } from "../../../utils/removedTools";
 import { assertBrokerConnectionPlainToolCall } from "../../brokerConnectionToolGate";
-import { SessionOutsideBoundSessionError } from "../../deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "../../../daemon/deviceOutsideBoundSessionRefusal";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
-import { isDeviceSessionAcquisitionTool } from "../../deviceSessionResult";
-import { resolveDirectSessionDevice } from "../../directSessionDeviceRegistry";
+import { isDeviceSessionAcquisitionTool } from "../../../daemon/deviceSessionResult";
+import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRegistry";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
-import { ToolUnavailableError, UnknownToolError } from "../../toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../../daemon/toolUnavailableError";
 import {
   assertUserConfigurableToolNames,
   requestedToolNamesFromSetToolEnabledArgs,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../../toolSelectionTools";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import {
   resolveActionsCompactMetadata,
   resolveToolResultsNoStructuredContent,
@@ -94,11 +98,14 @@ export interface DeviceRouting {
   readonly resolvedImplicitAutolockSessionUuid: string | undefined;
 }
 
-function routeViaAutolock(scope: RoutingScope, rawArgs: Record<string, unknown>): DeviceRouting {
+function routeViaAutolock(
+  scope: RoutingScope,
+  rawArgs: Record<string, unknown>,
+  pool: DevicePoolReads,
+): DeviceRouting {
   // Loopback MCP clients are reused by execution scope, not by socket.
   // Their local bindings are partial; only the pool owns all acquisitions.
   const { name, implicitAutolockMcpSessionId } = scope;
-  const pool = DaemonState.getInstance().getDevicePool();
   const platform = knownPlatform(rawArgs.platform);
   const deviceId = typeof rawArgs.deviceId === "string" ? rawArgs.deviceId : undefined;
   let routingSessionUuid = pool.resolveAutolockSessionForMcpSession(
@@ -118,34 +125,32 @@ function knownPlatform(value: unknown): "android" | "ios" | undefined {
 }
 
 function grantedPlatformOfSession(sessionUuid: string): "android" | "ios" | undefined {
-  const daemonState = DaemonState.getInstance();
-  const session = daemonState.getSessionManager().peekSession(sessionUuid);
+  const session = defaultDaemonContext.sessionManager()?.peekSession(sessionUuid);
   return session?.assignedDevice
-    ? daemonState.getDevicePool().getDevice(session.assignedDevice)?.platform
+    ? defaultDaemonContext.devicePool()?.getDevice(session.assignedDevice)?.platform
     : undefined;
 }
 
 function admittedSessionDevice(id: string) {
-  if (!DaemonState.getInstance().isInitialized()) {
+  const manager = defaultDaemonContext.sessionManager();
+  const pool = defaultDaemonContext.devicePool();
+  if (!manager || !pool) {
     return resolveDirectSessionDevice(id)?.device;
   }
-  const manager = DaemonState.getInstance().getSessionManager();
   const session = manager.getSession(id);
   if (!session || !manager.isAdmittedForAutomation(session) || !session.assignedDevice) {
     return undefined;
   }
-  const device = DaemonState.getInstance().getDevicePool().getDevice(session.assignedDevice);
+  const device = pool.getDevice(session.assignedDevice);
   return device ? { deviceId: device.id, platform: device.platform } : undefined;
 }
 
 function routeViaBinding(scope: RoutingScope, rawArgs: Record<string, unknown>): DeviceRouting {
   const { name, tool, toolParams, sessionId, daemonMode, sessionToolBinding } = scope;
   const requestMcpSessionId = scope.context.requestMcpSessionId;
-  const daemonState = DaemonState.getInstance();
-  const managedBinding =
-    daemonMode && daemonState.isInitialized()
-      ? daemonState.getBrokerConnectionScopes().get(requestMcpSessionId)
-      : undefined;
+  const managedBinding = daemonMode
+    ? defaultDaemonContext.brokerConnectionScopes()?.get(requestMcpSessionId)
+    : undefined;
   const refusal = brokerConnectionPlatformRefusal({
     binding:
       !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid ? managedBinding : undefined,
@@ -201,14 +206,15 @@ export function routeDeviceSession(
     return unrouted;
   }
   const rawArgs = toolParams;
+  const pool = defaultDaemonContext.devicePool();
   if (
-    DaemonState.getInstance().isInitialized() &&
+    pool &&
     implicitAutolockMcpSessionId &&
     !hasLocalBinding &&
     !rawArgs.sessionUuid &&
     !rawArgs.device
   ) {
-    return routeViaAutolock(scope, rawArgs);
+    return routeViaAutolock(scope, rawArgs, pool);
   }
   return routeViaBinding(scope, rawArgs);
 }
@@ -218,10 +224,10 @@ function autolockSessionOf(
   explicitSessionUuid: string | undefined,
   implicitAutolockMcpSessionId: string | undefined,
 ): string | undefined {
-  return explicitSessionUuid && DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance()
-        .getDevicePool()
-        .resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId)
+  return explicitSessionUuid
+    ? defaultDaemonContext
+        .devicePool()
+        ?.resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId)
     : undefined;
 }
 
@@ -349,13 +355,9 @@ export function resolveConnectionPresentation(
  */
 function selectionSessionManagerOf(
   options: McpServerOptions,
+  daemon: DaemonContext = defaultDaemonContext,
 ): ToolSelectionSessionManager | undefined {
-  return (
-    options.toolSelectionSessionManager ??
-    (DaemonState.getInstance().isInitialized()
-      ? DaemonState.getInstance().getSessionManager()
-      : undefined)
-  );
+  return options.toolSelectionSessionManager ?? daemon.sessionManager();
 }
 
 function labelLookupSessionUuid(

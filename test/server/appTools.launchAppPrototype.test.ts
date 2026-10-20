@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
@@ -18,6 +18,9 @@ import {
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttacher";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const appTools = createAppToolsHarness();
 
@@ -223,7 +226,7 @@ describe("launchApp prototype:true (#10567)", () => {
     const h = setup();
     appTools.configure("terminateApp", {
       createTerminateApp: () => ({
-        execute: async () => ({ success: false, error: "devicectl failed" }),
+        execute: async () => ({ success: false, error: "devicectl failed", packageName: APP }),
       }),
     });
     await launch(SIMULATOR, { prototype: true });

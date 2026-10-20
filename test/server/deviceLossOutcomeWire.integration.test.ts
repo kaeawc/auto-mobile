@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
-import { DeviceLostError, rememberDeviceLossAbort } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError, rememberDeviceLossAbort } from "../../src/utils/deviceLossOutcome";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { McpTestFixture, MCP_TEST_REQUEST_TIMEOUT_MS } from "../fixtures/mcpTestFixture";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -346,7 +346,6 @@ describe("device loss MCP outcome", () => {
         name: "observe",
         arguments: { platform: "android" },
       },
-      undefined,
       { timeout: MCP_TEST_REQUEST_TIMEOUT_MS },
     );
     await Promise.race([observeStarted.promise, resultPromise.then(() => observeStarted.promise)]);

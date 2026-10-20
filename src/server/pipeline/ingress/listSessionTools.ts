@@ -1,4 +1,4 @@
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
 import { isAlwaysOnTool } from "../../../features/toolSelection/toolSelectionControl";
 import { resolveToolSelectionBaseSessionUuid } from "../../../features/toolSelection/selectionSessionResolver";
 import {
@@ -8,13 +8,17 @@ import {
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import { resolveToolResultsNoStructuredContent } from "./connectionPresentation";
 
 export interface ListSessionToolsDeps {
   readonly options: McpServerOptions;
+  /** The request's session key, else the stateful transport's id (#4678). */
+  readonly bindingKey: string | undefined;
   readonly sessionToolBinding: SessionToolBinding;
   readonly toolSelectionProfileRegistry: ToolSelectionProfileRegistry;
+  /** Daemon state reads; defaults to the DaemonState bridge. */
+  readonly daemon?: DaemonContext;
 }
 
 /**
@@ -22,17 +26,11 @@ export interface ListSessionToolsDeps {
  * device acquisition, to report the session's gated and enabled tool names.
  */
 export function createListSessionTools(deps: ListSessionToolsDeps) {
-  const { options, sessionToolBinding, toolSelectionProfileRegistry } = deps;
-  return async (
-    routingSessionUuid = sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
-  ) => {
-    const sessionId = options.sessionContext?.sessionId;
-    const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
-    const selectionSessionManager =
-      options.toolSelectionSessionManager ??
-      (DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined);
+  const { options, bindingKey, sessionToolBinding, toolSelectionProfileRegistry } = deps;
+  const daemon = deps.daemon ?? defaultDaemonContext;
+  return async (routingSessionUuid = sessionToolBinding.effectiveSessionUuid(bindingKey)) => {
+    const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(bindingKey);
+    const selectionSessionManager = options.toolSelectionSessionManager ?? daemon.sessionManager();
     const routingBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
       routingSessionUuid,
       selectionSessionManager,

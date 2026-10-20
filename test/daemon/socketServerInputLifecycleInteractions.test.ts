@@ -1,15 +1,12 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import { mcpRequestFailureDetails, type UnixSocketServer } from "../../src/daemon/socketServer";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -18,6 +15,9 @@ import {
   createFakeDeviceManager,
   createFakeSession,
 } from "./helpers/inputSocketHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
 
 /**
  * Interactions between the four daemon input/shutdown changes that were each tested alone:
@@ -27,36 +27,6 @@ import {
  * fakes; nothing spawns and no daemon or database is touched.
  */
 
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    if (this.destroyed) {
-      throw Object.assign(new Error("peer closed"), { code: "EPIPE" });
-    }
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
-
 type Ack = { success: boolean; error?: string };
 
 interface Recorded {
@@ -65,19 +35,51 @@ interface Recorded {
   release: (result: Ack) => void;
 }
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  ownedGestures: { ownerCount: number };
-  captureInputTargetOwner(device: BootedDevice): void;
-  runTrackedDeviceInput<T>(
+type DaemonStateArg = ConstructorParameters<typeof UnixSocketServer>[1];
+
+const unexpectedDaemonState = (): never => {
+  throw new Error("Unexpected daemon state access");
+};
+
+/** A daemon that never finished initialising: only input admission is exercised. */
+const uninitializedDaemonState: DaemonStateArg = {
+  isInitialized: () => false,
+  getSessionManager: unexpectedDaemonState,
+  getDevicePool: unexpectedDaemonState,
+  getDeviceSessionRegistry: unexpectedDaemonState,
+};
+
+/** The real server with the gesture registry, owner capture and tracked input exposed. */
+class LifecycleInputServer extends UnixSocketServerHarness {
+  get ownedGestureOwnerCount(): number {
+    return this.ownedGestures.ownerCount;
+  }
+
+  captureOwner(device: BootedDevice): void {
+    this.captureInputTargetOwner(device);
+  }
+
+  trackDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal) => Promise<T>,
     ownerSignal?: AbortSignal,
     requester?: () => string | undefined,
-  ): Promise<T>;
+  ): Promise<T> {
+    return this.runTrackedDeviceInput(toolName, targetDevice, operation, ownerSignal, requester);
+  }
+}
+
+function createServer(state: DaemonStateArg): LifecycleInputServer {
+  return new LifecycleInputServer(
+    "unused",
+    state,
+    new FakeTimer(),
+    null,
+    { mcpDispatcher: unreachableMcpDispatcher },
+    undefined,
+    { bindLock: fakeBindLock },
+  );
 }
 
 const tapFrame = (id: string): DaemonRequest => ({
@@ -105,10 +107,11 @@ const subscribeFrame: DaemonRequest = {
   id: "subscribe",
   type: "mcp_request",
   method: DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  params: {},
 };
 
-let server: UnixSocketServer;
-let internals: Internals;
+let server: LifecycleInputServer;
+let sessionState: ReturnType<typeof createFakeDaemonState> | undefined;
 let calls: Recorded[];
 let sockets: FakeSocket[];
 
@@ -117,21 +120,16 @@ function pending(label: string): Recorded[] {
 }
 
 function installClient(): void {
-  const record = (label: string) => {
-    return (...args: unknown[]) =>
-      new Promise<Ack>((resolve) => {
-        calls.push({ label, args, release: resolve });
-      });
-  };
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: record("tap"),
-        requestGestureStart: record("gestureStart"),
-        requestGestureEnd: record("gestureEnd"),
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  const record = (label: string, args: unknown[]) =>
+    new Promise<Ack & { totalTimeMs: number }>((resolve) => {
+      calls.push({ label, args, release: (result) => resolve({ totalTimeMs: 0, ...result }) });
+    });
+  spyOnAndroidClientInstance(androidDevice, {
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: (...args) => record("tap", args),
+    requestGestureStart: (...args) => record("gestureStart", args),
+    requestGestureEnd: (...args) => record("gestureEnd", args),
+  });
 }
 
 beforeEach(() => {
@@ -139,14 +137,9 @@ beforeEach(() => {
   sockets = [];
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
   installClient();
-  server = createTestUnixSocketServer(
-    "unused",
-    "http://localhost:0/mcp",
-    { isInitialized: () => false } as DaemonStateAccess,
-    new FakeTimer(),
-  );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  sessionState = undefined;
+  server = createServer(uninitializedDaemonState);
+  server.allowRequests();
 });
 
 afterEach(() => {
@@ -160,7 +153,7 @@ afterEach(() => {
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   sockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  server.connect(socket);
   return socket;
 }
 
@@ -172,7 +165,7 @@ async function settle(): Promise<void> {
 
 async function drain(): Promise<void> {
   await settle();
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...server.state.activeRequestHandlers]);
 }
 
 /** A tap that owns the device key (mid-dispatch) until its recorded call is released. */
@@ -197,7 +190,7 @@ describe("(a) input/gestureStart that leaves while waiting on the device key (#1
 
     expect(pending("gestureStart")).toHaveLength(0);
     expect(pending("gestureEnd")).toHaveLength(0);
-    expect(internals.ownedGestures.ownerCount).toBe(0);
+    expect(server.ownedGestureOwnerCount).toBe(0);
   });
 
   test("a start cancelled by daemon/cancelRequest while parked is never dispatched or recorded", async () => {
@@ -213,7 +206,7 @@ describe("(a) input/gestureStart that leaves while waiting on the device key (#1
 
     expect(pending("gestureStart")).toHaveLength(0);
     expect(pending("gestureEnd")).toHaveLength(0);
-    expect(internals.ownedGestures.ownerCount).toBe(0);
+    expect(server.ownedGestureOwnerCount).toBe(0);
     expect(owner.responses.find((frame) => frame.id === "start")).toMatchObject({
       success: false,
     });
@@ -232,7 +225,7 @@ describe("(a) input/gestureStart that leaves while waiting on the device key (#1
     // Registry saw the dead socket at ack time: one cancelling end, nothing recorded.
     expect(pending("gestureEnd")).toHaveLength(1);
     expect(pending("gestureEnd")[0].args).toEqual(["g1", 0, 0, true, 5000]);
-    expect(internals.ownedGestures.ownerCount).toBe(0);
+    expect(server.ownedGestureOwnerCount).toBe(0);
     pending("gestureEnd")[0].release({ success: true });
     await drain();
     expect(pending("gestureEnd")).toHaveLength(1);
@@ -244,7 +237,7 @@ describe("(a) input/gestureStart that leaves while waiting on the device key (#1
     await settle();
     pending("gestureStart")[0].release({ success: true });
     await settle();
-    expect(internals.ownedGestures.ownerCount).toBe(1);
+    expect(server.ownedGestureOwnerCount).toBe(1);
     expect(pending("gestureEnd")).toHaveLength(0);
 
     owner.destroy();
@@ -253,7 +246,7 @@ describe("(a) input/gestureStart that leaves while waiting on the device key (#1
     pending("gestureEnd")[0].release({ success: true });
     await drain();
     expect(pending("gestureEnd")).toHaveLength(1);
-    expect(internals.ownedGestures.ownerCount).toBe(0);
+    expect(server.ownedGestureOwnerCount).toBe(0);
   });
 });
 
@@ -302,24 +295,14 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
   function useSessionState(assignedDevice: string): void {
     const session = createFakeSession("session-c", assignedDevice, "android");
     const state = createFakeDaemonState(new Map([["session-c", session]]));
-    const stateServer = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      state,
-      new FakeTimer(),
-    );
-    server = stateServer;
-    internals = stateServer as unknown as Internals;
+    sessionState = state;
+    server = createServer(state);
   }
 
   /** The session that resolved the target, then left the device (rebind). */
   function rebindAway(): void {
     // The in-place session is shared by reference with the fake state's map.
-    const stateServer = internals as unknown as {
-      daemonState: ReturnType<typeof createFakeDaemonState>;
-    };
-    const manager = stateServer.daemonState.getSessionManager();
-    const session = manager.getSession("session-c");
+    const session = sessionState?.getSessionManager().getSession("session-c");
     if (session) {
       session.assignedDevice = "emulator-other";
     }
@@ -337,22 +320,22 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
 
   test("ownership refusal wins over an already-aborted owner and starts no execution", async () => {
     useSessionState(device.deviceId);
-    internals.captureInputTargetOwner(device);
+    server.captureOwner(device);
     rebindAway();
 
     await expect(
-      internals.runTrackedDeviceInput("input/tap", device, operation, abortedSignal()),
+      server.trackDeviceInput("input/tap", device, operation, abortedSignal()),
     ).rejects.toThrow(/no longer owns device 'emulator-5599'/);
     expect(operationRuns).toBe(0);
   });
 
   test("the refusal for a holder that left after target resolution is typed on the frame (#11351)", async () => {
     useSessionState(device.deviceId);
-    internals.captureInputTargetOwner(device);
+    server.captureOwner(device);
     rebindAway();
 
-    const error = await internals
-      .runTrackedDeviceInput("input/tap", device, operation)
+    const error = await server
+      .trackDeviceInput("input/tap", device, operation)
       .catch((thrown: unknown) => thrown);
 
     expect(mcpRequestFailureDetails(error, undefined)).toEqual({
@@ -364,7 +347,7 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
 
   test("a refused bind wins over an already-aborted owner and the execution is still ended", async () => {
     useSessionState(device.deviceId);
-    internals.captureInputTargetOwner(device);
+    server.captureOwner(device);
     const refusal = new ActionableError(
       "Session session-c was rebound from device 'emulator-5599'",
     );
@@ -373,13 +356,7 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
     });
     try {
       await expect(
-        internals.runTrackedDeviceInput(
-          "input/tap",
-          device,
-          operation,
-          abortedSignal(),
-          () => "session-c",
-        ),
+        server.trackDeviceInput("input/tap", device, operation, abortedSignal(), () => "session-c"),
       ).rejects.toBe(refusal);
     } finally {
       bind.mockRestore();
@@ -389,22 +366,22 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
 
   test("with ownership intact an aborted owner fails as the owner's abort, before dispatch", async () => {
     useSessionState(device.deviceId);
-    internals.captureInputTargetOwner(device);
+    server.captureOwner(device);
     const signal = abortedSignal();
 
     await expect(
-      internals.runTrackedDeviceInput("input/tap", device, operation, signal, () => "session-c"),
+      server.trackDeviceInput("input/tap", device, operation, signal, () => "session-c"),
     ).rejects.toBe(signal.reason);
     expect(operationRuns).toBe(0);
   });
 
   test("an abort that lands during the operation ends the execution too", async () => {
     useSessionState(device.deviceId);
-    internals.captureInputTargetOwner(device);
+    server.captureOwner(device);
     const controller = new AbortController();
 
     await expect(
-      internals.runTrackedDeviceInput(
+      server.trackDeviceInput(
         "input/tap",
         device,
         async (signal) => {
@@ -420,10 +397,10 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
 
   test("a live, still-owning session runs the operation", async () => {
     useSessionState(device.deviceId);
-    internals.captureInputTargetOwner(device);
+    server.captureOwner(device);
 
     await expect(
-      internals.runTrackedDeviceInput(
+      server.trackDeviceInput(
         "input/tap",
         device,
         operation,
@@ -439,7 +416,7 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
 
     for (const requester of [undefined, "someone-else"]) {
       await expect(
-        internals.runTrackedDeviceInput(
+        server.trackDeviceInput(
           "input/tap",
           device,
           operation,

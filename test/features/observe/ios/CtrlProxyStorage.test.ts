@@ -195,7 +195,7 @@ describe("CtrlProxyStorage (iOS)", function () {
         expect(result[0].path).toBe("Standard");
         expect(JSON.stringify(result)).not.toContain("hidden-session");
         expect(JSON.stringify(result)).not.toContain("hidden-token");
-        expect(result[0].displayName).toBe("Standard");
+        expect(result[0]).toHaveProperty("displayName", "Standard");
         expect(result[1].name).toBe("group.com.example");
         expect(result[1].path).toBe("group.com.example");
       } finally {
@@ -682,6 +682,9 @@ import {
   type IosDelegateHarness,
 } from "../../../helpers/iosDelegateHarness";
 import { CtrlProxyStorage } from "../../../../src/features/observe/ios/CtrlProxyStorage";
+import { isolateToolRegistry } from "../../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 let deps: Partial<StorageToolsDependencies> = {};
 function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {

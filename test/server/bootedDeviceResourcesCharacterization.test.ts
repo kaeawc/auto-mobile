@@ -2,13 +2,15 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { queryDeviceServiceStatus } from "../../src/server/bootedDeviceResources";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import type { ForcedRestartSnapshot } from "../../src/ctrlProxy/ForcedRestartBudget";
-import {
-  IOSCtrlProxyClient,
-  IOS_RUNNER_FEATURE_FLAGS,
-} from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { IOS_RUNNER_FEATURE_FLAGS } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import * as release from "../../src/constants/release";
+import {
+  spyOnIosExistingFactory,
+  spyOnIosExistingInstance,
+} from "../helpers/iosCtrlProxyClientSpies";
 
 for (const expectedSha256 of ["", "ABC"]) {
   for (const installedSha256 of [null, "abc", "other"]) {
@@ -70,6 +72,8 @@ for (const expectedSha256 of ["", "ABC"]) {
   }
 }
 
+const IOS_DEVICE: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "characterization" };
+
 afterEach(() => {
   IOSCtrlProxyManager.resetInstances();
 });
@@ -78,23 +82,21 @@ for (const commands of [null, [], ["required"]]) {
   for (const features of [null, [], [...IOS_RUNNER_FEATURE_FLAGS]]) {
     test(`iOS cached handshake commands=${JSON.stringify(commands)}, features=${JSON.stringify(features)}`, async () => {
       const events: string[] = [];
-      const manager = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-        isInstalled: async () => {
-          events.push("installed");
-          return true;
-        },
-        checkRunningWithReason: async () => {
-          events.push("health");
-          return { ok: true };
-        },
-        getForcedRestartBudget: () => ({
-          snapshot: () => {
-            events.push("recovery");
-            return { state: "idle", attempts: 0 };
-          },
-        }),
-      } as unknown as IOSCtrlProxyManager);
-      const client = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      const runner = IOSCtrlProxyManager.createForTesting(IOS_DEVICE, new FakeTimer());
+      spyOn(runner, "isInstalled").mockImplementation(async () => {
+        events.push("installed");
+        return true;
+      });
+      spyOn(runner, "checkRunningWithReason").mockImplementation(async () => {
+        events.push("health");
+        return { ok: true };
+      });
+      spyOn(runner.getForcedRestartBudget(), "snapshot").mockImplementation(() => {
+        events.push("recovery");
+        return { state: "idle", attempts: 0 };
+      });
+      const manager = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue(runner);
+      const client = spyOnIosExistingInstance({
         getCachedSupportedCommands: () => {
           events.push("commands");
           return commands;
@@ -103,7 +105,7 @@ for (const commands of [null, [], ["required"]]) {
           events.push("features");
           return features;
         },
-      } as unknown as IOSCtrlProxyClient);
+      });
       try {
         const status = await queryDeviceServiceStatus(
           { name: "iPhone", platform: "ios", deviceId: "characterization" },
@@ -151,12 +153,12 @@ for (const state of ["backoff", "exhausted", "suspended"] as const) {
         attempts: 2,
         ...(hasReason ? { lastFailureReason: "private exception", nextAttemptAtMs: 5000 } : {}),
       };
-      const manager = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-        isInstalled: async () => true,
-        checkRunningWithReason: async () => ({ ok: false, reason: "unhealthy" }),
-        getForcedRestartBudget: () => ({ snapshot: () => recovery }),
-      } as unknown as IOSCtrlProxyManager);
-      const client = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockImplementation(() => {
+      const runner = IOSCtrlProxyManager.createForTesting(IOS_DEVICE, new FakeTimer());
+      spyOn(runner, "isInstalled").mockResolvedValue(true);
+      spyOn(runner, "checkRunningWithReason").mockResolvedValue({ ok: false, reason: "unhealthy" });
+      spyOn(runner.getForcedRestartBudget(), "snapshot").mockReturnValue(recovery);
+      const manager = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue(runner);
+      const client = spyOnIosExistingFactory(() => {
         throw new Error("stopped runner must not read cache");
       });
       try {

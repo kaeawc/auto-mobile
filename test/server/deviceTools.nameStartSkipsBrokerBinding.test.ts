@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
@@ -13,7 +13,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { DEVICE_ASSIGNED_TO_BINDING_CODE } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import type { DeviceInfo } from "../../src/models";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -65,7 +65,7 @@ describe("startDevice by name with a binding device matching the same name", () 
   let pool: DevicePool;
   let lifecycleCoordinator: FakeVirtualDeviceLifecycleCoordinator;
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
@@ -104,7 +104,19 @@ describe("startDevice by name with a binding device matching the same name", () 
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     resetDeviceToolsDependencies();
@@ -127,7 +139,7 @@ describe("startDevice by name with a binding device matching the same name", () 
     devices.getExecutedOperations().filter((operation) => operation.startsWith("startDevice:"));
 
   // Control: the boot's own exclusion works when the slot's simulator is not the matcher's pick.
-  test("boots the free simulator when the binding holds the older one", async () => {
+  arranged("boots the free simulator when the binding holds the older one", async () => {
     await assignBindingDevice(registry, "ios", SLOT_UDID);
     devices.setBootedDevices("ios", []);
     devices.setDeviceImages("ios", [simulator(SLOT_UDID, "18.0"), simulator(FREE_UDID, "18.2")]);
@@ -137,7 +149,7 @@ describe("startDevice by name with a binding device matching the same name", () 
     expect(result.runtime.deviceId).toBe(FREE_UDID);
   });
 
-  test("boots the free simulator when the binding holds the newer one", async () => {
+  arranged("boots the free simulator when the binding holds the newer one", async () => {
     await assignBindingDevice(registry, "ios", SLOT_UDID);
     devices.setBootedDevices("ios", []);
     // Same request, same inventory; only which of the two same-named simulators the slot holds
@@ -152,7 +164,7 @@ describe("startDevice by name with a binding device matching the same name", () 
     expect(bootedNames()).toEqual([expect.stringContaining("iPhone 16")]);
   });
 
-  test("a name only the binding's simulator matches is refused like its UDID", async () => {
+  arranged("a name only the binding's simulator matches is refused like its UDID", async () => {
     await assignBindingDevice(registry, "ios", SLOT_UDID);
     devices.setBootedDevices("ios", []);
     devices.setDeviceImages("ios", [simulator(SLOT_UDID, "18.2")]);
@@ -163,22 +175,25 @@ describe("startDevice by name with a binding device matching the same name", () 
     expect(bootedNames()).toEqual([]);
   });
 
-  test("an explicit UDID naming the binding's simulator stays refused with a free twin present", async () => {
-    await assignBindingDevice(registry, "ios", SLOT_UDID);
-    devices.setBootedDevices("ios", []);
-    devices.setDeviceImages("ios", [simulator(SLOT_UDID, "18.2"), simulator(FREE_UDID, "18.0")]);
+  arranged(
+    "an explicit UDID naming the binding's simulator stays refused with a free twin present",
+    async () => {
+      await assignBindingDevice(registry, "ios", SLOT_UDID);
+      devices.setBootedDevices("ios", []);
+      devices.setDeviceImages("ios", [simulator(SLOT_UDID, "18.2"), simulator(FREE_UDID, "18.0")]);
 
-    const outcome = await start({ platform: "ios", deviceId: SLOT_UDID }).catch(
-      (error: unknown) => error,
-    );
+      const outcome = await start({ platform: "ios", deviceId: SLOT_UDID }).catch(
+        (error: unknown) => error,
+      );
 
-    expect(outcome).toMatchObject({ code: DEVICE_ASSIGNED_TO_BINDING_CODE });
-    expect(bootedNames()).toEqual([]);
-  });
+      expect(outcome).toMatchObject({ code: DEVICE_ASSIGNED_TO_BINDING_CODE });
+      expect(bootedNames()).toEqual([]);
+    },
+  );
 
   // Android has no such hole: its name is leased as written and only the boot matches it,
   // with the managed AVDs already excluded.
-  test("an Android name whose best match is the binding's AVD boots the free AVD", async () => {
+  arranged("an Android name whose best match is the binding's AVD boots the free AVD", async () => {
     await assignBindingDevice(registry, "android", "Pixel_7_API_35");
     devices.setBootedDevices("android", []);
     devices.setDeviceImages("android", [avd("Pixel_7_API_35", "15"), avd("Pixel_7_API_34", "14")]);
@@ -189,7 +204,7 @@ describe("startDevice by name with a binding device matching the same name", () 
     expect(bootedNames()).toEqual([expect.stringContaining("Pixel_7_API_34")]);
   });
 
-  test("an Android name that is exactly the binding's AVD is refused", async () => {
+  arranged("an Android name that is exactly the binding's AVD is refused", async () => {
     await assignBindingDevice(registry, "android", "Pixel_7_API_35");
     devices.setBootedDevices("android", []);
     devices.setDeviceImages("android", [avd("Pixel_7_API_35", "15"), avd("Pixel_7_API_34", "14")]);
@@ -235,7 +250,7 @@ describe("startDevice by name with a binding device matching the same name", () 
     ).toMatchObject({ kind: "opened" });
   }
 
-  test("both lifecycle matching and boot selection skip the name-held simulator", async () => {
+  arranged("both lifecycle matching and boot selection skip the name-held simulator", async () => {
     const name = "amslot-12345678-0-g1-attempt";
     await creatingSlot(name);
     devices.setBootedDevices("ios", []);
@@ -250,37 +265,43 @@ describe("startDevice by name with a binding device matching the same name", () 
     expect(bootedNames()).toEqual([expect.stringContaining(`startDevice:${name}-user:`)]);
   });
 
-  test("a running name-held simulator is never selected or deferred to as an idle match", async () => {
-    const name = "amslot-12345678-0-g1-attempt";
-    await creatingSlot(name);
-    const booted = [{ name, deviceId: SLOT_UDID, platform: "ios" as const }];
-    devices.setBootedDevices("ios", booted);
-    await pool.initializeWithDevices(booted);
-    devices.setDeviceImages("ios", [
-      { ...simulator(SLOT_UDID, "18.2"), name, isRunning: true },
-      { ...simulator(FREE_UDID, "18.0"), name: `${name}-user` },
-    ]);
+  arranged(
+    "a running name-held simulator is never selected or deferred to as an idle match",
+    async () => {
+      const name = "amslot-12345678-0-g1-attempt";
+      await creatingSlot(name);
+      const booted = [{ name, deviceId: SLOT_UDID, platform: "ios" as const }];
+      devices.setBootedDevices("ios", booted);
+      await pool.initializeWithDevices(booted);
+      devices.setDeviceImages("ios", [
+        { ...simulator(SLOT_UDID, "18.2"), name, isRunning: true },
+        { ...simulator(FREE_UDID, "18.0"), name: `${name}-user` },
+      ]);
 
-    const result = await start({ platform: "ios", name: "amslot-" });
+      const result = await start({ platform: "ios", name: "amslot-" });
 
-    expect(result.runtime.deviceId).toBe(FREE_UDID);
-    expect(pool.getDevice(SLOT_UDID)?.sessionId).toBeNull();
-    expect(bootedNames()).toEqual([expect.stringContaining(`startDevice:${name}-user:`)]);
-  });
+      expect(result.runtime.deviceId).toBe(FREE_UDID);
+      expect(pool.getDevice(SLOT_UDID)?.sessionId).toBeNull();
+      expect(bootedNames()).toEqual([expect.stringContaining(`startDevice:${name}-user:`)]);
+    },
+  );
 
-  test("an unpooled name-held simulator is refused before taking its lifecycle lease", async () => {
-    const name = "amslot-12345678-0-g1-attempt";
-    await creatingSlot(name);
-    devices.setBootedDevices("ios", []);
-    devices.setDeviceImages("ios", [{ ...simulator(SLOT_UDID, "18.2"), name }]);
+  arranged(
+    "an unpooled name-held simulator is refused before taking its lifecycle lease",
+    async () => {
+      const name = "amslot-12345678-0-g1-attempt";
+      await creatingSlot(name);
+      devices.setBootedDevices("ios", []);
+      devices.setDeviceImages("ios", [{ ...simulator(SLOT_UDID, "18.2"), name }]);
 
-    const outcome = await start({ platform: "ios", name, createIfMissing: false }).catch(
-      (error: unknown) => error,
-    );
+      const outcome = await start({ platform: "ios", name, createIfMissing: false }).catch(
+        (error: unknown) => error,
+      );
 
-    expect(outcome).toMatchObject({ code: DEVICE_ASSIGNED_TO_BINDING_CODE });
-    expect((outcome as Error).message).toStartWith("startDevice refused:");
-    expect(lifecycleCoordinator.reservations).toEqual([]);
-    expect(bootedNames()).toEqual([]);
-  });
+      expect(outcome).toMatchObject({ code: DEVICE_ASSIGNED_TO_BINDING_CODE });
+      expect((outcome as Error).message).toStartWith("startDevice refused:");
+      expect(lifecycleCoordinator.reservations).toEqual([]);
+      expect(bootedNames()).toEqual([]);
+    },
+  );
 });

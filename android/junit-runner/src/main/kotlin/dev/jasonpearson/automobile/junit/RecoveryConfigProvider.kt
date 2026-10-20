@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -101,11 +102,7 @@ internal constructor(
       body["enabled"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: DEFAULT_ENABLED
     val configObj = body["config"]?.jsonObject
     val maxToolCalls =
-      try {
-        configObj?.get("maxToolCalls")?.jsonPrimitive?.intOrNull ?: DEFAULT_MAX_TOOL_CALLS
-      } catch (_: Exception) {
-        DEFAULT_MAX_TOOL_CALLS
-      }
+      (configObj?.get("maxToolCalls") as? JsonPrimitive)?.intOrNull ?: DEFAULT_MAX_TOOL_CALLS
     return CachedConfig(enabled, maxToolCalls)
   }
 

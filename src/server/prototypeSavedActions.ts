@@ -31,12 +31,18 @@ import {
 } from "../features/prototype/ios/iosPrototypeBundleId";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import type { BootedDevice } from "../models";
-import type { AdbCommandRunner } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { CTRL_PROXY_PACKAGE } from "../ctrlProxy/constants";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import {
+  confirmPinDialog,
+  type PinConfirmationDriver,
+  type PinConfirmationOutcome,
+} from "../features/prototype/pinConfirmation";
 
 export type PrototypeSavedAction = "save" | "listSaved" | "deleteSaved";
 export type PrototypeSavedErrorCode =
@@ -53,7 +59,7 @@ export interface PrototypeSavedOutput {
   warning?: string;
   uploadedAssets?: UploadedPrototypeAsset[];
 }
-export interface PrototypeSavedArgs {
+export interface PrototypeSavedInput {
   action: PrototypeSavedAction;
   spec?: PrototypeSpec;
   label?: string;
@@ -71,7 +77,9 @@ export interface PrototypeSavedDependencies {
     "save" | "listSaved" | "deleteSaved" | "pinSaved" | "supportsCommand"
   >;
   /** Host-side adb for `removeIcon`; absent means the icon cannot be cleared from the host. */
-  adb?: AdbCommandRunner;
+  adb?: AdbExecutor;
+  /** Accepts the launcher's pin dialog for `autoConfirm`; absent means it cannot be driven. */
+  pinConfirmation?: PinConfirmationDriver;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
   signal?: AbortSignal;
 }
@@ -123,7 +131,7 @@ const requestTypes: Record<PrototypeSavedAction, string> = {
   deleteSaved: "delete_saved_prototype",
 };
 export function savedPrototypeSuccess(
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   result: PrototypeResult,
 ): PrototypeSavedOutput {
   if (args.action === "listSaved") {
@@ -139,7 +147,8 @@ export function savedPrototypeSuccess(
 }
 const DISABLED_ICON_WARNING = "A deleted prototype's disabled home-screen icon may remain.";
 /** Clearing is only safe when no saved prototype is left: it clears every CtrlProxy shortcut. */
-const CLEAR_SHORTCUTS_COMMAND = `shell cmd shortcut clear-shortcuts ${CTRL_PROXY_PACKAGE}`;
+const clearShortcutsCommand = (userId: number) =>
+  `shell cmd shortcut clear-shortcuts --user ${userId} ${CTRL_PROXY_PACKAGE}`;
 function savedPrototypeRequestFailure(
   error: unknown,
   action: PrototypeSavedAction,
@@ -164,14 +173,14 @@ function savedPrototypeRequestFailure(
   };
 }
 function savedPrototypeResult(
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   result: PrototypeResult,
 ): PrototypeSavedOutput {
   return result.success ? savedPrototypeSuccess(args, result) : savedPrototypeFailure(result);
 }
 export async function performPrototypeSavedAction(
   deps: PrototypeSavedDependencies,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
 ): Promise<PrototypeSavedOutput> {
   try {
     if (!(await deps.client.supportsCommand(PROTOTYPE_SAVED_CAPABILITY))) {
@@ -203,7 +212,7 @@ export async function performPrototypeSavedAction(
 
 async function saveAndroidPrototype(
   deps: PrototypeSavedDependencies,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
 ): Promise<PrototypeSavedOutput> {
   const staged = await deps.stageAssets();
   deps.signal?.throwIfAborted();
@@ -223,11 +232,86 @@ async function saveAndroidPrototype(
   if (!args.pin || !output.success) {
     return { ...output, ...uploaded };
   }
+  // The pin transport takes no signal, so a cancellation that landed during the save must stop
+  // the second mutation here; the completed save is still reported.
+  if (deps.signal?.aborted) {
+    return {
+      ...output,
+      warning: "The request was cancelled after the save, so the prototype was not pinned.",
+      ...uploaded,
+    };
+  }
   return {
     ...output,
     ...(await pinSavedPrototype(deps, args, result.saved?.id ?? args.spec!.id)),
     ...uploaded,
   };
+}
+
+const PIN_PENDING_WARNING =
+  "The launcher's confirmation dialog is open and the icon is pinned only once it is accepted; declining sends no signal.";
+const PIN_VERIFY_ATTEMPTS = 5;
+const PIN_VERIFY_POLL_MS = 400;
+
+function autoConfirmReason(outcome: PinConfirmationOutcome | undefined): string {
+  switch (outcome?.status) {
+    case "unrecognized":
+      return `confirmation_unrecognized: no known accept button in the launcher dialog (buttons seen: ${outcome.visibleButtons.join(", ") || "none"}); accept it on the device.`;
+    case "timeout":
+      return "The launcher's confirmation dialog did not appear in time; accept it on the device if it is open.";
+    case "tap_failed":
+      return `Tapping the accept button failed (${outcome.error}); accept it on the device.`;
+    case "tapped":
+      return `Tapped "${outcome.label}" but the shortcut was not reported pinned yet.`;
+    default:
+      return "autoConfirm needs a driveable device; accept the launcher dialog on the device.";
+  }
+}
+
+/** Taps the launcher's accept button, then reports pinned only once listSaved says so. */
+async function autoConfirmPin(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedInput,
+  id: string,
+): Promise<Partial<PrototypeSavedOutput>> {
+  const driver = deps.pinConfirmation;
+  const pending = (outcome?: PinConfirmationOutcome) => ({
+    pinned: "pending" as const,
+    warning: `${PIN_PENDING_WARNING} autoConfirm: ${autoConfirmReason(outcome)}`,
+  });
+  if (!driver) {
+    return pending();
+  }
+  const outcome = await confirmPinDialog(driver, { signal: deps.signal });
+  if (outcome.status !== "tapped") {
+    return pending(outcome);
+  }
+  for (let attempt = 0; attempt < PIN_VERIFY_ATTEMPTS; attempt++) {
+    deps.signal?.throwIfAborted();
+    if (await isPinnedOnDevice(deps, id, args.timeoutMs)) {
+      return { pinned: "pinned" };
+    }
+    await driver.timer.sleep(PIN_VERIFY_POLL_MS);
+  }
+  return pending(outcome);
+}
+
+async function isPinnedOnDevice(
+  deps: PrototypeSavedDependencies,
+  id: string,
+  timeoutMs: number | undefined,
+): Promise<boolean> {
+  try {
+    const listed = await deps.client.listSaved(timeoutMs);
+    return listed.savedPrototypes?.some((entry) => entry.id === id && entry.pinned) === true;
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // A failed verification read only leaves the pin pending, which is reported to the caller.
+    logger.warn(`[prototype] pin verification failed: ${errorMessage(error)}`, error);
+    return false;
+  }
 }
 
 /**
@@ -236,21 +320,28 @@ async function saveAndroidPrototype(
  */
 async function pinSavedPrototype(
   deps: PrototypeSavedDependencies,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   id: string,
 ): Promise<Partial<PrototypeSavedOutput>> {
-  const reply = await deps.client.pinSaved(id, args.icon, args.timeoutMs);
-  const autoConfirm = args.autoConfirm
-    ? " autoConfirm is not implemented yet (#12266): accept the launcher's Add to home screen dialog on the device."
-    : "";
+  let reply: PrototypeResult;
+  try {
+    reply = await deps.client.pinSaved(id, args.icon, args.timeoutMs);
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // The save already succeeded; a pin transport failure must not hide it.
+    logger.warn(`[prototype] pin request failed: ${errorMessage(error)}`, error);
+    return { success: false, error: `Saved, but pinning failed. ${errorMessage(error)}` };
+  }
   if (reply.success && reply.pin?.status === "already_pinned") {
     return { pinned: "pinned" };
   }
+  if (reply.success && args.autoConfirm) {
+    return await autoConfirmPin(deps, args, id);
+  }
   if (reply.success) {
-    return {
-      pinned: "pending",
-      warning: `The launcher's confirmation dialog is open and the icon is pinned only once it is accepted; declining sends no signal.${autoConfirm}`,
-    };
+    return { pinned: "pending", warning: PIN_PENDING_WARNING };
   }
   const failure = savedPrototypeFailure(reply);
   if (reply.errorCode === "pin_unsupported") {
@@ -263,6 +354,29 @@ async function pinSavedPrototype(
   };
 }
 
+/** The saved ids still present after a delete, or the warning that the list could not be confirmed. */
+async function probeRemainingSaved(
+  deps: PrototypeSavedDependencies,
+  timeoutMs: number | undefined,
+): Promise<readonly unknown[] | string> {
+  const unconfirmed = (detail: string) =>
+    `Could not confirm that no saved prototype remains${detail}, so no icon was cleared. ${DISABLED_ICON_WARNING}`;
+  try {
+    const remaining = await deps.client.listSaved(timeoutMs);
+    // Only an explicit empty list proves nothing else would lose its shortcut.
+    return remaining.success && remaining.savedPrototypes !== undefined
+      ? remaining.savedPrototypes
+      : unconfirmed("");
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // The delete already succeeded; an unconfirmed probe only means the icon is left alone.
+    logger.warn(`[prototype] saved-list probe failed: ${errorMessage(error)}`, error);
+    return unconfirmed(` (${errorMessage(error)})`);
+  }
+}
+
 async function removeIconWarning(
   deps: PrototypeSavedDependencies,
   timeoutMs: number | undefined,
@@ -270,15 +384,20 @@ async function removeIconWarning(
   if (!deps.adb) {
     return `removeIcon is unavailable without host adb. ${DISABLED_ICON_WARNING}`;
   }
-  const remaining = await deps.client.listSaved(timeoutMs);
-  if (!remaining.success) {
-    return `Could not confirm that no saved prototype remains, so no icon was cleared. ${DISABLED_ICON_WARNING}`;
+  const remaining = await probeRemainingSaved(deps, timeoutMs);
+  if (typeof remaining === "string") {
+    return remaining;
   }
-  if ((remaining.savedPrototypes ?? []).length > 0) {
+  if (remaining.length > 0) {
     return `Other saved prototypes remain, and clearing shortcuts would remove their icons too, so the icon was left. ${DISABLED_ICON_WARNING}`;
   }
   try {
-    const cleared = await deps.adb.executeCommand(CLEAR_SHORTCUTS_COMMAND, {
+    // ShortcutService defaults to user 0, so a work or secondary profile needs the active user.
+    const { userId } = await new AndroidUserTargetResolver(deps.adb).resolve({
+      currentUser: true,
+      signal: deps.signal,
+    });
+    const cleared = await deps.adb.executeCommand(clearShortcutsCommand(userId), {
       noRetry: true,
       signal: deps.signal,
     });
@@ -344,7 +463,7 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
   const backend = () => (installer ??= createDefaultIosPrototypeInstaller());
   return (
     device: BootedDevice,
-    args: Omit<PrototypeSavedArgs, "action"> & { action: string },
+    args: Omit<PrototypeSavedInput, "action"> & { action: string },
     signal: AbortSignal | undefined,
     platformError: () =>
       | (Pick<ActionableError, "message"> & { errorCode?: PrototypeSavedErrorCode })
@@ -380,7 +499,7 @@ function savedElementAnchorFailure(): PrototypeSavedOutput {
 async function saveIosPrototype(
   backend: () => IosSavedPrototypeInstaller,
   udid: string,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   readers: IosSavedDependencies,
   signal?: AbortSignal,
 ): Promise<PrototypeSavedOutput> {
@@ -445,7 +564,7 @@ async function saveIosPrototype(
 async function performIosSavedAction(
   backend: () => IosSavedPrototypeInstaller,
   device: BootedDevice,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   readers: IosSavedDependencies,
   signal?: AbortSignal,
 ): Promise<PrototypeSavedOutput> {
@@ -502,7 +621,7 @@ async function performIosSavedAction(
 
 /** Dispatches saved actions without adding decisions to the shared tool handler. */
 export function dispatchPrototypeSavedAction<T>(
-  args: Omit<PrototypeSavedArgs, "action"> & {
+  args: Omit<PrototypeSavedInput, "action"> & {
     action: PrototypeSavedAction | "show" | "patch" | "dismiss";
   },
   dependencies: () => PrototypeSavedDependencies,

@@ -1,4 +1,12 @@
+import { SessionRequestOwnerMismatchError } from "./SessionRequestOwnerMismatchError";
 import type { Kysely, Selectable, Transaction } from "kysely";
+import {
+  readExport,
+  acknowledgeExport,
+  linkRequestExport,
+  linkExport,
+  pruneTerminalRequests,
+} from "./sqliteReceipts";
 import {
   SESSION_OWNER_EXITED_CODE,
   SESSION_OWNER_EXITED_MESSAGE,
@@ -18,6 +26,8 @@ import {
 } from "./requestIdentity";
 import {
   destructionTicket,
+  type BrokerExportIdentity,
+  type BrokerExportRecord,
   type BrokerAbandonment,
   type BrokerAdmission,
   type BrokerAdmissionInput,
@@ -29,8 +39,6 @@ import {
 } from "./store";
 
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
-
-const TERMINAL_REQUEST_STATES = ["released", "failed"] as const;
 
 function isTerminalState(state: BrokerRequestsTable["state"] | undefined): boolean {
   return state === "released" || state === "failed";
@@ -141,6 +149,25 @@ export class SqliteSessionBrokerStore {
     return this.readRequest(this.db, requestId);
   }
 
+  getExport(prepareId: string): Promise<BrokerExportRecord | undefined> {
+    return readExport(this.db, prepareId);
+  }
+
+  acknowledgeExport(
+    prepareId: string,
+    now = this.clock.now(),
+  ): Promise<BrokerExportRecord | undefined> {
+    return acknowledgeExport(this.db, prepareId, now);
+  }
+
+  linkRequestExport(
+    requestId: string,
+    fingerprint: string,
+    identity: BrokerExportIdentity,
+  ): Promise<void> {
+    return linkRequestExport(this.db, this.clock.now(), requestId, fingerprint, identity);
+  }
+
   async getSession(sessionId: string): Promise<BrokerRequestRecord | undefined> {
     const row = await this.db
       .selectFrom("session_broker_requests")
@@ -161,7 +188,7 @@ export class SqliteSessionBrokerStore {
 
   /**
    * The receipts a recovery pass can still act on, read without a write transaction: every
-   * non-terminal request, plus an abandoned one whose granted session may still need draining
+   * non-terminal request (an IN list, as NOT IN scans all receipts), plus an abandoned one whose granted session may still need draining
    * because its device is not yet confirmed destroyed. Settled terminal receipts are skipped, so
    * the pass costs nothing per finished request however many accumulate.
    */
@@ -171,7 +198,7 @@ export class SqliteSessionBrokerStore {
       .selectAll()
       .where((eb) =>
         eb.or([
-          eb("state", "not in", TERMINAL_REQUEST_STATES),
+          eb("state", "in", ["acquiring", "active", "releasing"]),
           eb.and([
             eb("state", "=", "failed"),
             eb("error_code", "=", SESSION_REQUEST_ABANDONED_CODE),
@@ -194,87 +221,20 @@ export class SqliteSessionBrokerStore {
     return rows.map(requestRecord);
   }
 
-  /**
-   * Deletes terminal receipts that became terminal at least `retentionMs` ago and hold no
-   * undestroyed resource, oldest first, at most `limit` per call. Their destroyed resource
-   * tombstones go with them unless a retained receipt still names that resource. A receipt with
-   * no terminal time (written before retention existed) is stamped now instead, so it gets a
-   * full window. A pruned identity answers as unknown, exactly as one never seen.
-   */
-  async pruneTerminalRequests(retentionMs: number, limit: number): Promise<number> {
-    if (!Number.isFinite(retentionMs) || retentionMs < 0 || !Number.isInteger(limit) || limit < 1) {
-      throw new ActionableError(
-        "Receipt retention needs a non-negative window and a positive limit",
-      );
-    }
-    return this.db.transaction().execute(async (trx) => {
-      const now = this.clock.now();
-      await trx
-        .updateTable("session_broker_requests")
-        .set({ terminal_at_ms: now })
-        .where("state", "in", TERMINAL_REQUEST_STATES)
-        .where("terminal_at_ms", "is", null)
-        .execute();
-      const expired = await trx
-        .selectFrom("session_broker_requests")
-        .select("request_id")
-        .where("state", "in", TERMINAL_REQUEST_STATES)
-        .where("terminal_at_ms", "<=", now - retentionMs)
-        .where(({ not, exists, selectFrom }) =>
-          not(
-            exists(
-              selectFrom("session_broker_resources")
-                .select("session_broker_resources.resource_id")
-                .whereRef(
-                  "session_broker_resources.request_id",
-                  "=",
-                  "session_broker_requests.request_id",
-                )
-                .where("session_broker_resources.state", "!=", "destroyed"),
-            ),
-          ),
-        )
-        .orderBy("terminal_at_ms")
-        .orderBy("request_id")
-        .limit(limit)
-        .execute();
-      const ids = expired.map((row) => row.request_id);
-      if (ids.length === 0) {
-        return 0;
-      }
-      // Tombstones still named by a retained receipt keep answering its profile.
-      await trx
-        .deleteFrom("session_broker_resources")
-        .where("request_id", "in", ids)
-        .where("state", "=", "destroyed")
-        .where(({ not, exists, selectFrom }) =>
-          not(
-            exists(
-              selectFrom("session_broker_requests")
-                .select("session_broker_requests.request_id")
-                .whereRef(
-                  "session_broker_requests.resource_id",
-                  "=",
-                  "session_broker_resources.resource_id",
-                )
-                .where("session_broker_requests.request_id", "not in", ids),
-            ),
-          ),
-        )
-        .execute();
-      await trx
-        .updateTable("session_broker_resources")
-        .set({ request_id: null })
-        .where("request_id", "in", ids)
-        .execute();
-      await trx.deleteFrom("session_broker_requests").where("request_id", "in", ids).execute();
-      return ids.length;
-    });
+  pruneTerminalRequests(
+    retentionMs: number,
+    limit: number,
+    exportRetentionMs?: number,
+  ): Promise<number> {
+    return pruneTerminalRequests(this.db, this.clock, retentionMs, limit, exportRetentionMs);
   }
 
   /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
   async recordPreAdmissionFailure(
-    input: Pick<BrokerAdmissionInput, "requestId" | "fingerprint" | "parameters" | "owner">,
+    input: Pick<
+      BrokerAdmissionInput,
+      "requestId" | "fingerprint" | "parameters" | "owner" | "export"
+    >,
     failure: SessionBrokerFailure,
   ): Promise<BrokerRequestRecord> {
     if (!input.requestId.trim() || !input.fingerprint.trim()) {
@@ -288,6 +248,7 @@ export class SqliteSessionBrokerStore {
             "Session request identity was already used with different parameters",
           );
         }
+        await linkExport(trx, input.requestId, input.export, this.clock.now());
         return previous;
       }
       const row = await trx
@@ -307,6 +268,7 @@ export class SqliteSessionBrokerStore {
         })
         .returningAll()
         .executeTakeFirstOrThrow();
+      await linkExport(trx, input.requestId, input.export, this.clock.now());
       return requestRecord(row);
     });
   }
@@ -323,6 +285,7 @@ export class SqliteSessionBrokerStore {
             "Session request identity was already used with different parameters",
           );
         }
+        await linkExport(trx, input.requestId, input.export, this.clock.now());
         return { kind: "existing", request: previous };
       }
       const row = await trx
@@ -342,6 +305,7 @@ export class SqliteSessionBrokerStore {
         })
         .returningAll()
         .executeTakeFirstOrThrow();
+      await linkExport(trx, input.requestId, input.export, this.clock.now());
       return this.reserve(trx, requestRecord(row), input);
     });
   }
@@ -394,7 +358,7 @@ export class SqliteSessionBrokerStore {
         };
       }
       if (!sameOwner(previous.owner, owner)) {
-        throw new ActionableError("Session request belongs to another daemon process generation");
+        throw new SessionRequestOwnerMismatchError(previous.restartHandoff === true);
       }
       let ticket: DestructionTicket | undefined;
       if (previous.resourceId) {
@@ -989,7 +953,7 @@ export class SqliteSessionBrokerStore {
   ): Promise<BrokerRequestRecord> {
     const request = requireValue(await this.readRequest(db, id), "Unknown session request");
     if (!sameOwner(request.owner, owner)) {
-      throw new ActionableError("Session request belongs to another daemon process generation");
+      throw new SessionRequestOwnerMismatchError(request.restartHandoff === true);
     }
     return request;
   }

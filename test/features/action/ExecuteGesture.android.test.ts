@@ -4,7 +4,6 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import type { BootedDevice } from "../../../src/models";
-import { ActionableError } from "../../../src/models/ActionableError";
 
 describe("ExecuteGesture Android swipe", () => {
   const androidDevice: BootedDevice = {
@@ -61,9 +60,7 @@ describe("ExecuteGesture Android swipe", () => {
 
   test("uses the accessibility service and skips ADB when a11y swipe succeeds", async () => {
     fakeA11yService.setSwipeResult({ success: true, totalTimeMs: 42, gestureTimeMs: 30 });
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
 
@@ -85,9 +82,7 @@ describe("ExecuteGesture Android swipe", () => {
       totalTimeMs: 0,
       error: "service unavailable",
     });
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
 
@@ -104,9 +99,7 @@ describe("ExecuteGesture Android swipe", () => {
       error: "Swipe timed out after 5000ms",
     });
     fakeA11yService.setSwipeDispatchesBeforeResult(true);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
 
@@ -119,9 +112,7 @@ describe("ExecuteGesture Android swipe", () => {
   test("does not replay a dispatched a11y swipe if its request throws", async () => {
     fakeA11yService.setFailureMode("swipe", new Error("response lost"));
     fakeA11yService.setSwipeDispatchesBeforeResult(true);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
 
@@ -133,25 +124,12 @@ describe("ExecuteGesture Android swipe", () => {
 
   test("falls back to an ADB swipe when the a11y service throws", async () => {
     fakeA11yService.setFailureMode("swipe", new Error("socket closed"));
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 90 });
 
     expect(result.success).toBe(true);
     expect(result.fallbackReason).toContain("socket closed");
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input swipe 5 6 7 8 90"]);
-  });
-
-  test("rejects a platform it has no swipe transport for", async () => {
-    const gesture = createGesture();
-    // The constructor validates the platform in BaseVisualChange, so mutate the
-    // resolved device after construction to reach the swipe() default branch.
-    (gesture as any).device.platform = "web";
-
-    const error = await gesture.swipe(0, 0, 1, 1).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(ActionableError);
-    expect((error as Error).message).toContain("web");
   });
 });

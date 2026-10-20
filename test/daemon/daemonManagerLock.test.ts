@@ -1,7 +1,8 @@
 import { describe, expect, test, afterEach, beforeEach } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
+
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { parseLockContent } from "../../src/utils/fileLock";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -14,7 +15,7 @@ function unavailableDaemonClient() {
 }
 
 describe("DaemonManager file lock", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("daemon-lock-test-");
   let previousDirs: NodeJS.ProcessEnv;
   beforeEach(() => {
     previousDirs = {
@@ -24,8 +25,7 @@ describe("DaemonManager file lock", () => {
   });
 
   function createTempLockPath(): string {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-lock-test-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     // Keep any daemon launch log inside this test's temp tree, not the real
     // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
     process.env.AUTOMOBILE_DATA_DIR = dir;
@@ -34,15 +34,6 @@ describe("DaemonManager file lock", () => {
   }
 
   afterEach(() => {
-    for (const dir of tempDirs) {
-      try {
-        const { rmSync } = require("node:fs");
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-    }
-    tempDirs.length = 0;
     for (const [key, value] of Object.entries(previousDirs)) {
       if (value === undefined) {
         delete process.env[key];

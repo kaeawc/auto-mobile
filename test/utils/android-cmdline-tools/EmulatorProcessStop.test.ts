@@ -1,6 +1,6 @@
 import { expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import {
   EMULATOR_TERM_GRACE_MS,
   EMULATOR_MIN_TERM_GRACE_MS,

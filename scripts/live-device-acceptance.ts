@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import "./manual-test/harnessLogSink";
+import { z } from "zod/v4";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
@@ -18,8 +19,8 @@ import {
 } from "node:fs";
 import { chmod, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/buildIdentity";
 import { DaemonClient } from "../src/daemon/client";
 import {
@@ -39,8 +40,8 @@ import {
   provisionDeviceSchema,
   startDeviceSchema,
 } from "../src/server/deviceTools";
-import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
-import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../src/server/ambiguousDeviceTargetRefusal";
+import { readToolEnvelopePayload } from "../src/daemon/toolEnvelopePayload";
+import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../src/daemon/ambiguousDeviceTargetRefusal";
 import { MIN_AVD_RAM_MB } from "../src/utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { parseAndroidApiLevelBound } from "../src/utils/androidVersionBounds";
@@ -498,6 +499,63 @@ function sameJson(left: unknown, right: unknown): boolean {
   return stableStringify(left) === stableStringify(right);
 }
 
+const manifestTargetSchema = z.looseObject({
+  target: z.looseObject({
+    avdName: z.string().optional(),
+    simulatorName: z.string().optional(),
+    simulatorUdid: z.string().optional(),
+  }),
+  controls: z.looseObject({
+    androidSiblingAvdName: z.string(),
+    androidDuplicateSerial: z.string(),
+    iosSameNameSiblingUdid: z.string(),
+  }),
+  runtime: z.string(),
+  deviceType: z.string(),
+  osVersionRange: z.looseObject({ min: z.string(), max: z.string() }),
+  androidConfig: z.looseObject({ memoryMb: z.number(), cpuCores: z.number() }).optional(),
+});
+const ownershipManifestSchema = z.looseObject({
+  schemaVersion: z.literal(1),
+  runId: z.string().min(1),
+  mac: z.string(),
+  targets: z.looseObject({
+    android: manifestTargetSchema.optional(),
+    ios: manifestTargetSchema.optional(),
+  }),
+});
+const jsonObjectSchema = z.record(z.string(), z.unknown());
+const evidenceSchema = z.looseObject({
+  schemaVersion: z.literal(10),
+  authentication: z.looseObject({
+    schemaVersion: z.literal(1),
+    algorithm: z.literal("hmac-sha256"),
+    binding: jsonObjectSchema,
+    mac: z.string(),
+  }),
+  generatedAt: z.string(),
+  scenario: z.literal("full"),
+  platform: z.enum(["android", "ios"]),
+  build: jsonObjectSchema,
+  ownership: jsonObjectSchema,
+  target: jsonObjectSchema,
+  provision: jsonObjectSchema,
+  acquisitionRequests: z.array(jsonObjectSchema),
+  runtimeIdentities: z.array(jsonObjectSchema),
+  controls: z.array(jsonObjectSchema),
+  checks: jsonObjectSchema,
+  cleanup: jsonObjectSchema,
+  outcome: jsonObjectSchema,
+  steps: z.array(
+    z.looseObject({
+      name: z.string(),
+      passed: z.boolean(),
+      elapsedMs: z.number(),
+      detail: jsonObjectSchema,
+    }),
+  ),
+});
+
 function parseOwnershipManifest(path: string, key: Buffer): OwnershipManifest {
   assertMode(path, SECURE_FILE_MODE, "Ownership manifest");
   let candidate: unknown;
@@ -506,7 +564,7 @@ function parseOwnershipManifest(path: string, key: Buffer): OwnershipManifest {
   } catch {
     throw new Error(`Ownership manifest is not valid JSON: ${path}`);
   }
-  const manifest = asObject(candidate, "ownership manifest") as OwnershipManifest;
+  const manifest = ownershipManifestSchema.parse(asObject(candidate, "ownership manifest"));
   if (
     manifest.schemaVersion !== 1 ||
     typeof manifest.runId !== "string" ||
@@ -546,7 +604,7 @@ function assertOwnershipManifest(args: AcceptanceArgs): OwnershipManifest {
 export function recordOwnershipManifest(args: AcceptanceArgs): void {
   assertControlConfiguration(args.target, args.controls);
   let targets: OwnershipManifestPayload["targets"] = {};
-  let runId = randomUUID();
+  let runId: string = randomUUID();
   if (existsSync(args.ownershipManifestPath)) {
     const existing = parseOwnershipManifest(args.ownershipManifestPath, args.operatorKey);
     targets = { ...existing.targets };
@@ -577,7 +635,7 @@ export function recordOwnershipManifest(args: AcceptanceArgs): void {
   writeSecureFile(args.ownershipManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function parseEvidence(path: string): JsonObject {
+function parseEvidence(path: string): Evidence {
   assertMode(path, SECURE_FILE_MODE, "Evidence file");
   let candidate: unknown;
   try {
@@ -589,7 +647,7 @@ function parseEvidence(path: string): JsonObject {
   if (evidence.schemaVersion !== 10) {
     throw new Error("Evidence has an unsupported schema version");
   }
-  return evidence;
+  return evidenceSchema.parse(evidence);
 }
 
 export function verifyEvidenceFile(args: EvidenceVerificationArgs): Evidence {
@@ -616,13 +674,13 @@ export function verifyEvidenceFile(args: EvidenceVerificationArgs): Evidence {
       "Evidence authentication binding does not match the build or ownership manifest",
     );
   }
-  const expectedMac = evidenceMac(evidence as Evidence, args.build, manifest, args.operatorKey);
+  const expectedMac = evidenceMac(evidence, args.build, manifest, args.operatorKey);
   assertMatchingMac(authentication.mac, expectedMac, "Evidence");
   const outcome = asObject(evidence.outcome, "evidence.outcome");
   if (outcome.passed !== true) {
     throw new Error("Evidence is authentic but records a failed acceptance outcome");
   }
-  return evidence as Evidence;
+  return evidence;
 }
 
 function writeSecureFile(path: string, content: string): void {
@@ -1099,26 +1157,44 @@ function toolDiagnostic(response: ToolResponse, tool: string): string {
  * Direct MCP SDK calls may render a JSON-RPC failure as an Error string instead
  * of the usual structured `isError` tool envelope. Preserve exact product
  * diagnostics while removing only that leading, validated transport rendering.
+ * The SDK v1 client prefixed the server's already-prefixed message again
+ * ("MCP error -32603: MCP error -32603: …"); the v2 client does not (issue
+ * #4678), so every leading validated prefix is removed.
  */
 export function normalizeMcpTransportDiagnostic(diagnostic: string): string {
   const renderedErrorPrefix = "Error: ";
+  let remainder = stripMcpErrorPrefix(
+    diagnostic.startsWith(renderedErrorPrefix)
+      ? diagnostic.slice(renderedErrorPrefix.length)
+      : diagnostic,
+  );
+  if (remainder === undefined) {
+    return diagnostic;
+  }
+  let next = stripMcpErrorPrefix(remainder);
+  while (next !== undefined) {
+    remainder = next;
+    next = stripMcpErrorPrefix(remainder);
+  }
+  return remainder;
+}
+
+/** Removes one leading `MCP error <negative integer code>: `, or returns undefined. */
+function stripMcpErrorPrefix(text: string): string | undefined {
   const mcpErrorPrefix = "MCP error ";
-  const candidate = diagnostic.startsWith(renderedErrorPrefix)
-    ? diagnostic.slice(renderedErrorPrefix.length)
-    : diagnostic;
-  if (!candidate.startsWith(mcpErrorPrefix)) {
-    return diagnostic;
+  if (!text.startsWith(mcpErrorPrefix)) {
+    return undefined;
   }
-  const separator = candidate.indexOf(": ", mcpErrorPrefix.length);
+  const separator = text.indexOf(": ", mcpErrorPrefix.length);
   if (separator === -1) {
-    return diagnostic;
+    return undefined;
   }
-  const code = candidate.slice(mcpErrorPrefix.length, separator);
+  const code = text.slice(mcpErrorPrefix.length, separator);
   const parsedCode = Number(code);
   if (!code.startsWith("-") || !Number.isInteger(parsedCode) || String(parsedCode) !== code) {
-    return diagnostic;
+    return undefined;
   }
-  return candidate.slice(separator + 2);
+  return text.slice(separator + 2);
 }
 
 function toolPayload(response: ToolResponse, tool: string): JsonObject {
@@ -1699,7 +1775,8 @@ export async function runTapAtMultiDeviceRefusalCheck(
   args: CoordinateAcceptanceArgs,
   dependencies: CoordinateAcceptanceDependencies,
 ): Promise<MultiDeviceRefusalResult> {
-  if (!args.expectedDeviceId) {
+  const expectedDeviceId = args.expectedDeviceId;
+  if (!expectedDeviceId) {
     throw new Error("tapAt multi-device refusal requires expectedDeviceId");
   }
   return await withCoordinateAcceptanceClient(
@@ -1754,7 +1831,7 @@ export async function runTapAtMultiDeviceRefusalCheck(
         ),
         point,
         `tapAt ${args.platform}-multiple-booted targeted call`,
-        { deviceId: args.expectedDeviceId, platform: args.platform },
+        { deviceId: expectedDeviceId, platform: args.platform },
       );
       const deviceId = stringField(targeted, "deviceId", "tapAt targeted response");
       if (deviceId !== args.expectedDeviceId) {
@@ -2352,8 +2429,16 @@ async function defaultCreateMcpClient(
     signal.removeEventListener("abort", abort);
   }
   return {
-    callTool: (name, arguments_, callSignal) =>
-      client.callTool({ name, arguments: arguments_ }, undefined, { signal: callSignal }),
+    callTool: async (name, arguments_, callSignal) => {
+      const result = await client.callTool({ name, arguments: arguments_ }, { signal: callSignal });
+      return {
+        ...result,
+        structuredContent:
+          result.structuredContent === undefined
+            ? undefined
+            : asObject(result.structuredContent, "tool structured content"),
+      };
+    },
     close: () => client.close(),
   };
 }
@@ -3365,7 +3450,8 @@ export async function runAcceptanceMatrix(
       if (!androidControls) {
         throw new Error("Android discovery controls were not initialized");
       }
-      if (devices.some((device) => device.deviceId === androidControls.duplicate.deviceId)) {
+      const controls = androidControls;
+      if (devices.some((device) => device.deviceId === controls.duplicate.deviceId)) {
         throw new Error(`Signed Android duplicate reappeared after ${stage}`);
       }
       const target = findExactlyOne(
@@ -3960,7 +4046,7 @@ export async function runAcceptanceMatrix(
     assertAndroidTransitionEvidence(prepared, stopped);
     if (args.platform === "android" && androidControls) {
       androidControls = { ...androidControls, target: stopped.device };
-      provisionedDevice = stopped.device;
+      provisionedDevice = { ...stopped.device };
     }
     await release(stopped.sessionUuid, "acquire-stopped");
     await assertCurrentControls("after-target-reacquire");

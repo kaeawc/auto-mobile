@@ -1,3 +1,5 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { EmulatorProcessLifecycle } from "../../src/daemon/emulatorProcessLifecycle";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -206,7 +208,7 @@ describe("DevicePool", () => {
         if (!unavailable) {
           throw new Error("expected second pooled device");
         }
-        unavailable.status = "busy";
+        patchDeviceBinding(unavailable, { status: "busy" });
       });
 
       await expect(
@@ -224,7 +226,7 @@ describe("DevicePool", () => {
         if (!unavailable) {
           throw new Error("expected second pooled device");
         }
-        unavailable.status = "busy";
+        patchDeviceBinding(unavailable, { status: "busy" });
         fakeTimer.advanceTime(1001);
       });
 
@@ -604,7 +606,12 @@ describe("DevicePool", () => {
           deviceId: "emulator-5554",
         },
       ];
-      await devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android", images[0]);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-2",
+        deviceId: "emulator-5554",
+        platform: "android",
+        sourceImage: images[0],
+      });
       releaseOpen.resolve();
       await drainUntil(
         () => incidentCompleted && !devicePool.isSessionRecoveryInFlight("session-1"),
@@ -639,37 +646,36 @@ describe("DevicePool", () => {
         fakeTimer,
         new CountingIdGenerator("incident"),
       );
+      let processLifecycle: EmulatorProcessLifecycle | undefined;
       devicePool = makePool({
         deviceManager: manager,
         recoveryPolicy: { onLoss: true, maxAttempts: 1 },
         emulatorLossIncidentStore: incidents,
+        emulatorProcessLifecycleFactory: (port) => {
+          processLifecycle = new EmulatorProcessLifecycle(port);
+          return processLifecycle;
+        },
       });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       manager.bootedDevices = [];
       const incidentResolutionStarted = Promise.withResolvers<void>();
       const releaseIncidentResolution = Promise.withResolvers<void>();
-      const internals = devicePool as unknown as {
-        evictStartedDeviceAfterProcessExit(
-          deviceId: string,
-          code: number | null,
-          signal: NodeJS.Signals | null,
-        ): Promise<void>;
-      };
-      const livenessInternals = (
-        devicePool as unknown as {
-          missingDeviceLiveness: {
-            resolveMissingDeviceIncident(...args: unknown[]): Promise<string | undefined>;
-          };
-        }
-      ).missingDeviceLiveness;
-      livenessInternals.resolveMissingDeviceIncident = async (...args) => {
+      devicePool.testHooks.missingDeviceLiveness.resolveMissingDeviceIncident = async (
+        _device,
+        _attemptDeviceLossRecovery,
+        incidentId,
+      ) => {
         incidentResolutionStarted.resolve();
         await releaseIncidentResolution.promise;
-        return args[2] as string | undefined;
+        return incidentId;
       };
 
-      const eviction = internals.evictStartedDeviceAfterProcessExit("emulator-5554", 1, null);
+      const eviction = processLifecycle!.evictStartedDeviceAfterProcessExit(
+        "emulator-5554",
+        1,
+        null,
+      );
       await incidentResolutionStarted.promise;
 
       expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(true);
@@ -811,6 +817,7 @@ describe("DevicePool", () => {
           }
           return false;
         },
+        clear(): void {},
       };
       devicePool = makePool({
         deviceManager: manager,

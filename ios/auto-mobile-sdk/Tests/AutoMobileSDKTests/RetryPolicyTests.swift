@@ -1,9 +1,8 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class RetryPolicyTests: XCTestCase {
-
-    private let policy = RetryPolicy(maxRetries: 3, baseDelayMs: 1000, maxDelayMs: 30_000)
+    private let policy = RetryPolicy(maxRetries: 3, baseDelayMs: 1000, maxDelayMs: 30000)
 
     // MARK: - Retryable Status Codes
 
@@ -83,32 +82,32 @@ final class RetryPolicyTests: XCTestCase {
 
     func testDelayDoublesWithAttempt() {
         // Attempt 0: base * 2^0 = 1000ms + jitter
-        let r0 = policy.shouldRetry(statusCode: 500, attempt: 0)
+        let initialResult = policy.shouldRetry(statusCode: 500, attempt: 0)
         // Attempt 1: base * 2^1 = 2000ms + jitter
-        let r1 = policy.shouldRetry(statusCode: 500, attempt: 1)
+        let firstRetry = policy.shouldRetry(statusCode: 500, attempt: 1)
         // Attempt 2: base * 2^2 = 4000ms + jitter
-        let r2 = policy.shouldRetry(statusCode: 500, attempt: 2)
+        let secondRetry = policy.shouldRetry(statusCode: 500, attempt: 2)
 
-        XCTAssertTrue(r0.shouldRetry)
-        XCTAssertTrue(r1.shouldRetry)
-        XCTAssertTrue(r2.shouldRetry)
+        XCTAssertTrue(initialResult.shouldRetry)
+        XCTAssertTrue(firstRetry.shouldRetry)
+        XCTAssertTrue(secondRetry.shouldRetry)
 
         // Base delay without jitter: 1000, 2000, 4000
         // With jitter up to delay/4: max 1250, 2500, 5000
-        XCTAssertGreaterThanOrEqual(r0.delayMs, 1000)
-        XCTAssertLessThanOrEqual(r0.delayMs, 1250)
+        XCTAssertGreaterThanOrEqual(initialResult.delayMs, 1000)
+        XCTAssertLessThanOrEqual(initialResult.delayMs, 1250)
 
-        XCTAssertGreaterThanOrEqual(r1.delayMs, 2000)
-        XCTAssertLessThanOrEqual(r1.delayMs, 2500)
+        XCTAssertGreaterThanOrEqual(firstRetry.delayMs, 2000)
+        XCTAssertLessThanOrEqual(firstRetry.delayMs, 2500)
 
-        XCTAssertGreaterThanOrEqual(r2.delayMs, 4000)
-        XCTAssertLessThanOrEqual(r2.delayMs, 5000)
+        XCTAssertGreaterThanOrEqual(secondRetry.delayMs, 4000)
+        XCTAssertLessThanOrEqual(secondRetry.delayMs, 5000)
     }
 
     // MARK: - Max Delay Cap
 
     func testDelayIsCappedAtMaxDelay() {
-        let bigPolicy = RetryPolicy(maxRetries: 20, baseDelayMs: 10000, maxDelayMs: 30_000)
+        let bigPolicy = RetryPolicy(maxRetries: 20, baseDelayMs: 10000, maxDelayMs: 30000)
         let result = bigPolicy.shouldRetry(statusCode: 500, attempt: 10)
         XCTAssertTrue(result.shouldRetry)
         // maxDelayMs=30000 + jitter up to 30000/4=7500
@@ -119,7 +118,7 @@ final class RetryPolicyTests: XCTestCase {
 
     func testJitterIsBounded() {
         // Run multiple times to verify jitter stays in range
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             let result = policy.shouldRetry(statusCode: 500, attempt: 0)
             // Base delay = 1000, jitter in 0..250
             XCTAssertGreaterThanOrEqual(result.delayMs, 1000)
@@ -133,6 +132,6 @@ final class RetryPolicyTests: XCTestCase {
         let defaultPolicy = RetryPolicy()
         XCTAssertEqual(defaultPolicy.maxRetries, 3)
         XCTAssertEqual(defaultPolicy.baseDelayMs, 1000)
-        XCTAssertEqual(defaultPolicy.maxDelayMs, 30_000)
+        XCTAssertEqual(defaultPolicy.maxDelayMs, 30000)
     }
 }

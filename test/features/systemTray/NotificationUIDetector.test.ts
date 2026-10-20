@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { AndroidNotificationUIDetector } from "../../../src/features/systemTray/AndroidNotificationUIDetector";
 import { IosNotificationUIDetector } from "../../../src/features/systemTray/IosNotificationUIDetector";
@@ -89,11 +91,11 @@ describe("NotificationUIDetector", () => {
     text: "Hello",
   } as Element;
 
-  const observationWithSize: ObserveResult = {
+  const observationWithSize: ObserveResult = buildObserveResult({
     updatedAt: 0,
     screenSize: { width: 375, height: 812 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 
   describe("FakeNotificationUIDetector", () => {
     let fake: FakeNotificationUIDetector;
@@ -336,7 +338,9 @@ describe("NotificationUIDetector", () => {
       const taps: Array<{ x: number; y: number }> = [];
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async () => ({ success: true }),
-        requestTapCoordinates: async (x, y) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { x, y } = request;
+
           taps.push({ x, y });
           return { success: true };
         },

@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { PS_SNAPSHOT_ARGS, PS_SNAPSHOT_MAX_BUFFER_BYTES, parsePsSnapshot } from "./psSnapshot";
+import { readHostProcessTable } from "../../devices/bootAdmission/readHostProcessTable";
 import { SIMCTL_LIST_DEVICES_ARGS, parseSimctlInventory } from "./simctlInventory";
 import type {
   HostProcessRow,
@@ -41,27 +41,6 @@ export const nodeHostOsInfo: HostOsInfo = {
     return process.platform === "win32" ? null : load;
   },
 };
-
-/**
- * One read-only `ps` snapshot of the host process table. Shared by the iOS
- * fleet cost source and the Android boot admission source (#11181), so the
- * host's single `ps` call site stays here.
- */
-export async function readHostProcessTable(
-  executor: HostCommandExecutor,
-  options: FleetReadOptions = {},
-): Promise<HostProcessRow[]> {
-  const ps = await executor.executeCommand("ps", PS_SNAPSHOT_ARGS, {
-    signal: options.signal,
-    timeoutMs: options.timeoutMs,
-    maxBuffer: PS_SNAPSHOT_MAX_BUFFER_BYTES,
-  });
-  const { rows, skipped } = parsePsSnapshot(ps.stdout);
-  if (rows.length === 0) {
-    throw new Error(`ps returned no parseable processes (${skipped} unparseable rows)`);
-  }
-  return rows;
-}
 
 const MEMORY_PRESSURE_SYSCTL = ["-n", "kern.memorystatus_vm_pressure_level"];
 

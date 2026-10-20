@@ -1,7 +1,12 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import {
+  getPreferenceResultSchema,
+  setPreferenceResultSchema,
+} from "./preferenceToolOutputSchemas";
 import type { BootedDevice } from "../models";
 import {
   AppPreferences,
@@ -76,10 +81,11 @@ export function registerPreferenceTools(deps: Partial<PreferenceToolsDependencie
     getPreferenceSchema,
     async (device: BootedDevice, args: GetPreferenceToolArgs) => {
       const result = await appPreferencesFactory(device).getPreference(args);
-      return createJSONToolResponse(result);
+      return createStructuredToolResponse(result);
     },
     {
       defaultEnabled: false,
+      outputSchema: getPreferenceResultSchema,
       // Reads only; a non-holder watches a held device through the read-only path (#10830).
       deviceReadOnly: true,
     },
@@ -91,9 +97,9 @@ export function registerPreferenceTools(deps: Partial<PreferenceToolsDependencie
     setPreferenceSchema,
     async (device: BootedDevice, args: SetPreferenceToolArgs) => {
       const result = await appPreferencesFactory(device).setPreference(args);
-      return createJSONToolResponse(result);
+      return createStructuredToolResponse(result);
     },
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setPreferenceResultSchema },
   );
 }
 

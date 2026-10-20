@@ -1,4 +1,3 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import {
   resolveSocketAdmissionLane,
@@ -9,11 +8,12 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
 } from "../../src/daemon/constants";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import type { DaemonResponse } from "../../src/daemon/types";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { daemonResponseFrameSchema } from "../helpers/wireMessageSchemas";
 
 function toolsCall(name: string, args: Record<string, unknown>): DaemonRequest {
   return { id: "1", type: "mcp_request", method: "tools/call", params: { name, arguments: args } };
@@ -187,22 +187,12 @@ test.each([undefined, "device:a"])(
   async (lane) => {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const server = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      {} as DaemonStateAccess,
-      timer,
-    );
-    const internals = server as unknown as {
-      acceptingRequests: boolean;
-      handleConnection(socket: FakeSocket): void;
-      handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
-    };
-    internals.acceptingRequests = true;
+    const server = createHarnessServer("unused", createFakeDaemonState(), timer);
+    server.allowRequests();
     const first = Promise.withResolvers<unknown>();
     const started = Promise.withResolvers<void>();
     let secondStarted = false;
-    internals.handleLocalSocketRequest = async (request) => {
+    server.localRequestHandler = async (request) => {
       if (request.id === "first") {
         started.resolve();
         return first.promise;
@@ -210,7 +200,7 @@ test.each([undefined, "device:a"])(
       secondStarted = true;
       return {};
     };
-    internals.handleConnection(socket);
+    server.connect(socket);
     const request = (id: string): DaemonRequest => ({
       id,
       type: "mcp_request",
@@ -227,7 +217,9 @@ test.each([undefined, "device:a"])(
     await flush();
     expect(secondStarted).toBe(false);
     expect(
-      socket.getWrittenMessages<DaemonResponse>().find((response) => response.id === "second"),
+      socket
+        .getWrittenMessages(daemonResponseFrameSchema)
+        .find((response) => response.id === "second"),
     ).toMatchObject({
       success: false,
       code: "daemon_queue_timeout",

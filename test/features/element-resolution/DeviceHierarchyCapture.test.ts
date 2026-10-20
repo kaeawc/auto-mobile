@@ -1,13 +1,15 @@
-import { expect, spyOn, test } from "bun:test";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { expect, test } from "bun:test";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import {
   createDeviceHierarchyCapture,
+  type AndroidHierarchyClients,
   type HierarchySyncClient,
 } from "../../../src/features/observe/DeviceHierarchyCapture";
 import {
   iosHierarchyAcquisition,
   type IosHierarchyAcquisition,
 } from "../../../src/features/observe/ios/types";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -83,18 +85,18 @@ function fixture(elapsed: number, incomplete = true, updatedAt?: number, autoAdv
     "shell cat /data/local/tmp/automobile-hierarchy-dump.xml",
     '<hierarchy><node package="com.test" class="android.widget.Button" resource-id="com.test:id/target" text="Target" bounds="[100,0][150,50]" /></hierarchy>',
   );
-  const raw: ViewHierarchyResult = {
+  const raw: ViewHierarchyResult = createHierarchyForTest({
     packageName: "com.test",
     ctrlProxyIncomplete: incomplete,
     updatedAt,
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         package: "com.test",
         "resource-id": "com.test:id/source",
         bounds: { left: 0, top: 0, right: 50, bottom: 50 },
-      },
+      }),
     },
-  };
+  });
   const replies: (ViewHierarchyResult | null | Error)[] = [raw];
   const reads: Parameters<HierarchySyncClient["requestHierarchySync"]>[] = [];
   let converted = raw;
@@ -115,7 +117,15 @@ function fixture(elapsed: number, incomplete = true, updatedAt?: number, autoAdv
   };
   const syncClient: HierarchySyncClient = {
     requestHierarchySync: read,
-    requestHierarchySyncForObserver: read,
+    requestHierarchySyncForObserver: (perf, filtering, signal, timeout, display) =>
+      read(
+        perf,
+        filtering,
+        signal,
+        timeout,
+        undefined,
+        typeof display === "number" ? display : display?.displayId,
+      ),
     convertToViewHierarchyResult: () => ({ ...converted, updatedAt: undefined }),
   };
   const capture = createDeviceHierarchyCapture(
@@ -274,16 +284,26 @@ test("fresh Android capture forwards the injected ADB factory to its sync client
     hierarchy: { node: { text: "Ready", bounds: { left: 0, top: 0, right: 50, bottom: 50 } } },
   };
   const adbFactory = { create: () => new FakeAdbClient() };
-  const singleton = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-    requestHierarchySync: async () => ({ hierarchy: raw }),
-    convertToViewHierarchyResult: () => raw,
-  } as any);
-  try {
-    await createDeviceHierarchyCapture(device, { adbFactory }).capture({ freshness: "fresh" });
-    expect(singleton).toHaveBeenCalledWith(device, adbFactory);
-  } finally {
-    singleton.mockRestore();
-  }
+  const lookups: Array<{
+    device: Parameters<AndroidHierarchyClients["getInstance"]>[0];
+    adbFactory?: Parameters<AndroidHierarchyClients["getInstance"]>[1];
+  }> = [];
+  const androidClients: AndroidHierarchyClients = {
+    getInstance: (requested, factory) => {
+      lookups.push({ device: requested, adbFactory: factory });
+      return {
+        requestHierarchySync: async () => ({ hierarchy: raw }),
+        convertToViewHierarchyResult: () => raw,
+      };
+    },
+    createForObservationRead: () => {
+      throw new Error("a fresh action capture must use the shared client");
+    },
+  };
+  await createDeviceHierarchyCapture(device, { adbFactory, androidClients }).capture({
+    freshness: "fresh",
+  });
+  expect(lookups).toEqual([{ device, adbFactory }]);
 });
 
 test("fresh Android capture preserves the device timestamp across conversion", async () => {
@@ -344,11 +364,11 @@ test.each([false, true])(
 test.each(["android", "ios"] as const)(
   "observer capture on %s uses the existing read request while an owner action is pending",
   async (platform) => {
-    const raw: ViewHierarchyResult = {
+    const raw: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: { node: { text: "Observer", bounds: { left: 0, top: 0, right: 20, bottom: 20 } } },
       screenWidth: 20,
       screenHeight: 20,
-    };
+    });
     let releaseAction: (() => void) | undefined;
     const action = new Promise<void>((resolve) => {
       releaseAction = resolve;
@@ -392,11 +412,11 @@ test.each(["device", "client-cache", undefined, "unknown"] as const)(
   "fresh iOS capture preserves only known sync acquisition: %s",
   async (source) => {
     const timer = new FakeTimer();
-    const raw: ViewHierarchyResult = {
+    const raw: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: { node: { text: "Target", bounds: { left: 0, top: 0, right: 20, bottom: 20 } } },
       screenWidth: 20,
       screenHeight: 20,
-    };
+    });
     const capture = createDeviceHierarchyCapture(
       { platform: "ios", deviceId: "ios-marker", name: "ios-marker" },
       {

@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
 import { Daemon } from "../../src/daemon/daemon";
@@ -7,11 +8,10 @@ import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { ExecutionTracker, executionTracker } from "../../src/daemon/executionTracker";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import {
   runWithToolSelectionContext,
@@ -20,7 +20,6 @@ import {
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceSessionExecutionCanceller } from "../fakes/FakeDeviceSessionExecutionCanceller";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -39,14 +38,12 @@ async function setup(tracker: ExecutionTracker, options: { drain?: boolean } = {
   manager.setBootedDevices("android", [device]);
   const canceller = new FakeDeviceSessionExecutionCanceller({ tracker, ...options });
   const binding = new FakeDeviceExecutionBinding();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "test-daemon", {
-      timer,
-      deviceManager: manager,
-      cancelDeviceSessionExecutions: canceller.cancel,
-      ambientExecutionIdReader: binding,
-    }),
-  );
+  const pool = makePool(sessions, "test-daemon", {
+    timer,
+    deviceManager: manager,
+    cancelDeviceSessionExecutions: canceller.cancel,
+    ambientExecutionIdReader: binding,
+  });
   await pool.initializeWithDevices([device]);
   DaemonState.getInstance().initialize(sessions, pool);
   const quarantine = (excludeExecutionId?: string) =>
@@ -69,7 +66,11 @@ describe("sessionless identity quarantine", () => {
         new FakeIdGenerator(["ambient", "explicit", "other", "session-only"]),
       );
       const h = await setup(tracker, { drain: true });
-      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const ambient = tracker.startExecution("setActiveDevice", undefined, "owner");
       const chosen = tracker.startExecution("killDevice", undefined, "owner");
       const other = tracker.startExecution("takeScreenshot");
@@ -156,7 +157,7 @@ describe("sessionless identity quarantine", () => {
     const commands: string[] = [];
     const client = new AdbClient(
       device,
-      async (command) => {
+      async (command: string) => {
         commands.push(command);
         return {
           stdout: "",
@@ -166,9 +167,7 @@ describe("sessionless identity quarantine", () => {
           includes: () => false,
         };
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
     const factory = new AdmittingAdbClientFactory({ create: () => client });
     await runWithToolSelectionContext(
@@ -201,7 +200,11 @@ describe("sessionless identity quarantine", () => {
   test("quarantine also cancels work indexed only under the bound session", async () => {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["session-work"]));
     const h = await setup(tracker);
-    await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
     const work = tracker.startExecution("takeScreenshot", undefined, "owner");
     await h.quarantine();
     expect(h.canceller.devices).toEqual([device.deviceId]);
@@ -292,14 +295,17 @@ describe("sessionless identity quarantine", () => {
     const newServer = () =>
       createTestUnixSocketServer(
         "scratch/never-listened.sock",
-        "http://localhost:0/mcp",
         DaemonState.getInstance(),
         new FakeTimer(),
       );
 
     test("is refused instead of running as an unowned call", async () => {
       const h = await setup(new ExecutionTracker(new FakeTimer(), new FakeIdGenerator()));
-      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const server = newServer();
       server["captureInputTargetOwner"](device);
 
@@ -319,7 +325,11 @@ describe("sessionless identity quarantine", () => {
 
     test("still runs while the resolving session owns the device", async () => {
       const h = await setup(new ExecutionTracker(new FakeTimer(), new FakeIdGenerator()));
-      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const server = newServer();
       server["captureInputTargetOwner"](device);
 
@@ -353,7 +363,6 @@ describe("sessionless identity quarantine", () => {
     const h = await setup(executionTracker);
     const server = createTestUnixSocketServer(
       "scratch/never-listened.sock",
-      "http://localhost:0/mcp",
       DaemonState.getInstance(),
       new FakeTimer(),
     );
@@ -386,7 +395,6 @@ describe("sessionless identity quarantine", () => {
     const h = await setup(executionTracker);
     const server = createTestUnixSocketServer(
       "scratch/never-listened.sock",
-      "http://localhost:0/mcp",
       DaemonState.getInstance(),
       new FakeTimer(),
     );

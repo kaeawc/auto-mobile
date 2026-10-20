@@ -32,18 +32,15 @@ function makeMonitor() {
   };
   const frames = new SdkFrameMetricsStore();
   const buffer = new PerfWindowBuffer();
-  const monitor = new PerformanceMonitor(
-    new FakeTimer(),
-    new FakeAdbClientFactory(),
-    () => null,
-    undefined,
-    undefined,
-    () => emitter,
-    buffer,
-    frames,
-  );
+  const monitor = new PerformanceMonitor(new FakeTimer(), {
+    adbClientFactory: new FakeAdbClientFactory(),
+    serverGetter: () => null,
+    getTelemetryEmitter: () => emitter,
+    perfWindowBuffer: buffer,
+    frameMetricsStore: frames,
+  });
   monitor.startMonitoring("fake-device", "com.fake");
-  const device = monitor["monitoredDevices"].get("fake-device")!;
+  const device = monitor.getMonitoredDevice("fake-device")!;
   return { monitor, device, events, order, frames, buffer };
 }
 
@@ -83,10 +80,10 @@ describe("PerformanceMonitor telemetry health boundaries", () => {
   for (const { field, metric, values, health } of rows) {
     test(`${metric} equality and crossing`, () => {
       const { monitor, device, events, order } = makeMonitor();
-      monitor["emitPerformanceTelemetry"](device, 0, empty, "healthy");
+      monitor.emitPerformanceTelemetry(device, 0, empty, "healthy");
       expect(events).toEqual([]);
       for (const [i, value] of values.entries()) {
-        monitor["emitPerformanceTelemetry"](device, i + 1, { ...empty, [field]: value }, "overall");
+        monitor.emitPerformanceTelemetry(device, i + 1, { ...empty, [field]: value }, "overall");
         expect(device.previousMetricHealth).toEqual({ [metric]: health[i] });
       }
       expect(events.map((event) => event.changedMetrics)).toEqual([[metric], [metric], [metric]]);
@@ -103,7 +100,7 @@ describe("PerformanceMonitor telemetry health boundaries", () => {
       memoryUsageMb: 0,
       cpuUsagePercent: 100,
     };
-    monitor["emitPerformanceTelemetry"](device, 10, metrics, "healthy");
+    monitor.emitPerformanceTelemetry(device, 10, metrics, "healthy");
     expect(events[0]).toEqual({
       timestamp: 10,
       packageName: "com.fake",
@@ -111,8 +108,8 @@ describe("PerformanceMonitor telemetry health boundaries", () => {
       health: "healthy",
       changedMetrics: ["fps", "frameTime", "jank", "touchLatency", "memory"],
     });
-    monitor["emitPerformanceTelemetry"](device, 11, { ...empty, fps: 60 }, "healthy");
-    monitor["emitPerformanceTelemetry"](device, 12, metrics, "healthy");
+    monitor.emitPerformanceTelemetry(device, 11, { ...empty, fps: 60 }, "healthy");
+    monitor.emitPerformanceTelemetry(device, 12, metrics, "healthy");
     expect(events).toHaveLength(1);
     expect(device.previousMetricHealth).toEqual({
       fps: "healthy",
@@ -121,7 +118,7 @@ describe("PerformanceMonitor telemetry health boundaries", () => {
       touchLatency: "healthy",
       memory: "healthy",
     });
-    monitor["emitPerformanceTelemetry"](
+    monitor.emitPerformanceTelemetry(
       device,
       13,
       {
@@ -156,23 +153,18 @@ describe("PerformanceMonitor Android parsed metric assembly", () => {
         jankFrames: 0,
         receivedAt: 500,
       });
-      const internals = monitor as unknown as {
-        collectGfxMetrics: PerformanceMonitor["collectGfxMetrics"];
-        collectCpuMetrics: PerformanceMonitor["collectCpuMetrics"];
-        collectMemoryMetrics: PerformanceMonitor["collectMemoryMetrics"];
-      };
-      const gfx = spyOn(internals, "collectGfxMetrics");
-      const cpu = spyOn(internals, "collectCpuMetrics").mockResolvedValue({
+      const gfx = spyOn(monitor, "collectGfxMetrics");
+      const cpu = spyOn(monitor, "collectCpuMetrics").mockResolvedValue({
         cpuUsagePercent: 0,
         sample: { processTicks: 0, uptimeSeconds: 1 },
       });
-      const mem = spyOn(internals, "collectMemoryMetrics").mockResolvedValue({
+      const mem = spyOn(monitor, "collectMemoryMetrics").mockResolvedValue({
         totalPssMb: 0,
         breakdown: null,
       });
       const pushed: Parameters<PerformanceMonitor["pushMetrics"]>[2][] = [];
       try {
-        await monitor["sampleAndroidDevice"](
+        await monitor.sampleAndroidDevice(
           device,
           500,
           {

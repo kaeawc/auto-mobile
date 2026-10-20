@@ -1,7 +1,10 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
-import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { SessionOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   SessionRecoveryIdentityLossError,
   SessionTerminalReleaseInProgressError,
@@ -19,10 +22,7 @@ import {
   DaemonToolOutcomeUnknownError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
-  DaemonBoundSessionLostError,
   DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
 } from "../../src/daemon/client";
@@ -31,6 +31,7 @@ import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
 } from "../../src/daemon/types";
+import { z } from "zod/v4";
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
@@ -51,9 +52,9 @@ import {
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -232,9 +233,15 @@ class ScriptedDaemonClient implements DaemonClientLike {
 
 describe("DaemonMcpProxy", () => {
   beforeEach(() => {
-    ToolRegistry.register("observe", "read-only observation", {}, async () => ({ content: [] }), {
-      transportRecovery: "replay",
-    });
+    ToolRegistry.register(
+      "observe",
+      "read-only observation",
+      z.object({}),
+      async () => ({ content: [] }),
+      {
+        transportRecovery: "replay",
+      },
+    );
   });
 
   afterEach(() => {
@@ -973,8 +980,13 @@ describe("DaemonMcpProxy", () => {
         }
       }
 
-      test("waits for socket publication when the daemon reports running but the socket is not yet published", async () => {
-        const fakeManager = new StartingDaemonManager();
+      // Wire a SocketGatedClient + auto-start proxy around a running-but-unpublished
+      // daemon, with the observation-only availability probe failing so auto-start
+      // engages. Restores the probe spy and closes the proxy afterwards.
+      const withGatedProxy = async (
+        fakeManager: StartingDaemonManager,
+        body: (ctx: { client: SocketGatedClient; proxy: DaemonMcpProxy }) => Promise<void>,
+      ) => {
         fakeManager.statusResult = {
           running: true,
           pid: 1234,
@@ -983,49 +995,36 @@ describe("DaemonMcpProxy", () => {
           version: DAEMON_VERSION,
         };
         const client = new SocketGatedClient(fakeManager);
-        // The socket is not published yet, so the observation-only availability
-        // probe fails and auto-start engages.
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
-
         const proxy = new DaemonMcpProxy({
           clientFactory: () => client,
           daemonManager: fakeManager,
           autoStartDaemon: true,
         });
-
         try {
+          await body({ client, proxy });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      };
+
+      test("waits for socket publication when the daemon reports running but the socket is not yet published", async () => {
+        const fakeManager = new StartingDaemonManager();
+        await withGatedProxy(fakeManager, async ({ client, proxy }) => {
           await proxy.listTools();
 
           // The bounded readiness path was consulted before connecting, and the
           // client connected successfully once the socket was published.
           expect(fakeManager.waitForReadyCalls).toBeGreaterThanOrEqual(1);
           expect(client.connectCallCount).toBe(1);
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
+        });
       });
 
       test("throws an actionable startup error when the socket is never published", async () => {
         const fakeManager = new StartingDaemonManager();
         fakeManager.publishOnWaitForReady = false;
-        fakeManager.statusResult = {
-          running: true,
-          pid: 1234,
-          port: 3000,
-          socketPath: "/tmp/test.sock",
-          version: DAEMON_VERSION,
-        };
-        const client = new SocketGatedClient(fakeManager);
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
-
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => client,
-          daemonManager: fakeManager,
-          autoStartDaemon: true,
-        });
-
-        try {
+        await withGatedProxy(fakeManager, async ({ client, proxy }) => {
           // The unreachable-running-daemon branch surfaces an actionable error
           // rather than the client seeing zero tools with no text (issue #5878).
           await expect(proxy.listTools()).rejects.toThrow(
@@ -1035,33 +1034,14 @@ describe("DaemonMcpProxy", () => {
           // connect against a socket that was never published.
           expect(fakeManager.waitForReadyCalls).toBeGreaterThanOrEqual(1);
           expect(client.connectCallCount).toBe(0);
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
+        });
       });
 
       test("keeps the full startup budget and exits on holder liveness rather than a shorter bound (#5878)", async () => {
         const fakeManager = new StartingDaemonManager();
         fakeManager.publishOnWaitForReady = false;
         fakeManager.startupLockHeldByLiveProcess = true;
-        fakeManager.statusResult = {
-          running: true,
-          pid: 1234,
-          port: 3000,
-          socketPath: "/tmp/test.sock",
-          version: DAEMON_VERSION,
-        };
-        const client = new SocketGatedClient(fakeManager);
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
-
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => client,
-          daemonManager: fakeManager,
-          autoStartDaemon: true,
-        });
-
-        try {
+        await withGatedProxy(fakeManager, async ({ client, proxy }) => {
           await expect(proxy.listTools()).rejects.toThrow(
             /socket did not become reachable, and no live process is completing its startup/,
           );
@@ -1077,41 +1057,19 @@ describe("DaemonMcpProxy", () => {
           expect(fakeManager.lastShouldContinueWaiting?.()).toBe(true);
           fakeManager.startupLockHeldByLiveProcess = false;
           expect(fakeManager.lastShouldContinueWaiting?.()).toBe(false);
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
+        });
       });
 
       test("coalesces concurrent first requests through a single readiness wait", async () => {
         const fakeManager = new StartingDaemonManager();
-        fakeManager.statusResult = {
-          running: true,
-          pid: 1234,
-          port: 3000,
-          socketPath: "/tmp/test.sock",
-          version: DAEMON_VERSION,
-        };
-        const client = new SocketGatedClient(fakeManager);
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
-
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => client,
-          daemonManager: fakeManager,
-          autoStartDaemon: true,
-        });
-
-        try {
+        await withGatedProxy(fakeManager, async ({ client, proxy }) => {
           // Two concurrent first requests must share one readiness wait rather than
           // racing independent launches or probes.
           await Promise.all([proxy.listTools(), proxy.listTools()]);
 
           expect(fakeManager.waitForReadyCalls).toBe(1);
           expect(client.connectCallCount).toBe(1);
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
+        });
       });
 
       test("path 1 re-arbitrates onto a replacement holder that publishes the socket (#5904)", async () => {
@@ -1130,33 +1088,14 @@ describe("DaemonMcpProxy", () => {
         }
 
         const fakeManager = new ReArbitratingManager();
-        fakeManager.statusResult = {
-          running: true,
-          pid: 1234,
-          port: 3000,
-          socketPath: "/tmp/test.sock",
-          version: DAEMON_VERSION,
-        };
-        const client = new SocketGatedClient(fakeManager);
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
-
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => client,
-          daemonManager: fakeManager,
-          autoStartDaemon: true,
-        });
-
-        try {
+        await withGatedProxy(fakeManager, async ({ client, proxy }) => {
           await proxy.listTools();
 
           // The re-arbitration entry point was used, and the client connected once the
           // replacement published the socket.
           expect(fakeManager.lockHolderReadinessCalls).toBe(1);
           expect(client.connectCallCount).toBe(1);
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
+        });
       });
     });
 
@@ -4518,7 +4457,7 @@ describe("DaemonMcpProxy", () => {
             content: refusal.content,
           });
           timer.advanceTime(5_000);
-          await drainMicrotasks();
+          await drainMicrotasks(32);
           await proxy.callTool("observe", {});
 
           expect(client.callToolCalls).toEqual([
@@ -4690,7 +4629,7 @@ describe("DaemonMcpProxy", () => {
 
         // A read only watches the session it names: unlike a control call in flight, it does not
         // keep that session's idle window from running out.
-        expect(proxy["hasSessionCallInFlight"]("session-a")).toBe(false);
+        expect(proxy.getInternalsForTesting().hasSessionCallInFlight("session-a")).toBe(false);
         doctorRunning.resolve();
         await doctor;
       } finally {
@@ -4844,10 +4783,10 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         await proxy.callTool("observe", {
-          sessionUuid: null as unknown as string,
+          sessionUuid: null,
         });
         await proxy.callTool("observe", {
-          sessionUuid: 42 as unknown as string,
+          sessionUuid: 42,
         });
 
         expect(client.callToolCalls).toEqual([
@@ -5074,7 +5013,7 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool("getAndroid", {});
-        const owned = Reflect.get(proxy, "ownedDeviceSessions") as Set<string>;
+        const owned = proxy.getInternalsForTesting().ownedDeviceSessions as Set<string>;
         expect(owned.has("earlier-session")).toBe(true);
         expect(owned.has("latest-session")).toBe(true);
         client.emitNotification(
@@ -5534,7 +5473,7 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
-        const before = Reflect.get(proxy, "boundSessionUuidAt");
+        const before = proxy.getInternalsForTesting().boundSessionUuidAt;
         expect(before).toBe(timer.now());
         timer.advanceTime(1_000);
         const error = await proxy.callTool("tapAt", { sessionUuid: "session-b", x: 1, y: 1 }).then(
@@ -5549,10 +5488,10 @@ describe("DaemonMcpProxy", () => {
           boundSessionUuid: "session-a",
           requestedSessionUuid: "session-b",
         });
-        expect(Reflect.get(proxy, "boundSessionUuidAt")).toBe(before);
+        expect(proxy.getInternalsForTesting().boundSessionUuidAt).toBe(before);
         expect(fakeClient.callToolCalls).toHaveLength(0);
         await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
-        expect(Reflect.get(proxy, "boundSessionUuid")).toBe("session-a");
+        expect(proxy.getInternalsForTesting().boundSessionUuid).toBe("session-a");
         await proxy.callTool("tapAt", { sessionUuid: "session-a", x: 2, y: 2 });
         expect(fakeClient.callToolCalls.map((call) => call.params.sessionUuid)).toEqual([
           "session-b",
@@ -6211,28 +6150,50 @@ describe("DaemonMcpProxy", () => {
       content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
     });
 
+    // Run `body` against a proxy over a FakeDaemonClient that mints per-tool
+    // sessions (getAndroid -> session-android, anything else -> session-ios unless
+    // overridden) and serves a canned resource, with the daemon reachable.
+    const withResourceProxy = async (
+      options: {
+        initialSessionUuid?: string;
+        toolResultFor?: (toolName: string) => ReturnType<typeof mintingResult>;
+      },
+      body: (ctx: { fakeClient: FakeDaemonClient; proxy: DaemonMcpProxy }) => Promise<void>,
+    ) => {
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor:
+          options.toolResultFor ??
+          ((toolName) =>
+            toolName === "getAndroid"
+              ? mintingResult("session-android")
+              : mintingResult("session-ios")),
+        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        ...(options.initialSessionUuid !== undefined
+          ? { initialSessionUuid: options.initialSessionUuid }
+          : {}),
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+      try {
+        await body({ fakeClient, proxy });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    };
+
     test("routes a fresh screenshot read to the owning session, not the latest binding", async () => {
       // AC1: acquire an Android and an iOS device session over one connection,
       // then read each session's fresh screenshot. The read for the FIRST
       // (now non-current) session must still route to its owner rather than the
       // latest binding — otherwise the daemon denies the just-established owner
       // with SCREENSHOT_ACCESS_DENIED.
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        toolResultFor: (toolName) =>
-          toolName === "getAndroid"
-            ? mintingResult("session-android")
-            : mintingResult("session-ios"),
-        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
-      });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => fakeClient,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
-
-      try {
+      await withResourceProxy({}, async ({ fakeClient, proxy }) => {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool("getApple", {});
 
@@ -6243,10 +6204,7 @@ describe("DaemonMcpProxy", () => {
           { sessionUuid: "session-android" },
           { sessionUuid: "session-ios" },
         ]);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
+      });
     });
 
     test.each([
@@ -6254,51 +6212,18 @@ describe("DaemonMcpProxy", () => {
       "automobile:observation/session/session-android/latest/screenshot",
       "automobile:device-session/session-android/screenshot",
     ])("routes an owned session resource to its URI session: %s", async (uri) => {
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        toolResultFor: (toolName) =>
-          toolName === "getAndroid"
-            ? mintingResult("session-android")
-            : mintingResult("session-ios"),
-        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
-      });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => fakeClient,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
-
-      try {
+      await withResourceProxy({}, async ({ fakeClient, proxy }) => {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool("getApple", {});
 
         await proxy.readResource(uri);
 
         expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-android" }]);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
+      });
     });
 
     test("routes surviving owned observation resources after the latest binding is released", async () => {
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        toolResultFor: (toolName) =>
-          toolName === "getAndroid"
-            ? mintingResult("session-android")
-            : mintingResult("session-ios"),
-        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
-      });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => fakeClient,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
-
-      try {
+      await withResourceProxy({}, async ({ fakeClient, proxy }) => {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool("getApple", {});
         fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-ios");
@@ -6318,69 +6243,41 @@ describe("DaemonMcpProxy", () => {
         await expect(
           proxy.readResource("automobile:observation/session/session-ios/latest/screenshot"),
         ).rejects.toThrow(/released/i);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
+      });
     });
 
     test("routes a surviving configured initial session after a later binding is released", async () => {
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        toolResultFor: () => mintingResult("session-android"),
-        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
-      });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        initialSessionUuid: " session-a ",
-        clientFactory: () => fakeClient,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
+      await withResourceProxy(
+        {
+          initialSessionUuid: " session-a ",
+          toolResultFor: () => mintingResult("session-android"),
+        },
+        async ({ fakeClient, proxy }) => {
+          await proxy.callTool("getAndroid", {});
+          fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-android");
 
-      try {
-        await proxy.callTool("getAndroid", {});
-        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-android");
+          await proxy.readResource("automobile:observation/session/session-a/latest");
+          await proxy.readResource("automobile:observation/session/session-a/latest/screenshot");
 
-        await proxy.readResource("automobile:observation/session/session-a/latest");
-        await proxy.readResource("automobile:observation/session/session-a/latest/screenshot");
-
-        expect(fakeClient.readResourceParams).toEqual([
-          { sessionUuid: "session-a" },
-          { sessionUuid: "session-a" },
-        ]);
-        await expect(
-          proxy.readResource("automobile:observation/session/session-android/latest"),
-        ).rejects.toThrow(/released/i);
-        await expect(
-          proxy.readResource("automobile:observation/session/session-android/latest/screenshot"),
-        ).rejects.toThrow(/released/i);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
+          expect(fakeClient.readResourceParams).toEqual([
+            { sessionUuid: "session-a" },
+            { sessionUuid: "session-a" },
+          ]);
+          await expect(
+            proxy.readResource("automobile:observation/session/session-android/latest"),
+          ).rejects.toThrow(/released/i);
+          await expect(
+            proxy.readResource("automobile:observation/session/session-android/latest/screenshot"),
+          ).rejects.toThrow(/released/i);
+        },
+      );
     });
 
     test("routes concurrent fresh screenshot reads each to their owning session", async () => {
       // AC2: concurrent reads during/after acquisition (concurrent MCP init) must
       // each carry their own owner session, independent of ordering or a delayed
       // first heartbeat.
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        toolResultFor: (toolName) =>
-          toolName === "getAndroid"
-            ? mintingResult("session-android")
-            : mintingResult("session-ios"),
-        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
-      });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => fakeClient,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
-
-      try {
+      await withResourceProxy({}, async ({ fakeClient, proxy }) => {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool("getApple", {});
 
@@ -6391,61 +6288,31 @@ describe("DaemonMcpProxy", () => {
 
         const forwarded = fakeClient.readResourceParams.map((params) => params.sessionUuid).sort();
         expect(forwarded).toEqual(["session-android", "session-ios"]);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
+      });
     });
 
     test("does not route a fresh screenshot read for a session this connection never acquired", async () => {
       // AC3: a different connection (bound to its own session) reading another
       // connection's fresh screenshot must NOT borrow the URI's session — it
       // forwards its own binding, so the daemon keeps denying it.
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        toolResultFor: () => mintingResult("session-mine"),
-        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
-      });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => fakeClient,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
+      await withResourceProxy(
+        { toolResultFor: () => mintingResult("session-mine") },
+        async ({ fakeClient, proxy }) => {
+          await proxy.callTool("getAndroid", {});
 
-      try {
-        await proxy.callTool("getAndroid", {});
+          await proxy.readResource("automobile:device-session/session-foreign/screenshot");
 
-        await proxy.readResource("automobile:device-session/session-foreign/screenshot");
-
-        // The connection owns session-mine, so a read for a foreign session
-        // forwards the connection's own binding — never the foreign URI session.
-        expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-mine" }]);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
+          // The connection owns session-mine, so a read for a foreign session
+          // forwards the connection's own binding — never the foreign URI session.
+          expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-mine" }]);
+        },
+      );
     });
 
     test("stops owner-routing a fresh screenshot read after its session is released", async () => {
       // AC3: once a session is released it is no longer owner-routed; the read
       // falls back to the connection's current binding and the daemon denies it.
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        toolResultFor: (toolName) =>
-          toolName === "getAndroid"
-            ? mintingResult("session-android")
-            : mintingResult("session-ios"),
-        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
-      });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => fakeClient,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
-
-      try {
+      await withResourceProxy({}, async ({ fakeClient, proxy }) => {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool("getApple", {});
         // Release the non-current owned session.
@@ -6455,10 +6322,7 @@ describe("DaemonMcpProxy", () => {
 
         // No longer owner-routed to session-android; forwards the live binding.
         expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-ios" }]);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
+      });
     });
   });
 
@@ -7440,7 +7304,7 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "device-session-a" });
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([{ name: "setToolEnabled" }]);
 
         await proxy.callTool("setToolEnabled", {
           toolName: "openLink",
@@ -7448,7 +7312,10 @@ describe("DaemonMcpProxy", () => {
           sessionUuid: "device-session-a",
         });
 
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([
+          { name: "setToolEnabled" },
+          { name: "openLink" },
+        ]);
         expect(listChangedKinds).toEqual(["tools"]);
         expect(client.callDaemonMethodCalls.filter((call) => call.method === "tools/list")).toEqual(
           [
@@ -7504,7 +7371,10 @@ describe("DaemonMcpProxy", () => {
         firstClient.emitConnectionClosed();
         await Promise.resolve();
 
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([
+          { name: "setToolEnabled" },
+          { name: "openLink" },
+        ]);
         expect(replacementClient.callDaemonMethodCalls).toContainEqual({
           method: "tools/list",
           params: { sessionUuid: "device-session-a" },
@@ -7816,11 +7686,7 @@ describe("DaemonMcpProxy", () => {
     const releaseMapSizes = (
       proxy: DaemonMcpProxy,
     ): { epochs: number; reasons: number; references: number } => {
-      const internals = proxy as unknown as {
-        releasedSessionEpochs: Map<string, number>;
-        releasedSessionReasons: Map<string, string>;
-        activeReleaseEpochReferences: Map<string, number>;
-      };
+      const internals = proxy.getInternalsForTesting().releaseLedger;
       return {
         epochs: internals.releasedSessionEpochs.size,
         reasons: internals.releasedSessionReasons.size,
@@ -7866,11 +7732,7 @@ describe("DaemonMcpProxy", () => {
         autoStartDaemon: false,
       });
 
-      const internals = proxy as unknown as {
-        releasedSessionEpochs: Map<string, number>;
-        releasedSessionReasons: Map<string, string>;
-        activeReleaseEpochReferences: Map<string, number>;
-      };
+      const internals = proxy.getInternalsForTesting().releaseLedger;
       // Simulate a record that outlived its in-flight reference (e.g. a future
       // regression in the retain/release pairing). close() must still drain it so
       // the maps cannot accumulate across the proxy's lifetime.

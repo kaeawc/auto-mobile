@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerAppFileTools } from "../../src/server/appFileTools";
-import {
-  createAppFileServiceForTesting,
-  nodeAppFileFileSystem,
-} from "../../src/server/appFileService";
+import { createAppFileServiceForTesting } from "../../src/server/appFileService";
+import { nodeAppFileFileSystem } from "../../src/server/appFileSupport";
 import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
   name: "Pixel",

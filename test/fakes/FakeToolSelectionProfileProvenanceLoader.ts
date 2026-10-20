@@ -1,4 +1,4 @@
-import type { ToolSelectionProfileProvenanceLoader } from "../../src/server/toolSelectionProfileRegistry";
+import type { ToolSelectionProfileProvenanceLoader } from "../../src/daemon/toolSelectionProfileRegistry";
 
 /**
  * No-op `ToolSelectionProfileProvenanceLoader` for daemon startup tests

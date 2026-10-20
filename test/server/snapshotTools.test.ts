@@ -1,3 +1,4 @@
+import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
@@ -11,7 +12,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetDeviceSnapshotManagerDependencies,
   setDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
@@ -19,6 +20,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
 import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
+import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -50,9 +52,9 @@ describe("snapshot tool", () => {
     restoreOverrides = {};
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: store as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: store,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
       createCaptureProvider: () => ({
@@ -149,9 +151,9 @@ describe("snapshot tool", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     expect(schema.required).toEqual(["action"]);
-    expect(schema.properties.action.enum).toEqual(["capture", "restore"]);
+    expect(schema.properties?.action?.enum).toEqual(["capture", "restore"]);
     expect(schema.anyOf).toBeUndefined();
     expect(schema.oneOf).toBeUndefined();
     expect(schema.allOf).toBeUndefined();
@@ -168,7 +170,7 @@ describe("snapshot tool", () => {
       appBundleIds: ["com.example.app"],
     });
 
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
     expect(payload.snapshotName).toBe("snapshot-1");
     expect(payload.snapshotType).toBe("app_data");
     expect(payload.message).toContain("captured successfully");
@@ -177,9 +179,9 @@ describe("snapshot tool", () => {
     // AC2: per-bundle status is surfaced at the top level of the tool result,
     // not only nested inside the manifest.
     expect(payload.bundleStatuses).toEqual([{ bundleId: "com.example.app", status: "captured" }]);
-    expect(payload.manifest.appDataBackup.bundleStatuses).toEqual([
-      { bundleId: "com.example.app", status: "captured" },
-    ]);
+    expect(payload.manifest).toMatchObject({
+      appDataBackup: { bundleStatuses: [{ bundleId: "com.example.app", status: "captured" }] },
+    });
   });
 
   test("restores snapshot and returns payload", async () => {
@@ -216,7 +218,7 @@ describe("snapshot tool", () => {
       snapshotName: "snapshot-restore",
     });
 
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
     expect(payload.snapshotName).toBe("snapshot-restore");
     expect(payload.snapshotType).toBe("app_data");
     expect(payload.message).toContain("restored successfully");
@@ -260,7 +262,7 @@ describe("snapshot tool", () => {
         snapshotName: manifest.snapshotName,
         useVmSnapshot: true,
       });
-      expect(JSON.parse(response.content?.[0]?.text ?? "{}").deviceSessionUuid).toBe("epoch-new");
+      expect(toolJson(response).deviceSessionUuid).toBe("epoch-new");
     } finally {
       DaemonState.getInstance().reset();
     }
@@ -302,7 +304,7 @@ describe("snapshot tool", () => {
       action: "restore",
       snapshotName: manifest.snapshotName,
     });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.snapshotType).toBe("adb");
     expect(payload.restoreMode).toBe("settings_only");
@@ -339,7 +341,7 @@ describe("snapshot tool", () => {
     restoreFailures = [{ kind: "ios_bundle", bundleId: "com.example.app", reason: "copy denied" }];
 
     const response = await tool!.deviceAwareHandler!(device, { action: "restore", snapshotName });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.message).toContain("partially restored");
     expect(payload.message).not.toContain("restored successfully");
@@ -354,7 +356,7 @@ describe("snapshot tool", () => {
     await expect(
       tool!.deviceAwareHandler!(device, {
         action: "restore",
-      } as any),
+      }),
     ).rejects.toThrow("snapshotName is required");
   });
 });

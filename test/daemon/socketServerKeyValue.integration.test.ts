@@ -13,7 +13,11 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+import { createIosTestClient } from "../helpers/iosCtrlProxyClientSpies";
+import { createFakeDeviceManager } from "./helpers/inputSocketHarness";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { BootedDevice } from "../../src/models";
@@ -45,11 +49,13 @@ function createDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getSessionForDevice: (deviceId: string) => deviceHolders.get(deviceId) ?? null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -78,40 +84,15 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   let iosSetPreference: ReturnType<typeof mock>;
   let iosRemovePreference: ReturnType<typeof mock>;
   let iosClearPreferenceStore: ReturnType<typeof mock>;
-  let simctlSweepFails = false;
+  let deviceManager: FakeDeviceManager;
 
   beforeEach(async () => {
-    simctlSweepFails = false;
     socketPath = join(tmpdir(), `kv-routing-${randomUUID()}.sock`);
 
     // Only the two platform-specific booted devices exist; discovery is scoped
     // by the platform the handler asks for.
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevicesDetailed: async (platform: "android" | "ios" | "either") => {
-        const iosFails = simctlSweepFails && platform !== "android";
-        const succeeded: ("android" | "ios")[] = [];
-        const devices: BootedDevice[] = [];
-        if (platform !== "ios") {
-          succeeded.push("android");
-          devices.push(androidDevice);
-        }
-        if (platform !== "android" && !iosFails) {
-          succeeded.push("ios");
-          devices.push(iosDevice);
-        }
-        return {
-          devices,
-          succeededPlatforms: new Set(succeeded),
-          discoveryErrors: iosFails ? { ios: { code: "failed", message: "simctl exploded" } } : {},
-        };
-      },
-      getBootedDevices: async (platform: "android" | "ios" | "either") =>
-        platform === "ios"
-          ? [iosDevice]
-          : platform === "android"
-            ? [androidDevice]
-            : [androidDevice, iosDevice],
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    deviceManager = createFakeDeviceManager([androidDevice, iosDevice]);
+    PlatformDeviceManagerFactory.setInstance(deviceManager);
 
     androidSetPreference = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
@@ -161,16 +142,20 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
         throw new Error("Unexpected ADB access");
       },
     };
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      setPreference: androidSetPreference,
-      removePreference: androidRemovePreference,
-      clearPreferenceStore: androidClearPreferenceStore,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      setPreference: iosSetPreference,
-      removePreference: iosRemovePreference,
-      clearPreferenceStore: iosClearPreferenceStore,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, {
+        setPreference: androidSetPreference,
+        removePreference: androidRemovePreference,
+        clearPreferenceStore: androidClearPreferenceStore,
+      }),
+    );
+    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      createIosTestClient(iosDevice, {
+        setPreference: iosSetPreference,
+        removePreference: iosRemovePreference,
+        clearPreferenceStore: iosClearPreferenceStore,
+      }),
+    );
 
     const profileService: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> = {
       isEnabled: async () => true,
@@ -179,7 +164,6 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createDaemonState(),
       new FakeTimer(),
       null,
@@ -253,7 +237,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   });
 
   test("ide/setKeyValue on iOS reports incomplete discovery, not 'Device not found', when simctl fails (#11122)", async () => {
-    simctlSweepFails = true;
+    deviceManager.failedPlatforms.add("ios");
     const response = await sendRequest(socketPath, "ide/setKeyValue", {
       platform: "ios",
       deviceId: iosDevice.deviceId,
@@ -470,7 +454,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
         const sessionless = await sendRequest(socketPath, route, kvParams);
         for (const response of [foreign, sessionless]) {
           expect(response.success).toBe(false);
-          expect((response as { code?: string }).code).toBe("device_owned_by_other_session");
+          expect(response.code).toBe("device_owned_by_other_session");
         }
         expect(androidSetPreference).not.toHaveBeenCalled();
         expect(androidRemovePreference).not.toHaveBeenCalled();
@@ -489,9 +473,13 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
       beforeEach(() => {
         ensure = mock(async () => ({ status: "compatible" }));
-        managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-          ensureCompatibleVersion: ensure,
-        } as never);
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          androidDevice,
+          new FakeAdbExecutor(),
+          new FakeTimer(),
+        );
+        spyOn(manager, "ensureCompatibleVersion").mockImplementation(ensure);
+        managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(manager);
       });
 
       afterEach(() => {
@@ -507,7 +495,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
           sessionUuid: "someone-else",
         });
         expect(response.success).toBe(false);
-        expect((response as { code?: string }).code).toBe("device_owned_by_other_session");
+        expect(response.code).toBe("device_owned_by_other_session");
         expect(ensure).not.toHaveBeenCalled();
       });
 
@@ -531,40 +519,44 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   describe("SharedPreferences inspection-disabled fallback on the ide/* routes (#6292)", () => {
     const INSPECTION_DISABLED = "SharedPreferences inspection is disabled";
 
-    function useAndroidClientThrowing(overrides: Partial<Record<string, () => Promise<void>>>) {
-      AndroidCtrlProxyClient.getInstance = mock(() => ({
-        setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-          if (typeof args[5] === "object") {
-            args[5].onDispatch?.();
-          }
-          if (overrides.setPreference) {
-            return overrides.setPreference();
-          }
-          throw new Error(INSPECTION_DISABLED);
-        },
-        removePreference: async (
-          ...args: Parameters<AndroidCtrlProxyClient["removePreference"]>
-        ) => {
-          if (typeof args[3] === "object") {
-            args[3].onDispatch?.();
-          }
-          if (overrides.removePreference) {
-            return overrides.removePreference();
-          }
-          throw new Error(INSPECTION_DISABLED);
-        },
-        clearPreferenceStore: async (
-          ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
-        ) => {
-          if (typeof args[2] === "object") {
-            args[2].onDispatch?.();
-          }
-          if (overrides.clearPreferenceStore) {
-            return overrides.clearPreferenceStore();
-          }
-          throw new Error(INSPECTION_DISABLED);
-        },
-      })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    function useAndroidClientThrowing(
+      overrides: Partial<Record<string, () => Promise<undefined>>>,
+    ) {
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        createAndroidTestClient(androidDevice, {
+          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+            if (typeof args[5] === "object") {
+              args[5].onDispatch?.();
+            }
+            if (overrides.setPreference) {
+              return overrides.setPreference();
+            }
+            throw new Error(INSPECTION_DISABLED);
+          },
+          removePreference: async (
+            ...args: Parameters<AndroidCtrlProxyClient["removePreference"]>
+          ) => {
+            if (typeof args[3] === "object") {
+              args[3].onDispatch?.();
+            }
+            if (overrides.removePreference) {
+              return overrides.removePreference();
+            }
+            throw new Error(INSPECTION_DISABLED);
+          },
+          clearPreferenceStore: async (
+            ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
+          ) => {
+            if (typeof args[2] === "object") {
+              args[2].onDispatch?.();
+            }
+            if (overrides.clearPreferenceStore) {
+              return overrides.clearPreferenceStore();
+            }
+            throw new Error(INSPECTION_DISABLED);
+          },
+        }),
+      );
     }
 
     function injectFakeAdb(adb: FakeAdbExecutor): void {

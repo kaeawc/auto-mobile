@@ -14,10 +14,8 @@ import type { DeviceRecoveryCoordinator } from "./deviceRecoveryCoordinator";
 import type { DeviceRecoveryPolicy } from "./poolConfig";
 import type { EmulatorLossIncident, EmulatorRecoveryOutcome } from "./emulatorLossIncident";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
-import {
-  UnconfirmedRecoveryShutdownError,
-  type AndroidEmulatorRecoveryOptions,
-} from "./androidRebootCoordinator";
+import { type AndroidEmulatorRecoveryOptions } from "./androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "./UnconfirmedRecoveryShutdownError";
 import {
   deviceRestartReleaseReason,
   isDeviceRestartReleaseReason,

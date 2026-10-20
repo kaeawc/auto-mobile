@@ -5,16 +5,18 @@ import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createReplayNavigationGraph } from "../../helpers/replayNavigationGraph";
 import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { DevicePool } from "../../../src/daemon/devicePool";
+import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
-import type { NavigationGraphService } from "../../../src/features/navigation/NavigationGraphManager";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 
@@ -60,18 +62,16 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
-      viewHierarchy: {
+      viewHierarchy: createHierarchyForTest({
         packageName: "com.example",
         hierarchy: {
-          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+          node: { "resource-id": "com.example:id/root", "content-desc": "keep" },
         },
-      },
+      }),
     } as ObserveResult;
   }
 
-  const baseSchema = {
-    parse: (v: Record<string, unknown>) => v,
-  } as any;
+  const baseSchema = z.record(z.string(), z.unknown());
 
   async function setupAutolockedSession(): Promise<string> {
     fakeDeviceSessionManager.setConnectedDevices([androidA]);
@@ -147,24 +147,7 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
         timestamp: 0,
       },
     };
-    const navManager = {
-      getCurrentScreen: () => "Home",
-      getNode: async () => ({
-        screenName: "Home",
-        firstSeenAt: 0,
-        lastSeenAt: 0,
-        visitCount: 1,
-        backStackDepth: 0,
-      }),
-      findPath: async () => ({
-        found: true,
-        path: [edge],
-        startScreen: "Home",
-        targetScreen: "Detail",
-      }),
-      recordEdgeReplayOutcome: () => {},
-      getKnownScreens: async () => ["Home", "Detail"],
-    } as unknown as NavigationGraphService;
+    const navManager = createReplayNavigationGraph(edge);
     const uiStateSetup: UIStateSetup = {
       setupUIState: async () => [],
       setupScrollPosition: async () => null,
@@ -174,16 +157,12 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     };
 
     // Authorize replay with the running session that holds the device lock, as production does.
-    const navigateTo = new NavigateTo(
-      androidA,
-      undefined,
+    const navigateTo = new NavigateTo(androidA, undefined, {
       uiStateSetup,
       screenWaiter,
-      navManager,
-      undefined,
-      undefined,
-      sessionId,
-    );
+      navigationManager: navManager,
+      sessionUuid: sessionId,
+    });
     const result = await navigateTo.execute({ targetScreen: "Detail", platform: "android" });
     expect(result.success).toBe(true);
 

@@ -1,6 +1,6 @@
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
@@ -8,7 +8,7 @@ import { RealToolCallPath } from "../helpers/realToolCallPath";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -50,9 +50,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
   const mcpA = "mcp-socket-a";
 
   let handled: string[];
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
-  let originalNavigationRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let registry: FakeBindingRegistry;
@@ -70,7 +68,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
     }
   }
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     handled = [];
     ToolRegistry.clearTools();
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
@@ -87,12 +85,14 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
     });
     const devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([slotA, slotB, free]);
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    originalNavigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
 
     timer = new FakeTimer();
     registry = new FakeBindingRegistry(timer);
@@ -134,46 +134,71 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       },
       { deviceReadOnly: true },
     );
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     restorePipeline();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
   });
 
-  test("a generic control call on another binding's idle device is refused; a read is not", async () => {
-    const refused = await outcome("controlProbe", { platform: "ios", deviceId: slotB.deviceId });
-    expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
-    expect((refused as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
+  arranged(
+    "a generic control call on another binding's idle device is refused; a read is not",
+    async () => {
+      const refused = await outcome("controlProbe", { platform: "ios", deviceId: slotB.deviceId });
+      expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
+      expect((refused as DeviceAssignedToBindingError).code).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
 
-    await call("readProbe", { platform: "ios", deviceId: slotB.deviceId });
-    expect(handled).toEqual([`read:${slotB.deviceId}`]);
-  });
+      await call("readProbe", { platform: "ios", deviceId: slotB.deviceId });
+      expect(handled).toEqual([`read:${slotB.deviceId}`]);
+    },
+  );
 
-  test("a binding's own execution controls its device; it cannot reach another binding's", async () => {
-    await call("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
-    expect(handled).toEqual([`control:${slotA.deviceId}`]);
+  arranged(
+    "a binding's own execution controls its device; it cannot reach another binding's",
+    async () => {
+      await call("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
+      expect(handled).toEqual([`control:${slotA.deviceId}`]);
 
-    const refused = await outcome("controlProbe", { sessionUuid: execA, deviceId: slotB.deviceId });
-    expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
-  });
+      const refused = await outcome("controlProbe", {
+        sessionUuid: execA,
+        deviceId: slotB.deviceId,
+      });
+      expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
+    },
+  );
 
-  test("a released execution loses control of the binding device even though its session lives on", async () => {
-    await call("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
-    await registry.releaseExecution(keyA, execA);
-    // Control calls share one registry read per second; the next read sees the cleared owner.
-    timer.advanceTime(1_000);
+  arranged(
+    "a released execution loses control of the binding device even though its session lives on",
+    async () => {
+      await call("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
+      await registry.releaseExecution(keyA, execA);
+      // Control calls share one registry read per second; the next read sees the cleared owner.
+      timer.advanceTime(1_000);
 
-    const refused = await outcome("controlProbe", { sessionUuid: execA, deviceId: slotA.deviceId });
+      const refused = await outcome("controlProbe", {
+        sessionUuid: execA,
+        deviceId: slotA.deviceId,
+      });
 
-    expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
-    expect(handled).toEqual([`control:${slotA.deviceId}`]);
-  });
+      expect(refused).toBeInstanceOf(DeviceAssignedToBindingError);
+      expect(handled).toEqual([`control:${slotA.deviceId}`]);
+    },
+  );
 
   describe("a managed connection", () => {
     beforeEach(() => {
@@ -182,7 +207,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         .bind(mcpA, { scopeKey: keyA.scopeKey, sessionUuids: [execA] });
     });
 
-    test("controls its binding device", async () => {
+    arranged("controls its binding device", async () => {
       await call("controlProbe", {
         sessionUuid: execA,
         deviceId: slotA.deviceId,
@@ -191,7 +216,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       expect(handled).toEqual([`control:${slotA.deviceId}`]);
     });
 
-    test("may not control an unassigned device, sessionless or not", async () => {
+    arranged("may not control an unassigned device, sessionless or not", async () => {
       const refused = await outcome("controlProbe", {
         platform: "ios",
         deviceId: free.deviceId,
@@ -209,7 +234,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       expect(handled).toEqual([]);
     });
 
-    test("may not route control through a session outside its grants", async () => {
+    arranged("may not route control through a session outside its grants", async () => {
       await sessionManager.createSession("other-session", free.deviceId, "ios");
       const refused = await outcome("controlProbe", {
         sessionUuid: "other-session",
@@ -222,7 +247,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       });
     });
 
-    test("still reads any device", async () => {
+    arranged("still reads any device", async () => {
       await call("readProbe", { platform: "ios", deviceId: free.deviceId, __mcpSessionId: mcpA });
       await call("readProbe", { platform: "ios", deviceId: slotB.deviceId, __mcpSessionId: mcpA });
       expect(handled).toEqual([`read:${free.deviceId}`, `read:${slotB.deviceId}`]);
@@ -230,7 +255,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
 
     // #11397: a plan step or nested tool call never passes the MCP ingress and carries no socket
     // session id; it is confined by the slot session it runs on.
-    test("an internal call on its binding session may not reach lifecycle tools", async () => {
+    arranged("an internal call on its binding session may not reach lifecycle tools", async () => {
       ToolRegistry.register("getAndroid", "Acquire probe", z.object({}).passthrough(), async () => {
         handled.push("acquire");
         return { success: true };
@@ -261,115 +286,119 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
     });
 
     // #11469: a sessionless plan's steps run for the managed connection that called executePlan.
-    test("a sessionless plan step may name its binding session, not one another connection owns", async () => {
-      const asBrokerConnection = (sessionUuid: string): Promise<unknown> =>
-        runWithToolSelectionContext({ callerMcpSessionId: mcpA }, () =>
-          ToolRegistry.callInternal("controlProbe", { platform: "ios", sessionUuid }),
-        ).catch((error: unknown) => error);
-      await DaemonState.getInstance()
-        .getDevicePool()
-        .bindOrReuseDeviceSession(
-          "foreign-session",
-          free.deviceId,
-          "ios",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          "mcp-socket-other",
-        );
-
-      const refused = await asBrokerConnection("foreign-session");
-      expect((refused as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect(handled).toEqual([]);
-
-      await asBrokerConnection(execA);
-      expect(handled).toEqual([`control:${slotA.deviceId}`]);
-    });
-
-    test("an internal call on its binding session may not control an unassigned device", async () => {
-      let refused: unknown;
-      try {
-        await ToolRegistry.callInternal(
-          "controlProbe",
-          { platform: "ios", deviceId: free.deviceId },
-          undefined,
-          undefined,
-          { sessionUuid: execA },
-        );
-      } catch (error) {
-        refused = error;
-      }
-      expect(refused).toBeInstanceOf(DeviceOutsideBrokerGrantError);
-      expect((refused as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
-        reason: "device",
-        deviceId: free.deviceId,
-      });
-      expect(handled).toEqual([]);
-
-      await ToolRegistry.callInternal("controlProbe", {}, undefined, undefined, {
-        sessionUuid: execA,
-      });
-      expect(handled).toEqual([`control:${slotA.deviceId}`]);
-    });
-
-    test("may not acquire, start, provision or delete devices, or retarget setActiveDevice", () => {
-      const gate = (toolName: string, args: Record<string, unknown>, sessionUuid?: string) => () =>
-        assertBrokerConnectionPlainToolCall({
-          daemonMode: true,
-          requiresDevice: false,
-          toolName,
-          mcpSessionId: mcpA,
-          args,
-          sessionUuid,
+    arranged(
+      "a sessionless plan step may name its binding session, not one another connection owns",
+      async () => {
+        const asBrokerConnection = (sessionUuid: string): Promise<unknown> =>
+          runWithToolSelectionContext({ callerMcpSessionId: mcpA }, () =>
+            ToolRegistry.callInternal("controlProbe", { platform: "ios", sessionUuid }),
+          ).catch((error: unknown) => error);
+        await DaemonState.getInstance().getDevicePool().bindOrReuseDeviceSession({
+          sessionId: "foreign-session",
+          deviceId: free.deviceId,
+          platform: "ios",
+          allowSessionRebind: false,
+          mcpSessionId: "mcp-socket-other",
         });
-      for (const tool of [
-        "getAndroid",
-        "getApple",
-        "startDevice",
-        "provisionDevice",
-        "deleteDevice",
-      ]) {
-        expect(gate(tool, {})).toThrow(DeviceOutsideBrokerGrantError);
-      }
-      expect(gate("setActiveDevice", { deviceId: free.deviceId })).toThrow(
-        "not one of its granted",
-      );
-      expect(gate("setActiveDevice", { deviceId: slotA.deviceId }, execA)).not.toThrow();
-      expect(
-        gate("killDevice", { device: { deviceId: free.deviceId, name: "Free", platform: "ios" } }),
-      ).toThrow(DeviceOutsideBrokerGrantError);
-      expect(gate("listDevices", {})).not.toThrow();
-      // Stopping is lifecycle too: even its own slot device stops only through slot release (#11271).
-      const ownKill = gate(
-        "killDevice",
-        { device: { deviceId: slotA.deviceId, name: "Binding A", platform: "ios" } },
-        execA,
-      );
-      expect(ownKill).toThrow(DeviceOutsideBrokerGrantError);
-      try {
-        ownKill();
-      } catch (error) {
-        expect((error as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
-          reason: "tool",
-          action: "killDevice",
+
+        const refused = await asBrokerConnection("foreign-session");
+        expect((refused as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect(handled).toEqual([]);
+
+        await asBrokerConnection(execA);
+        expect(handled).toEqual([`control:${slotA.deviceId}`]);
+      },
+    );
+
+    arranged(
+      "an internal call on its binding session may not control an unassigned device",
+      async () => {
+        let refused: unknown;
+        try {
+          await ToolRegistry.callInternal(
+            "controlProbe",
+            { platform: "ios", deviceId: free.deviceId },
+            undefined,
+            undefined,
+            { sessionUuid: execA },
+          );
+        } catch (error) {
+          refused = error;
+        }
+        expect(refused).toBeInstanceOf(DeviceOutsideBrokerGrantError);
+        expect((refused as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
+          reason: "device",
+          deviceId: free.deviceId,
         });
-      }
-      // A generic connection is not confined.
-      expect(() =>
-        assertBrokerConnectionPlainToolCall({
-          daemonMode: true,
-          requiresDevice: false,
-          toolName: "getApple",
-          mcpSessionId: "generic-socket",
-          args: {},
-          sessionUuid: undefined,
-        }),
-      ).not.toThrow();
-    });
+        expect(handled).toEqual([]);
+
+        await ToolRegistry.callInternal("controlProbe", {}, undefined, undefined, {
+          sessionUuid: execA,
+        });
+        expect(handled).toEqual([`control:${slotA.deviceId}`]);
+      },
+    );
+
+    arranged(
+      "may not acquire, start, provision or delete devices, or retarget setActiveDevice",
+      () => {
+        const gate =
+          (toolName: string, args: Record<string, unknown>, sessionUuid?: string) => () =>
+            assertBrokerConnectionPlainToolCall({
+              daemonMode: true,
+              requiresDevice: false,
+              toolName,
+              mcpSessionId: mcpA,
+              args,
+              sessionUuid,
+            });
+        for (const tool of [
+          "getAndroid",
+          "getApple",
+          "startDevice",
+          "provisionDevice",
+          "deleteDevice",
+        ]) {
+          expect(gate(tool, {})).toThrow(DeviceOutsideBrokerGrantError);
+        }
+        expect(gate("setActiveDevice", { deviceId: free.deviceId })).toThrow(
+          "not one of its granted",
+        );
+        expect(gate("setActiveDevice", { deviceId: slotA.deviceId }, execA)).not.toThrow();
+        expect(
+          gate("killDevice", {
+            device: { deviceId: free.deviceId, name: "Free", platform: "ios" },
+          }),
+        ).toThrow(DeviceOutsideBrokerGrantError);
+        expect(gate("listDevices", {})).not.toThrow();
+        // Stopping is lifecycle too: even its own slot device stops only through slot release (#11271).
+        const ownKill = gate(
+          "killDevice",
+          { device: { deviceId: slotA.deviceId, name: "Binding A", platform: "ios" } },
+          execA,
+        );
+        expect(ownKill).toThrow(DeviceOutsideBrokerGrantError);
+        try {
+          ownKill();
+        } catch (error) {
+          expect((error as DeviceOutsideBrokerGrantError).toPayload()).toMatchObject({
+            reason: "tool",
+            action: "killDevice",
+          });
+        }
+        // A generic connection is not confined.
+        expect(() =>
+          assertBrokerConnectionPlainToolCall({
+            daemonMode: true,
+            requiresDevice: false,
+            toolName: "getApple",
+            mcpSessionId: "generic-socket",
+            args: {},
+            sessionUuid: undefined,
+          }),
+        ).not.toThrow();
+      },
+    );
   });
 });
 
@@ -396,7 +425,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     restore();
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness2(): Promise<void> {
     restoreHermetic = installHermeticServerFixture();
     timer = new FakeTimer();
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
@@ -414,19 +443,13 @@ describe("platform-only calls on a bound daemon connection", () => {
     );
     await pool.initializeWithDevices([device, iosDevice]);
     DaemonState.getInstance().initialize(manager, pool);
-    await pool.bindOrReuseDeviceSession(
-      SESSION,
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: CONNECTION,
+    });
     manager.setDeviceReadiness(SESSION, "automationReady");
     unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
     fixture = new McpTestFixture({
@@ -435,7 +458,32 @@ describe("platform-only calls on a bound daemon connection", () => {
     });
     await fixture.setup();
     tools = new RealToolCallPath([device, iosDevice]).install();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged2(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness2();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach2<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each<T>([...table])(
+        name,
+        async (row: T) => {
+          await arrangeHarness2();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
 
   afterEach(async () => {
     await fixture.teardown();
@@ -449,7 +497,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
   });
 
-  test.each([
+  arrangedEach2([
     { name: "managed", managed: true },
     { name: "unmanaged", managed: false },
   ])("a foreign platform is refused before admission; $name", async ({ managed }) => {
@@ -482,7 +530,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     expect({ expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt }).toEqual(clocks);
   });
 
-  test("mixed bindings preserve the bound-session platform refusal", async () => {
+  arranged2("mixed bindings preserve the bound-session platform refusal", async () => {
     await manager.createSession(IOS_SESSION, iosDevice.deviceId, "ios");
     manager.setDeviceReadiness(IOS_SESSION, "automationReady");
     DaemonState.getInstance()
@@ -505,7 +553,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     );
   });
 
-  test("a platform-only read outside bindings explains deviceId access", async () => {
+  arranged2("a platform-only read outside bindings explains deviceId access", async () => {
     DaemonState.getInstance()
       .getBrokerConnectionScopes()
       .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
@@ -533,7 +581,7 @@ describe("platform-only calls on a bound daemon connection", () => {
     expect({ expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt }).toEqual(clocks);
   });
 
-  test("the managed connection runs a matching platform on its slot", async () => {
+  arranged2("the managed connection runs a matching platform on its slot", async () => {
     DaemonState.getInstance()
       .getBrokerConnectionScopes()
       .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });

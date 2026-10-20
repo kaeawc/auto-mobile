@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { describe, expect, test } from "bun:test";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -36,14 +37,7 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
       new FakeAdbClient() as never,
       { timer: new FakeTimer() },
     );
-    const lookup = (
-      tapOn as unknown as {
-        findElementInHierarchy(
-          options: { testTag: string; action: "tap" },
-          hierarchy: ViewHierarchyResult,
-        ): { selection: { element: HierarchyNode | null } };
-      }
-    ).findElementInHierarchy({ testTag: "A_edit3", action: "tap" }, prototype());
+    const lookup = tapOn.findElementInHierarchy({ testTag: "A_edit3", action: "tap" }, prototype());
     expect(lookup.selection.element?.["resource-id"]).toBe("A_edit3");
   });
 
@@ -67,10 +61,10 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
     delete untagged["test-tag"];
     const capture = { hierarchy: { node: [untagged] } };
     const selector = new ResolverElementSelector();
-    expect(selector.selectByTestTag(capture, "submit").element).toBeNull();
+    expect(selector.selectByTestTag(wireCapture(capture), "submit").element).toBeNull();
     // The full id is the node's exact reported identifier, so it matches when the node has no tag.
-    expect(selector.selectByTestTag(capture, "example.app:id/submit").element?.text).toBe(
-      "Submit form",
-    );
+    expect(
+      selector.selectByTestTag(wireCapture(capture), "example.app:id/submit").element?.text,
+    ).toBe("Submit form");
   });
 });

@@ -6,7 +6,11 @@ import { packageListingContains } from "../../utils/android-cmdline-tools/shellO
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { ActionableError, BootedDevice, ObserveResult, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
@@ -112,22 +116,22 @@ export interface TerminateAppCall extends ActionCall {
   userId?: number;
 }
 
-export interface TerminateAppOptions {
-  simctl?: SimCtlClient;
+export interface TerminateAppOptions extends DisplayFenceDependencies {
+  simctl?: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   timer?: Timer;
   deviceTerminator?: DeviceAppTerminator;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 
 export class TerminateApp extends BaseVisualChange {
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   private deviceTerminator: DeviceAppTerminator;
   private cacheInvalidator: DeviceWindowCacheInvalidator;
 
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbClient instance for testing
+   * @param adb - Optional AdbExecutor instance for testing
    * @param options - Optional simulator, timer, physical-device terminator, and cache invalidator dependencies
    */
   constructor(
@@ -135,7 +139,7 @@ export class TerminateApp extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     options: TerminateAppOptions = {},
   ) {
-    super(device, adb, options.timer ?? defaultTimer);
+    super(device, adb, options.timer ?? defaultTimer, undefined, options);
     this.device = device;
     this.simctl = options.simctl ?? new SimCtlClient(device);
     this.deviceTerminator = options.deviceTerminator ?? new DeviceAppManager();

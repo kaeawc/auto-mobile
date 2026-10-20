@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
@@ -161,7 +162,7 @@ describe("observe-to-resolve contract", () => {
     const query = { kind: "text" as const, value: "Name", intent: "focus-input" as const };
     const selected: ContractCase = {
       key: "focus-label-collision",
-      capture,
+      capture: { ...capture, hierarchy: wireCapture(capture.hierarchy) },
       query,
       observed: { bounds: [0, 40, 100, 70], affordances: ["tap"] },
     };
@@ -250,7 +251,7 @@ describe("observe-to-resolve contract", () => {
     const query = { kind: "text" as const, value: "Submit" };
     const probe: ContractCase = {
       key: "whitespace-probe",
-      capture,
+      capture: { ...capture, hierarchy: capture.hierarchy },
       query,
       observed: { bounds: [0, 0, 100, 50], affordances: ["tap"] },
     };

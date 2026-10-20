@@ -38,6 +38,8 @@ die() {
 is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then is_positive_integer "$@"; fi
 
 if [[ "${1:-}" == "--help" ]]; then
   usage
@@ -48,16 +50,28 @@ if [[ "${1:-}" == "--" ]]; then
   shift
 fi
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
 if [[ $# -eq 0 ]]; then
   usage
   die "missing Gradle command"
 fi
 
-if ! is_positive_integer "$MAX_ATTEMPTS"; then
+run_capture_status is_positive_integer "$MAX_ATTEMPTS"
+if (( RUN_STATUS != 0 )); then
   die "GRADLE_RETRY_MAX_ATTEMPTS must be a positive integer"
 fi
 
-if ! is_positive_integer "$RETRY_DELAY_SECONDS"; then
+run_capture_status is_positive_integer "$RETRY_DELAY_SECONDS"
+if (( RUN_STATUS != 0 )); then
   die "GRADLE_RETRY_DELAY_SECONDS must be a positive integer"
 fi
 
@@ -78,6 +92,24 @@ PATTERN
 
   grep -qiE "${retryable_pattern}|${MISSING_ARTIFACT_PATTERN}" "$log_file"
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then is_retryable_gradle_failure "$@"; fi
+
+# A restored dependency cache can hold module metadata whose jars are missing
+# (partial restore, #12706). Gradle then reports ArtifactNotFoundException for
+# artifacts that exist upstream, and --refresh-dependencies alone does not
+# re-download them because the cached metadata still claims they are present.
+PARTIAL_CACHE_PATTERN='ArtifactNotFoundException: Could not find [^ ]+\.(jar|aar|pom|module)'
+
+purge_resolved_module_cache() {
+  local gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
+  local modules_dir="${gradle_home}/caches/modules-2"
+
+  if [[ -d "$modules_dir" ]]; then
+    log "Partial dependency cache detected; purging ${modules_dir}."
+    rm -rf "$modules_dir"
+  fi
+}
 
 has_refresh_dependencies_flag() {
   local arg
@@ -90,6 +122,8 @@ has_refresh_dependencies_flag() {
 
   return 1
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then has_refresh_dependencies_flag "$@"; fi
 
 stop_gradle_daemon() {
   local gradle_cmd="$1"
@@ -110,6 +144,8 @@ run_gradle_command() {
 
   return "$exit_code"
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then run_gradle_command "$@"; fi
 
 command=("$@")
 attempt=1
@@ -119,13 +155,14 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
   log_file="${LOG_DIR}/gradle-attempt-${attempt}.log"
   log "Running Gradle attempt ${attempt}/${MAX_ATTEMPTS}: ${command[*]}"
 
-  if run_gradle_command "$log_file" "${command[@]}"; then
+  run_capture_status run_gradle_command "$log_file" "${command[@]}"
+  if (( RUN_STATUS == 0 )); then
     if [[ "$attempt" -gt 1 ]]; then
       log "Gradle succeeded after retry."
     fi
     exit 0
   else
-    exit_code=$?
+    exit_code="$RUN_STATUS"
   fi
 
   if [[ "$attempt" -eq "$MAX_ATTEMPTS" ]]; then
@@ -133,7 +170,8 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
     exit "$exit_code"
   fi
 
-  if ! is_retryable_gradle_failure "$log_file"; then
+  run_capture_status is_retryable_gradle_failure "$log_file"
+  if (( RUN_STATUS != 0 )); then
     log "Failure did not match Maven/plugin repository retry patterns."
     exit "$exit_code"
   fi
@@ -151,7 +189,12 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
 
   stop_gradle_daemon "${command[0]}"
 
-  if ! has_refresh_dependencies_flag "${command[@]}"; then
+  if grep -qE "$PARTIAL_CACHE_PATTERN" "$log_file"; then
+    purge_resolved_module_cache
+  fi
+
+  run_capture_status has_refresh_dependencies_flag "${command[@]}"
+  if (( RUN_STATUS != 0 )); then
     command+=("--refresh-dependencies")
   fi
 

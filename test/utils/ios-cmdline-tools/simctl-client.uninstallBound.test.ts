@@ -25,8 +25,7 @@ function wedgedUninstall() {
         );
       });
     },
-    timer,
-    "darwin",
+    { timer, platform: "darwin" },
   );
   return { client, timer, childSignal: () => childSignal };
 }
@@ -77,8 +76,7 @@ describe("SimCtlClient.uninstallApp bound and signal (#10077)", () => {
         }
         return createExecResult("", "");
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
 
     await expect(client.uninstallApp(bundleId, UDID, { timeoutMs: 30_000 })).rejects.toBe(failure);
@@ -104,8 +102,7 @@ describe("SimCtlClient.installApp explicit bound", () => {
           );
         });
       },
-      timer,
-      "darwin",
+      { timer, platform: "darwin" },
     );
     return { client, timer, childSignal: () => childSignal };
   }

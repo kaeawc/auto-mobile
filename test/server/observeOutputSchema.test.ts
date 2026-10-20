@@ -1,4 +1,7 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import type { LayoutWarning } from "../../src/models/ObservationInsets";
+import { readToolResponse } from "../helpers/toolResponse";
+import { observeToolScreen } from "../helpers/observeToolScreen";
 import { describe, expect, spyOn, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
@@ -11,7 +14,7 @@ import {
   skeletonElementSchema,
   viewHierarchyNodeSchema,
 } from "../../src/server/toolOutputSchemas";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 import {
   advertiseBoundsForCompact,
   BOUNDS_UNION_DESCRIPTION_PREFIX,
@@ -38,6 +41,13 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 
 isolateToolRegistry();
+
+/** A fresh module instance keyed by `key`, as the DB lifecycle suites import `database.ts`. */
+function importFreshServerConfig(
+  key: string,
+): Promise<typeof import("../../src/utils/ServerConfig")> {
+  return import(`../../src/utils/ServerConfig.ts?${key}`);
+}
 
 describe("observe setup timing composition", () => {
   const setup: TimingEntry = { name: "setup", durationMs: 5 };
@@ -97,16 +107,12 @@ describe("observe setup timing composition", () => {
       registerObserveTools({
         timer,
         pathProtection: new FakeScreenshotPathProtection(timer),
-        createScreen: () => ({
-          execute: screen.execute.bind(screen),
-          executeDeviceRead: screen.execute.bind(screen),
-          captureScreenshot: screen.captureScreenshot.bind(screen),
-          appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
-          getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
-        }),
+        createScreen: () => observeToolScreen(screen),
       });
       const tool = ToolRegistry.getTool("observe")!;
-      const response = await tool.deviceAwareHandler!(device, tool.schema.parse({}));
+      const response = readToolResponse(
+        await tool.deviceAwareHandler!(device, tool.schema.parse({})),
+      );
       if (expected) {
         expect(response.structuredContent).toHaveProperty("perfTiming", expected);
       } else {
@@ -433,7 +439,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         },
         ...(layoutWarnings === undefined ? {} : { layoutWarnings }),
       }) as ObserveResult;
-    const warning = {
+    const warning: LayoutWarning = {
       type: "important-content-under-inset",
       severity: "warning",
       element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
@@ -444,7 +450,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       insetPx: { top: 59.5 },
       overlapPercent: 100,
       confidence: "high",
-    } as const;
+    };
     const perEntry = diffObserveResult(
       observation({ scope: "truncated", total: 100, warnings: [warning] }),
       observation({ scope: "truncated", total: 140, warnings: [warning] }),
@@ -626,7 +632,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       } as never,
       { dropElements: false, compact: true },
     );
-    expect(sanitized.insets?.displayCutoutInfo?.bounds).toEqual([[480, 0, 600, 100]]);
+    expect<unknown>(sanitized.insets?.displayCutoutInfo?.bounds).toEqual([[480, 0, 600, 100]]);
     expect(() => observeResultSchema.parse(sanitized)).not.toThrow();
   });
 
@@ -692,7 +698,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       compact: true,
     });
 
-    expect(compacted.layoutWarnings?.warnings[0]?.element.bounds).toEqual([0, 0, 100, 30]);
+    expect<unknown>(compacted.layoutWarnings?.warnings[0]?.element.bounds).toEqual([0, 0, 100, 30]);
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
   });
 
@@ -1075,7 +1081,7 @@ describe("occlusionState/occludedBy/occludedByViewId: --no-occlusion (issue occl
     // Pollute the shared singleton to prove the fresh import is independent.
     serverConfig.setOcclusionEnabled(false);
     try {
-      const fresh = await import("../../src/utils/ServerConfig?occlusionDefault");
+      const fresh = await importFreshServerConfig("occlusionDefault");
       expect(fresh.serverConfig.getAccessibilityFlagsConfig().occlusionEnabled).toBe(true);
     } finally {
       serverConfig.setOcclusionEnabled(true);

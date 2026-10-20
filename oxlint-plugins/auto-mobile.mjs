@@ -345,6 +345,24 @@ const noUnknownCastRule = {
   },
 };
 
+const noAsAnyRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      asAny:
+        "Avoid `as any` (and `<any>x`): it switches the type checker off for the expression. Use a typed fake or builder, a `Pick<Interface, ...>` view, `satisfies`, or a type guard.",
+    },
+  },
+  create(context) {
+    const report = (node) => {
+      if (node.typeAnnotation?.type === "TSAnyKeyword") {
+        context.report({ node, messageId: "asAny" });
+      }
+    };
+    return { TSAsExpression: report, TSTypeAssertion: report };
+  },
+};
+
 // Building a collection by mutating it inside a callback. These are the forms
 // that have a direct declarative replacement (map/filter/flatMap), as opposed to
 // a callback that logs or recurses, where the only rewrite is a loop.
@@ -400,7 +418,7 @@ const noAccumulatorForEachRule = {
 };
 
 // The ElementSelector service has one entry point, `select(capture, query, options)`. The older
-// per-field adapters survive only for the tap actions that have not moved yet (issue #11838).
+// per-field adapters survive only for ResolverElementSelector's own tests until they move (issue #11838).
 const SELECTOR_FACADE_METHODS = new Set([
   "selectByText",
   "selectByResourceId",
@@ -410,13 +428,13 @@ const SELECTOR_FACADE_METHODS = new Set([
   "selectClickableSiblingOfResourceId",
 ]);
 const SELECTOR_FACADE_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/(?:action\/(?:TapOnElement|TapAnyElement|tapElementFinder)|utility\/ResolverElementSelector)\.ts$/;
+  /(?:^|\/)src\/features\/utility\/ResolverElementSelector\.ts$/;
 const noDeprecatedSelectorFacadeRule = {
   meta: {
     type: "problem",
     messages: {
       facade:
-        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only TapOnElement, TapAnyElement and tapElementFinder may still use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
+        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only ResolverElementSelector, which defines them, may use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
     },
   },
   create(context) {
@@ -1005,7 +1023,7 @@ const RAW_ACCESSOR_NAMES = new Set([
 ]);
 // Files whose raw-accessor use is hint extraction / diagnostics, not selection.
 const RAW_ACCESSOR_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|systemTrayHelpers)|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
+  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|helpers\/(?:hierarchy|matching|groupExpansion|dismissal))|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
 const noRawSelectorFieldReadRule = {
   meta: {
     type: "problem",
@@ -1827,6 +1845,7 @@ const plugin = {
     "no-inline-error-normalize": noInlineErrorNormalizeRule,
     "no-caught-error-interpolation": noCaughtErrorInterpolationRule,
     "no-unknown-cast": noUnknownCastRule,
+    "no-as-any": noAsAnyRule,
     "no-accumulator-foreach": noAccumulatorForEachRule,
     "no-bare-expect": noBareExpectRule,
     "stress-explicit-timeout": stressExplicitTimeoutRule,

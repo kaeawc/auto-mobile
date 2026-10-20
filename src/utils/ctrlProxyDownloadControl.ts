@@ -1,8 +1,9 @@
 import { readBooleanFlag } from "./flagTokens";
+import { ENV } from "../config/env";
 
 export const SKIP_CTRL_PROXY_DOWNLOAD_FLAG = "--skip-ctrl-proxy-download";
 export const LEGACY_SKIP_ACCESSIBILITY_DOWNLOAD_FLAG = "--skip-accessibility-download";
-export const SKIP_CTRL_PROXY_DOWNLOAD_ENV = "AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD";
+export const SKIP_CTRL_PROXY_DOWNLOAD_ENV = ENV.SKIP_CTRL_PROXY_DOWNLOAD.name;
 
 export function isTruthyEnvValue(value: string | undefined): boolean {
   return value === "1" || value?.toLowerCase() === "true";

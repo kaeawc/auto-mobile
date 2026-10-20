@@ -70,6 +70,18 @@ const fixtures: Record<string, Node> = {
     label: "Save",
     enabledWhen: { key: "liked", equals: true },
   },
+  prototype_data_actions_v1: {
+    ...label,
+    onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
+  },
+  prototype_network_v1: {
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
+  },
+  prototype_network_device_v1: {
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
+  },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -105,13 +117,28 @@ const containers: {
   },
 ];
 
-test("every capability gate has a container fixture", () => {
-  expect(Object.keys(fixtures).sort()).toEqual(
+// Gates on a root-level spec field, not a node: no container can hold them, so they get a
+// dedicated test below instead of a container fixture.
+const ROOT_LEVEL_GATES = ["prototype_storage_v1"];
+
+test("every capability gate has a container fixture or is a root-level gate", () => {
+  expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability).sort(),
   );
 });
 
-for (const gate of PROTOTYPE_SPEC_CAPABILITY_GATES) {
+test("the storage gate reports the root-level storage block", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_storage_v1",
+  )!;
+  const spec = { root: label, state: { a: 1 }, storage: { version: 1, keys: ["state:a"] } };
+  expect(gate.fields(spec)).toEqual(["storage"]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+for (const gate of PROTOTYPE_SPEC_CAPABILITY_GATES.filter(
+  (entry) => !ROOT_LEVEL_GATES.includes(entry.capability),
+)) {
   for (const container of containers) {
     test(`${gate.capability} covers ${container.name}`, () => {
       const spec = container.wrap(fixtures[gate.capability]!);

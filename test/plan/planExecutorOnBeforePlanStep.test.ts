@@ -1,5 +1,5 @@
 import { describe, expect, mock, beforeEach, afterEach, test } from "bun:test";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { z } from "zod/v4";
@@ -10,14 +10,14 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("PlanExecutor — onBeforePlanStep", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
 
   afterEach(() => {
     ToolRegistry.unregister("hookTestNoop");
   });
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     const noopSchema = z.object({
       platform: z.string().optional(),
       deviceId: z.string().optional(),
@@ -78,7 +78,7 @@ describe("PlanExecutor — onBeforePlanStep", () => {
   });
 
   test("invokes onBeforePlanStep once per step with correct indices", async () => {
-    const hook = mock(async () => {});
+    const hook = mock(async (_context?: PlanStepLifecycleContext) => {});
 
     const plan: Plan = {
       name: "hook-test",
@@ -109,7 +109,7 @@ describe("PlanExecutor — onBeforePlanStep", () => {
   });
 
   test("invokes hook from startStep offset with correct totalSteps", async () => {
-    const hook = mock(async () => {});
+    const hook = mock(async (_context?: PlanStepLifecycleContext) => {});
 
     const plan: Plan = {
       name: "hook-offset",

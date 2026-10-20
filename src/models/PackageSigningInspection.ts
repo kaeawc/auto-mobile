@@ -1,7 +1,4 @@
-import type {
-  ApkSignatureScheme,
-  ApkSignerCertificate,
-} from "../utils/android-cmdline-tools/apkSigningBlock";
+import type { ApkSignatureScheme, ApkSignerCertificate } from "./ApkSignerCertificate";
 
 /**
  * Whether the package is installed for the inspected Android user.

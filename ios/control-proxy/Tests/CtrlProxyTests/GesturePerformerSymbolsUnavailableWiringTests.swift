@@ -79,9 +79,15 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
     func testPressKeyRequiresKeyboardFocusBeforeSynthesis() throws {
         let pressKey = try gesturePerformerFunction(named: "performPressKey(")
         XCTAssertTrue(pressKey.contains("async throws"))
-        XCTAssertTrue(pressKey.contains("try await KeyboardWait.destructivePostCondition("))
-        XCTAssertTrue(pressKey.contains("GesturePerformer.performHorizontalArrow("))
-        XCTAssertTrue(pressKey.contains("clock: keyboardClock, key: normalizedKey"))
+        // Destructive-key confirmation and plain horizontal arrows live in helpers that
+        // performPressKey delegates to; the wiring must hold through them.
+        XCTAssertTrue(pressKey.contains("return try await confirmDestructiveKeyOutcome("))
+        XCTAssertTrue(pressKey.contains("return try performPlainHorizontalArrow("))
+        let destructive = try gesturePerformerFunction(named: "confirmDestructiveKeyOutcome(")
+        XCTAssertTrue(destructive.contains("try await KeyboardWait.destructivePostCondition("))
+        let horizontalArrow = try gesturePerformerFunction(named: "performPlainHorizontalArrow(")
+        XCTAssertTrue(horizontalArrow.contains("GesturePerformer.performHorizontalArrow("))
+        XCTAssertTrue(horizontalArrow.contains("clock: keyboardClock, key: normalizedKey"))
         let focusGuard = try XCTUnwrap(pressKey.range(of: "requireKeyboardFocus("))
         let keyPressFocus = try XCTUnwrap(pressKey.range(of: "forKeyPress: true"))
         let synthesis = try XCTUnwrap(pressKey.range(of: "app.typeKey(keyboardKey, modifierFlags: modifierFlags)"))

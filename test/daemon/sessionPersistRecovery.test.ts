@@ -1,3 +1,5 @@
+import { makePool } from "../helpers/makePool";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import {
@@ -11,12 +13,9 @@ import { ActionableError } from "../../src/models/ActionableError";
 import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // A call naming a UUID may issue it again for the recoverable handoffs and for `plan-auto-release`
 // (#11418): the list, startup rehydration and the claim's category are separate, and the claim,
@@ -196,20 +195,20 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       manager.attachLiveDaemonSessionIds(() => new Set(["daemon-new"]));
       const deviceManager = new FakeDeviceManager();
       deviceManager.bootedDevices = devices;
-      pool = new DevicePool(
-        createDevicePoolDependencies(manager, "plan-reissue", {
-          timer,
-          deviceManager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-        }),
-      );
+      pool = makePool(manager, "plan-reissue", { timer, deviceManager });
       await pool.initializeWithDevices(devices);
     }
 
     /** A session that ran a plan on SIM_A and was released by the plan's cleanup. */
-    async function runPlanOnSimA(reason: string = PLAN_AUTO_RELEASE_REASON): Promise<void> {
-      await pool.bindOrReuseDeviceSession(SESSION, SIM_A, "ios", undefined, undefined, ios(SIM_A));
+    async function runPlanOnSimA(
+      reason: SessionReleaseReason = PLAN_AUTO_RELEASE_REASON,
+    ): Promise<void> {
+      await pool.bindOrReuseDeviceSession({
+        sessionId: SESSION,
+        deviceId: SIM_A,
+        platform: "ios",
+        expectedIdentity: ios(SIM_A),
+      });
       await manager.releaseSession(SESSION, reason);
       await pool.releaseDevice(SIM_A, SESSION);
       expect(await repo.getSession(SESSION)).toMatchObject({ release_reason: reason });
@@ -228,7 +227,12 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     test("re-issues on another device when a session took the old one", async () => {
       await setUp([ios(SIM_A), ios(SIM_B)]);
       await runPlanOnSimA();
-      await pool.bindOrReuseDeviceSession("other", SIM_A, "ios", undefined, undefined, ios(SIM_A));
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other",
+        deviceId: SIM_A,
+        platform: "ios",
+        expectedIdentity: ios(SIM_A),
+      });
 
       const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
 
@@ -258,7 +262,12 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     test("a recoverable row whose device was taken still ends as identity loss", async () => {
       await setUp([ios(SIM_A), ios(SIM_B)]);
       await runPlanOnSimA("daemon-restart");
-      await pool.bindOrReuseDeviceSession("other", SIM_A, "ios", undefined, undefined, ios(SIM_A));
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "other",
+        deviceId: SIM_A,
+        platform: "ios",
+        expectedIdentity: ios(SIM_A),
+      });
 
       await expect(
         manager.getOrCreateSession(SESSION, pool, "ios", undefined, true),

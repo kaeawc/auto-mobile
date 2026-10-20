@@ -2,52 +2,48 @@ import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test"
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import type { JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
+import { toJSONSchema } from "zod/v4";
+import type { JsonSchemaValidator } from "@modelcontextprotocol/client";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import type { BootedDevice, KeyboardResult } from "../../src/models";
 import type { SendKeysResult } from "../../src/features/action/SendKeys";
 import { AndroidImeCatalog } from "../../src/features/action/AndroidImeCatalog";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetKeyboardFactory,
-  resetOpenUrlFactory,
-  resetSendKeysFactory,
-  setKeyboardFactory,
-  setOpenUrlFactory,
-  setSendKeysFactory,
-  setShakeFactory,
-  resetShakeFactory,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { readToolResponse } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 const device: BootedDevice = { deviceId: "fake-output-schema", name: "Fake", platform: "android" };
 const validators = new Map<string, JsonSchemaValidator<unknown>>();
 
 // Compile the same validators the SDK caches on tools/list, outside test timing.
 beforeAll(() => {
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   const provider = new AjvJsonSchemaValidator();
   for (const name of ["sendKeys", "keyboard", "openLink"]) {
     const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
     // Disabled tools are still registered; use their registered schema directly.
     const schema =
-      definition?.outputSchema ?? ToolRegistry.getTool(name)!.outputSchema!.toJSONSchema();
+      definition?.outputSchema ?? toJSONSchema(ToolRegistry.getTool(name)!.outputSchema!);
     validators.set(name, provider.getValidator(schema));
   }
 });
-beforeEach(() => registerInteractionTools());
+beforeEach(() => registerInteractionTools(interactionDeps));
 afterEach(() => {
-  resetSendKeysFactory();
-  resetKeyboardFactory();
-  resetOpenUrlFactory();
-  resetShakeFactory();
+  delete interactionDeps.sendKeysFactory;
+  delete interactionDeps.keyboardFactory;
+  delete interactionDeps.openUrlFactory;
+  delete interactionDeps.shakeFactory;
 });
 
 async function checkResponse(
@@ -57,7 +53,7 @@ async function checkResponse(
   isError?: boolean,
 ) {
   const tool = ToolRegistry.getTool(name)!;
-  const response = await tool.deviceAwareHandler!(device, args);
+  const response = readToolResponse(await tool.deviceAwareHandler!(device, args));
   expect(response.content).toEqual(createJSONToolResponse(payload).content);
   expect(response.isError).toBe(isError);
   // The SDK requires presence unless isError; it validates whenever content is present.
@@ -79,7 +75,7 @@ for (const success of [true, false]) {
       commands: [{ index: 0, action: "clear", success }],
       ...(success ? {} : { failedIndex: 0, error: "No focused input" }),
     };
-    setSendKeysFactory(() => ({ execute: async () => result }));
+    interactionDeps.sendKeysFactory = () => ({ execute: async () => result });
     try {
       await checkResponse(
         "sendKeys",
@@ -103,18 +99,18 @@ for (const success of [true, false]) {
         open: success,
         ...(success ? {} : { error: "failed" }),
       };
-      setKeyboardFactory(() => ({ execute: async () => result }));
+      interactionDeps.keyboardFactory = () => ({ execute: async () => result });
       await checkResponse("keyboard", { action }, result, success ? undefined : true);
     });
   }
 }
 
 test("keyboard exceptions still throw actionable errors", async () => {
-  setKeyboardFactory(() => ({
+  interactionDeps.keyboardFactory = () => ({
     execute: async () => {
       throw new Error("failed");
     },
-  }));
+  });
   await expect(
     ToolRegistry.getTool("keyboard")!.deviceAwareHandler!(device, { action: "detect" }),
   ).rejects.toThrow("Failed to execute keyboard detect: failed");
@@ -216,7 +212,7 @@ for (const action of ["listImes", "setIme", "tapImeKey"] as const) {
 for (const success of [true, false]) {
   test(`openLink ${success ? "success" : "failure"} preserves text`, async () => {
     const result = { success, url: "https://example.com", ...(success ? {} : { error: "failed" }) };
-    setOpenUrlFactory(() => ({ execute: async () => result }));
+    interactionDeps.openUrlFactory = () => ({ execute: async () => result });
     await checkResponse(
       "openLink",
       { url: result.url },
@@ -231,7 +227,7 @@ for (const success of [true, false]) {
 
 test("neighbouring shake retains its text-only envelope", async () => {
   const result = { success: true, duration: 10, intensity: 20 };
-  setShakeFactory(() => ({ execute: async () => result }));
+  interactionDeps.shakeFactory = () => ({ execute: async () => result });
   const tool = ToolRegistry.getTool("shake")!;
   expect(tool.outputSchema).toBeUndefined();
   expect(await tool.deviceAwareHandler!(device, { duration: 10, intensity: 20 })).toEqual(
@@ -249,7 +245,8 @@ interface SourceIndex {
   source: ts.SourceFile;
   bindings: Map<string, ts.Node>;
   imports: Map<string, { file: string; name: string }>;
-  registrations: Array<{ name: string; handler: ts.Expression }>;
+  reexports: string[];
+  registrations: Array<{ name: string; handler: ts.Expression; nonDeviceHandler?: ts.Expression }>;
 }
 const serverDirectory = path.resolve(import.meta.dir, "../../src/server");
 // Handlers delegate response building to helpers that moved out of src/server
@@ -285,8 +282,11 @@ function indexSource(
     source: ast,
     bindings: new Map(),
     imports: new Map(),
+    reexports: [],
     registrations: [],
   };
+  const lateBound = new Map<string, string>();
+  const lateRegistrations: Array<{ variable: string; handler: ts.Expression }> = [];
   function visit(node: ts.Node): void {
     if (ts.isFunctionDeclaration(node) && node.name) {
       index.bindings.set(node.name.text, node);
@@ -332,6 +332,28 @@ function indexSource(
       }
     }
     if (
+      ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      const target = pathApi.resolve(pathApi.dirname(file), `${node.moduleSpecifier.text}.ts`);
+      if (isInside(directory, target, pathApi)) {
+        if (!node.exportClause) {
+          index.reexports.push(target);
+        } else if (ts.isNamedExports(node.exportClause)) {
+          for (const element of node.exportClause.elements) {
+            if (!element.isTypeOnly) {
+              index.imports.set(element.name.text, {
+                file: target,
+                name: element.propertyName?.text ?? element.name.text,
+              });
+            }
+          }
+        }
+      }
+    }
+    if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       ts.isIdentifier(node.expression.expression) &&
@@ -350,7 +372,13 @@ function indexSource(
             ts.isPropertyAssignment(property) && property.name.getText(ast) === "outputSchema",
         )
       ) {
-        index.registrations.push({ name: name.text, handler });
+        // Tools registered with `shouldEnsureDevice: () => false` do their work in
+        // `nonDeviceHandler`, so the audit must follow it as well as the positional handler.
+        const nonDeviceHandler = options.properties.find(
+          (property): property is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(property) && property.name.getText(ast) === "nonDeviceHandler",
+        )?.initializer;
+        index.registrations.push({ name: name.text, handler, nonDeviceHandler });
       }
     }
     if (
@@ -370,23 +398,43 @@ function indexSource(
       const name = property("name")?.initializer;
       const handler = property("handler")?.initializer;
       const options = property("options")?.initializer;
-      if (
-        name &&
-        ts.isStringLiteral(name) &&
-        handler &&
+      const hasOutputSchema =
         options &&
         ts.isObjectLiteralExpression(options) &&
         options.properties.some(
           (candidate) =>
             ts.isPropertyAssignment(candidate) && candidate.name.getText(ast) === "outputSchema",
-        )
-      ) {
-        index.registrations.push({ name: name.text, handler });
+        );
+      if (name && ts.isStringLiteral(name) && hasOutputSchema) {
+        if (handler) {
+          index.registrations.push({ name: name.text, handler });
+        } else if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+          // Late-bound handler: paired below with `<variable>.register(registry, handler)`.
+          lateBound.set(node.parent.name.text, name.text);
+        }
       }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.name.text === "register" &&
+      node.arguments[1]
+    ) {
+      lateRegistrations.push({
+        variable: node.expression.expression.text,
+        handler: node.arguments[1],
+      });
     }
     ts.forEachChild(node, visit);
   }
   visit(ast);
+  for (const { variable, handler } of lateRegistrations) {
+    const name = lateBound.get(variable);
+    if (name) {
+      index.registrations.push({ name, handler });
+    }
+  }
   return index;
 }
 function auditHandler(
@@ -398,6 +446,27 @@ function auditHandler(
   const visited = new Set<ts.Node>();
   const offenders: string[] = [];
   let structured = false;
+  const visitedBindings = new Set<string>();
+  function visitBinding(file: string, name: string): void {
+    const key = `${sourceKey(file, pathApi)}#${name}`;
+    const index = indexes.get(sourceKey(file, pathApi));
+    if (!index || visitedBindings.has(key)) {
+      return;
+    }
+    visitedBindings.add(key);
+    const binding = index.bindings.get(name);
+    if (binding) {
+      visit(file, binding);
+      return;
+    }
+    const imported = index.imports.get(name);
+    if (imported) {
+      visitBinding(imported.file, imported.name);
+    }
+    for (const target of index.reexports) {
+      visitBinding(target, name);
+    }
+  }
   function visit(currentFile: string, node: ts.Node): void {
     if (visited.has(node)) {
       return;
@@ -424,21 +493,19 @@ function auditHandler(
       ts.isIdentifier(node) &&
       (node === handler ||
         (ts.isCallExpression(node.parent) && node.parent.expression === node) ||
+        // `{ hook: handlers.prepareDevice }` passed into a factory: follow the object that built
+        // the handler set, since a hook injected at construction (#11827) is no longer defined
+        // inside the factory body the audit walks.
+        (ts.isPropertyAccessExpression(node.parent) &&
+          node.parent.expression === node &&
+          ts.isPropertyAssignment(node.parent.parent) &&
+          node.parent.parent.initializer === node.parent) ||
         (ts.isVariableDeclaration(node.parent) && node.parent.initializer === node) ||
         (ts.isShorthandPropertyAssignment(node.parent) &&
           ts.isObjectLiteralExpression(node.parent.parent) &&
           ts.isReturnStatement(node.parent.parent.parent)))
     ) {
-      const binding = index.bindings.get(node.text);
-      if (binding) {
-        visit(currentFile, binding);
-      }
-      const imported = index.imports.get(node.text);
-      const importedBinding =
-        imported && indexes.get(sourceKey(imported.file, pathApi))?.bindings.get(imported.name);
-      if (imported && importedBinding) {
-        visit(imported.file, importedBinding);
-      }
+      visitBinding(currentFile, node.text);
     }
     if (
       ts.isObjectLiteralExpression(node) &&
@@ -478,10 +545,16 @@ beforeAll(() => {
     }
   }
   sourceAudit = [...indexes].flatMap(([file, index]) =>
-    index.registrations.map(({ name, handler }) => ({
-      name,
-      ...auditHandler(indexes, file, handler),
-    })),
+    index.registrations.map(({ name, handler, nonDeviceHandler }) => {
+      const audits = [handler, ...(nonDeviceHandler ? [nonDeviceHandler] : [])].map((target) =>
+        auditHandler(indexes, file, target),
+      );
+      return {
+        name,
+        structured: audits.some((audit) => audit.structured),
+        offenders: audits.flatMap((audit) => audit.offenders),
+      };
+    }),
   );
 });
 test("every schema registration reaches a structured builder and no text-only builder", () => {
@@ -511,6 +584,21 @@ test("source guard detects helper and raw text envelopes while exempting error e
     offenders: [],
   });
   expect(auditHandler(indexes, file, index.bindings.get("error")!).offenders).toEqual([]);
+});
+
+test("source guard captures nonDeviceHandler so session-resolved tools are audited", () => {
+  const file = path.join(serverDirectory, "nonDevice.ts");
+  const index = indexSource(
+    file,
+    `ToolRegistry.registerDeviceAware("viaNonDevice", "", schema, async () => { throw new Error("x"); }, {
+  outputSchema: schema,
+  nonDeviceHandler: async () => createJSONToolResponse({ success: true }),
+});`,
+  );
+  const indexes = new Map([[sourceKey(file), index]]);
+  const [registration] = index.registrations;
+  expect(registration?.nonDeviceHandler).toBeDefined();
+  expect(auditHandler(indexes, file, registration!.nonDeviceHandler!).offenders).toHaveLength(1);
 });
 
 test("source guard follows factory helpers returned through object shorthand", () => {
@@ -552,6 +640,34 @@ export function createMixedHandlers() { return { mixed }; }`,
   ]);
 });
 
+test("follows a hook injected into a handler factory from a sibling handler set (#11827)", () => {
+  const registrationFile = path.join(serverDirectory, "injectedRegistrations.ts");
+  const handlerFile = path.join(serverDirectory, "injectedHandlers.ts");
+  const registrationIndex = indexSource(
+    registrationFile,
+    `import { createBase, createStart } from "./injectedHandlers";
+const base = createBase();
+const { start } = createStart({ prepare: base.prepare });
+ToolRegistry.register("start", "", schema, (args) => start(args), { outputSchema: schema });`,
+  );
+  const handlerIndex = indexSource(
+    handlerFile,
+    `function ready() { return createStructuredToolResponse({ success: true }); }
+export function createBase() { return { prepare: () => ready() }; }
+export function createStart(hooks) { const start = (args) => hooks.prepare(args); return { start }; }`,
+  );
+  const indexes = new Map([
+    [sourceKey(registrationFile), registrationIndex],
+    [sourceKey(handlerFile), handlerIndex],
+  ]);
+  expect(
+    registrationIndex.registrations.map(({ name, handler }) => ({
+      name,
+      ...auditHandler(indexes, registrationFile, handler),
+    })),
+  ).toEqual([{ name: "start", structured: true, offenders: [] }]);
+});
+
 test("source paths use Windows containment and canonical keys", () => {
   const directory = String.raw`C:\repo\src\server`;
   const file = String.raw`C:\repo\src\server\handlers\x.ts`;
@@ -573,6 +689,44 @@ test("source paths use Windows containment and canonical keys", () => {
   expect(sourceKey(String.raw`/repo/server/a\b.ts`, path.posix)).toBe(
     String.raw`/repo/server/a\b.ts`,
   );
+});
+
+test("source guard follows named and star re-exports, including cyclic barrels", () => {
+  const files = new Map([
+    [
+      "registration.ts",
+      `import { good, bad } from "./barrel";
+ToolRegistry.register("good", "", schema, good, { outputSchema: schema });
+ToolRegistry.register("bad", "", schema, bad, { outputSchema: schema });`,
+    ],
+    ["barrel.ts", `export * from "./responses"; export * from "./cycle";`],
+    ["cycle.ts", `export * from "./barrel";`],
+    ["responses.ts", `export { structured as good, text as bad } from "./builders";`],
+    [
+      "builders.ts",
+      `export function structured() { return createStructuredToolResponse({}); }
+export function text() { return createJSONToolResponse({}); }`,
+    ],
+  ]);
+  const indexes = new Map(
+    [...files].map(([name, source]) => {
+      const file = path.join(serverDirectory, name);
+      return [sourceKey(file), indexSource(file, source)];
+    }),
+  );
+  const file = path.join(serverDirectory, "registration.ts");
+  const results = indexes.get(sourceKey(file))!.registrations.map(({ name, handler }) => ({
+    name,
+    ...auditHandler(indexes, file, handler),
+  }));
+  expect(results).toEqual([
+    { name: "good", structured: true, offenders: [] },
+    {
+      name: "bad",
+      structured: false,
+      offenders: [`${path.join(serverDirectory, "builders.ts")}:2`],
+    },
+  ]);
 });
 
 test("source guard follows Windows cross-file handlers and rejects text-only builders", () => {

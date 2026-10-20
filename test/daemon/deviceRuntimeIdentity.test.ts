@@ -9,6 +9,7 @@ import {
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 const id = "emulator-5554";
 const observed = (name: string, observedAt: number): BootedDevice => ({
@@ -103,7 +104,7 @@ describe("DeviceRuntimeIdentity", () => {
   test("quarantine cancels by device even when the pool has no session", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = undefined;
+    patchDeviceBinding(device, { sessionId: null });
     h.devices.set(id, device);
     await h.identity.reconcileDiscoveryObservation([observed("Other", 20)], "test", {
       excludeExecutionId: "own-execution",

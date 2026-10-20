@@ -1,14 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 /**
  * #11448 item 2: the claim across a System UI ANR recovery replacement (#11437), above all a
@@ -83,17 +80,18 @@ describe("cross-daemon claim across a same-serial System UI ANR recovery", () =>
     };
     const devices = new FakeDeviceManager();
     devices.bootedDevices = [original];
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "daemon-a", {
-        timer,
-        deviceManager: devices,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        foreignDeviceOwnership: daemonA,
-      }),
-    );
+    const pool = makePool(sessions, "daemon-a", {
+      timer,
+      deviceManager: devices,
+      foreignDeviceOwnership: daemonA,
+    });
     await pool.initializeWithDevices([original]);
-    await pool.bindOrReuseDeviceSession(SESSION, SERIAL, "android", sourceImage);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: SERIAL,
+      platform: "android",
+      sourceImage,
+    });
     expect(claims.get(SERIAL)).toBe(DAEMON_A_PID);
 
     const reservation = await pool.reserveDeviceForShutdown(SERIAL);
@@ -158,17 +156,18 @@ describe("cross-daemon claim across a same-serial System UI ANR recovery", () =>
     };
     const devices = new FakeDeviceManager();
     devices.bootedDevices = [original];
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "daemon-a", {
-        timer,
-        deviceManager: devices,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        foreignDeviceOwnership: daemonA,
-      }),
-    );
+    const pool = makePool(sessions, "daemon-a", {
+      timer,
+      deviceManager: devices,
+      foreignDeviceOwnership: daemonA,
+    });
     await pool.initializeWithDevices([original]);
-    await pool.bindOrReuseDeviceSession(SESSION, SERIAL, "android", sourceImage);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: SERIAL,
+      platform: "android",
+      sourceImage,
+    });
     events.length = 0;
 
     const reservation = await pool.reserveDeviceForShutdown(SERIAL);

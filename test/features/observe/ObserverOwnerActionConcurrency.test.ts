@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { afterEach, expect, spyOn, test } from "bun:test";
@@ -44,7 +45,7 @@ class HoldingAdb extends FakeAdbExecutor {
 
   constructor(private readonly commandToHold: string) {
     super();
-    this.setCommandResponse("screencap", { stdout: png, stderr: "" });
+    this.setCommandResponse("screencap", createExecResult(png, ""));
   }
 
   override async executeCommand(
@@ -76,18 +77,14 @@ class HoldingAdb extends FakeAdbExecutor {
 
 function screenshot(adb: FakeAdbExecutor, timer: FakeTimer, ids: CountingIdGenerator) {
   const writer = new FakeScreenshotFileWriter();
-  const capture = new TakeScreenshot(
-    device,
-    new FakeAdbClientFactory(adb),
+  const capture = new TakeScreenshot(device, {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    ids,
-    writer,
-    undefined,
-    undefined,
-    undefined,
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-  );
+    idGenerator: ids,
+    fileWriter: writer,
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+  });
   return { capture, writer };
 }
 
@@ -139,10 +136,8 @@ test.each(ownerCommands)(
     const factory = new FakeAdbClientFactory(adb);
     let socket: FakeWebSocket | undefined;
     let hierarchyRequested = false;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      (url) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, timer);
         spyOn(socket, "send").mockImplementation((wire: string) => {
           if (wire.includes('"request_hierarchy"')) {
@@ -152,7 +147,7 @@ test.each(ownerCommands)(
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
       AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
@@ -177,8 +172,7 @@ test.each(ownerCommands)(
                   30,
                   40,
                   { duration: 100 },
-                  undefined,
-                  owner.signal,
+                  { signal: owner.signal },
                 )
               : command === ownerCommands[4]
                 ? new InputKey(device, factory, undefined, timer).press(
@@ -188,7 +182,7 @@ test.each(ownerCommands)(
                     [],
                     { signal: owner.signal },
                   )
-                : adb.executeCommand(command, undefined, undefined, undefined, owner.signal);
+                : adb.executeCommand(command, { signal: owner.signal });
       await adb.started;
       const ownerIndex = adb.getExecutedCommands().indexOf(command);
       const revision = displayTransitions.revision(device.deviceId);
@@ -248,7 +242,7 @@ test.each(["finish", "timeout", "cancel"] as const)(
     // Read the exact command from the production capture, rather than inventing its temp path.
     const recorder = new FakeAdbExecutor();
     const commandProbe = screenshot(recorder, timer, new CountingIdGenerator("captures"));
-    recorder.setCommandResponse("screencap", { stdout: png, stderr: "" });
+    recorder.setCommandResponse("screencap", createExecResult(png, ""));
     await commandProbe.capture.startTrackedCapture({ format: "png", displayId: 0 }).promise;
     ScreenshotJobTracker.clear();
     const command = recorder.getExecutedCommands().find((value) => value.includes("screencap"))!;

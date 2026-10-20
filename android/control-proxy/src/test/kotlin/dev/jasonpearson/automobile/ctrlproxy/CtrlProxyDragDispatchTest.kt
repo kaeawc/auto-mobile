@@ -48,15 +48,17 @@ class CtrlProxyDragDispatchTest {
           override fun currentTimeMillis() = 0L
         },
       )
-    ReflectionHelpers.setField(fixture.service, "perfProvider", perf)
-    fixture.service.dragResultReporter = { id, outcome ->
+    fixture.usePerfProvider(perf)
+    fixture.gestureController.dragResultReporter = { id, outcome ->
       frames.add(
         dragResultFrame(
-          id,
-          outcome.completed,
-          outcome.error,
-          outcome.totalTimeMs,
-          outcome.gestureTimeMs,
+          GestureFrameResult(
+            requestId = id,
+            success = outcome.completed,
+            error = outcome.error,
+            totalTimeMs = outcome.totalTimeMs,
+            gestureTimeMs = outcome.gestureTimeMs,
+          ),
           null,
         ),
       )
@@ -111,7 +113,7 @@ class CtrlProxyDragDispatchTest {
     shadow.complete(0L)
     assertTrue(frames.isEmpty())
     assertEquals(1, shadow.attempts.size)
-    val timer = fixture.service.dragDeadline as FakeGestureDeadline
+    val timer = fixture.gestureController.dragDeadline as FakeGestureDeadline
     assertEquals(600L, timer.tasks.last().delayMs)
     ShadowSystemClock.advanceBy(Duration.ofMillis(600L))
     timer.expire()
@@ -179,7 +181,7 @@ class CtrlProxyDragDispatchTest {
     drag()
     shadow.complete()
     fixture.advanceDragWait()
-    (fixture.service.dragDeadline as FakeGestureDeadline).expire()
+    (fixture.gestureController.dragDeadline as FakeGestureDeadline).expire()
     assertReleaseThenFailure()
   }
 

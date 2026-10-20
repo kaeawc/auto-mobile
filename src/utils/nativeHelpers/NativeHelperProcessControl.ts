@@ -1,7 +1,7 @@
 import {
   compareProcessGenerationTokens,
   readProcessGenerationTokenForPid,
-} from "../../daemon/daemonFiles";
+} from "../processGeneration";
 import { logger } from "../logger";
 import { isProcessRunning } from "../processLiveness";
 

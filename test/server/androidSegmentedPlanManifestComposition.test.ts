@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fsPromises } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
@@ -9,7 +9,7 @@ import {
   PlanExecutionOrchestrator,
   type VideoRecorder,
 } from "../../src/server/planExecutionOrchestrator";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 
@@ -142,8 +142,9 @@ describe("timer-rotated multi-device plan manifest (#10026 x #10018)", () => {
     return (await readManifest()).segments.map((segment) => segment.recordingId);
   }
 
+  const scratch = useScratchRoot("plan-video-manifest-");
   beforeEach(async () => {
-    archive = await fsPromises.mkdtemp(path.join(os.tmpdir(), "plan-video-manifest-"));
+    archive = scratch.next();
     for (const id of ["rec-0", "rec-1", "rec-2"]) {
       await fsPromises.mkdir(path.join(archive, id));
     }
@@ -160,7 +161,6 @@ describe("timer-rotated multi-device plan manifest (#10026 x #10018)", () => {
     proto["allocateDevices"] = originalAllocate;
     execute.mockRestore();
     writeFile.mockRestore();
-    await fsPromises.rm(archive, { recursive: true, force: true });
   });
 
   test("a plan that ends writes one manifest of both segments", async () => {

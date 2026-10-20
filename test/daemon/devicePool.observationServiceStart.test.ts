@@ -1,4 +1,6 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import type { DeviceInfo } from "../../src/models";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { observationServiceStartHarness } from "../helpers/observationServiceStartHarness";
@@ -40,11 +42,16 @@ test.each([
   const h = await harness();
   const device = h.pool.getDevice(h.device.deviceId)!;
   if (kind === "busy" || kind === "error") {
-    device.status = kind;
+    patchDeviceBinding(device, kind === "error" ? { health: "error" } : { status: "busy" });
   } else if (kind === "identityReconcileOwner") {
     device.identityReconcileOwner = Symbol("reconcile");
+  } else if (kind === "identityUnresolved") {
+    device.identityUnresolved = true;
+  } else if (kind === "sessionId") {
+    const writable: { sessionId: string | null } = device;
+    writable.sessionId = "owner";
   } else {
-    Reflect.set(device, kind, kind === "identityUnresolved" ? true : "owner");
+    device.adbServerResetSessionId = "owner";
   }
   expect(h.safe()).toBe(false);
 });
@@ -93,8 +100,13 @@ test("declines pending cleanup and a deferred release even if pooled state says 
   pending.resolve();
   await h.sessions.getPendingDeviceCleanup(h.device.deviceId);
   expect(h.safe()).toBe(true);
-  const deferred = Reflect.get(h.pool, "deferredDeviceReleases");
-  deferred.set(h.device.deviceId, {});
+  const deferred = h.pool.testHooks.deferredDeviceReleases;
+  deferred.set(h.device.deviceId, {
+    device: h.pool.getDevice(h.device.deviceId)!,
+    sessionId: "session",
+    assignmentCount: 1,
+    cleanup: Promise.resolve(),
+  });
   expect(h.safe()).toBe(false);
   deferred.clear();
   expect(h.safe()).toBe(true);
@@ -102,7 +114,7 @@ test("declines pending cleanup and a deferred release even if pooled state says 
 
 test("declines while the assignment mutex is held", async () => {
   const h = await harness();
-  const release = await Reflect.get(h.pool, "assignmentMutex").acquire();
+  const release = await h.pool.testHooks.assignmentMutex.acquire();
   try {
     expect(h.safe()).toBe(false);
   } finally {
@@ -145,45 +157,78 @@ test.each([false, true])(
   },
 );
 
-test.each([
-  "recoveringAndroidDeviceIds",
-  "recoveringAndroidImages",
-  "androidRecoveryHandoffOwners",
-  "adbServerResetRecoveryReservations",
-  "mcpSessionRecoveryDevices",
-  "recoveringSessionLosses",
-])("declines %s transition", async (kind) => {
+const image = (name: string): DeviceInfo => ({ name, platform: "android", isRunning: false });
+
+type RecoveryTransition = {
+  seed(h: Awaited<ReturnType<typeof harness>>): () => void;
+};
+
+const RECOVERY_TRANSITIONS: Record<string, RecoveryTransition> = {
+  recoveringAndroidDeviceIds: {
+    seed: (h) => {
+      const state = recoveryInternals(h.pool).recoveringAndroidDeviceIds;
+      state.add(h.device.deviceId);
+      return () => state.clear();
+    },
+  },
+  recoveringAndroidImages: {
+    seed: (h) => {
+      const state = recoveryInternals(h.pool).recoveringAndroidImages;
+      state.set(h.device.name, image(h.device.name));
+      return () => state.clear();
+    },
+  },
+  androidRecoveryHandoffOwners: {
+    seed: (h) => {
+      const state = recoveryInternals(h.pool).androidRecoveryHandoffOwners;
+      state.set(h.device.deviceId, Symbol("recovery"));
+      return () => state.clear();
+    },
+  },
+  adbServerResetRecoveryReservations: {
+    seed: (h) => {
+      const state = h.pool.testHooks.adbServerResetRecoveryReservations;
+      state.set(h.device.name, {
+        deviceId: h.device.deviceId,
+        image: image(h.device.name),
+        cancelled: false,
+        settled: Promise.resolve(),
+        resolve: () => {},
+      });
+      return () => state.clear();
+    },
+  },
+  mcpSessionRecoveryDevices: {
+    seed: (h) => {
+      const state = h.pool.testHooks.mcpSessionRecoveryDevices;
+      state.set("client", {
+        device: h.pool.getDevice(h.device.deviceId)!,
+        token: Symbol("recovery"),
+      });
+      return () => state.clear();
+    },
+  },
+  recoveringSessionLosses: {
+    seed: (h) => {
+      const state = recoveryInternals(h.pool).recoveringSessionLosses;
+      state.set("session", {
+        deviceId: h.device.deviceId,
+        state: "pending",
+        reservations: new Set(["quarantine"]),
+        sessionId: "session",
+        generation: 1,
+        deferredShutdowns: 0,
+      });
+      return () => state.clear();
+    },
+  },
+};
+
+test.each(Object.keys(RECOVERY_TRANSITIONS))("declines %s transition", async (kind) => {
   const h = await harness();
-  // Coordinator and ledger state first; pool-level fields otherwise.
-  const state = Reflect.get(recoveryInternals(h.pool), kind) ?? Reflect.get(h.pool, kind);
-  if (kind === "recoveringAndroidDeviceIds") {
-    state.add(h.device.deviceId);
-  }
-  if (kind === "recoveringAndroidImages") {
-    state.set(h.device.name, { name: h.device.name, platform: "android" });
-  }
-  if (kind === "androidRecoveryHandoffOwners") {
-    state.set(h.device.deviceId, Symbol("recovery"));
-  }
-  if (kind === "adbServerResetRecoveryReservations") {
-    state.set(h.device.name, {
-      deviceId: h.device.deviceId,
-      image: { name: h.device.name, platform: "android" },
-    });
-  }
-  if (kind === "mcpSessionRecoveryDevices") {
-    state.set("client", { device: h.pool.getDevice(h.device.deviceId), token: Symbol("recovery") });
-  }
-  if (kind === "recoveringSessionLosses") {
-    state.set("session", {
-      deviceId: h.device.deviceId,
-      state: "pending",
-      reservations: new Set(["quarantine"]),
-      sessionId: "session",
-    });
-  }
+  const clear = RECOVERY_TRANSITIONS[kind]!.seed(h);
   expect(h.safe()).toBe(false);
-  state.clear();
+  clear();
   expect(h.safe()).toBe(true);
 });
 
@@ -196,7 +241,7 @@ test("declines a reverse session assignment not yet published in the pooled entr
 
 test("declines an unresolved restoration health marker", async () => {
   const h = await harness();
-  Reflect.get(h.pool, "deviceHealthMarkers").mark(
+  h.pool.testHooks.deviceHealthMarkers.mark(
     h.device.deviceId,
     h.pool.getDevice(h.device.deviceId)!.incarnation,
     "clock",
@@ -226,10 +271,11 @@ test("observation declines bound/busy/error rows before collecting recovery fact
   try {
     const device = h.pool.getDevice(h.device.deviceId)!;
     expect(h.pool.isSafeForObservationServiceStart("missing")).toBe(false);
-    device.sessionId = "owner";
+    const writable: { sessionId: string | null } = device;
+    writable.sessionId = "owner";
     expect(h.safe()).toBe(false);
-    device.sessionId = null;
-    device.status = "busy";
+    patchDeviceBinding(device, { sessionId: null });
+    patchDeviceBinding(device, { status: "busy" });
     expect(h.safe()).toBe(false);
     markDeviceError(device);
     expect(h.safe()).toBe(false);

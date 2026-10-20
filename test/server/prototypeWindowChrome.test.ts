@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
@@ -96,7 +97,7 @@ for (const platform of ["android", "ios"] as const) {
     });
     async function call(input: Record<string, unknown>) {
       const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-      return prototypeOutputSchema.parse(response.structuredContent);
+      return prototypeOutputSchema.parse(readToolResponse(response).structuredContent);
     }
     const show = (window?: Record<string, unknown>) =>
       call(window === undefined ? showInput : { ...showInput, spec: spec(window) });

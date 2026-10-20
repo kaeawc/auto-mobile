@@ -27,6 +27,16 @@ export interface SwipeOnResult extends BaseActionResult {
   x2: number;
   y2: number;
   duration: number;
+  /**
+   * Straight-line distance / dispatched duration in native px/s (points/s on iOS), as swipeAt
+   * reports (#12968). Uses `effectiveDurationMs` when set. Omitted when the route ignored the
+   * duration, for boomerang, and for `lookFor` searches.
+   */
+  velocityPxPerSecond?: number;
+  /** iOS XCUICoordinate route: the stroke duration actually run after the runner's velocity clamp (#12987). */
+  effectiveDurationMs?: number;
+  /** TalkBack semantic scroll: `duration` is nominal because the scroll has no timed stroke (#12987). */
+  durationIgnored?: boolean;
 
   // Gesture details
   easing?: "linear" | "decelerate" | "accelerate" | "accelerateDecelerate";

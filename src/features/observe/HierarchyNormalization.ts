@@ -30,8 +30,9 @@ export function resolveActionableHierarchyScreenSize(
   );
 }
 
+/** Normalizes an already-converted iOS hierarchy (see CtrlProxyHierarchy.convertToViewHierarchyResult). */
 export function normalizeIosHierarchy(
-  hierarchy: any,
+  hierarchy: ViewHierarchyResult,
   updatedAt?: number,
   ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
   frameContext?: string,

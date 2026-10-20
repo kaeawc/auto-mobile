@@ -1,4 +1,4 @@
-import type { ResolverSelector } from "../server/elementSelectorSchemas";
+import type { ResolverSelector } from "./ResolverSelector";
 import { errorMessage } from "./describeUnknownError";
 // Structural match for ElementResolution.containerFailure from dependency PR #10292.
 export interface ContainerFailure {
@@ -21,12 +21,6 @@ export class ActionableError extends Error {
     }
   }
 }
-
-/**
- * The target app is not installed, so there is nothing to act on. A subclass so callers can
- * tell "nothing to clean" from a real failure without matching message text.
- */
-export class AppNotInstalledError extends ActionableError {}
 
 /**
  * Wrap an unknown caught error in an ActionableError with actionable context.

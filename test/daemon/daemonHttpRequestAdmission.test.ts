@@ -2,12 +2,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { releasingSessionHarness, releasingSessionId } from "../helpers/releasingSessionHarness";
 import { EventEmitter } from "node:events";
-import type {
-  IncomingHttpHeaders,
-  IncomingMessage,
-  Server as HttpServer,
-  ServerResponse,
-} from "node:http";
+import type { IncomingHttpHeaders } from "node:http";
 import { logger } from "../../src/utils/logger";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -15,34 +10,33 @@ import { Daemon } from "../../src/daemon/daemon";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
+import type {
+  HttpBodyRequest,
+  HttpListener,
+  McpIngressRequest,
+  McpIngressTransport,
+} from "../../src/daemon/daemonHttpIngress";
+import type {
+  McpHttpResponseLike,
+  StatelessMcpServer,
+} from "../../src/daemon/statelessMcpHttpEndpoint";
 
 const port = 41321;
 
-interface DaemonHttpInternals {
-  startHttpServer(): Promise<void>;
-  startUntilReady(): Promise<void>;
-  startThroughSocketBind(): Promise<void>;
-  startAfterSocketBind(): Promise<void>;
-  stopAfterFailedStartup(): Promise<void>;
-  quiesceProvisioningIngress(): Promise<void>;
-  closeHttpListener(): Promise<void>;
-  resolveStartupCompletion(): void;
-  rejectStartupCompletion(reason: unknown): void;
-  sessionManager: SessionManager;
-  observerSessionRegistry: ObserverSessionRegistry;
-  transports: Map<string, FakeTransport>;
-}
-
-class FakeRequest extends EventEmitter {
+class FakeRequest extends EventEmitter implements McpIngressRequest, HttpBodyRequest {
   method = "GET";
   url = MCP_STREAMABLE_PATH;
 
   constructor(readonly headers: IncomingHttpHeaders) {
     super();
   }
+
+  destroy(): this {
+    return this;
+  }
 }
 
-class FakeResponse extends EventEmitter {
+class FakeResponse extends EventEmitter implements McpHttpResponseLike {
   body = "";
   statusCode = 200;
   headersSent = false;
@@ -73,6 +67,10 @@ class FakeResponse extends EventEmitter {
     return this;
   }
 
+  write(): boolean {
+    return true;
+  }
+
   end(body?: string): this {
     this.body = body ?? "";
     this.writableEnded = true;
@@ -82,7 +80,8 @@ class FakeResponse extends EventEmitter {
   }
 }
 
-class FakeHttpServer extends EventEmitter {
+class FakeHttpServer extends EventEmitter implements HttpListener {
+  readonly listening = false;
   requestTimeout = 0;
   headersTimeout = 0;
   timeout = 0;
@@ -111,17 +110,22 @@ class FakeHttpServer extends EventEmitter {
     request.method = method;
     request.url = path;
     const response = new FakeResponse();
-    this.emit(
-      "request",
-      request as unknown as IncomingMessage,
-      response as unknown as ServerResponse,
-    );
     if (body !== undefined) {
-      queueMicrotask(() => {
-        request.emit("data", Buffer.from(body));
-        request.emit("end");
-      });
+      // Like a socket that buffers the upload: deliver it once the daemon reads the
+      // body, which a request held on startup admission does only later.
+      const deliver = (event: string | symbol) => {
+        if (event !== "end") {
+          return;
+        }
+        request.off("newListener", deliver);
+        queueMicrotask(() => {
+          request.emit("data", Buffer.from(body));
+          request.emit("end");
+        });
+      };
+      request.on("newListener", deliver);
     }
+    this.emit("request", request, response);
     const finished = response.finished.then(() => response);
     this.inFlight.add(finished);
     void finished.then(() => this.inFlight.delete(finished));
@@ -129,14 +133,19 @@ class FakeHttpServer extends EventEmitter {
   }
 }
 
-class FakeTransport {
-  readonly sessionId = "known-session";
+/** Stands in for every request's transport: one fake shared across the stateless requests. */
+class FakeTransport implements McpIngressTransport {
   handled = 0;
+  closed = 0;
   parsedBodies: unknown[] = [];
 
+  async start(): Promise<void> {}
+
+  async send(): Promise<void> {}
+
   async handleRequest(
-    _req: IncomingMessage,
-    res: ServerResponse,
+    _req: McpIngressRequest,
+    res: McpHttpResponseLike,
     parsedBody?: unknown,
   ): Promise<void> {
     this.handled += 1;
@@ -144,34 +153,51 @@ class FakeTransport {
     res.writeHead(200);
     res.end();
   }
+
+  async close(): Promise<void> {
+    this.closed += 1;
+  }
+}
+
+class FakeMcpServer implements StatelessMcpServer<McpIngressTransport> {
+  async connect(): Promise<void> {}
+  async close(): Promise<void> {}
 }
 
 async function harness(
   sessionManager?: SessionManager,
   observers?: ObserverSessionRegistry,
   { startupComplete = true, timer = new FakeTimer() } = {},
-): Promise<{ server: FakeHttpServer; transport: FakeTransport; internals: DaemonHttpInternals }> {
+): Promise<{ server: FakeHttpServer; transport: FakeTransport; daemon: Daemon }> {
   const server = new FakeHttpServer();
   const daemon = new Daemon(
     { port, host: "127.0.0.1" },
-    { timer, httpServerFactory: () => server as unknown as HttpServer },
+    { timer, httpServerFactory: () => server },
   );
   const transport = new FakeTransport();
-  const internals = daemon as unknown as DaemonHttpInternals;
+  const hooks = daemon.testHooks;
   if (sessionManager) {
-    internals.sessionManager = sessionManager;
+    hooks.replaceSessionManager(sessionManager);
   }
   if (observers) {
-    internals.observerSessionRegistry = observers;
+    hooks.replaceObserverSessionRegistry(observers);
   }
-  internals.transports.set(transport.sessionId, transport);
-  await internals.startHttpServer();
+  hooks.httpIngress.setMcpTransportFactory(() => transport);
+  hooks.httpIngress.setMcpRequestServerFactory(() => new FakeMcpServer());
+  await hooks.httpIngress.start();
   if (startupComplete) {
-    internals.resolveStartupCompletion();
+    hooks.resolveStartupCompletion();
     // Let the daemon observe completion so admitted requests take the fast path.
     await Promise.resolve();
   }
-  return { server, transport, internals };
+  return { server, transport, daemon };
+}
+
+const TOOLS_LIST = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+
+/** POST one MCP request, the way every stateless MCP exchange arrives. */
+function dispatchMcp(server: FakeHttpServer, headers: IncomingHttpHeaders): Promise<FakeResponse> {
+  return server.dispatch(headers, "POST", MCP_STREAMABLE_PATH, TOOLS_LIST);
 }
 
 // harness() constructs a Daemon, which initializes the process-wide DaemonState.
@@ -184,7 +210,7 @@ describe("Daemon HTTP request admission", () => {
     "rejects a non-loopback or mismatched Host header %s before MCP transport",
     async (host) => {
       const { server, transport } = await harness();
-      const response = await server.dispatch({ host, "mcp-session-id": transport.sessionId });
+      const response = await dispatchMcp(server, { host });
       expect(response.statusCode).toBe(403);
       expect(transport.handled).toBe(0);
     },
@@ -192,22 +218,26 @@ describe("Daemon HTTP request admission", () => {
 
   test("rejects a non-empty Origin header before MCP transport", async () => {
     const { server, transport } = await harness();
-    const response = await server.dispatch({
+    const response = await dispatchMcp(server, {
       host: `127.0.0.1:${port}`,
       origin: "https://evil.com",
-      "mcp-session-id": transport.sessionId,
     });
     expect(response.statusCode).toBe(403);
     expect(transport.handled).toBe(0);
   });
 
   test.each([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`])(
-    "forwards loopback Host %s without Origin to the existing MCP transport",
+    "forwards loopback Host %s without Origin to a per-request MCP transport",
     async (host) => {
       const { server, transport } = await harness();
-      const response = await server.dispatch({ host, "mcp-session-id": transport.sessionId });
+      const response = await dispatchMcp(server, { host });
       expect(response.statusCode).toBe(200);
       expect(transport.handled).toBe(1);
+      // Stateless (#4678): the request's transport closes with its response.
+      for (let turn = 0; turn < 20 && transport.closed === 0; turn++) {
+        await Promise.resolve();
+      }
+      expect(transport.closed).toBe(1);
       expect(response.headers.has("access-control-allow-origin")).toBeFalse();
     },
   );
@@ -216,7 +246,7 @@ describe("Daemon HTTP request admission", () => {
     const { server, transport } = await harness();
     const body = { jsonrpc: "2.0", id: 1, method: "tools/list" };
     const response = await server.dispatch(
-      { host: `127.0.0.1:${port}`, "mcp-session-id": transport.sessionId },
+      { host: `127.0.0.1:${port}` },
       "POST",
       MCP_STREAMABLE_PATH,
       JSON.stringify(body),
@@ -225,6 +255,27 @@ describe("Daemon HTTP request admission", () => {
     expect(transport.handled).toBe(1);
     expect(transport.parsedBodies).toEqual([body]);
   });
+
+  test("an unknown mcp-session-id is not a 404: no session table exists to miss (#4678)", async () => {
+    const { server, transport } = await harness();
+    const response = await dispatchMcp(server, {
+      host: `127.0.0.1:${port}`,
+      "mcp-session-id": "expired-before-a-restart",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(transport.handled).toBe(1);
+  });
+
+  test.each(["GET", "DELETE"])(
+    "%s answers 405: there is no session stream (#4678)",
+    async (method) => {
+      const { server, transport } = await harness();
+      const response = await server.dispatch({ host: `127.0.0.1:${port}` }, method);
+      expect(response.statusCode).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST");
+      expect(transport.handled).toBe(0);
+    },
+  );
 
   test("preflight does not expose wildcard CORS", async () => {
     const { server } = await harness();
@@ -241,14 +292,14 @@ describe("Daemon HTTP request admission", () => {
 });
 
 describe("Daemon HTTP MCP admission during startup (#11156)", () => {
-  const headers = { host: `127.0.0.1:${port}`, "mcp-session-id": "known-session" };
+  const headers = { host: `127.0.0.1:${port}` };
 
   test("holds an MCP request until startup and rehydration complete", async () => {
-    const { server, transport, internals } = await harness(undefined, undefined, {
+    const { server, transport, daemon } = await harness(undefined, undefined, {
       startupComplete: false,
     });
     let answered = false;
-    const response = server.dispatch(headers).then((result) => {
+    const response = dispatchMcp(server, headers).then((result) => {
       answered = true;
       return result;
     });
@@ -256,7 +307,7 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
     expect(answered).toBeFalse();
     expect(transport.handled).toBe(0);
 
-    internals.resolveStartupCompletion();
+    daemon.testHooks.resolveStartupCompletion();
     expect((await response).statusCode).toBe(200);
     expect(transport.handled).toBe(1);
   });
@@ -269,7 +320,7 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
         startupComplete: false,
         timer,
       });
-      const response = server.dispatch(headers);
+      const response = dispatchMcp(server, headers);
       for (let turn = 0; turn < 20 && timer.getPendingTimeoutCount() === 0; turn++) {
         await Promise.resolve();
       }
@@ -288,11 +339,11 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
   test("answers 503 when startup fails", async () => {
     const warnings = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const { server, transport, internals } = await harness(undefined, undefined, {
+      const { server, transport, daemon } = await harness(undefined, undefined, {
         startupComplete: false,
       });
-      const response = server.dispatch(headers);
-      internals.rejectStartupCompletion(new Error("rehydration exploded"));
+      const response = dispatchMcp(server, headers);
+      daemon.testHooks.rejectStartupCompletion(new Error("rehydration exploded"));
       const result = await response;
       expect(result.statusCode).toBe(503);
       expect(JSON.parse(result.body)).toEqual({ error: "Daemon startup failed" });
@@ -304,25 +355,25 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
 });
 
 describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
-  const headers = { host: `127.0.0.1:${port}`, "mcp-session-id": "known-session" };
+  const headers = { host: `127.0.0.1:${port}` };
 
   test("shutdown answers a request held on startup with 503 so the HTTP server can close", async () => {
     const infos = spyOn(logger, "info").mockImplementation(() => {});
     try {
-      const { server, transport, internals } = await harness(undefined, undefined, {
+      const { server, transport, daemon } = await harness(undefined, undefined, {
         startupComplete: false,
       });
       let answered = false;
-      const response = server.dispatch(headers).then((result) => {
+      const response = dispatchMcp(server, headers).then((result) => {
         answered = true;
         return result;
       });
       await Bun.sleep(0);
       expect(answered).toBeFalse();
 
-      await internals.quiesceProvisioningIngress();
+      await daemon.testHooks.quiesceProvisioningIngress();
       let closed = false;
-      void internals.closeHttpListener().then(() => {
+      void daemon.testHooks.httpIngress.closeListener().then(() => {
         closed = true;
       });
       for (let turn = 0; turn < 20 && !closed; turn++) {
@@ -343,24 +394,26 @@ describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
     const warnings = spyOn(logger, "warn").mockImplementation(() => {});
     const errors = spyOn(logger, "error").mockImplementation(() => {});
     try {
-      const { server, transport, internals } = await harness(undefined, undefined, {
+      const { server, transport, daemon } = await harness(undefined, undefined, {
         startupComplete: false,
       });
-      const response = server.dispatch(headers);
+      const response = dispatchMcp(server, headers);
       await Bun.sleep(0);
       const failure = new Error("rehydration exploded");
       let stopEntered = false;
-      internals.startThroughSocketBind = async () => {};
-      internals.startAfterSocketBind = async () => {
-        throw failure;
-      };
       // The real stop awaits the HTTP server close, which waits for the held request.
-      internals.stopAfterFailedStartup = async () => {
-        stopEntered = true;
-        await internals.closeHttpListener();
-      };
+      daemon.testHooks.overrideStartupStages({
+        startThroughSocketBind: async () => {},
+        startAfterSocketBind: async () => {
+          throw failure;
+        },
+        stopAfterFailedStartup: async () => {
+          stopEntered = true;
+          await daemon.testHooks.httpIngress.closeListener();
+        },
+      });
       let startError: unknown;
-      await internals.startUntilReady().catch((error: unknown) => {
+      await daemon.testHooks.startUntilReady().catch((error: unknown) => {
         startError = error;
       });
       expect(stopEntered).toBeTrue();
@@ -544,7 +597,7 @@ describe("HTTP heartbeat on a proxy-owned session", () => {
       expect(response.body).toBe('{"status":"ok"}');
       expect(session.lastHeartbeat).toBe(records ? h.timer.now() : before);
       expect(session.hasReceivedHeartbeat).toBe(records);
-      expect(session.livenessOwnerToken).toBe(owner ?? token);
+      expect(session.livenessOwnerToken).toBe<unknown>(owner ?? token);
       expect(session.livenessOwnershipClaims?.size ?? 0).toBe(0);
     } finally {
       h.dispose();

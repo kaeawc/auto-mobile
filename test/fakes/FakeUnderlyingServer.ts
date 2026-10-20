@@ -1,7 +1,28 @@
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type {
+  HandlerResultTypeMap,
+  RequestTypeMap,
+  Server,
+  ServerNotification,
+  ServerContext,
+} from "@modelcontextprotocol/server";
+import type {
+  RegistryUnderlyingServer,
+  ResourceRegistryRequestMethod,
+} from "../../src/server/registryHost";
+
+/**
+ * Method syntax keeps the parameters bivariant, so each typed registry handler
+ * is accepted here without a cast; tests then call the stored wrapper with
+ * hand-built requests.
+ */
+type LooseHandler = {
+  call(request: unknown, extra?: unknown): unknown;
+}["call"];
 
 /** Request/notification surface used by resource registry tests. */
-export class FakeUnderlyingServer implements Pick<Server, "notification"> {
+export class FakeUnderlyingServer
+  implements Pick<Server, "notification">, RegistryUnderlyingServer
+{
   readonly notifications: Array<{ method: string; params?: unknown }> = [];
   readonly handlersBySchema = new Map<
     unknown,
@@ -12,14 +33,18 @@ export class FakeUnderlyingServer implements Pick<Server, "notification"> {
   notificationGate?: Promise<void>;
   onclose?: () => void;
 
-  setRequestHandler(
-    schema: unknown,
-    handler: (request: unknown, extra?: unknown) => Promise<unknown>,
+  setRequestHandler<M extends ResourceRegistryRequestMethod>(
+    method: M,
+    handler: (
+      request: RequestTypeMap[M],
+      ctx: ServerContext,
+    ) => HandlerResultTypeMap[M] | Promise<HandlerResultTypeMap[M]>,
   ): void {
-    this.handlersBySchema.set(schema, handler);
+    const loose: LooseHandler = handler;
+    this.handlersBySchema.set(method, async (request, extra) => loose(request, extra));
   }
 
-  async notification(payload: Parameters<Server["notification"]>[0]): Promise<void> {
+  async notification(payload: ServerNotification): Promise<void> {
     if (this.shouldThrow) {
       throw new Error("Not connected");
     }

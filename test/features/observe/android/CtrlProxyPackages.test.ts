@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
@@ -9,13 +10,15 @@ import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../fakes/FakeScreenshotBackoffScheduler";
 import {
-  startDeviceDataStreamSocketServer,
+  DeviceDataStreamSocketServer,
+  installDeviceDataStreamSocketServerForTesting,
   stopDeviceDataStreamSocketServer,
 } from "../../../../src/daemon/deviceDataStreamSocketServer";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../../src/daemon/daemonFiles";
 import { testOverrides } from "../../../../src/utils/testOverrides";
 import { statSync } from "node:fs";
 import path from "node:path";
+import { FakeSocket } from "../../../fakes/FakeNetServer";
 
 describe("CtrlProxyPackages (Android)", function () {
   let fakeAdb: FakeAdbExecutor;
@@ -23,8 +26,8 @@ describe("CtrlProxyPackages (Android)", function () {
   let fakeTimer: FakeTimer;
   const serverPort: number = 8765;
   const clients: AndroidCtrlProxyClient[] = [];
-  const createClient: typeof AndroidCtrlProxyClient.createForTesting = (...args) => {
-    const client = AndroidCtrlProxyClient.createForTesting(...args);
+  const createClient: typeof AndroidCtrlProxyClient.createForTesting = (device, adb, deps = {}) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, deps);
     clients.push(client);
     return client;
   };
@@ -34,13 +37,12 @@ describe("CtrlProxyPackages (Android)", function () {
     fakeTimer.enableAutoAdvance();
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
 
     testDevice = {
       deviceId: "test-device-packages",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -172,16 +174,19 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("connection lifecycle", function () {
     test("cancels screenshot backoff when the underlying socket closes", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
       const scheduler = new FakeScreenshotBackoffScheduler();
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+        screenshotBackoffScheduler: scheduler,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        (client as any).screenshotBackoffScheduler = scheduler;
 
         // A genuine WebSocket "close" must run the client's close handler, which cancels pending
-        // screenshot captures. The old test poked (client as any).onConnectionClosed() directly, so
+        // screenshot captures. The old test called onConnectionClosed() directly, so
         // it stayed green even if the ws.on("close") -> onConnectionClosed() wiring was severed.
         socket!.close();
         await waitForCondition(() => scheduler.cancelPendingCapturesCalls >= 1);
@@ -194,10 +199,12 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("refreshes screenshot cadence by rescheduling keepalive", function () {
       const { factory } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
       const scheduler = new FakeScreenshotBackoffScheduler();
-
-      (client as any).screenshotBackoffScheduler = scheduler;
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+        screenshotBackoffScheduler: scheduler,
+      });
       client.refreshObservationStreamScreenshotCadence();
 
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
@@ -205,7 +212,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("refreshes hierarchy cadence by sending interval config", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -221,7 +231,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("skips hierarchy cadence refresh when runner does not advertise support", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -235,27 +248,25 @@ describe("CtrlProxyPackages (Android)", function () {
     });
 
     test("refreshes hierarchy cadence from the stream server when no interval is passed", async function () {
-      const streamServer = await startDeviceDataStreamSocketServer(fakeTimer);
+      const streamServer = new DeviceDataStreamSocketServer(undefined, fakeTimer, {
+        authorize: () => {},
+      });
+      installDeviceDataStreamSocketServerForTesting(streamServer);
+      await streamServer.start();
       const socketPath = DEVICE_DATA_STREAM_SOCKET_CONFIG.defaultPath;
+      if (!testOverrides.auxSocketDir) {
+        throw new Error("Expected auxiliary socket directory");
+      }
       expect(path.dirname(socketPath)).toBe(testOverrides.auxSocketDir);
       // Windows named-pipe sockets do not have a stat-able NTFS socket inode.
       if (process.platform !== "win32") {
         expect(statSync(socketPath).isSocket()).toBe(true);
       }
-      (streamServer as any).subscribers.set("hierarchy-cadence-test", {
-        socket: { destroyed: false },
-        backfilling: false,
-        filter: {
-          deviceId: testDevice.deviceId,
-          // Device-scoped subscriptions created at the socket boundary always
-          // carry an explicit session filter; null is the all-session sentinel.
-          deviceSessionUuid: null,
-          screenshotIntervalMs: null,
-          hierarchyIntervalMs: 500,
-        },
-      });
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -263,6 +274,17 @@ describe("CtrlProxyPackages (Android)", function () {
       expect(connected).toBe(true);
       await emitConnectedFrame(socket!, ["set_hierarchy_interval"]);
 
+      // Subscribe once the fake clock has finished advancing (the keepalive would otherwise reap an
+      // idle subscriber), through the server's own command parser rather than seeded state.
+      const subscriber = new FakeSocket();
+      await streamServer.dispatchLineForTesting(
+        subscriber,
+        JSON.stringify({
+          id: "hierarchy-cadence-test",
+          command: "subscribe",
+          hierarchyIntervalMs: 500,
+        }),
+      );
       client.refreshObservationStreamHierarchyCadence();
 
       const message = findSentMessage(socket!, "set_hierarchy_interval");
@@ -273,7 +295,10 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("requestInstalledPackages", function () {
     test("sends request_installed_packages and resolves on result", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         // Trigger a connection (any method that calls ensureConnected works)
         await client.ensureConnected();
@@ -320,7 +345,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("returns error when WebSocket not connected", async function () {
       const { factory } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         const result = await client.requestInstalledPackages(true);
         expect(result.success).toBe(false);
@@ -334,7 +362,10 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("requestPackageInfo", function () {
     test("sends request_package_info and resolves with package details", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -386,7 +417,10 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("returns error when package not found", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -420,7 +454,10 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("requestLaunchIntent", function () {
     test("sends request_launch_intent and resolves with componentName", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = createClient(testDevice, fakeAdb, factory, fakeTimer);
+      const client = createClient(testDevice, fakeAdb, {
+        webSocketFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);

@@ -1,7 +1,16 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
-import { afterEach, beforeEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  beforeAll,
+  afterAll,
+  spyOn,
+} from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -11,6 +20,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
@@ -40,8 +50,7 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
   let sessionManager: SessionManager;
   let pool: DevicePool;
   let timer: FakeTimer;
-  let origMgr: typeof AndroidCtrlProxyManager.getInstance;
-  let origClient: typeof AndroidCtrlProxyClient.getInstance;
+  let restoreCtrlProxy: () => void;
 
   const devices: BootedDevice[] = [
     { name: "Pixel A", platform: "android", deviceId: "emulator-5554" },
@@ -65,15 +74,29 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
     await pool.initializeWithDevices(devices);
     DaemonState.getInstance().initialize(sessionManager, pool);
 
-    origMgr = AndroidCtrlProxyManager.getInstance;
-    origClient = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({ resetSetupState: () => {}, setup: async () => ({ success: true, message: "ok" }) }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      close: async () => {},
-    })) as any;
     AndroidCtrlProxyClient.resetInstances();
+    AndroidCtrlProxyManager.resetInstances();
+    // Real per-device manager/client instances (fake adb) registered where getInstance
+    // looks them up; only the setup/connect work that would touch a device is stubbed.
+    for (const device of devices) {
+      AndroidCtrlProxyManager.registry.get(device.deviceId, () =>
+        AndroidCtrlProxyManager.createForTestingWithDeps(device, new FakeAdbExecutor(), timer),
+      );
+      AndroidCtrlProxyClient.registerForTesting(
+        AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), { timer }),
+        device.deviceId,
+      );
+    }
+    const spies = [
+      spyOn(AndroidCtrlProxyManager.prototype, "setup").mockResolvedValue({
+        success: true,
+        message: "ok",
+      }),
+      spyOn(AndroidCtrlProxyManager.prototype, "resetSetupState").mockImplementation(() => {}),
+      spyOn(AndroidCtrlProxyClient.prototype, "waitForConnection").mockResolvedValue(true),
+      spyOn(AndroidCtrlProxyClient.prototype, "close").mockResolvedValue(undefined),
+    ];
+    restoreCtrlProxy = () => spies.forEach((spy) => spy.mockRestore());
 
     handlerDevices = [];
     ToolRegistry.clearTools();
@@ -112,8 +135,8 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
     restoreDisplayInventory();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
-    AndroidCtrlProxyManager.getInstance = origMgr;
-    AndroidCtrlProxyClient.getInstance = origClient;
+    restoreCtrlProxy();
+    AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
   });
 
@@ -211,7 +234,7 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
 
       // An autolock session is the connection's active session (implicit binding
       // via the mcp session id), not an explicit SessionToolBinding.
-      const autolockSessionId = await pool.autolockDevice("emulator-5554", "android", "conn-1");
+      const autolockSessionId = (await pool.autolockDevice("emulator-5554", "android", "conn-1"))!;
       expect(sessionManager.getSession(autolockSessionId)?.assignedDevice).toBe("emulator-5554");
 
       let rejected = false;
@@ -258,11 +281,11 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
 
         // An autolock session is the connection's active session (implicit binding
         // via the mcp session id), not an explicit SessionToolBinding.
-        const autolockSessionId = await pool.autolockDevice(
+        const autolockSessionId = (await pool.autolockDevice(
           "emulator-5554",
           "android",
           connectionId,
-        );
+        ))!;
         expect(sessionManager.getSession(autolockSessionId)?.assignedDevice).toBe("emulator-5554");
 
         await sessionManager.createSession("F1", "emulator-5556", "android");

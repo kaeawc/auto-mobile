@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -57,7 +57,7 @@ describe("PlanExecutor saved internal step params", () => {
         __foo: "reserved",
       };
       const plan: Plan = { name: "old-export", steps: [{ tool: toolName, params }] };
-      const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+      const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
         plan,
         0,
         "android",

@@ -208,9 +208,12 @@ describe("NavigationScreenshotManager", () => {
   });
 
   test("background LRU rejection preserves the stored image and warns", async () => {
-    const image = spyOn(Image, "fromBuffer").mockImplementation(
-      (buffer) => new Image(buffer, fakeTimer, new FakeImageBackend()),
-    );
+    const image = spyOn(Image, "fromBuffer").mockImplementation((buffer) => {
+      if (!Buffer.isBuffer(buffer)) {
+        throw new Error("Expected screenshot bytes");
+      }
+      return new Image(buffer, fakeTimer, new FakeImageBackend());
+    });
     const cleanup = spyOn(manager, "cleanupLRU").mockRejectedValue(new Error("cleanup denied"));
     try {
       const stored = await manager.storeScreenshot(
@@ -234,9 +237,12 @@ describe("NavigationScreenshotManager", () => {
 
   test("temporary capture deletion failure preserves the stored image and emits debug", async () => {
     fakeFs.setFile("/capture.png", Buffer.from("temporary capture image"));
-    const image = spyOn(Image, "fromBuffer").mockImplementation(
-      (buffer) => new Image(buffer, fakeTimer, new FakeImageBackend()),
-    );
+    const image = spyOn(Image, "fromBuffer").mockImplementation((buffer) => {
+      if (!Buffer.isBuffer(buffer)) {
+        throw new Error("Expected screenshot bytes");
+      }
+      return new Image(buffer, fakeTimer, new FakeImageBackend());
+    });
     const remove = spyOn(fakeFs, "remove").mockRejectedValue(new Error("already removed"));
     try {
       const stored = await manager.captureAndStore(

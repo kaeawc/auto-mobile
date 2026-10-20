@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, spyOn } from "bun:test";
 import {
   DualTrackRecorder,
   MERGE_WINDOW_MS,
+  withTimelineGeometry,
   resolveSwipeDirection,
 } from "../../../../src/features/record/android/DualTrackRecorder";
 import type {
@@ -15,6 +16,7 @@ import { swipeAtSchema } from "../../../../src/server/swipeAtTools";
 import { createSwipeAt } from "../../../helpers/swipeAtCoordinate";
 import { logger } from "../../../../src/utils/logger";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { ScreenGeometryTimeline } from "../../../../src/features/record/android/ScreenGeometryTimeline";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
 import type { RawTouchFrame } from "../../../../src/features/record/android/types";
@@ -23,7 +25,7 @@ import type { RawTouchFrame } from "../../../../src/features/record/android/type
 // Fakes
 // ---------------------------------------------------------------------------
 
-type InteractionListener = (event: { type: string; [key: string]: unknown }) => void;
+type InteractionListener = Parameters<A11ySource["onInteraction"]>[0];
 
 class FakeGestureEmitter implements GestureEmitter {
   startCount = 0;
@@ -74,7 +76,7 @@ class FakeA11ySource implements A11ySource {
     };
   }
 
-  emit(event: { type: string; [key: string]: unknown }): void {
+  emit(event: Parameters<InteractionListener>[0]): void {
     this.listener?.(event);
   }
 }
@@ -1217,7 +1219,6 @@ describe("DualTrackRecorder", () => {
       const steps = await recordedSwipe({
         startX: 500,
         startY: 1200,
-        endX: 500,
         endY: 600,
         ...overrides,
       });
@@ -1933,7 +1934,7 @@ describe("resolveSwipeDirection (scroll-delta axis mapping)", () => {
     [10, 10, "left", "an axis tie resolves on the X branch"],
     [undefined, undefined, null, "absent deltas mean no direction"],
   ])("resolveSwipeDirection(%p, %p) → %p (%s)", (dx, dy, expected, _why) => {
-    expect(resolveSwipeDirection(dx, dy)).toBe(expected);
+    expect<unknown>(resolveSwipeDirection(dx, dy)).toBe(expected);
   });
 });
 
@@ -1985,4 +1986,69 @@ test("coordinate fallback carries the same native provenance as tool call record
       },
     },
   ]);
+});
+
+describe("exported steps after a mid-recording rotation (#12880)", () => {
+  async function rotatedRecording() {
+    const timer = new FakeTimer();
+    timer.advanceTime(1000);
+    const timeline = new ScreenGeometryTimeline(
+      { xMin: 0, xMax: 32767, yMin: 0, yMax: 32767 },
+      { rotation: 0, display: { width: 1080, height: 2400 } },
+      timer.now(),
+    );
+    const emitter = new FakeGestureEmitter();
+    const recorder = new DualTrackRecorder(
+      fakeDevice,
+      withTimelineGeometry(emitter, timeline, timer),
+      new FakeA11ySource(),
+      timer,
+    );
+    await recorder.start();
+    timer.advanceTime(1000);
+    timeline.apply({ rotation: 1 }, timer.now());
+    timer.advanceTime(1000);
+    return { timer, emitter, recorder };
+  }
+
+  test("a diagonal swipe after rotation is normalized against the landscape display", async () => {
+    const { timer, emitter, recorder } = await rotatedRecording();
+    emitter.emit({
+      type: "swipe",
+      direction: "right",
+      downAt: timer.now(),
+      arrivedAt: timer.now() + 100,
+      startX: 300,
+      startY: 270,
+      endX: 1200,
+      endY: 810,
+    });
+    timer.advanceTime(MERGE_WINDOW_MS);
+
+    expect((await recorder.stop()).steps).toEqual([
+      {
+        tool: "swipeAt",
+        params: {
+          from: { x: 0.125, y: 0.25 },
+          to: { x: 0.5, y: 0.75 },
+          coordinateSpace: "normalized",
+        },
+      },
+    ]);
+  });
+
+  test("a tapAt after rotation records the landscape geometry", async () => {
+    const { timer, emitter, recorder } = await rotatedRecording();
+    emitter.emit({
+      type: "tap",
+      downAt: timer.now(),
+      arrivedAt: timer.now() + 50,
+      screenX: 1200,
+      screenY: 540,
+    });
+    timer.advanceTime(MERGE_WINDOW_MS);
+
+    const [step] = (await recorder.stop()).steps;
+    expect(step.geometry).toMatchObject({ deviceWidth: 2400, deviceHeight: 1080, orientation: 1 });
+  });
 });

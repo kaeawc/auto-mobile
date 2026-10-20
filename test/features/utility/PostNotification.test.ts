@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
@@ -30,12 +31,12 @@ describe("PostNotification", () => {
       appId: "com.example.app",
       activityName: "MainActivity",
       layoutSeqSum: 1,
-    } as any);
+    });
     fakeWindow.configureActiveWindow({
       appId: "com.example.app",
       activityName: "MainActivity",
       layoutSeqSum: 1,
-    } as any);
+    });
   });
 
   afterEach(() => {
@@ -54,17 +55,20 @@ describe("PostNotification", () => {
     new PostNotification(device, fakeAdb, fakeWindow, null, fileSystem);
   const configureBroadcastResult = (code: number) => {
     configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: `Broadcast completed: result=${code}`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult(`Broadcast completed: result=${code}`, ""),
+    );
   };
 
   const configureReceiverProbe = (appId: string = "com.example.app") => {
-    fakeAdb.setCommandResponse("cmd package query-receivers", {
-      stdout: `1 receivers found:\n    ${appId}/dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "cmd package query-receivers",
+      createExecResult(
+        `1 receivers found:\n    ${appId}/dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver`,
+        "",
+      ),
+    );
   };
 
   test("logs failures preparing SDK extras and preserves the Android failure", async () => {
@@ -159,12 +163,12 @@ describe("PostNotification", () => {
 
   test("posts via SDK receiver when available", async () => {
     configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=1", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "Hello",
       body: "World",
@@ -183,14 +187,14 @@ describe("PostNotification", () => {
       appId: "com.google.android.apps.nexuslauncher",
       activityName: "NexusLauncherActivity",
       layoutSeqSum: 1,
-    } as any);
-    configureReceiverProbe("dev.jasonpearson.automobile.playground");
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
     });
+    configureReceiverProbe("dev.jasonpearson.automobile.playground");
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=1", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -210,7 +214,7 @@ describe("PostNotification", () => {
   });
 
   test("rejects invalid explicit Android appId before SDK broadcast", async () => {
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -228,19 +232,19 @@ describe("PostNotification", () => {
       appId: "com.google.android.apps.nexuslauncher",
       activityName: "NexusLauncherActivity",
       layoutSeqSum: 1,
-    } as any);
+    });
     fakeWindow.configureActiveWindow({
       appId: "dev.jasonpearson.automobile.playground",
       activityName: "MainActivity",
       layoutSeqSum: 2,
-    } as any);
-    configureReceiverProbe("dev.jasonpearson.automobile.playground");
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
     });
+    configureReceiverProbe("dev.jasonpearson.automobile.playground");
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=1", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -259,12 +263,9 @@ describe("PostNotification", () => {
 
   test("fails when SDK receiver is missing", async () => {
     configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Error: No receiver found",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("am broadcast", createExecResult("Error: No receiver found", ""));
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "Fallback",
       body: "Body",
@@ -276,7 +277,7 @@ describe("PostNotification", () => {
   });
 
   test("requires imagePath for bigPicture imageType", async () => {
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "Big",
       body: "Picture",
@@ -290,12 +291,12 @@ describe("PostNotification", () => {
 
   test("does not retry when SDK receiver reports failure", async () => {
     configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=0",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=0", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "Fail",
       body: "Body",
@@ -616,12 +617,12 @@ describe("PostNotification", () => {
   });
 
   test("reports an absent receiver without broadcasting", async () => {
-    fakeAdb.setCommandResponse("cmd package query-receivers", {
-      stdout: "No receivers found",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "cmd package query-receivers",
+      createExecResult("No receivers found", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({ title: "Missing", body: "Receiver" });
 
     expect(result.success).toBe(false);
@@ -633,16 +634,16 @@ describe("PostNotification", () => {
 
   test("accepts the receiver's short-form component name", async () => {
     const appId = "dev.jasonpearson.automobile.sdk.notifications";
-    fakeAdb.setCommandResponse("cmd package query-receivers", {
-      stdout: `1 receivers found:\n    ${appId}/.AutoMobileNotificationReceiver`,
-      stderr: "",
-    });
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "cmd package query-receivers",
+      createExecResult(`1 receivers found:\n    ${appId}/.AutoMobileNotificationReceiver`, ""),
+    );
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=1", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({
       title: "Short form",
       body: "Receiver",
@@ -655,12 +656,12 @@ describe("PostNotification", () => {
   });
 
   test("does not accept another receiver from the target package", async () => {
-    fakeAdb.setCommandResponse("cmd package query-receivers", {
-      stdout: "1 receivers found:\n    com.example.app/.SomeOtherReceiver",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "cmd package query-receivers",
+      createExecResult("1 receivers found:\n    com.example.app/.SomeOtherReceiver", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({ title: "Other", body: "Receiver" });
 
     expect(result).toEqual({
@@ -675,12 +676,12 @@ describe("PostNotification", () => {
 
   test("broadcast failure is reported after the probe confirms the receiver", async () => {
     configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=0",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=0", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({ title: "Fail", body: "Broadcast" });
 
     expect(result).toEqual({
@@ -695,12 +696,12 @@ describe("PostNotification", () => {
 
   test("broadcast success is returned after the probe confirms the receiver", async () => {
     configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=1", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({ title: "Success", body: "Broadcast" });
 
     expect(result.success).toBe(true);
@@ -710,12 +711,12 @@ describe("PostNotification", () => {
 
   test("falls back to broadcast when the receiver probe fails", async () => {
     fakeAdb.setCommandError("cmd package query-receivers", new Error("unsupported command"));
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=1", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({ title: "Fallback", body: "Broadcast" });
 
     expect(result.success).toBe(true);
@@ -725,16 +726,16 @@ describe("PostNotification", () => {
   });
 
   test("falls back to broadcast when the receiver probe output is unknown", async () => {
-    fakeAdb.setCommandResponse("cmd package query-receivers", {
-      stdout: "Unknown command: query-receivers",
-      stderr: "",
-    });
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "cmd package query-receivers",
+      createExecResult("Unknown command: query-receivers", ""),
+    );
+    fakeAdb.setCommandResponse(
+      "am broadcast",
+      createExecResult("Broadcast completed: result=1", ""),
+    );
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
     const result = await postNotification.execute({ title: "Fallback", body: "Broadcast" });
 
     expect(result.success).toBe(true);

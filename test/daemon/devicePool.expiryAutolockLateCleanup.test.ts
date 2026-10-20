@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 /**
  * H13 reproduction: an EXPIRY-origin release whose device quarantine is extended
  * after the pool's release listener ran returns the device to idle, but leaves
@@ -24,7 +25,7 @@
  * `runSessionRotationMutation`.
  *
  * Faked: FakeTimer, FakeDeviceSessionPersistence, FakeDbWriteBarrier, FakeDeviceUtils
- * (discovery), the Rotate adb work (injected with `setRotateFactory`; the fake
+ * (discovery), the Rotate adb work (injected with `(f: never) => { interactionDeps.rotateFactory = f; }`; the fake
  * calls the real `options.sessionRotation`), and the rotation restorer (SessionManager's
  * restorer-factory seam). The SessionManager's active-execution checker is left at
  * its constructor default (`() => false`) in tests 1 and 2. The daemon installs the
@@ -33,7 +34,6 @@
  */
 import { afterEach, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type {
   RotateOptions,
@@ -41,20 +41,16 @@ import type {
   RotationRestoreState,
 } from "../../src/features/action/Rotate";
 import type { RotateResult } from "../../src/models/RotateResult";
-import { ExecutionTracker } from "../../src/server/executionTracker";
-import {
-  resetRotateFactory,
-  rotateHandler,
-  setRotateFactory,
-} from "../../src/server/interactionTools";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
+import { type InteractionToolDependencies, rotateHandler } from "../../src/server/interactionTools";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
+const interactionDeps: InteractionToolDependencies = {};
 // SessionManager.CLEANUP_INTERVAL_MS (sessionManager.ts:1150): the real sweep timer fires the expiry.
 const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 // SESSION_SETUP_DRAIN_TIMEOUT_MS (sessionManager.ts:752): release stops waiting for setup after this.
@@ -66,7 +62,7 @@ const AUTOLOCK_ENV = "AUTOMOBILE_DEVICE_POOL_AUTOLOCK";
 const previousAutolockEnv = process.env[AUTOLOCK_ENV];
 
 afterEach(() => {
-  resetRotateFactory();
+  delete interactionDeps.rotateFactory;
   DaemonState.getInstance().reset();
   if (previousAutolockEnv === undefined) {
     delete process.env[AUTOLOCK_ENV];
@@ -101,13 +97,11 @@ async function setupDaemonPool() {
   });
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [DEVICE]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "daemon-h13", {
-      timer,
-      deviceManager: utils,
-      idGenerator: new CountingIdGenerator("autolock"),
-    }),
-  );
+  const pool = makePool(manager, "daemon-h13", {
+    timer,
+    deviceManager: utils,
+    idGenerator: new CountingIdGenerator("autolock"),
+  });
   await pool.initializeWithDevices([DEVICE]);
   // rotateHandler resolves the SessionManager through DaemonState, as in the daemon.
   DaemonState.getInstance().initialize(manager, pool);
@@ -122,7 +116,7 @@ async function setupDaemonPool() {
 function installSlowRotate(recordRotationSlot: boolean) {
   const adbWrite = Promise.withResolvers<void>();
   let started = false;
-  setRotateFactory((_device, options?: RotateOptions) => ({
+  interactionDeps.rotateFactory = (_device, options?: RotateOptions) => ({
     execute: async (orientation) => {
       const mutation = async (slot?: RotationRestoreSlot): Promise<RotateResult> => {
         if (recordRotationSlot) {
@@ -134,7 +128,7 @@ function installSlowRotate(recordRotationSlot: boolean) {
       };
       return options?.sessionRotation ? options.sessionRotation(mutation) : mutation();
     },
-  }));
+  });
   return { adbWrite, hasStarted: () => started };
 }
 
@@ -165,7 +159,13 @@ test("#10665: expiry release whose quarantine is chained after notify clears the
   });
 
   // The rotate tool call records the session's prior rotation, then waits on a slow adb write.
-  const rotateCall = rotateHandler(DEVICE, { orientation: "landscape", sessionUuid: sessionId });
+  const rotateCall = rotateHandler(
+    DEVICE,
+    { orientation: "landscape", sessionUuid: sessionId },
+    undefined,
+    undefined,
+    interactionDeps,
+  );
   await drainUntil(rotate.hasStarted, { description: "rotation mutation started" });
 
   // No heartbeat or tool activity: the 60 s autolock window lapses, and the sweep
@@ -205,7 +205,11 @@ test("#10665: expiry release whose quarantine is chained after notify clears the
   expect(() => pool.assertAutolockAccess(DEVICE.deviceId, undefined)).not.toThrow();
 
   // A non-autolock bind takes the idle device and its tool calls are not refused.
-  await pool.bindOrReuseDeviceSession("studio-session", DEVICE.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "studio-session",
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+  });
   expect(() => pool.assertAutolockAccess(DEVICE.deviceId, "studio-session")).not.toThrow();
   manager.stopCleanupTimer();
 });
@@ -216,7 +220,13 @@ test("H13 control: the same expiry release with NO chained cleanup clears the au
   const rotate = installSlowRotate(false);
 
   const sessionId = (await pool.autolockDevice(DEVICE.deviceId, "android", "mcp-client-1"))!;
-  const rotateCall = rotateHandler(DEVICE, { orientation: "landscape", sessionUuid: sessionId });
+  const rotateCall = rotateHandler(
+    DEVICE,
+    { orientation: "landscape", sessionUuid: sessionId },
+    undefined,
+    undefined,
+    interactionDeps,
+  );
   await drainUntil(rotate.hasStarted, { description: "rotation mutation started" });
 
   await expireThroughCleanupSweep(timer, manager, sessionId);
@@ -250,7 +260,13 @@ test("H13 reachability control: with the daemon's execution gate, the in-flight 
 
   const sessionId = (await pool.autolockDevice(DEVICE.deviceId, "android", "mcp-client-1"))!;
   const execution = executions.startExecution("rotate", "mcp-client-1", sessionId);
-  const rotateCall = rotateHandler(DEVICE, { orientation: "landscape", sessionUuid: sessionId });
+  const rotateCall = rotateHandler(
+    DEVICE,
+    { orientation: "landscape", sessionUuid: sessionId },
+    undefined,
+    undefined,
+    interactionDeps,
+  );
   await drainUntil(rotate.hasStarted, { description: "rotation mutation started" });
 
   // Five minutes pass while the call is in flight: the sweep skips the session.

@@ -17,9 +17,9 @@ export async function getVisionEnrichedError(
   searchCriteria: ElementSearchCriteria,
   visionConfig: VisionFallbackConfig,
   baseError: string,
-  signal?: AbortSignal,
-  visionAnalyzer?: VisionAnalyzer,
+  options: { signal?: AbortSignal; visionAnalyzer?: VisionAnalyzer } = {},
 ): Promise<string> {
+  const { signal, visionAnalyzer } = options;
   if (!visionConfig.enabled) {
     return baseError;
   }

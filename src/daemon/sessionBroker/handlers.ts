@@ -1,13 +1,35 @@
+import {
+  SessionRequestOwnerMismatchError,
+  SESSION_BROKER_RETRY_AFTER_MS,
+} from "./SessionRequestOwnerMismatchError";
 import { z } from "zod";
+import { SessionExportIdentityMismatchError } from "./store";
 import { parseSessionConfig } from "../../devices/sessionConfig";
 import { SESSION_OWNER_EXITED_CODE } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { DaemonRequest } from "../types";
-import type { DaemonMethodResult, DaemonStateAccess } from "../daemonRequestHandlers";
+import type {
+  DaemonMethodResult,
+  DaemonStateAccess,
+  InitializedDaemonMethodHandler,
+} from "../daemonRequestHandlers";
 
 const ownerToken = z.string().min(1);
-const prepareParams = z.object({ config: z.unknown(), livenessOwnerToken: ownerToken }).strict();
+const exportIdentity = z
+  .object({
+    prepareId: z.string().min(1).max(256),
+    requestDigest: z.string().min(1).max(256),
+  })
+  .strict();
+const exportParams = exportIdentity.extend({ livenessOwnerToken: ownerToken }).strict();
+const prepareParams = z
+  .object({
+    config: z.unknown(),
+    livenessOwnerToken: ownerToken,
+    export: exportIdentity.optional(),
+  })
+  .strict();
 const statusParams = z
   .object({ requestId: z.string().min(1), livenessOwnerToken: ownerToken })
   .strict();
@@ -29,7 +51,7 @@ export async function handlePrepareBrokerSession(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   // Fail closed before validation/acquisition: this connection is never a generic allocator.
   bind(state, socketSessionId, service.scopeKey, []);
@@ -48,7 +70,17 @@ export async function handlePrepareBrokerSession(
     logger.warn(`Session broker rejected invalid configuration: ${errorMessage(error)}`);
     return { success: false, code: "session_config_invalid", error: errorMessage(error) };
   }
-  const result = await service.broker.prepare(config, parsed.data.livenessOwnerToken, signal);
+  let result;
+  try {
+    result = await service.broker.prepare(
+      config,
+      parsed.data.livenessOwnerToken,
+      signal,
+      parsed.data.export,
+    );
+  } catch (error) {
+    return brokerRejection(error);
+  }
   if (!signal?.aborted) {
     bind(
       state,
@@ -60,6 +92,74 @@ export async function handlePrepareBrokerSession(
   return { success: true, result: { ...result } };
 }
 
+export async function handleGetSessionExport(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  return handleSessionExport(request, state, false);
+}
+
+export async function handleAcknowledgeSessionExport(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  return handleSessionExport(request, state, true);
+}
+
+async function handleSessionExport(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  acknowledge: boolean,
+): Promise<DaemonMethodResult> {
+  const service = state.getSessionBrokerService?.();
+  if (!service) {
+    return unavailable(state);
+  }
+  // Reading proof or releasing its pin neither grants nor revokes this connection's device
+  // control, so the existing binding is deliberately left untouched.
+  const parsed = exportParams.safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      code: "session_config_invalid",
+      error: "prepareId, requestDigest and livenessOwnerToken are required",
+    };
+  }
+  const { prepareId, requestDigest, livenessOwnerToken } = parsed.data;
+  try {
+    const result = acknowledge
+      ? await service.broker.acknowledgeExport(prepareId, requestDigest, livenessOwnerToken)
+      : await service.broker.getExport(prepareId, requestDigest, livenessOwnerToken);
+    return result
+      ? { success: true, result: { ...result } }
+      : {
+          success: false,
+          code: "session_export_not_found",
+          error: "No session export has that prepare identity",
+        };
+  } catch (error) {
+    return brokerRejection(error);
+  }
+}
+
+function brokerRejection(error: unknown): DaemonMethodResult {
+  if (error instanceof SessionRequestOwnerMismatchError) {
+    logger.warn(`Session broker rejected request ownership: ${errorMessage(error)}`);
+    return {
+      success: false,
+      code: error.code,
+      error: errorMessage(error),
+      retryable: error.retryable,
+      ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+    };
+  }
+  if (!(error instanceof SessionExportIdentityMismatchError)) {
+    throw error;
+  }
+  logger.warn(`Session broker rejected export identity: ${errorMessage(error)}`);
+  return { success: false, code: error.code, error: errorMessage(error) };
+}
+
 export async function handleBrokerSessionStatus(
   request: DaemonRequest,
   state: DaemonStateAccess,
@@ -67,7 +167,7 @@ export async function handleBrokerSessionStatus(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   // A malformed or unauthorized recovery request must not retain an earlier grant.
   bind(state, socketSessionId, service.scopeKey, []);
@@ -100,17 +200,21 @@ export async function handleAbandonBrokerSessionRequest(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   const parsed = abandonParams.safeParse(request.params);
   if (!parsed.success) {
     return { success: false, error: "requestId and livenessOwnerToken are required" };
   }
-  const result = await service.broker.abandon(
-    parsed.data.requestId,
-    parsed.data.livenessOwnerToken,
-  );
-  return { success: true, result: { ...result } };
+  try {
+    const result = await service.broker.abandon(
+      parsed.data.requestId,
+      parsed.data.livenessOwnerToken,
+    );
+    return { success: true, result: { ...result } };
+  } catch (error) {
+    return brokerRejection(error);
+  }
 }
 
 export async function handleReleaseBrokerSession(
@@ -119,26 +223,30 @@ export async function handleReleaseBrokerSession(
 ): Promise<DaemonMethodResult> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   const parsed = releaseParams.safeParse(request.params);
   if (!parsed.success) {
     return { success: false, error: "sessionId and livenessOwnerToken are required" };
   }
-  const receipt = await service.broker.ownedSessionRequest(
-    parsed.data.sessionId,
-    parsed.data.livenessOwnerToken,
-  );
-  if (!receipt) {
+  try {
+    const receipt = await service.broker.ownedSessionRequest(
+      parsed.data.sessionId,
+      parsed.data.livenessOwnerToken,
+    );
+    if (!receipt) {
+      return {
+        success: true,
+        result: { sessionUuid: parsed.data.sessionId, outcome: "unknown_session" },
+      };
+    }
     return {
       success: true,
-      result: { sessionUuid: parsed.data.sessionId, outcome: "unknown_session" },
+      result: { ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason)) },
     };
+  } catch (error) {
+    return brokerRejection(error);
   }
-  return {
-    success: true,
-    result: { ...(await service.broker.release(parsed.data.sessionId, parsed.data.reason)) },
-  };
 }
 
 /** Reconnect proves request ownership and derives private binding from the receipt. */
@@ -150,7 +258,7 @@ export async function bindBrokerRegistration(
 ): Promise<DaemonMethodResult | undefined> {
   const service = state.getSessionBrokerService?.();
   if (!service) {
-    return unavailable();
+    return unavailable(state);
   }
   bind(state, socketSessionId, service.scopeKey, []);
   const result = await service.broker.ownedStatus(
@@ -189,10 +297,38 @@ function bind(
   }
 }
 
-function unavailable(): DaemonMethodResult {
+function unavailable(state: DaemonStateAccess): DaemonMethodResult {
+  // Broker mode is set from the configured host path before installation and survives close.
+  const retryable = state.isSessionBrokerMode?.() === true;
   return {
     success: false,
     code: "session_broker_unavailable",
     error: "Session-broker mode is not available in this provider",
+    retryable,
+    ...(retryable ? { retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS } : {}),
   };
 }
+
+/** Session-broker socket dispatch shares the initialized daemon context. */
+export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMethodHandler]> = [
+  [
+    "daemon/prepareSession",
+    (request, state, _executions, signal, context) =>
+      handlePrepareBrokerSession(request, state, signal, context.socketSessionId),
+  ],
+  ["daemon/getSessionExport", (request, state) => handleGetSessionExport(request, state)],
+  [
+    "daemon/acknowledgeSessionExport",
+    (request, state) => handleAcknowledgeSessionExport(request, state),
+  ],
+  [
+    "daemon/sessionRequestStatus",
+    (request, state, _executions, _signal, context) =>
+      handleBrokerSessionStatus(request, state, context.socketSessionId),
+  ],
+  [
+    "daemon/abandonSessionRequest",
+    (request, state) => handleAbandonBrokerSessionRequest(request, state),
+  ],
+  ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
+];

@@ -1,0 +1,29 @@
+{# GitHub Pages serves this file for every path under the site that does not exist. Send the visitor
+back to the site root (site_url) instead of leaving them on a dead end. The redirect is skipped when
+the visitor is already at the root, so a broken home page cannot reload itself forever. Checked in a
+browser by scripts/docs/check-site-in-browser.ts. #} {% extends "main.html" %} {% set home_url =
+config.site_url | default(base_url, true) %} {% if not home_url.endswith("/") %}{% set home_url =
+home_url ~ "/" %}{% endif %} {% block extrahead %} {{ super() }}
+<meta name="robots" content="noindex" />
+<noscript>
+  <meta http-equiv="refresh" content="0; url={{ home_url }}" />
+</noscript>
+{% endblock %} {% block content %}
+<h1>Page not found</h1>
+<p>
+  That page does not exist. Taking you back to the
+  <a id="home-link" href="{{ home_url }}">AutoMobile home page</a>&hellip;
+</p>
+<script>
+  (function () {
+    // Keep the visitor on the origin serving this page (previews, mirrors):
+    // only the configured site_url path matters.
+    var home = new URL(new URL({{ home_url | tojson }}).pathname, location.origin);
+    document.getElementById("home-link").href = home.href;
+    if (location.pathname === home.pathname) {
+      return;
+    }
+    location.replace(home.href);
+  })();
+</script>
+{% endblock %}

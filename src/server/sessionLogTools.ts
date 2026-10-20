@@ -1,7 +1,9 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { ToolRegistry } from "./toolRegistry";
 import { resetAppLogsSchema, type ResetAppLogsArgs } from "./sessionLogContract";
 import { getSessionLogService, type SessionLogService } from "./sessionLogService";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { resetAppLogsResultSchema } from "./sessionLogToolOutputSchemas";
 import type { BootedDevice } from "../models";
 
 export function registerSessionLogTools(
@@ -20,8 +22,8 @@ export function registerSessionLogTools(
         paths: args.paths,
         signal,
       });
-      return createJSONToolResponse(result);
+      return createStructuredToolResponse(result);
     },
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: resetAppLogsResultSchema },
   );
 }

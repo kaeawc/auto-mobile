@@ -192,11 +192,23 @@ get_available_ios_versions() {
 }
 
 # Check if a version meets the minimum requirement
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
 version_gte() {
     local version=$1
     local min=$2
     [ "$(printf '%s\n' "$min" "$version" | sort -V | head -1)" = "$min" ]
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then version_gte "$@"; fi
 
 # Find the best available iOS runtime (highest version >= minimum, <= max SDK)
 find_best_ios_runtime() {
@@ -205,9 +217,11 @@ find_best_ios_runtime() {
     local best_version=""
 
     while IFS= read -r version; do
-        if [ -n "$version" ] && version_gte "$version" "$min_version"; then
+        run_capture_status version_gte "$version" "$min_version"
+        if [ -n "$version" ] && [ "$RUN_STATUS" -eq 0 ]; then
             # Skip runtimes newer than what this Xcode supports
-            if ! version_gte "$max_version" "$version"; then
+            run_capture_status version_gte "$max_version" "$version"
+            if [ "$RUN_STATUS" -ne 0 ]; then
                 log_debug "Skipping iOS ${version} (exceeds SDK ${max_version})"
                 continue
             fi

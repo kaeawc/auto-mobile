@@ -5,6 +5,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
 import { ActionableError } from "../../../src/models";
 import { DeviceAlreadyRunningError } from "../../../src/models/DeviceAlreadyRunningError";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
@@ -14,21 +15,12 @@ const UDID = "11111111-2222-3333-4444-555555555555";
 const OTHER_UDID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 
 function resetSimctlState(): void {
-  const simctlClass = SimCtlClient as unknown as {
-    simulatorBoots: Map<string, unknown>;
-    bootPresentationGenerations: Map<string, string>;
-    simulatorAppPresentations: Map<string, unknown>;
-    inFlightDeviceList: Promise<unknown[]> | null;
-  };
-  simctlClass.simulatorBoots.clear();
-  simctlClass.bootPresentationGenerations.clear();
-  simctlClass.simulatorAppPresentations.clear();
+  resetSimCtlSharedStateForTesting();
   // Drop any still-pending shared listing a previous test left behind (e.g. one
   // whose mock only settles on an abort that never fired within that test's own
   // FakeTimer). Without this a later test's caller-independent coalesced read
   // (see SimCtlClient.listSimulatorImages, issue #6576) would silently join that
   // orphaned promise and hang forever awaiting a timer no one is driving.
-  simctlClass.inFlightDeviceList = null;
   SimCtlClient.invalidateDeviceListCache();
 }
 
@@ -133,15 +125,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     return createExecResult("", "");
   };
 
-  const simctl = new SimCtlClient(
-    null,
-    execAsync,
-    timer,
-    "darwin",
-    undefined,
-    undefined,
-    bootOptions,
-  );
+  const simctl = new SimCtlClient(null, execAsync, { timer, platform: "darwin", bootOptions });
 
   return {
     simctl,
@@ -321,9 +305,13 @@ function createConcurrentStartHarness(
     timer,
     lifecycleCalls,
     createClient: () =>
-      new SimCtlClient(null, execAsync, timer, "darwin", undefined, undefined, {
-        maxAttempts: 1,
-        retryBackoffMs: 0,
+      new SimCtlClient(null, execAsync, {
+        timer,
+        platform: "darwin",
+        bootOptions: {
+          maxAttempts: 1,
+          retryBackoffMs: 0,
+        },
       }),
     bootstatusInvocations: () => bootstatusCount,
     shutdownInvocations: () => shutdownCount,
@@ -370,8 +358,7 @@ describe("SimCtlClient boot self-verification", () => {
         }
         return createExecResult("", "");
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
     const controller = new AbortController();
     const start = runWithAbortSignal(controller.signal, () => simctl.startSimulator(UDID, 5_000));
@@ -418,8 +405,7 @@ describe("SimCtlClient boot self-verification", () => {
         }
         return createExecResult("", "");
       },
-      timer,
-      "darwin",
+      { timer, platform: "darwin" },
     );
     const start = runWithAbortSignal(requestController.signal, () =>
       simctl.startSimulator(UDID, 1_234),
@@ -434,6 +420,9 @@ describe("SimCtlClient boot self-verification", () => {
       `Command timed out after 1234ms: xcrun simctl bootstatus ${UDID} -b`,
     );
     expect(requestController.signal.aborted).toBe(false);
+    if (!bootstatusSignal) {
+      throw new Error("bootstatus did not capture its signal");
+    }
     expect(bootstatusSignal.aborted).toBe(true);
     expect(shutdownCalls(calls)).toEqual([`xcrun simctl shutdown ${UDID}`]);
     expect(shutdownSignal).toBeDefined();
@@ -464,6 +453,9 @@ describe("SimCtlClient boot self-verification", () => {
     await waitForCondition(() => completeCleanup !== undefined, "failed-start cleanup");
     await drainMicrotasks();
     expect(harness.bootstatusInvocations()).toBe(1);
+    if (!completeCleanup) {
+      throw new Error("Missing completeCleanup callback");
+    }
     completeCleanup();
 
     await expect(firstStart).rejects.toThrow(
@@ -507,7 +499,7 @@ describe("SimCtlClient boot self-verification", () => {
       return createExecResult("", "");
     };
     const timer = new FakeTimer();
-    const createClient = () => new SimCtlClient(null, execAsync, timer, "darwin");
+    const createClient = () => new SimCtlClient(null, execAsync, { timer, platform: "darwin" });
     const firstStart = runWithAbortSignal(firstController.signal, () =>
       createClient().startSimulator(UDID, 5_000),
     );
@@ -643,6 +635,9 @@ describe("SimCtlClient boot self-verification", () => {
       .catch((error: unknown) => error);
     const sessionStart = harness.createClient().bootSimulator(UDID);
     const readiness = harness.createClient().waitForSimulatorReady(UDID, 5_000);
+    if (!completeFirstBootstatus) {
+      throw new Error("Missing completeFirstBootstatus callback");
+    }
     completeFirstBootstatus();
     await expect(firstStart).resolves.toBeDefined();
 
@@ -753,6 +748,9 @@ describe("SimCtlClient boot self-verification", () => {
       .createClient()
       .bootSimulator(UDID)
       .catch((error: unknown) => error);
+    if (!completeOwnerBootstatus) {
+      throw new Error("Missing completeOwnerBootstatus callback");
+    }
     completeOwnerBootstatus();
 
     await expect(owner).resolves.toBeDefined();
@@ -1162,6 +1160,9 @@ describe("SimCtlClient boot self-verification", () => {
     expect(handle.kill()).toBe(true);
     await drainMicrotasks();
     expect(harness.shutdownInvocations()).toBe(0);
+    if (!completeMetadata) {
+      throw new Error("Missing completeMetadata callback");
+    }
     completeMetadata();
 
     await expect(readiness).resolves.toMatchObject({ deviceId: UDID });
@@ -1219,6 +1220,9 @@ describe("SimCtlClient boot self-verification", () => {
     await drainMicrotasks();
     expect(harness.shutdownInvocations()).toBe(0);
 
+    if (!completeReadiness) {
+      throw new Error("Missing completeReadiness callback");
+    }
     completeReadiness();
     harness.timer.enableAutoAdvance();
 
@@ -1327,6 +1331,9 @@ describe("SimCtlClient boot self-verification", () => {
       .createClient()
       .startSimulator(UDID, 5_000)
       .catch((error: unknown) => error);
+    if (!completeOwnerBootstatus) {
+      throw new Error("Missing completeOwnerBootstatus callback");
+    }
     completeOwnerBootstatus();
 
     await expect(owner).resolves.toBeDefined();
@@ -1448,11 +1455,11 @@ describe("SimCtlClient boot self-verification", () => {
         }
         return createExecResult("", "");
       },
-      new FakeTimer(),
-      "darwin",
-      undefined,
-      undefined,
-      { maxAttempts: 2, retryBackoffMs: 10 },
+      {
+        timer: new FakeTimer(),
+        platform: "darwin",
+        bootOptions: { maxAttempts: 2, retryBackoffMs: 10 },
+      },
     );
 
     await expect(simctl.startSimulator(craftedUdid, 5000)).rejects.toBe(error);
@@ -1605,23 +1612,8 @@ describe("SimCtlClient boot self-verification", () => {
     // Seed a fresh (within-TTL) cache entry as if an earlier, unrelated caller
     // listed devices moments before this boot began, while the device was
     // still Shutdown.
-    (
-      SimCtlClient as unknown as {
-        deviceListCache: { devices: unknown[]; timestamp: number } | null;
-      }
-    ).deviceListCache = {
-      devices: [
-        {
-          name: "iPhone 17",
-          platform: "ios",
-          deviceId: UDID,
-          isRunning: false,
-          state: "Shutdown",
-          isAvailable: true,
-        },
-      ],
-      timestamp: harness.timer.now(),
-    };
+    const cached = await harness.timer.resolvePromise(harness.simctl.listSimulatorImages());
+    expect(cached[0].state).toBe("Shutdown");
     harness.setStates(["Booted"]);
 
     // Without the fix, resolveRegisteredBootSimulator's getBootedSimulatorsChecked
@@ -1710,12 +1702,12 @@ describe("SimCtlClient boot self-verification", () => {
 
   test("bootSimulator and waitForSimulatorReady agree when isAvailable is absent", async () => {
     const bootHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(undefined),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(undefined),
     );
     const readyHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(undefined),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(undefined),
     );
 
     const bootDevice = await bootHarness
@@ -1744,12 +1736,12 @@ describe("SimCtlClient boot self-verification", () => {
   test("bootSimulator and waitForSimulatorReady agree when isAvailable is false", async () => {
     const availabilityError = "the requested device runtime is unavailable";
     const bootHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(false, availabilityError),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(false, availabilityError),
     );
     const readyHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(false, availabilityError),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(false, availabilityError),
     );
 
     const bootError = await bootHarness

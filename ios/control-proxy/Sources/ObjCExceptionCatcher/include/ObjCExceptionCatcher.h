@@ -55,6 +55,32 @@ FOUNDATION_EXPORT ObjCPinchPoints ObjCExceptionCatcher_computePinchPoints(
     CGFloat rotationDegrees
 );
 
+/// Both finger positions at one instant of a pinch (`finger1` is the center-offset finger).
+typedef struct ObjCPinchFingers {
+    CGPoint finger1;
+    CGPoint finger2;
+} ObjCPinchFingers;
+
+/// Number of straight segments each finger's path is split into. A pinch without rotation moves
+/// along the shared axis so one segment is exact; a rotating pinch must follow an arc, because the
+/// straight chord between start and end passes closer to the center than either endpoint and so
+/// zooms a pure rotation mid-gesture (issue #12996). One segment per 10 degrees, at most 36.
+/// Mirrors the Android runner's `pinchSegmentCount`.
+FOUNDATION_EXPORT NSInteger ObjCExceptionCatcher_pinchSegmentCount(CGFloat rotationDegrees);
+
+/// Finger positions after `fraction` (0...1) of the pinch: the axis angle and the radius are both
+/// interpolated linearly, so a pure rotation keeps a constant radius. `fraction` 0 and 1 equal
+/// `ObjCExceptionCatcher_computePinchPoints`' start and end points (finger1 = start1/end1).
+/// Mirrors the Android runner's `computePinchFingerPositions`.
+FOUNDATION_EXPORT ObjCPinchFingers ObjCExceptionCatcher_computePinchFingersAt(
+    CGFloat centerX,
+    CGFloat centerY,
+    CGFloat distanceStart,
+    CGFloat distanceEnd,
+    CGFloat rotationDegrees,
+    CGFloat fraction
+);
+
 /// Executes the given block, catching any NSException thrown.
 /// Returns the caught NSException, or nil if no exception was raised.
 FOUNDATION_EXPORT NSException * _Nullable ObjCExceptionCatcher_tryBlock(void (NS_NOESCAPE ^block)(void));
@@ -139,11 +165,12 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 );
 
-/// Two-finger pinch on an explicit display. The caller supplies display-space endpoints (already
-/// mapped from observed space), so the rotated inner panel of an unfolded iPhone Duo receives the
+/// Two-finger pinch on an explicit display. The caller supplies display-space waypoints (already
+/// mapped from observed space) as flat [x0, y0, x1, y1, ...] waypoint lists per finger, reached at
+/// evenly spaced offsets across `duration`, so the rotated inner panel of an unfolded iPhone Duo receives the
 /// pinch axis the host observed. Unavailable symbols permit the main-screen pinch fallback.
 FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayPinch(
-    ObjCPinchPoints points, NSTimeInterval duration,
+    NSArray<NSNumber *> *firstPath, NSArray<NSNumber *> *secondPath, NSTimeInterval duration,
     unsigned long long displayID, NSInteger interfaceOrientation,
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 );

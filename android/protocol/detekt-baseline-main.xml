@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongParameterList:PrototypeRequest.kt:PrototypeRequestEvent$fun payload: JsonObject</ID>
+    <ID>TooManyFunctions:SdkEventSerializer.kt:SdkEventSerializer</ID>
+  </CurrentIssues>
+</SmellBaseline>

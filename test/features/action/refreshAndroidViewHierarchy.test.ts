@@ -1,6 +1,6 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { describe, expect, test } from "bun:test";
-import type { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { refreshAndroidViewHierarchy } from "../../../src/features/action/refreshAndroidViewHierarchy";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -15,14 +15,11 @@ import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
  * issue #6323 supplements incomplete captures within the original deadline.
  */
 describe("refreshAndroidViewHierarchy", () => {
-  const asClient = (fake: FakeCtrlProxy): AndroidCtrlProxyClient =>
-    fake as unknown as AndroidCtrlProxyClient;
-
   test("returns null when the accessibility service has no hierarchy", async () => {
     const fakeCtrlProxy = new FakeCtrlProxy();
     fakeCtrlProxy.setHierarchyData(null);
 
-    const result = await refreshAndroidViewHierarchy(asClient(fakeCtrlProxy), 1000);
+    const result = await refreshAndroidViewHierarchy(fakeCtrlProxy, 1000);
 
     expect(result).toBeNull();
   });
@@ -32,17 +29,17 @@ describe("refreshAndroidViewHierarchy", () => {
     fakeCtrlProxy.setHierarchyData({
       updatedAt: Date.now(),
       packageName: "com.test.app",
-      hierarchy: { $: { class: "android.widget.FrameLayout" } },
+      hierarchy: { className: "android.widget.FrameLayout" },
     });
     const completeResult: ViewHierarchyResult = {
-      hierarchy: { node: [] },
+      hierarchy: { node: createFlatNodeForTest({ node: [] }) },
       packageName: "com.test.app",
       updatedAt: Date.now(),
       ctrlProxyIncomplete: false,
     };
     fakeCtrlProxy.setViewHierarchyResult(completeResult);
 
-    const result = await refreshAndroidViewHierarchy(asClient(fakeCtrlProxy), 1000);
+    const result = await refreshAndroidViewHierarchy(fakeCtrlProxy, 1000);
 
     expect(result).toEqual(completeResult);
   });
@@ -52,18 +49,18 @@ describe("refreshAndroidViewHierarchy", () => {
     fakeCtrlProxy.setHierarchyData({
       updatedAt: Date.now(),
       packageName: "com.test.app",
-      hierarchy: { $: {} },
+      hierarchy: {},
       ctrlProxyIncomplete: true,
     });
     const incompleteResult: ViewHierarchyResult = {
-      hierarchy: { node: [] },
+      hierarchy: { node: createFlatNodeForTest({ node: [] }) },
       packageName: "com.test.app",
       updatedAt: Date.now(),
       ctrlProxyIncomplete: true,
     };
     fakeCtrlProxy.setViewHierarchyResult(incompleteResult);
 
-    const result = await refreshAndroidViewHierarchy(asClient(fakeCtrlProxy), 1000);
+    const result = await refreshAndroidViewHierarchy(fakeCtrlProxy, 1000);
 
     // Previously this path threw inside a swallowed try/catch (calling two
     // methods that never existed on ViewHierarchy); now it deliberately skips
@@ -89,10 +86,10 @@ describe("refreshAndroidViewHierarchy", () => {
     fakeCtrlProxy.setHierarchyData({
       updatedAt: Date.now(),
       packageName: "com.test.app",
-      hierarchy: { $: {} },
+      hierarchy: {},
     });
 
-    await refreshAndroidViewHierarchy(asClient(fakeCtrlProxy), 1000);
+    await refreshAndroidViewHierarchy(fakeCtrlProxy, 1000);
 
     expect(fakeCtrlProxy.getLastRequestHierarchySyncArgs()?.timeoutMs).toBe(1000);
   });
@@ -110,9 +107,9 @@ describe("refresh fallback budget", () => {
       }
     }
     const client = new SyncClient();
-    client.setHierarchyData({ packageName: "com.test", hierarchy: { $: {} } });
+    client.setHierarchyData({ updatedAt: timer.now(), packageName: "com.test", hierarchy: {} });
     client.setViewHierarchyResult({
-      hierarchy: { node: { $: {} } },
+      hierarchy: { node: createFlatNodeForTest({ $: {} }) },
       packageName: "com.test",
       ctrlProxyIncomplete: incomplete,
     });
@@ -123,12 +120,11 @@ describe("refresh fallback budget", () => {
       '<hierarchy><node package="com.test" class="Button" text="Missing" bounds="[0,0][10,10]"/></hierarchy>',
     );
     const controller = new AbortController();
-    const result = await refreshAndroidViewHierarchy(
-      client as unknown as AndroidCtrlProxyClient,
-      1000,
-      controller.signal,
-      { adb, timer, idGenerator: new FakeIdGenerator(["test"]) },
-    );
+    const result = await refreshAndroidViewHierarchy(client, 1000, controller.signal, {
+      adb,
+      timer,
+      idGenerator: new FakeIdGenerator(["test"]),
+    });
     expect(result).not.toBeNull();
     const calls = adb.getCommandCalls();
     expect(calls.length).toBe(incomplete ? 3 : 0);

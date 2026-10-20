@@ -1,8 +1,8 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 
-async function columnExists(
-  db: Kysely<unknown>,
+async function columnExists<DB>(
+  db: Kysely<DB>,
   tableName: string,
   columnName: string,
 ): Promise<boolean> {
@@ -12,8 +12,8 @@ async function columnExists(
   return result.rows.length > 0;
 }
 
-async function addColumnIfNotExists(
-  db: Kysely<unknown>,
+async function addColumnIfNotExists<DB>(
+  db: Kysely<DB>,
   tableName: string,
   columnName: string,
   columnType: "real" | "integer",
@@ -24,7 +24,7 @@ async function addColumnIfNotExists(
   await db.schema.alterTable(tableName).addColumn(columnName, columnType).execute();
 }
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Add new columns to performance_audit_results table for live metrics
   await addColumnIfNotExists(db, "performance_audit_results", "time_to_first_frame_ms", "real");
   await addColumnIfNotExists(db, "performance_audit_results", "time_to_interactive_ms", "real");
@@ -48,7 +48,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   // Drop indexes first
   await db.schema.dropIndex("idx_performance_audit_results_package_timestamp").execute();
 

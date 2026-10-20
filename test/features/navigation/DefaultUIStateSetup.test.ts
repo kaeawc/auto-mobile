@@ -1,18 +1,22 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { z } from "zod/v4";
 import {
   DefaultUIStateSetup,
+  createDefaultObserveScreen,
   type ObserveScreenLike,
 } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { BootedDevice } from "../../../src/models";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
+import type { UIState } from "../../../src/utils/interfaces/NavigationGraph";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 import type { ModalState, ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { readFileSync } from "node:fs";
@@ -37,14 +41,24 @@ const device: BootedDevice = {
 // A destination gives UIStateExtractor useful state without adding any modals.
 // A featureless root alone would make the extractor return undefined.
 const emptyModalHierarchy = (): ObserveResult =>
-  ({
-    viewHierarchy: {
+  createObserveResultForTest({
+    viewHierarchy: createHierarchyForTest({
       hierarchy: {
-        class: "android.widget.FrameLayout",
-        "resource-id": "navigation.HomeDestination",
+        node: {
+          class: "android.widget.FrameLayout",
+          "resource-id": "navigation.HomeDestination",
+        },
       },
-    },
-  }) as unknown as ObserveResult;
+    }),
+  });
+
+const edgeWithUiState = (uiState: UIState): NavigationEdge => ({
+  from: "A",
+  to: "B",
+  timestamp: 0,
+  edgeType: "unknown",
+  uiState,
+});
 
 const emptyModalObserve = (): ObserveScreenLike => ({ execute: async () => emptyModalHierarchy() });
 
@@ -102,11 +116,11 @@ describe("DefaultUIStateSetup alignment order", () => {
 
 // A flat sheet node with an explicit window ID uses the real extractor path.
 const bottomSheetHierarchy = (windowId: number): ObserveResult =>
-  ({
-    viewHierarchy: {
-      hierarchy: { class: "BottomSheetDialog", "window-id": String(windowId) },
-    },
-  }) as unknown as ObserveResult;
+  createObserveResultForTest({
+    viewHierarchy: createHierarchyForTest({
+      hierarchy: { node: { class: "BottomSheetDialog", "window-id": String(windowId) } },
+    }),
+  });
 
 const fakeAdbBySetup = new WeakMap<DefaultUIStateSetup, FakeAdbClient>();
 
@@ -135,23 +149,21 @@ describe("DefaultUIStateSetup", () => {
   // swallowed by getCurrentUIState's catch, and silently skip required UI setup.
   test("default observe provider builds a RealObserveScreen bound to the injected device and adb", () => {
     const fakeAdb = new FakeAdbClient();
-    const timer = new FakeTimer();
-    const setup = new DefaultUIStateSetup(device, fakeAdb, undefined, timer);
-    const provider = (setup as unknown as { observeScreenProvider: () => ObserveScreenLike })
-      .observeScreenProvider;
+    const bindings: Array<{ device: BootedDevice; adb: unknown }> = [];
 
-    let observeScreen: ObserveScreenLike | undefined;
-    expect(() => {
-      observeScreen = provider();
-    }).not.toThrow();
+    const observeScreen = createDefaultObserveScreen(device, fakeAdb, (boundDevice, factory) => {
+      bindings.push({ device: boundDevice, adb: factory.create() });
+      return { execute: async () => createObserveResultForTest({ viewHierarchy: undefined }) };
+    });
 
-    // Assert the concrete type and its binding rather than merely "has an execute
-    // method" (a bare stub would pass that). The default provider must wire the
-    // injected device and the resolved AdbClient into the real observe path.
-    expect(observeScreen).toBeInstanceOf(RealObserveScreen);
-    const internals = observeScreen as unknown as { device: BootedDevice; adb: AdbClient };
-    expect(internals.device).toBe(device);
-    expect(internals.adb).toBe(fakeAdb);
+    expect(typeof observeScreen.execute).toBe("function");
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0].device).toBe(device);
+    expect(bindings[0].adb).toBe(fakeAdb);
+
+    // The default construction path must not throw (the #2754 factory regression).
+    expect(() => createDefaultObserveScreen(device, fakeAdb)).not.toThrow();
+    expect(createDefaultObserveScreen(device, fakeAdb)).toBeInstanceOf(RealObserveScreen);
   });
 
   test("setupUIState consults the observe provider when the edge requires UI state", async () => {
@@ -161,13 +173,14 @@ describe("DefaultUIStateSetup", () => {
       // No viewHierarchy => getCurrentUIState returns undefined and setup proceeds
       // without taps. The point is that the provider was reached, i.e. observation
       // was not silently skipped by a construction failure.
-      return { execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult };
+      return { execute: async () => createObserveResultForTest({ viewHierarchy: undefined }) };
     };
 
     const setup = makeSetup(provider);
-    const edge = {
-      uiState: { modalStack: [{ type: "dialog" }] },
-    } as unknown as NavigationEdge;
+    const edge = edgeWithUiState({
+      selectedElements: [],
+      modalStack: [{ type: "dialog", layer: 1 }],
+    });
 
     const actions = await setup.setupUIState(edge, "android");
 
@@ -179,10 +192,10 @@ describe("DefaultUIStateSetup", () => {
     let calls = 0;
     const setup = makeSetup(() => {
       calls++;
-      return { execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult };
+      return { execute: async () => createObserveResultForTest({ viewHierarchy: undefined }) };
     });
 
-    const edge = { uiState: {} } as unknown as NavigationEdge;
+    const edge = edgeWithUiState({ selectedElements: [] });
     const actions = await setup.setupUIState(edge, "android");
 
     expect(actions).toEqual([]);
@@ -202,7 +215,7 @@ describe("DefaultUIStateSetup", () => {
 
     test("routes a missing content-description-only selection through tapOn's text selector", async () => {
       let capturedArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("tapOn", "tapOn", {}, async (args) => {
+      ToolRegistry.register("tapOn", "tapOn", z.object({}).passthrough(), async (args) => {
         capturedArgs = args;
         return createStructuredToolResponse({ success: true });
       });
@@ -220,7 +233,7 @@ describe("DefaultUIStateSetup", () => {
     });
 
     test("does not report a selected-element tap when its internal tool response fails", async () => {
-      ToolRegistry.register("tapOn", "tapOn", {}, async () =>
+      ToolRegistry.register("tapOn", "tapOn", z.object({}).passthrough(), async () =>
         createStructuredToolResponse({ success: false, error: "element is disabled" }),
       );
       const setup = setupWithNoSelections();
@@ -253,7 +266,7 @@ describe("DefaultUIStateSetup", () => {
     };
 
     function registerSwipeOn(found: boolean): void {
-      ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
+      ToolRegistry.register("swipeOn", "swipeOn", z.object({}).passthrough(), async () =>
         createStructuredToolResponse({
           success: true,
           found,
@@ -300,7 +313,7 @@ describe("DefaultUIStateSetup", () => {
     test("invokes the registered `swipeOn` handler (not `swipe`) with direction down", async () => {
       let swipeOnCalls = 0;
       let capturedArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("swipeOn", "swipeOn", {}, async (args: any) => {
+      ToolRegistry.register("swipeOn", "swipeOn", z.object({}).passthrough(), async (args: any) => {
         swipeOnCalls++;
         capturedArgs = args;
         return createStructuredToolResponse({ success: true });
@@ -327,10 +340,10 @@ describe("DefaultUIStateSetup", () => {
     });
 
     test("falls through to the back button when the swipe leaves the bottom sheet present (#3125)", async () => {
-      ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
+      ToolRegistry.register("swipeOn", "swipeOn", z.object({}).passthrough(), async () =>
         createStructuredToolResponse({ success: true }),
       );
-      ToolRegistry.register("pressButton", "pressButton", {}, async () => {
+      ToolRegistry.register("pressButton", "pressButton", z.object({}).passthrough(), async () => {
         throw new Error("Android modal recovery must not use the global tool registry");
       });
 
@@ -373,7 +386,7 @@ describe("DefaultUIStateSetup", () => {
       // Register ONLY the wrong name. With the bug this would be the tool the
       // branch resolves; after the fix it must be ignored (no swipeOn present →
       // the branch skips straight to the back-button fallback).
-      ToolRegistry.register("swipe", "swipe", {}, async () => {
+      ToolRegistry.register("swipe", "swipe", z.object({}).passthrough(), async () => {
         legacySwipeCalls++;
         return createStructuredToolResponse({ success: true });
       });
@@ -394,7 +407,7 @@ describe("DefaultUIStateSetup", () => {
       ToolRegistry.register(
         "pressButton",
         "pressButton",
-        {},
+        z.object({}).passthrough(),
         async (args: Record<string, unknown>) => {
           backArgs = args;
           return createStructuredToolResponse({ success: true });
@@ -513,7 +526,7 @@ describe("DefaultUIStateSetup", () => {
                   throw new Error("Observation unavailable");
                 }
                 if (observation === "null hierarchy") {
-                  return { viewHierarchy: null } as unknown as ObserveResult;
+                  return createObserveResultForTest({ viewHierarchy: undefined });
                 }
                 return observation === "healthy" ? emptyModalHierarchy() : bottomSheetHierarchy(42);
               },
@@ -521,15 +534,20 @@ describe("DefaultUIStateSetup", () => {
             timer,
           );
           if (path.swipe) {
-            ToolRegistry.register("swipeOn", "swipeOn", {}, async () => {
+            ToolRegistry.register("swipeOn", "swipeOn", z.object({}).passthrough(), async () => {
               swipeCalls++;
               return createStructuredToolResponse({ success: true });
             });
           }
-          ToolRegistry.register("pressButton", "pressButton", {}, async () => {
-            iosBackCalls++;
-            return createStructuredToolResponse({ success: true });
-          });
+          ToolRegistry.register(
+            "pressButton",
+            "pressButton",
+            z.object({}).passthrough(),
+            async () => {
+              iosBackCalls++;
+              return createStructuredToolResponse({ success: true });
+            },
+          );
           const modal: ModalState = { type: path.modalType, layer: 1, windowId: 42 };
 
           const dismissed = await setup[path.method](modal, path.platform);
@@ -559,12 +577,12 @@ describe("DefaultUIStateSetup", () => {
           execute: async () => {
             observeCalls++;
             return observeCalls === 1
-              ? ({ viewHierarchy: null } as unknown as ObserveResult)
+              ? createObserveResultForTest({ viewHierarchy: undefined })
               : emptyModalHierarchy();
           },
         }));
         let swipeCalls = 0;
-        ToolRegistry.register("swipeOn", "swipeOn", {}, async () => {
+        ToolRegistry.register("swipeOn", "swipeOn", z.object({}).passthrough(), async () => {
           swipeCalls++;
           return createStructuredToolResponse({ success: true });
         });
@@ -611,7 +629,7 @@ describe("DefaultUIStateSetup", () => {
       let dismissedAfterTap = false;
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       // getCurrentUIState drives isModalConfirmedDismissed: report the modal gone as
       // soon as any candidate has been tapped.
@@ -620,7 +638,7 @@ describe("DefaultUIStateSetup", () => {
         modalStack: dismissedAfterTap ? [] : [dialog],
       });
 
-      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+      ToolRegistry.register("tapOn", "tapOn", z.object({}).passthrough(), async (args: any) => {
         tappedTexts.push(args.selector.text);
         dismissedAfterTap = true;
         return createStructuredToolResponse({ success: true });
@@ -637,14 +655,14 @@ describe("DefaultUIStateSetup", () => {
       let dismissed = false;
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       setup.getCurrentUIState = async () => ({
         selectedElements: [],
         modalStack: dismissed ? [] : [dialog],
       });
 
-      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+      ToolRegistry.register("tapOn", "tapOn", z.object({}).passthrough(), async (args: any) => {
         const text = args.selector.text;
         tappedTexts.push(text);
         // "Close" taps successfully (tool-wise) but never actually dismisses
@@ -665,12 +683,12 @@ describe("DefaultUIStateSetup", () => {
       const tappedTexts: string[] = [];
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       // Modal never leaves the stack, regardless of what was tapped.
       setup.getCurrentUIState = async () => ({ selectedElements: [], modalStack: [dialog] });
 
-      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+      ToolRegistry.register("tapOn", "tapOn", z.object({}).passthrough(), async (args: any) => {
         tappedTexts.push(args.selector.text);
         return createStructuredToolResponse({ success: true });
       });
@@ -686,14 +704,14 @@ describe("DefaultUIStateSetup", () => {
       let dismissed = false;
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       setup.getCurrentUIState = async () => ({
         selectedElements: [],
         modalStack: dismissed ? [] : [dialog],
       });
 
-      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+      ToolRegistry.register("tapOn", "tapOn", z.object({}).passthrough(), async (args: any) => {
         const text = args.selector.text;
         tappedTexts.push(text);
         if (text === "Close") {
@@ -732,10 +750,10 @@ describe("DefaultUIStateSetup", () => {
       // Real getCurrentUIState runs: every observation returns a null
       // hierarchy, so isModalConfirmedDismissed can never confirm the modal is gone.
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
 
-      ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {
+      ToolRegistry.register("tapOn", "tapOn", z.object({}).passthrough(), async (args: any) => {
         tappedTexts.push(args.selector.text);
         // A real element was tapped (tool-wise success), but the outcome is
         // unverifiable because the re-observation has no hierarchy.
@@ -765,7 +783,7 @@ describe("DefaultUIStateSetup cancellation", () => {
         return emptyModalHierarchy();
       },
     }));
-    ToolRegistry.register("swipeOn", "Fake swipe", {}, async () => {
+    ToolRegistry.register("swipeOn", "Fake swipe", z.object({}).passthrough(), async () => {
       swipes++;
       return createStructuredToolResponse({ success: true });
     });
@@ -790,12 +808,17 @@ describe("DefaultUIStateSetup cancellation", () => {
   test("cancellation during a selection tap prevents the next setup tap", async () => {
     const controller = new AbortController();
     const taps: unknown[] = [];
-    ToolRegistry.register("tapOn", "Fake tap", {}, async (args, _progress, signal) => {
-      expect(signal).toBe(controller.signal);
-      taps.push(args.selector);
-      controller.abort();
-      return createStructuredToolResponse({ success: true });
-    });
+    ToolRegistry.register(
+      "tapOn",
+      "Fake tap",
+      z.object({}).passthrough(),
+      async (args, _progress, signal) => {
+        expect(signal).toBe(controller.signal);
+        taps.push(args.selector);
+        controller.abort();
+        return createStructuredToolResponse({ success: true });
+      },
+    );
     const setup = makeSetup(selectionObserve);
     await expect(
       setup.setupUIState(
@@ -811,11 +834,16 @@ describe("DefaultUIStateSetup cancellation", () => {
 
   test("cancellation during scroll propagates instead of returning null", async () => {
     const controller = new AbortController();
-    ToolRegistry.register("swipeOn", "Fake swipe", {}, async (_args, _progress, signal) => {
-      expect(signal).toBe(controller.signal);
-      controller.abort();
-      return createStructuredToolResponse({ success: true });
-    });
+    ToolRegistry.register(
+      "swipeOn",
+      "Fake swipe",
+      z.object({}).passthrough(),
+      async (_args, _progress, signal) => {
+        expect(signal).toBe(controller.signal);
+        controller.abort();
+        return createStructuredToolResponse({ success: true });
+      },
+    );
     await expect(
       makeSetup(emptyModalObserve).setupScrollPosition(
         { targetElement: { text: "Target" }, direction: "down" },
@@ -828,13 +856,18 @@ describe("DefaultUIStateSetup cancellation", () => {
   test("cancellation in a modal dismissal never tries its fallback actions", async () => {
     const controller = new AbortController();
     const actions: string[] = [];
-    ToolRegistry.register("swipeOn", "Fake swipe", {}, async (_args, _progress, signal) => {
-      expect(signal).toBe(controller.signal);
-      actions.push("swipe");
-      controller.abort();
-      return createStructuredToolResponse({ success: true });
-    });
-    ToolRegistry.register("pressButton", "Fake back", {}, async () => {
+    ToolRegistry.register(
+      "swipeOn",
+      "Fake swipe",
+      z.object({}).passthrough(),
+      async (_args, _progress, signal) => {
+        expect(signal).toBe(controller.signal);
+        actions.push("swipe");
+        controller.abort();
+        return createStructuredToolResponse({ success: true });
+      },
+    );
+    ToolRegistry.register("pressButton", "Fake back", z.object({}).passthrough(), async () => {
       actions.push("back");
       return createStructuredToolResponse({ success: true });
     });
@@ -861,13 +894,19 @@ describe("DefaultUIStateSetup captured Android selections", () => {
   afterEach(() => ToolRegistry.clearTools());
 
   function edge(text: string): NavigationEdge {
-    return { from: "Tap", to: "Target", timestamp: 0, uiState: { selectedElements: [{ text }] } };
+    return {
+      from: "Tap",
+      to: "Target",
+      timestamp: 0,
+      edgeType: "unknown",
+      uiState: { selectedElements: [{ text }] },
+    };
   }
 
   for (const text of ["Demos", "Button"]) {
     test(`captured Android ${text}: unselected tab taps, exact ordinary button skips`, async () => {
       const taps: unknown[] = [];
-      ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+      ToolRegistry.register("tapOn", "Fake tap", z.object({}).passthrough(), async (args) => {
         taps.push(args.selector);
         return createStructuredToolResponse({ success: true });
       });
@@ -886,7 +925,7 @@ describe("DefaultUIStateSetup captured Android selections", () => {
       let observations = 0;
       let taps = 0;
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      ToolRegistry.register("tapOn", "Fake tap", {}, async () => {
+      ToolRegistry.register("tapOn", "Fake tap", z.object({}).passthrough(), async () => {
         taps++;
         return createStructuredToolResponse({ success: true });
       });

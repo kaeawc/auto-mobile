@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeatIfKnown } from "../helpers/daemonHeartbeatHandler";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -8,7 +9,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -107,7 +108,7 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
       });
-      sessionManager.recordHeartbeat("slow");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "slow");
       await sessionManager.createSession("later", "emulator-5556", "android", {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
@@ -132,7 +133,7 @@ describe("SessionHeartbeatMonitor", () => {
       expect(reaped.map((r) => r.sessionId)).toEqual(["slow"]);
 
       // "later" heartbeats now and lapses while "slow" is still tearing down.
-      sessionManager.recordHeartbeat("later");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "later");
       const lapsesAt = timer.now() + 1_000 + SUSPECT_GRACE_MS;
       timer.advanceTime(1_000 + SUSPECT_GRACE_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
       await drainMicrotasks(10);
@@ -150,7 +151,7 @@ describe("SessionHeartbeatMonitor", () => {
   describe("tick reaping decision", () => {
     it("reaps a heartbeating default session only after the default timeout boundary", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -187,7 +188,7 @@ describe("SessionHeartbeatMonitor", () => {
       });
       expect(session.heartbeatTimeoutSource).toBe("default");
       expect(session.heartbeatTimeoutMs).toBe(timeoutMs);
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -319,7 +320,7 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
       });
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -342,7 +343,9 @@ describe("SessionHeartbeatMonitor", () => {
         heartbeatTimeoutMs: 1_000,
       });
       expect(await sessionManager.claimLivenessOwnership("s1", "owner-token")).toBe("claimed");
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1", {
+        livenessOwnerToken: "owner-token",
+      });
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -373,7 +376,7 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
       });
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -570,13 +573,13 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 100,
       });
-      sessionManager.recordHeartbeat("stale");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "stale");
       timer.advanceTime(50);
       await sessionManager.createSession("newly-stale", "emulator-5556", "android", {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 100,
       });
-      sessionManager.recordHeartbeat("newly-stale");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "newly-stale");
       timer.advanceTime(51 + SUSPECT_GRACE_MS);
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
@@ -647,7 +650,7 @@ describe("SessionHeartbeatMonitor", () => {
   describe("integration with DevicePool autolock", () => {
     let pool: DevicePool;
 
-    beforeEach(async () => {
+    async function arrangeHarness(): Promise<void> {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "60"; // 60s idle timeout
       const fakeDeviceUtils = new FakeDeviceUtils();
@@ -663,7 +666,19 @@ describe("SessionHeartbeatMonitor", () => {
         }),
       );
       await pool.initializeWithDevices(androidDevices);
-    });
+    }
+
+    // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+    function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      it(
+        name,
+        async () => {
+          await arrangeHarness();
+          await fn();
+        },
+        timeout,
+      );
+    }
 
     // Mirrors daemon.ts cancelAndReleaseSession (minus execution cancellation).
     const reapVia =
@@ -675,7 +690,7 @@ describe("SessionHeartbeatMonitor", () => {
         }
       };
 
-    it("releases an idle autolocked device promptly after the idle timeout", async () => {
+    arranged("releases an idle autolocked device promptly after the idle timeout", async () => {
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
 
@@ -692,7 +707,7 @@ describe("SessionHeartbeatMonitor", () => {
         for (let elapsed = 0; elapsed < ms && sessionManager.getSession(sessionId!);) {
           timer.advanceTime(2_000);
           elapsed += 2_000;
-          sessionManager.recordHeartbeat(sessionId!);
+          await deliverDaemonHeartbeatIfKnown(sessionManager, sessionId!);
           await monitor.tick();
         }
       };
@@ -711,7 +726,7 @@ describe("SessionHeartbeatMonitor", () => {
       expect(sessionManager.getSession(sessionId!)).toBeNull();
     });
 
-    it("keeps the device locked while it is being actively used", async () => {
+    arranged("keeps the device locked while it is being actively used", async () => {
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -729,50 +744,57 @@ describe("SessionHeartbeatMonitor", () => {
       }
     });
 
-    it("keeps the autolock resolved by an implicit execution after its MCP session remaps", async () => {
-      const firstSessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
-      const executionTracker = new ExecutionTracker(timer);
-      const hasActiveExecutions = (sessionUuid: string): boolean =>
-        executionTracker.hasActiveSessionUuidExecutions(sessionUuid) ||
-        executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
-      sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
-      const monitor = new SessionHeartbeatMonitor(
-        sessionManager,
-        hasActiveExecutions,
-        reapVia(sessionManager, pool),
-        timer,
-      );
-      const execution = executionTracker.startExecution("tapOn", "mcp-session-1");
-      executionTracker.setResolvedAutolockSessionUuid(execution.id, firstSessionId!);
+    arranged(
+      "keeps the autolock resolved by an implicit execution after its MCP session remaps",
+      async () => {
+        const firstSessionId = await pool.autolockDevice(
+          "emulator-5554",
+          "android",
+          "mcp-session-1",
+        );
+        const executionTracker = new ExecutionTracker(timer);
+        const hasActiveExecutions = (sessionUuid: string): boolean =>
+          executionTracker.hasActiveSessionUuidExecutions(sessionUuid) ||
+          executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
+        sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
+        const monitor = new SessionHeartbeatMonitor(
+          sessionManager,
+          hasActiveExecutions,
+          reapVia(sessionManager, pool),
+          timer,
+        );
+        const execution = executionTracker.startExecution("tapOn", "mcp-session-1");
+        executionTracker.setResolvedAutolockSessionUuid(execution.id, firstSessionId!);
 
-      // A later startDevice call from the same MCP session changes only the
-      // routing map. It must not transfer this running call's ownership.
-      const replacementSessionId = await pool.autolockDevice(
-        "emulator-5556",
-        "android",
-        "mcp-session-1",
-      );
+        // A later startDevice call from the same MCP session changes only the
+        // routing map. It must not transfer this running call's ownership.
+        const replacementSessionId = await pool.autolockDevice(
+          "emulator-5556",
+          "android",
+          "mcp-session-1",
+        );
 
-      timer.advanceTime(60_001); // Past the autolock idle timeout.
-      await monitor.tick();
-      // An idle release is terminal (#11258) and writes its row before it frees the device.
-      await sessionManager.waitForSessionRelease(replacementSessionId!);
+        timer.advanceTime(60_001); // Past the autolock idle timeout.
+        await monitor.tick();
+        // An idle release is terminal (#11258) and writes its row before it frees the device.
+        await sessionManager.waitForSessionRelease(replacementSessionId!);
 
-      expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBe(firstSessionId);
-      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
-      expect(sessionManager.getSession(firstSessionId!)).not.toBeNull();
-      expect(pool.getDevice("emulator-5556")!.status).toBe("idle");
-      expect(sessionManager.getSession(replacementSessionId!)).toBeNull();
+        expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBe(firstSessionId);
+        expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
+        expect(sessionManager.getSession(firstSessionId!)).not.toBeNull();
+        expect(pool.getDevice("emulator-5556")!.status).toBe("idle");
+        expect(sessionManager.getSession(replacementSessionId!)).toBeNull();
 
-      executionTracker.endExecution(execution.id);
-      await monitor.tick();
-      await sessionManager.waitForSessionRelease(firstSessionId!);
+        executionTracker.endExecution(execution.id);
+        await monitor.tick();
+        await sessionManager.waitForSessionRelease(firstSessionId!);
 
-      expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
-      expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBeUndefined();
-    });
+        expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
+        expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBeUndefined();
+      },
+    );
 
-    it("does not reap an autolock while an implicit call is still resolving", async () => {
+    arranged("does not reap an autolock while an implicit call is still resolving", async () => {
       const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["implicit"]));
       tracker.setAutolockSessionResolver({
@@ -807,49 +829,52 @@ describe("SessionHeartbeatMonitor", () => {
       expect(sessionManager.getSession(sessionId!)).toBeNull();
     });
 
-    it("does not pin the mapped autolock for an explicit call to another session", async () => {
-      const mappedSessionId = await pool.autolockDevice(
-        "emulator-5554",
-        "android",
-        "mcp-session-1",
-      );
-      const explicitSessionId = await pool.autolockDevice(
-        "emulator-5556",
-        "android",
-        "other-mcp-session",
-      );
-      const executionTracker = new ExecutionTracker(timer);
-      const hasActiveExecutions = (sessionUuid: string): boolean =>
-        executionTracker.hasActiveSessionUuidExecutions(sessionUuid) ||
-        executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
-      sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
-      const monitor = new SessionHeartbeatMonitor(
-        sessionManager,
-        hasActiveExecutions,
-        reapVia(sessionManager, pool),
-        timer,
-      );
-      const execution = executionTracker.startExecution(
-        "tapOn",
-        "mcp-session-1",
-        explicitSessionId,
-      );
+    arranged(
+      "does not pin the mapped autolock for an explicit call to another session",
+      async () => {
+        const mappedSessionId = await pool.autolockDevice(
+          "emulator-5554",
+          "android",
+          "mcp-session-1",
+        );
+        const explicitSessionId = await pool.autolockDevice(
+          "emulator-5556",
+          "android",
+          "other-mcp-session",
+        );
+        const executionTracker = new ExecutionTracker(timer);
+        const hasActiveExecutions = (sessionUuid: string): boolean =>
+          executionTracker.hasActiveSessionUuidExecutions(sessionUuid) ||
+          executionTracker.hasActiveAutolockSessionExecutions(sessionUuid);
+        sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
+        const monitor = new SessionHeartbeatMonitor(
+          sessionManager,
+          hasActiveExecutions,
+          reapVia(sessionManager, pool),
+          timer,
+        );
+        const execution = executionTracker.startExecution(
+          "tapOn",
+          "mcp-session-1",
+          explicitSessionId,
+        );
 
-      timer.advanceTime(60_001);
-      await monitor.tick();
-      // An idle release is terminal (#11258) and writes its row before it frees the device.
-      await sessionManager.waitForSessionRelease(mappedSessionId!);
+        timer.advanceTime(60_001);
+        await monitor.tick();
+        // An idle release is terminal (#11258) and writes its row before it frees the device.
+        await sessionManager.waitForSessionRelease(mappedSessionId!);
 
-      expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
-      expect(sessionManager.getSession(mappedSessionId!)).toBeNull();
-      expect(pool.getDevice("emulator-5556")!.autolockSessionId).toBe(explicitSessionId);
-      expect(sessionManager.getSession(explicitSessionId!)).not.toBeNull();
+        expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
+        expect(sessionManager.getSession(mappedSessionId!)).toBeNull();
+        expect(pool.getDevice("emulator-5556")!.autolockSessionId).toBe(explicitSessionId);
+        expect(sessionManager.getSession(explicitSessionId!)).not.toBeNull();
 
-      executionTracker.endExecution(execution.id);
-      await monitor.tick();
-      await sessionManager.waitForSessionRelease(explicitSessionId!);
+        executionTracker.endExecution(execution.id);
+        await monitor.tick();
+        await sessionManager.waitForSessionRelease(explicitSessionId!);
 
-      expect(pool.getDevice("emulator-5556")!.status).toBe("idle");
-    });
+        expect(pool.getDevice("emulator-5556")!.status).toBe("idle");
+      },
+    );
   });
 });

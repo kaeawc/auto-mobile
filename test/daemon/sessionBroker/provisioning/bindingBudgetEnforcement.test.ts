@@ -241,6 +241,7 @@ describe("binding total-resource enforcement on SQLite", () => {
               deleting: 0,
               orphaned: 0,
             },
+            charged: [],
             retained: [],
             evictionFailures: [],
           };
@@ -273,6 +274,8 @@ describe("binding total-resource enforcement on SQLite", () => {
         platform: "android",
         deviceId: "orphan",
         name: bindingDeviceName(req.key, 1, "abcd"),
+        isRunning: false,
+        isRunningStateKnown: false,
         ...SPEC,
       });
       const result = await make().reconcile(req);
@@ -288,6 +291,8 @@ describe("binding total-resource enforcement on SQLite", () => {
       platform: "android",
       deviceId: "ambroker-other",
       name: "ambroker-other",
+      isRunning: false,
+      isRunningStateKnown: false,
     });
     const result = await make().reconcile(await request());
     expect(result).toMatchObject({
@@ -295,6 +300,7 @@ describe("binding total-resource enforcement on SQLite", () => {
       failure: {
         code: "binding_budget_exhausted",
         budget: { usage: { orphaned: 1, preparing: 1 } },
+        message: expect.stringContaining("ambroker-other (android, orphaned"),
       },
     });
     expect(provisioner.calls).toEqual([]);
@@ -322,6 +328,8 @@ describe("binding total-resource enforcement on SQLite", () => {
       platform: "android",
       deviceId: "amslot-old",
       name: "amslot-old",
+      isRunning: false,
+      isRunningStateKnown: false,
       runtime: "old",
       deviceType: SPEC.deviceType,
     });

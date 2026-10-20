@@ -4,85 +4,26 @@ import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest } from "../../src/daemon/types";
-import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
+import { createFakeDaemonState, createFakeSession } from "./helpers/inputSocketHarness";
 
-function createFakeSession(
-  sessionId: string,
-  assignedDevice: string,
-  deviceLabels?: DeviceLabelMap,
-): Session {
-  return {
-    sessionId,
-    assignedDevice,
-    platform: "android",
-    createdAt: 0,
-    lastUsedAt: 0,
-    expiresAt: 60_000,
-    cacheData: { deviceLabels },
-    lastHeartbeat: 0,
-    sessionTimeoutMs: 60_000,
-    heartbeatTimeoutMs: 10_000,
-    heartbeatTimeoutSource: "default",
-    hasReceivedHeartbeat: false,
-  };
-}
-
-function createFakeDaemonState(sessionDevices: Map<string, string>) {
-  return {
-    isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: (sessionId: string) => {
-        const assignedDevice = sessionDevices.get(sessionId);
-        return assignedDevice ? createFakeSession(sessionId, assignedDevice) : null;
-      },
-      getDeviceLabels: () => undefined,
-      releaseSession: async () => null,
-    }),
-    getDevicePool: () => ({
-      refreshDevices: async () => 0,
-      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-      releaseDevice: async () => {},
-      resolveAutolockSessionForMcpSession: () => undefined,
-    }),
-  };
-}
-
-interface McpForwardRoute {
-  executionKey: string;
-  clientKey: string;
-  sessionUuid?: string;
-}
-
-interface BoundClientEntry {
-  clientKey: string;
-  executionKey: string;
-  sessionUuid: string;
-  requiresLiveDaemonSession: boolean;
-}
-
-function createServer(): UnixSocketServer {
-  const sessionDevices = new Map<string, string>();
-  // session-a is a live daemon session; session-b exists but is unbound to a device.
-  sessionDevices.set("session-a", "device-1");
-  sessionDevices.set("session-b", "");
-  return new UnixSocketServer(
+function createServer(): UnixSocketServerHarness {
+  // session-a is a live daemon session; session-b is not known to the daemon session manager.
+  const sessions = new Map([["session-a", createFakeSession("session-a", "device-1", "android")]]);
+  return createHarnessServer(
     join(tmpdir(), `ide-route-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
-    createFakeDaemonState(sessionDevices),
+    createFakeDaemonState(sessions),
     new FakeTimer(),
   );
 }
 
-function bindSocketToSessionA(server: UnixSocketServer, socketSessionId: string): void {
-  const boundMap = (
-    server as unknown as {
-      boundMcpClientKeysBySocketSession: Map<string, BoundClientEntry>;
-    }
-  ).boundMcpClientKeysBySocketSession;
-  boundMap.set(socketSessionId, {
+function bindSocketToSessionA(server: UnixSocketServerHarness, socketSessionId: string): void {
+  server.bindClient(socketSessionId, {
     clientKey: `socket:${socketSessionId}:session:session-a`,
     executionKey: "device:device-1",
     sessionUuid: "session-a",
@@ -90,30 +31,27 @@ function bindSocketToSessionA(server: UnixSocketServer, socketSessionId: string)
   });
 }
 
-function route(
-  server: UnixSocketServer,
+async function route(
+  server: UnixSocketServerHarness,
   request: DaemonRequest,
   socketSessionId: string,
-): McpForwardRoute {
-  return (
-    server as unknown as {
-      getMcpForwardRoute: (r: DaemonRequest, s: string) => McpForwardRoute;
-    }
-  ).getMcpForwardRoute(request, socketSessionId);
+) {
+  return await server.forwardRouteFor(request, socketSessionId);
 }
 
 describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => {
-  test("an explicit sessionUuid B does not repurpose the socket's bound (session-a) client", () => {
+  test("an explicit sessionUuid B does not repurpose the socket's bound (session-a) client", async () => {
     const server = createServer();
     const socketSessionId = "socket-A";
     bindSocketToSessionA(server, socketSessionId);
 
     const request: DaemonRequest = {
       id: "1",
+      type: "mcp_request",
       method: "ide/getNavigationGraph",
       params: { sessionUuid: "session-b" },
     };
-    const resolved = route(server, request, socketSessionId);
+    const resolved = await route(server, request, socketSessionId);
 
     // The read must route to session-b's OWN client, never session-a's bound
     // transport (whose SessionToolBinding would otherwise be rebound to B).
@@ -122,33 +60,35 @@ describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => 
     expect(resolved.executionKey).toBe("session:session-b");
   });
 
-  test("no-sessionUuid getNavigationGraph still reuses the socket's bound client", () => {
+  test("no-sessionUuid getNavigationGraph still reuses the socket's bound client", async () => {
     const server = createServer();
     const socketSessionId = "socket-A";
     bindSocketToSessionA(server, socketSessionId);
 
     const request: DaemonRequest = {
       id: "2",
+      type: "mcp_request",
       method: "ide/getNavigationGraph",
       params: {},
     };
-    const resolved = route(server, request, socketSessionId);
+    const resolved = await route(server, request, socketSessionId);
 
     expect(resolved.clientKey).toBe(`socket:${socketSessionId}:session:session-a`);
     expect(resolved.sessionUuid).toBe("session-a");
   });
 
-  test("an explicit sessionUuid equal to the bound session keeps routing to that session", () => {
+  test("an explicit sessionUuid equal to the bound session keeps routing to that session", async () => {
     const server = createServer();
     const socketSessionId = "socket-A";
     bindSocketToSessionA(server, socketSessionId);
 
     const request: DaemonRequest = {
       id: "3",
+      type: "mcp_request",
       method: "ide/getNavigationGraph",
       params: { sessionUuid: "session-a" },
     };
-    const resolved = route(server, request, socketSessionId);
+    const resolved = await route(server, request, socketSessionId);
 
     expect(resolved.clientKey).toBe(`socket:${socketSessionId}:session:session-a`);
     expect(resolved.sessionUuid).toBe("session-a");
@@ -158,22 +98,27 @@ describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => 
 describe("tools/call selector forwarding", () => {
   test.each([{ platform: "ios" }, { platform: "ios", deviceId: "iphone" }])(
     "does not seed an implicit selector from the socket's previous binding: %j",
-    (args) => {
+    async (args) => {
       const server = createServer();
       bindSocketToSessionA(server, "socket-A");
-      const resolved = route(
+      const resolved = await route(
         server,
-        { id: "selector", method: "tools/call", params: { name: "observe", arguments: args } },
+        {
+          id: "selector",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: "observe", arguments: args },
+        },
         "socket-A",
       );
       expect(resolved.sessionUuid).toBeUndefined();
-      const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+      const forwarded = server.withAutolockKey(args, "socket-A", 1000);
       expect(forwarded.sessionUuid).toBeUndefined();
       expect(forwarded.__mcpSessionId).toBe("socket-A");
     },
   );
 
-  test("a pinned proxy's injected UUID keeps the bound transport", () => {
+  test("a pinned proxy's injected UUID keeps the bound transport", async () => {
     const server = createServer();
     bindSocketToSessionA(server, "socket-A");
     const args = {
@@ -182,13 +127,18 @@ describe("tools/call selector forwarding", () => {
       sessionUuid: "session-a",
       [DAEMON_BOUND_SESSION_PARAM]: "session-a",
     };
-    const resolved = route(
+    const resolved = await route(
       server,
-      { id: "pinned", method: "tools/call", params: { name: "observe", arguments: args } },
+      {
+        id: "pinned",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: args },
+      },
       "socket-A",
     );
     expect(resolved.sessionUuid).toBe("session-a");
-    const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+    const forwarded = server.withAutolockKey(args, "socket-A", 1000);
     const binding = new SessionToolBinding(resolved.sessionUuid);
     expect(() =>
       binding.resolveDeviceSessionUuid(undefined, forwarded, () => ({
@@ -198,16 +148,21 @@ describe("tools/call selector forwarding", () => {
     ).toThrow("device_outside_bound_session");
   });
 
-  test("preserves an explicit UUID matching the prior binding over a conflicting platform", () => {
+  test("preserves an explicit UUID matching the prior binding over a conflicting platform", async () => {
     const server = createServer();
     bindSocketToSessionA(server, "socket-A");
     const args = { sessionUuid: "session-a", platform: "ios" };
-    const resolved = route(
+    const resolved = await route(
       server,
-      { id: "explicit", method: "tools/call", params: { name: "observe", arguments: args } },
+      {
+        id: "explicit",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: args },
+      },
       "socket-A",
     );
-    const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+    const forwarded = server.withAutolockKey(args, "socket-A", 1000);
     const binding = new SessionToolBinding(resolved.sessionUuid);
     expect(forwarded.sessionUuid).toBe("session-a");
     expect(

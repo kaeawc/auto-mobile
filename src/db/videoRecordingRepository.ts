@@ -2,19 +2,19 @@ import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { z } from "zod";
 import { getDatabase } from "./database";
 import type {
+  VideoCaptureTeardownDescriptor,
   VideoContainerFormat,
   VideoRecordingConfig,
   VideoRecordingHighlightEntry,
   VideoRecordingMetadata,
 } from "../models";
-import { parseVideoRecordingConfig } from "../features/video";
+import { parseVideoRecordingConfig } from "../models/VideoRecordingConfigParsing";
 import type {
   Database,
   NewVideoRecording,
   VideoRecordingUpdate,
   VideoRecording as DbVideoRecording,
 } from "./types";
-import type { VideoCaptureTeardownDescriptor } from "../features/video/VideoRecorderService";
 import { logger } from "../utils/logger";
 
 /**
@@ -107,27 +107,72 @@ function parseConfig(configJson: string): VideoRecordingConfig {
   }
 }
 
+const highlightTimelineSchema = z.object({
+  appearedAtSeconds: z.number().finite(),
+  disappearedAtSeconds: z.number().finite().optional(),
+});
+
+// The shape payload is only rendered, never branched on here; require an object with a type tag.
+const highlightEntrySchema = z.custom<VideoRecordingHighlightEntry>((value) => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const { description, shape, timeline } = value as Record<string, unknown>;
+  return (
+    (description === undefined || typeof description === "string") &&
+    typeof shape === "object" &&
+    shape !== null &&
+    typeof (shape as { type?: unknown }).type === "string" &&
+    highlightTimelineSchema.safeParse(timeline).success
+  );
+});
+
+const panelSchema = z.object({
+  key: z.string(),
+  role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+});
+
+const transitionsSchema = z.array(
+  z.object({ atMs: z.number().finite(), from: panelSchema, to: panelSchema }),
+);
+
 function parseHighlights(
   highlightsJson: string | null,
 ): VideoRecordingHighlightEntry[] | undefined {
   if (!highlightsJson) {
     return undefined;
   }
+  let raw: unknown;
   try {
-    const parsed = JSON.parse(highlightsJson) as VideoRecordingHighlightEntry[];
-    return Array.isArray(parsed) ? parsed : undefined;
+    raw = JSON.parse(highlightsJson);
   } catch (error) {
     logger.warn(`[VideoRecordingRepository] Failed to parse highlights JSON: ${error}`);
     return undefined;
   }
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  // Entries drive overlay timing; drop malformed ones instead of handing them to the renderer.
+  const valid = raw.flatMap((entry): VideoRecordingHighlightEntry[] => {
+    const result = highlightEntrySchema.safeParse(entry);
+    if (!result.success) {
+      logger.warn(`[VideoRecordingRepository] Dropping invalid highlight: ${result.error.message}`);
+      return [];
+    }
+    return [result.data];
+  });
+  return valid;
 }
 
-function parseDisplayMetadata<T>(value: string | null): T | undefined {
+function parseDisplayMetadata<S extends z.ZodTypeAny>(
+  value: string | null,
+  schema: S,
+): z.infer<S> | undefined {
   if (!value) {
     return undefined;
   }
   try {
-    return JSON.parse(value) as T;
+    return schema.parse(JSON.parse(value));
   } catch (error) {
     logger.warn(`[VideoRecordingRepository] Failed to parse display metadata: ${error}`);
     return undefined;
@@ -182,12 +227,8 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
     lastAccessedAt: row.last_accessed_at,
     config: parseConfig(row.config_json),
     highlights: parseHighlights(row.highlights_json ?? null),
-    recordedPanel: parseDisplayMetadata<VideoRecordingMetadata["recordedPanel"]>(
-      row.recorded_panel_json,
-    ),
-    transitions: parseDisplayMetadata<VideoRecordingMetadata["transitions"]>(
-      row.display_transitions_json,
-    ),
+    recordedPanel: parseDisplayMetadata(row.recorded_panel_json, panelSchema),
+    transitions: parseDisplayMetadata(row.display_transitions_json, transitionsSchema),
     ownerSessionUuid: row.owner_session_uuid ?? undefined,
   };
 }

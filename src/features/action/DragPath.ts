@@ -102,9 +102,11 @@ export class DragPath extends BaseVisualChange {
           options.display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         return await this.observedInteraction(
           () => this.drive(options, observation, call, displayId, assertCurrent),
@@ -119,7 +121,8 @@ export class DragPath extends BaseVisualChange {
         );
       }
       return await this.observedInteraction(
-        (observation) => this.drive(options, observation, call, undefined, undefined),
+        (observation, fence) =>
+          this.drive(options, observation, call, undefined, fence && (() => fence.assertCurrent())),
         { changeExpected: false, progress, perf, signal },
       );
     } finally {

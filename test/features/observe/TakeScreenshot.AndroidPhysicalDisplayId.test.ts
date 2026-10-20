@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -33,14 +34,17 @@ function captureBase64(
 }
 
 function configureDisplayFixtures(adb: FakeAdbExecutor): void {
-  adb.setCommandResponse("dumpsys SurfaceFlinger", {
-    stdout: readFileSync(`${fixtureDirectory}/surfaceflinger-two-displays.txt`, "utf8"),
-    stderr: "",
-  });
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout: readFileSync(`${fixtureDirectory}/cmd-display-two-displays.txt`, "utf8"),
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "dumpsys SurfaceFlinger",
+    createExecResult(
+      readFileSync(`${fixtureDirectory}/surfaceflinger-two-displays.txt`, "utf8"),
+      "",
+    ),
+  );
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(readFileSync(`${fixtureDirectory}/cmd-display-two-displays.txt`, "utf8"), ""),
+  );
 }
 
 function createScreenshot(
@@ -48,29 +52,26 @@ function createScreenshot(
   timer: FakeTimer,
   displayRevision: (deviceId: string) => number = () => 0,
 ): TakeScreenshot {
-  return new TakeScreenshot(
-    androidDevice("display-test-device"),
-    new FakeAdbClientFactory(adb),
+  return new TakeScreenshot(androidDevice("display-test-device"), {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    undefined,
-    screenshotWriter,
-    new FakeFileSystem(),
-    () => "/screenshots/cache",
-    new AndroidPhysicalDisplayIdResolver({ timer, displayRevision }),
-    undefined,
-    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-  );
+    fileWriter: screenshotWriter,
+    fileSystem: new FakeFileSystem(),
+    cacheDirResolver: () => "/screenshots/cache",
+    physicalDisplayIdResolver: new AndroidPhysicalDisplayIdResolver({ timer, displayRevision }),
+    pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+  });
 }
 
 describe("TakeScreenshot Android physical display selection", function () {
   test("uses a unique temp path for single-display screencap", async function () {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys SurfaceFlinger", {
-      stdout: `Display ${singleDisplayId} (HWC display 0): port=1`,
-      stderr: "",
-    });
-    adb.setCommandResponse("cmd display get-displays", { stdout: "", stderr: "" });
-    adb.setCommandResponse("screencap", { stdout: png.toString("base64"), stderr: "" });
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger",
+      createExecResult(`Display ${singleDisplayId} (HWC display 0): port=1`, ""),
+    );
+    adb.setCommandResponse("cmd display get-displays", createExecResult("", ""));
+    adb.setCommandResponse("screencap", createExecResult(png.toString("base64"), ""));
 
     const screenshot = createScreenshot(adb, new FakeTimer());
     await captureBase64(screenshot, "/screenshots/single.png");
@@ -92,12 +93,12 @@ describe("TakeScreenshot Android physical display selection", function () {
 
   test("caches a single-display result within the TTL", async function () {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys SurfaceFlinger", {
-      stdout: `Display ${singleDisplayId} (HWC display 0): port=1`,
-      stderr: "",
-    });
-    adb.setCommandResponse("cmd display get-displays", { stdout: "", stderr: "" });
-    adb.setCommandResponse("screencap", { stdout: png.toString("base64"), stderr: "" });
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger",
+      createExecResult(`Display ${singleDisplayId} (HWC display 0): port=1`, ""),
+    );
+    adb.setCommandResponse("cmd display get-displays", createExecResult("", ""));
+    adb.setCommandResponse("screencap", createExecResult(png.toString("base64"), ""));
     const timer = new FakeTimer();
     const screenshot = createScreenshot(adb, timer);
 
@@ -126,7 +127,7 @@ describe("TakeScreenshot Android physical display selection", function () {
   test("selects the default physical display on a multi-display device", async function () {
     const adb = new FakeAdbExecutor();
     configureDisplayFixtures(adb);
-    adb.setCommandResponse("screencap", { stdout: png.toString("base64"), stderr: "" });
+    adb.setCommandResponse("screencap", createExecResult(png.toString("base64"), ""));
 
     await captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/multi.png");
 
@@ -140,8 +141,8 @@ describe("TakeScreenshot Android physical display selection", function () {
     const firstPng = Buffer.concat([png, Buffer.from([1])]);
     const secondPng = Buffer.concat([png, Buffer.from([2])]);
     adb.setCommandResponseSequence("screencap", [
-      { stdout: firstPng.toString("base64"), stderr: "" },
-      { stdout: secondPng.toString("base64"), stderr: "" },
+      createExecResult(firstPng.toString("base64"), ""),
+      createExecResult(secondPng.toString("base64"), ""),
     ]);
     const written = new Map<string, Buffer>();
     const writer: ScreenshotFileWriter = {
@@ -150,18 +151,15 @@ describe("TakeScreenshot Android physical display selection", function () {
       },
       async remove(): Promise<void> {},
     };
-    const screenshot = new TakeScreenshot(
-      androidDevice("concurrent-capture-device"),
-      new FakeAdbClientFactory(adb),
-      new FakeTimer(),
-      new FakeIdGenerator(["capture-one", "capture-two"]),
-      writer,
-      new FakeFileSystem(),
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+    const screenshot = new TakeScreenshot(androidDevice("concurrent-capture-device"), {
+      adbFactory: new FakeAdbClientFactory(adb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["capture-one", "capture-two"]),
+      fileWriter: writer,
+      fileSystem: new FakeFileSystem(),
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
 
     await Promise.all([
       captureBase64(screenshot, "/screenshots/one.png"),
@@ -180,15 +178,15 @@ describe("TakeScreenshot Android physical display selection", function () {
 
   test("rejects decoded screencap data without the PNG signature", async function () {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("dumpsys SurfaceFlinger", {
-      stdout: `Display ${singleDisplayId} (HWC display 0): port=1`,
-      stderr: "",
-    });
-    adb.setCommandResponse("cmd display get-displays", { stdout: "", stderr: "" });
-    adb.setCommandResponse("screencap", {
-      stdout: Buffer.from("[Warning] Multiple displays detected").toString("base64"),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger",
+      createExecResult(`Display ${singleDisplayId} (HWC display 0): port=1`, ""),
+    );
+    adb.setCommandResponse("cmd display get-displays", createExecResult("", ""));
+    adb.setCommandResponse(
+      "screencap",
+      createExecResult(Buffer.from("[Warning] Multiple displays detected").toString("base64"), ""),
+    );
 
     await expect(
       captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/bad.png"),
@@ -197,10 +195,10 @@ describe("TakeScreenshot Android physical display selection", function () {
 
   test("strips warning text printed before base64 screencap output", async function () {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("screencap", {
-      stdout: `WARNING: display fallback\n${png.toString("base64")}`,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "screencap",
+      createExecResult(`WARNING: display fallback\n${png.toString("base64")}`, ""),
+    );
     const written = new Map<string, Buffer>();
     const writer: ScreenshotFileWriter = {
       async write(filePath, data): Promise<void> {
@@ -208,18 +206,15 @@ describe("TakeScreenshot Android physical display selection", function () {
       },
       async remove(): Promise<void> {},
     };
-    const screenshot = new TakeScreenshot(
-      androidDevice("warning-output-device"),
-      new FakeAdbClientFactory(adb),
-      new FakeTimer(),
-      new FakeIdGenerator(["warning"]),
-      writer,
-      new FakeFileSystem(),
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+    const screenshot = new TakeScreenshot(androidDevice("warning-output-device"), {
+      adbFactory: new FakeAdbClientFactory(adb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["warning"]),
+      fileWriter: writer,
+      fileSystem: new FakeFileSystem(),
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
 
     await captureBase64(screenshot, "/screenshots/warning.png");
 
@@ -321,7 +316,7 @@ describe("TakeScreenshot Android physical display selection", function () {
   test("TakeScreenshot refreshes physical display discovery after a revision bump", async function () {
     const adb = new FakeAdbExecutor();
     configureDisplayFixtures(adb);
-    adb.setCommandResponse("screencap", { stdout: png.toString("base64"), stderr: "" });
+    adb.setCommandResponse("screencap", createExecResult(png.toString("base64"), ""));
     let revision = 0;
     const screenshot = createScreenshot(adb, new FakeTimer(), () => revision);
 
@@ -364,8 +359,8 @@ describe("TakeScreenshot Android physical display selection", function () {
 
     function adbWithDisplays(stdout: string): FakeAdbExecutor {
       const adb = new FakeAdbExecutor();
-      adb.setCommandResponse("cmd display get-displays", { stdout, stderr: "" });
-      adb.setCommandResponse("screencap", { stdout: png.toString("base64"), stderr: "" });
+      adb.setCommandResponse("cmd display get-displays", createExecResult(stdout, ""));
+      adb.setCommandResponse("screencap", createExecResult(png.toString("base64"), ""));
       return adb;
     }
 
@@ -444,7 +439,7 @@ describe("TakeScreenshot Android physical display selection", function () {
       expect(lookups()).toHaveLength(1);
 
       // A display appears (hot-plug / fold transition) after the list was cached.
-      adb.setCommandResponse("cmd display get-displays", { stdout: foldDisplays, stderr: "" });
+      adb.setCommandResponse("cmd display get-displays", createExecResult(foldDisplays, ""));
       await captureBase64(screenshot, "/screenshots/two.png", { format: "png", displayId: 3 });
 
       expect(lookups()).toHaveLength(2);
@@ -484,7 +479,7 @@ describe("TakeScreenshot Android physical display selection", function () {
     test("leaves the default-display command unchanged when no display is requested", async function () {
       const adb = new FakeAdbExecutor();
       configureDisplayFixtures(adb);
-      adb.setCommandResponse("screencap", { stdout: png.toString("base64"), stderr: "" });
+      adb.setCommandResponse("screencap", createExecResult(png.toString("base64"), ""));
 
       await captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/default.png");
 

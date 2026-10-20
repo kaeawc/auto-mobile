@@ -11,14 +11,16 @@ import { createInstantFailureWebSocketFactory } from "../../fakes/FakeWebSocket"
 const device: BootedDevice = {
   deviceId: "shared-methods-test-device",
   platform: "android",
-  isEmulator: true,
   name: "Shared methods test device",
 };
 
 function createClients(timer: FakeTimer) {
   const factory = createInstantFailureWebSocketFactory(timer);
   return [
-    AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), factory, timer),
+    AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: factory,
+      timer,
+    }),
     IOSCtrlProxyClient.createForTesting({ ...device, platform: "ios" }, 8765, factory, timer),
   ] as const;
 }
@@ -124,7 +126,7 @@ describe("DeviceServiceClient shared methods", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     try {
       client.bindSession("shared-methods-session-a");

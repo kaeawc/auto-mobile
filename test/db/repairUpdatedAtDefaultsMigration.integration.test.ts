@@ -392,7 +392,7 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
     });
 
     test("is a no-op: a defaulted updated_at insert already stores a real timestamp", async () => {
-      await repairUp(db as unknown as Kysely<unknown>);
+      await repairUp(db);
       // Omit updated_at entirely — the fresh schema already carries the default.
       const rows = await sql<{ updated_at: string }>`
         INSERT INTO feature_flags (key) VALUES ('fresh') RETURNING updated_at
@@ -401,11 +401,10 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
     });
 
     test("runs as part of the real migration chain (migration is registered)", async () => {
-      const executed = await db
-        .selectFrom("kysely_migration" as never)
-        .select("name" as never)
-        .execute();
-      const names = executed.map((r: { name: string }) => r.name);
+      const { rows: executed } = await sql<{
+        name: string;
+      }>`SELECT name FROM kysely_migration`.execute(db);
+      const names = executed.map((r) => r.name);
       expect(names).toContain("2026_07_05_000_repair_updated_at_defaults");
     });
 

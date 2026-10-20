@@ -29,7 +29,7 @@ import org.junit.Test
  * hand-maintained list of the confirmed correlated-error consumers. Widening the scan to every file
  * in the package was considered and rejected: `WebSocketServer.kt` (the decode path, #2985)
  * constructs `ErrorResponse` for legitimate non-fallback reasons, so a package-wide rule would fire
- * on correct code. This is the same limit [BroadcastGuardAdoptionTest] documents for raw
+ * on correct code. This is the same limit [BroadcastGuardAdoptionTestSourceTest] documents for raw
  * `serviceScope.launch` — it "cannot distinguish such an action from the ~30 legitimate raw
  * launches without false positives" — and it is why [ServiceScopeGuard] closed that gap *by
  * construction* rather than by scanning. A text scanner is a backstop against reintroducing a known
@@ -547,70 +547,87 @@ object CorrelatedErrorDriftScanner {
    * inside a literal from opening a comment and blanking the real code after it.
    */
   private fun stripComments(source: String): String {
-    val out = StringBuilder(source.length)
+    return CommentStripper(source).strip()
+  }
+
+  private class CommentStripper(private val source: String) {
+    private val out = StringBuilder(source.length)
     // Kotlin block comments nest, so this is a depth counter rather than a flag: commenting out an
     // old implementation that contains its own KDoc must stay fully commented out, or the disabled
     // code gets scanned as live and fails CI on something that isn't even compiled.
-    var blockCommentDepth = 0
-    var inLineString = false
-    var inRawString = false
-    var inCharLiteral = false
-    var index = 0
+    private var blockCommentDepth = 0
+    private var inLineString = false
+    private var inRawString = false
+    private var inCharLiteral = false
+    private var index = 0
 
-    while (index < source.length) {
-      val char = source[index]
-      val next = source.getOrNull(index + 1)
-      val isRawDelimiter = char == '"' && next == '"' && source.getOrNull(index + 2) == '"'
+    fun strip(): String {
+      while (index < source.length) {
+        val char = source[index]
+        val next = source.getOrNull(index + 1)
+        val isRawDelimiter = char == '"' && next == '"' && source.getOrNull(index + 2) == '"'
+        when {
+          blockCommentDepth > 0 -> scanBlockComment(char, next)
+          inRawString -> scanRawString(char, isRawDelimiter)
+          inLineString || inCharLiteral -> scanLiteral(char, next)
+          else -> scanCode(char, next, isRawDelimiter)
+        }
+      }
+      return out.toString()
+    }
 
+    private fun scanBlockComment(char: Char, next: Char?) {
       when {
-        blockCommentDepth > 0 -> {
-          when {
-            char == '/' && next == '*' -> {
-              blockCommentDepth++
-              index += 2
-            }
-            char == '*' && next == '/' -> {
-              blockCommentDepth--
-              index += 2
-            }
-            else -> {
-              if (char == '\n') out.append(char)
-              index++
-            }
-          }
+        char == '/' && next == '*' -> {
+          blockCommentDepth++
+          index += 2
         }
-        // A raw string spans lines and honors no escapes; only `"""` closes it.
-        inRawString -> {
-          if (isRawDelimiter) {
-            inRawString = false
-            out.append("\"\"\"")
-            index += 3
-          } else {
-            out.append(char)
-            index++
-          }
+        char == '*' && next == '/' -> {
+          blockCommentDepth--
+          index += 2
         }
-        inLineString || inCharLiteral -> {
-          when {
-            char == '\\' -> {
-              out.append(char).append(next ?: ' ')
-              index += 2
-            }
-            // An unterminated literal cannot span a line; recover rather than swallow the file.
-            char == '\n' -> {
-              inLineString = false
-              inCharLiteral = false
-              out.append(char)
-              index++
-            }
-            else -> {
-              if (inLineString && char == '"') inLineString = false
-              if (inCharLiteral && char == '\'') inCharLiteral = false
-              out.append(char)
-              index++
-            }
-          }
+        else -> {
+          if (char == '\n') out.append(char)
+          index++
         }
+      }
+    }
+
+    private fun scanRawString(char: Char, isRawDelimiter: Boolean) {
+      if (isRawDelimiter) {
+        inRawString = false
+        out.append("\"\"\"")
+        index += 3
+      } else {
+        out.append(char)
+        index++
+      }
+    }
+
+    private fun scanLiteral(char: Char, next: Char?) {
+      when {
+        char == '\\' -> {
+          out.append(char).append(next ?: ' ')
+          index += 2
+        }
+        // An unterminated literal cannot span a line; recover rather than swallow the file.
+        char == '\n' -> {
+          inLineString = false
+          inCharLiteral = false
+          out.append(char)
+          index++
+        }
+        else -> {
+          if (inLineString && char == '"') inLineString = false
+          if (inCharLiteral && char == '\'') inCharLiteral = false
+          out.append(char)
+          index++
+        }
+      }
+    }
+
+    private fun scanCode(char: Char, next: Char?, isRawDelimiter: Boolean) {
+      when {
         char == '/' && next == '*' -> {
           blockCommentDepth++
           index += 2
@@ -639,7 +656,5 @@ object CorrelatedErrorDriftScanner {
         }
       }
     }
-
-    return out.toString()
   }
 }

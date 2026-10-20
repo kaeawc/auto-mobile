@@ -87,6 +87,8 @@ const nodeFileSystem: TccDatabaseFileSystem = { stat };
 export type SimulatorDeviceSetEnvironment = {
   [CORESIMULATOR_DEVICE_SET_PATH_ENV]?: string;
   [DAEMON_LAUNCH_CWD_ENV]?: string;
+  // Lets a full `process.env` satisfy this narrow view (Bun's ProcessEnv has no props in common otherwise).
+  [name: string]: string | undefined;
 };
 
 /**

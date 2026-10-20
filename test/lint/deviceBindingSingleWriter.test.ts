@@ -1,13 +1,16 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor, type AssignmentTarget, type Expression, type MemberExpression } from "oxc-parser";
+import { type AssignmentTarget, type Expression, type MemberExpression } from "oxc-parser";
 import {
   localBindings,
   parseGuardSource,
   relativePosix,
   typeScriptFiles,
   unwrapCallee,
+  guardTextMayMatch,
+  readGuardFile,
+  GuardVisitor as Visitor,
 } from "./astGuard";
 import preChangeWriters from "./fixtures/deviceBindingWriters.json";
 
@@ -31,14 +34,18 @@ const DEVICE_RECEIVERS = new Set([
 // releaseSessionAndDevice.ts funnel or DevicePool's own internal calls.
 const RELEASE_DEVICE_ALLOWLIST: Readonly<Record<string, number>> = {
   // Includes the unrelated installed-apps cache write coordinator's releaseDevice call.
-  "src/daemon/devicePool.ts": 7,
+  "src/daemon/devicePoolParts/allocationWiring.ts": 1,
+  "src/daemon/devicePoolParts/recoveryWiring.ts": 1,
+  "src/daemon/devicePoolParts/release.ts": 3,
+  "src/daemon/devicePoolParts/reporting.ts": 1,
+  "src/daemon/devicePoolParts/sessionRecovery.ts": 1,
   // Unrelated APIs sharing the name: prototype agent registry, viewer connections,
   // events, and the installed-apps cache write coordinator. These counts do not
   // permit new DevicePool release callers.
   "src/features/prototype/ios/prototypeViewerAttach.ts": 1,
   "src/server/appTools.ts": 2,
   "src/server/deviceToolsShutdown.ts": 1,
-  "src/server/prototypeTools.ts": 3,
+  "src/server/prototypeLifecycle.ts": 1,
 };
 
 function memberName(node: MemberExpression): string | undefined {
@@ -53,7 +60,14 @@ function memberName(node: MemberExpression): string | undefined {
 }
 
 function scan(file: string, source: string): { writes: string[]; releases: number } {
-  const program = parseGuardSource(file, source);
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /sessionId|status|health|releaseDevice/),
+  );
+  if (!program) {
+    return { writes: [], releases: 0 };
+  }
   const binding = localBindings(program);
   const writes: string[] = [];
   let releases = 0;
@@ -202,7 +216,19 @@ function scan(file: string, source: string): { writes: string[]; releases: numbe
     CallExpression(node) {
       const callee = unwrapCallee(node.callee);
       if (callee.type === "MemberExpression" && memberName(callee) === "releaseDevice") {
-        releases++;
+        // The facade and its connection port forward the same release, with no new caller.
+        // Only their exact rest-argument delegates are excluded; real calls still consume the inventory.
+        const forwarded =
+          (file === "src/daemon/devicePool.ts" ||
+            file === "src/daemon/devicePoolSeams.ts" ||
+            file === "src/daemon/devicePoolParts/release.ts") &&
+          node.arguments.length === 1 &&
+          node.arguments[0].type === "SpreadElement" &&
+          node.arguments[0].argument.type === "Identifier" &&
+          node.arguments[0].argument.name === "args";
+        if (!forwarded) {
+          releases++;
+        }
       }
       if (
         callee.type !== "MemberExpression" ||
@@ -274,7 +300,7 @@ describe("device binding single writer", () => {
   beforeAll(() => {
     for (const file of typeScriptFiles(path.join(ROOT, "src"))) {
       const relative = relativePosix(ROOT, file);
-      facts.set(relative, scan(relative, readFileSync(file, "utf8")));
+      facts.set(relative, scan(relative, readGuardFile(file)));
     }
   }, 20_000);
 

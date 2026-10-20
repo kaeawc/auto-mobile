@@ -12,10 +12,10 @@ import { up as displayUp } from "../../src/db/migrations/2026_09_30_000_video_re
 import { up as recorderUp } from "../../src/db/migrations/2026_10_13_000_video_recording_recorder_daemon";
 import { up as captureUp } from "../../src/db/migrations/2026_10_12_001_video_recording_capture_teardown";
 
-let db: Kysely<unknown>;
+let db: Kysely<Database>;
 let repo: VideoRecordingRepository;
 beforeEach(async () => {
-  db = new Kysely<unknown>({
+  db = new Kysely<Database>({
     dialect: new BunSqliteDialect({ database: new BunDatabase(":memory:") }),
   });
   for (const up of [baseUp, highlightsUp, ownerUp, displayUp, captureUp]) {
@@ -28,7 +28,7 @@ beforeEach(async () => {
   await sql`INSERT INTO device_sessions VALUES ('peer-owner', 'released', 'peer-daemon')`.execute(
     db,
   );
-  repo = new VideoRecordingRepository(db.withTables<Database>());
+  repo = new VideoRecordingRepository(db);
 });
 afterEach(async () => {
   await db.destroy();
@@ -61,7 +61,7 @@ async function insert(recorder: string | null, ownerSessionUuid?: string) {
 import {
   redriveUnconfirmedCaptureTeardowns,
   type RecordingTeardownRedriveDeps,
-} from "../../src/server/recordingTeardownRedrive";
+} from "../../src/daemon/recordingTeardownRedrive";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
@@ -74,6 +74,7 @@ for (const owner of [undefined, "peer-owner"]) {
     const manager = {
       markDeviceNeedsRecorderTeardown: (_id: string, retry: () => Promise<void>) => {
         retries.push(retry);
+        return () => {};
       },
       getSessionForDevice: () => null,
       onSessionRelease: () => {},
@@ -114,6 +115,7 @@ test.each([undefined, "peer-owner"])(
     const manager = {
       markDeviceNeedsRecorderTeardown: (_id: string, retry: () => Promise<void>) => {
         retries.push(retry);
+        return () => {};
       },
       getSessionForDevice: () => null,
       onSessionRelease: () => {},
@@ -161,6 +163,7 @@ test("dead recorder is still marked and force stopped", async () => {
     {
       markDeviceNeedsRecorderTeardown: (_id, retry) => {
         retries.push(retry);
+        return () => {};
       },
       getSessionForDevice: () => null,
       onSessionRelease: () => {},

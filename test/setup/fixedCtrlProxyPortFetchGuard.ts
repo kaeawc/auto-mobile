@@ -39,17 +39,20 @@ export function installFixedCtrlProxyPortFetchGuard(
   getTestFile: () => string,
 ): void {
   const original = target.fetch;
-  const guarded = ((input: unknown, init?: unknown) => {
-    if (isUnitTestPath(getTestFile()) && isFixedCtrlProxyPortUrl(input)) {
-      return Promise.reject(
-        new TypeError(
-          `Unable to connect: unit tests must not dial fixed CtrlProxy host ports (${String(
-            (input as { url?: string }).url ?? input,
-          )}); inject a fake fetch (#11106)`,
-        ),
-      );
-    }
-    return (original as (...args: unknown[]) => Promise<Response>)(input, init);
-  }) as unknown as typeof fetch;
+  const guarded = Object.assign(
+    (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (isUnitTestPath(getTestFile()) && isFixedCtrlProxyPortUrl(input)) {
+        return Promise.reject(
+          new TypeError(
+            `Unable to connect: unit tests must not dial fixed CtrlProxy host ports (${String(
+              input instanceof Request ? input.url : input,
+            )}); inject a fake fetch (#11106)`,
+          ),
+        );
+      }
+      return original(input, init);
+    },
+    { preconnect: original.preconnect },
+  );
   target.fetch = guarded;
 }

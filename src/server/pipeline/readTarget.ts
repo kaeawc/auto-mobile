@@ -4,16 +4,21 @@ import {
   matchRunningReadTarget,
   isProvidedReadTargetNotFound,
 } from "../../devices/runningReadTarget";
-import { AmbiguousDeviceTargetError } from "../ambiguousDeviceTargetRefusal";
+import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
 import {
   type ConnectedPlatformScan,
   type DeviceReadyOptions,
-} from "../../devices/DeviceSessionManager";
+} from "../../daemon/readiness/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform, type DeviceInfo } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { UnissuedSessionError, type Session } from "../../daemon/sessionManager";
-import { DaemonState } from "../../daemon/daemonState";
+import {
+  UnissuedSessionError,
+  type Session,
+  type SessionManager,
+} from "../../daemon/sessionManager";
+import type { DevicePoolReads } from "../../daemon/daemonContext";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../../utils/factories/PlatformDeviceManagerFactory";
 import {
@@ -28,17 +33,17 @@ import { didSourceSucceedForDevice } from "../../utils/discoverySource";
 import { bindingPoolGate } from "../../daemon/sessionBroker/provisioning/poolGate";
 import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../../daemon/inputDeviceOwnership";
 import { DeviceAssignedToBindingError } from "../../daemon/sessionBroker/provisioning/refusal";
-import { DeviceOwnedByOtherDaemonError } from "../../daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
 import {
   assertControlNotOnForeignDaemonDevice,
   deviceReservedForRestartRecoveryError,
 } from "../../daemon/inputDeviceOwnership";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { INTERNAL_NO_DIFF_PARAM } from "../internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/internalToolCall";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
-import { combineAbortSignals, runWithAbortSignal } from "../../utils/AbortContext";
-import { executionTracker } from "../executionTracker";
+import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
+import { executionTracker } from "../../daemon/executionTracker";
 import type {
   SessionlessDeviceRead,
   DeviceAwareToolOptions,
@@ -75,13 +80,19 @@ export async function resolveSessionlessDeviceRead(
   };
 }
 
+/** The pool and session views together, or undefined when the daemon is not initialized. */
+function initializedDaemonViews() {
+  const pool = defaultDaemonContext.devicePool();
+  const sessions = defaultDaemonContext.sessionManager();
+  return pool && sessions ? { pool, sessions } : undefined;
+}
+
 /** A restart reservation forbids read booting even for the reservation's owner. */
 function readRestartReservation(deviceIds: readonly string[], platform: unknown) {
-  const state = DaemonState.getInstance();
-  if (!state.isInitialized()) {
+  const pool = defaultDaemonContext.devicePool();
+  if (!pool) {
     return undefined;
   }
-  const pool = state.getDevicePool();
   for (const p of bindingPlatformsFor(undefined, platform)) {
     const reservation = pool.restartReservationForStart?.(p, deviceIds, {});
     if (reservation) {
@@ -387,14 +398,17 @@ export async function isSessionlessReadTargetHeld(
   signal?: AbortSignal,
 ): Promise<boolean> {
   const { deviceId, platform: requestedPlatform, now } = input;
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const views = initializedDaemonViews();
+  if (!views) {
     return false;
   }
-  if (readRestartReservation([deviceId], requestedPlatform) || isDeviceHeld(deviceId)) {
+  const { pool, sessions } = views;
+  if (
+    readRestartReservation([deviceId], requestedPlatform) ||
+    isDeviceHeld(deviceId, pool, sessions)
+  ) {
     return true;
   }
-  const pool = daemonState.getDevicePool();
   try {
     const unidentified = await unidentifiedToolTargetRow(
       { deviceId, platform: requestedPlatform, readOnly: true, now },
@@ -406,7 +420,7 @@ export async function isSessionlessReadTargetHeld(
         pool,
         unidentified,
         false,
-        frameHeldSessionsFrom(daemonState.getSessionManager()),
+        frameHeldSessionsFrom(sessions),
       ))
     ) {
       return true;
@@ -451,22 +465,20 @@ export function foreignDeviceRead(
   sessionUuid: string | undefined,
   providedDeviceId: string | undefined,
 ): string | undefined {
-  if (!sessionUuid || !providedDeviceId || !DaemonState.getInstance().isInitialized()) {
+  const sessions =
+    sessionUuid && providedDeviceId ? defaultDaemonContext.sessionManager() : undefined;
+  if (!sessionUuid || !providedDeviceId || !sessions) {
     return undefined;
   }
-  const assignedDevice = DaemonState.getInstance()
-    .getSessionManager()
-    .findSession(sessionUuid)?.assignedDevice;
+  const assignedDevice = sessions.findSession(sessionUuid)?.assignedDevice;
   return assignedDevice && assignedDevice !== providedDeviceId ? providedDeviceId : undefined;
 }
 
 /** A gated holder's read watches its assigned device without admission or readiness. */
 export function gatedReadSessionDevice(sessionUuid: string | undefined): string | undefined {
-  const state = DaemonState.getInstance();
-  return sessionUuid &&
-    state.isInitialized() &&
-    state.getDevicePool().bindingOwnershipGate(sessionUuid)
-    ? state.getSessionManager().findSession(sessionUuid)?.assignedDevice
+  const views = sessionUuid ? initializedDaemonViews() : undefined;
+  return sessionUuid && views?.pool.bindingOwnershipGate(sessionUuid)
+    ? views.sessions.findSession(sessionUuid)?.assignedDevice
     : undefined;
 }
 
@@ -481,13 +493,15 @@ export async function admitReadSession(
   sessionUuid: string,
   execution: { executionId: string; startTime: number } | undefined,
 ): Promise<Session | null | undefined> {
-  if (!DaemonState.getInstance().isInitialized()) {
+  const sessions = defaultDaemonContext.sessionManager();
+  if (!sessions) {
     return undefined;
   }
   try {
-    const session = await DaemonState.getInstance()
-      .getSessionManager()
-      .admitIssuedSessionForAutomation(sessionUuid, execution, { access: "read-only" });
+    const session = await sessions.admitIssuedSessionForAutomation(sessionUuid, execution, {
+      access: "read-only",
+      signal: getAbortSignal(),
+    });
     return session?.assignedDevice ? session : null;
   } catch (error) {
     if (error instanceof UnissuedSessionError) {
@@ -506,16 +520,18 @@ export function lateReadSessionDevice(
   execution: { executionId: string; startTime: number } | undefined,
 ): string | undefined {
   return sessionUuid
-    ? DaemonState.getInstance().getSessionManager().deviceHeldForLateRead(sessionUuid, execution)
+    ? defaultDaemonContext.requireSessionManager().deviceHeldForLateRead(sessionUuid, execution)
     : undefined;
 }
 
 /** A device another session holds: a live owner, or an autolock holder. */
-function isDeviceHeld(deviceId: string): boolean {
-  const daemonState = DaemonState.getInstance();
+function isDeviceHeld(
+  deviceId: string,
+  pool: Pick<DevicePoolReads, "getDevice">,
+  sessions: Pick<SessionManager, "getSessionForDevice">,
+): boolean {
   return Boolean(
-    daemonState.getSessionManager().getSessionForDevice(deviceId) ??
-    daemonState.getDevicePool().getDevice(deviceId)?.autolockSessionId,
+    sessions.getSessionForDevice(deviceId) ?? pool.getDevice(deviceId)?.autolockSessionId,
   );
 }
 
@@ -538,11 +554,10 @@ export function resolveCallerDeviceIds<T extends Record<string, unknown>>(
   args: T,
   request: { control: boolean; signal?: AbortSignal; timer?: Timer },
 ): T | Promise<T> {
-  const daemonState = DaemonState.getInstance();
-  if (!toolCallNamesDeviceId(args) || !daemonState.isInitialized()) {
+  const pool = toolCallNamesDeviceId(args) ? defaultDaemonContext.devicePool() : undefined;
+  if (!pool) {
     return args;
   }
-  const pool = daemonState.getDevicePool();
   if (
     args.platform === "ios" ||
     (typeof args.device === "object" &&
@@ -625,7 +640,7 @@ export function adoptHolderConnectionSession(args: Record<string, unknown>): voi
     typeof args.deviceId !== "string" ||
     nonBlankSessionUuid(args.sessionUuid) !== undefined ||
     args.device !== undefined ||
-    !DaemonState.getInstance().isInitialized()
+    !defaultDaemonContext.devicePool()
   ) {
     return;
   }
@@ -638,9 +653,9 @@ export function adoptHolderConnectionSession(args: Record<string, unknown>): voi
   if (!mcpSessionId) {
     return;
   }
-  const holderSessionUuid = DaemonState.getInstance()
-    .getDevicePool()
-    .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, args.deviceId);
+  const holderSessionUuid = defaultDaemonContext
+    .devicePool()
+    ?.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, args.deviceId);
   if (!holderSessionUuid) {
     return;
   }

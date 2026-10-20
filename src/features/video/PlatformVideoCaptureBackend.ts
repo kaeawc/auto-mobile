@@ -1,5 +1,6 @@
 import { DeviceUnreachableError } from "../../models/DeviceUnreachableError";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { unsupportedVideoPlatformError } from "./unsupportedVideoPlatformError";
 import { ActionableError, toActionableError, BootedDevice, ExecResult } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
@@ -26,7 +27,7 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { capBitrateKbps, VideoCaptureFinalizationError } from "./VideoRecorderService";
-import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
+import { ANDROID_SCREENRECORD_MAX_SECONDS, SCREENRECORD_MS } from "./androidScreenrecord";
 import {
   buildPidReportingScreenrecordArgs,
   isOwnRecorderCmdline,
@@ -267,10 +268,9 @@ export function clampBitrateKbps(config: VideoCaptureConfig): number {
  * every iOS device to `FfmpegVideoProcessingBackend`, whose `startIos` drives
  * `simctl … recordVideo` with the SIGINT + moov-atom flush + materialization wait
  * that a robust iOS capture needs. The former platform-native `simctl recordVideo`
- * branch here spawned the recorder with all stdio ignored, so a failed recording
- * surfaced only an exit code with no stderr to diagnose it — and it was unreachable
- * in production. It was removed rather than hardened (issue #4773); iOS callers are
- * rejected explicitly so a future mis-wire fails loudly instead of silently.
+ * branch here ignored all stdio, so a failed capture surfaced only an exit code, and it
+ * was unreachable in production; it was removed (issue #4773). iOS callers are rejected
+ * explicitly so a future mis-wire fails loudly instead of silently.
  */
 export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   constructor(
@@ -298,7 +298,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
     }
 
-    throw new ActionableError(`Unsupported platform for video recording: ${device.platform}`);
+    throw unsupportedVideoPlatformError(device.platform);
   }
 
   describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
@@ -376,7 +376,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     try {
       await raceWithDeadline(backendHandle.exitPromise, {
         timer: this.timer,
-        timeoutMs: 10000,
+        timeoutMs: SCREENRECORD_MS.gracefulExit,
         label: "Video capture graceful exit",
         timeoutError: () => gracefulExitTimeout,
         onTimeout: () => {
@@ -509,7 +509,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         logger.info(`[VideoCapture] Device recorder pid ${pid} SIGINT: ${outcome}`);
         return;
       }
-      const pk = await adb.executeCommand("shell pkill -2 screenrecord", { timeoutMs: 8000 });
+      const pk = await adb.executeCommand("shell pkill -2 screenrecord", SCREENRECORD_MS.pkillOpts);
       logger.info(
         `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`,
       );
@@ -525,7 +525,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * be our `screenrecord` (same unique output file) right before the kill so a reused
    * pid is never signalled; a pid that is gone or no longer ours reports "not-ours".
    */
-  private async signalDeviceRecorder(
+  async signalDeviceRecorder(
     adb: AdbExecutor,
     backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
@@ -598,7 +598,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     try {
       if (pid === undefined) {
-        await adb.executeCommand("shell pkill -9 screenrecord", { timeoutMs: 8000 });
+        await adb.executeCommand("shell pkill -9 screenrecord", SCREENRECORD_MS.pkillOpts);
       } else {
         await this.signalDeviceRecorder(adb, backendHandle, pid, 9);
       }
@@ -668,7 +668,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   ): Promise<number | null> {
     try {
       const result = await adb.executeCommand(`shell stat -c %s ${deviceTempPath}`, {
-        timeoutMs: 5000,
+        timeoutMs: SCREENRECORD_MS.probe,
         noRetry: true,
       });
       const parsed = Number.parseInt(result.stdout.trim(), 10);
@@ -753,7 +753,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       // than masking command/transport failures with `|| true`.
       const result = await adb.executeCommand(
         'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'',
-        { timeoutMs: 5000, noRetry: true },
+        { timeoutMs: SCREENRECORD_MS.probe, noRetry: true },
       );
       return (
         !result.error && result.stderr.trim() === "" && result.stdout.trim() === "pidof-status:1"
@@ -881,7 +881,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     try {
       await adb.execute(["shell", "rm", "-f", backendHandle.deviceTempPath], {
-        timeoutMs: 8000,
+        timeoutMs: SCREENRECORD_MS.tempFileRemove,
       });
     } catch (error) {
       logger.warn(`[VideoCapture] Device temp-file cleanup failed: ${error}`);
@@ -1050,7 +1050,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     await this.cleanupDeviceRecording(adb, { deviceTempPath }, false);
   }
 
-  private resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
+  resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
     if (maxDurationSeconds && maxDurationSeconds > 0) {
       return Math.min(maxDurationSeconds, ANDROID_SCREENRECORD_MAX_SECONDS);
     }

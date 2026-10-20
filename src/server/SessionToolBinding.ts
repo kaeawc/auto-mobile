@@ -2,13 +2,22 @@ import { nonBlankSessionUuid } from "./planCallerIdentity";
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "./deviceOutsideBoundSessionRefusal";
+} from "../daemon/deviceOutsideBoundSessionRefusal";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import {
+  SessionToolBindingStore,
+  type SessionToolBindingLocalState,
+} from "./sessionToolBindingStore";
 
-export class SessionToolBinding {
-  private readonly acquiredSessions = new Map<string | undefined, Set<string>>();
-  private readonly boundDeviceSessions = new Map<string, string>();
-  private readonly releasedDeviceSessions = new Map<string, string>();
+/**
+ * One server's view of the session-tool bindings. The `mcpSessionId` every method
+ * takes is the request's session key (#4678): bindings recorded under a key live in
+ * the {@link SessionToolBindingStore}, so every server sharing the store sees them.
+ * A keyless call uses this instance's direct slot (stdio has one connection).
+ */
+export class SessionToolBinding implements SessionToolBindingLocalState {
+  /** Sessions acquired on the keyless direct slot; keyed acquisitions live in the store. */
+  private readonly directAcquiredSessions = new Set<string>();
   private initialSessionUuid?: string;
   private releasedInitialSessionUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its device session here. */
@@ -17,7 +26,7 @@ export class SessionToolBinding {
   private initialToolSelectionProfileUuid?: string;
   /** The single stdio transport has no MCP session ID, so retain its profile here. */
   private directToolSelectionProfileUuid?: string;
-  private readonly toolSelectionProfiles = new Map<string, string>();
+  private readonly detachFromStore: () => void;
 
   constructor(
     initialSessionUuid?: string,
@@ -33,15 +42,23 @@ export class SessionToolBinding {
       sessionUuid: string,
       boundSessionUuid: string,
     ) => boolean = () => false,
+    /** Where keyed bindings live; a private store keeps them to this instance. */
+    private readonly store: SessionToolBindingStore = new SessionToolBindingStore(),
   ) {
     this.initialSessionUuid = initialSessionUuid;
     this.initialToolSelectionProfileUuid = initialToolSelectionProfileUuid;
     this.releasedInitialSessionUuid = initialReleasedSessionUuid;
+    this.detachFromStore = store.attach(this);
+  }
+
+  /** Stop receiving the store's release teardown; keyed bindings stay in the store. */
+  dispose(): void {
+    this.detachFromStore();
   }
 
   private boundSessionUuid(mcpSessionId: string | undefined): string | undefined {
     if (mcpSessionId) {
-      return this.boundDeviceSessions.get(mcpSessionId) ?? this.initialSessionUuid;
+      return this.store.boundSessionUuid(mcpSessionId) ?? this.initialSessionUuid;
     }
     return this.directDeviceSessionUuid ?? this.initialSessionUuid;
   }
@@ -144,12 +161,10 @@ export class SessionToolBinding {
     rebindFallback?: string,
     selectingActiveDevice = false,
   ): string | undefined {
-    const candidates = [...(this.acquiredSessions.get(mcpSessionId) ?? [])].flatMap(
-      (sessionUuid) => {
-        const device = lookup(sessionUuid);
-        return device ? [{ sessionUuid, ...device }] : [];
-      },
-    );
+    const candidates = [...this.acquiredSessionUuids(mcpSessionId)].flatMap((sessionUuid) => {
+      const device = lookup(sessionUuid);
+      return device ? [{ sessionUuid, ...device }] : [];
+    });
     if (candidates.length === 0) {
       // With no live acquired device, let ordinary device discovery resolve the selector.
       return undefined;
@@ -182,10 +197,16 @@ export class SessionToolBinding {
     );
   }
 
+  private acquiredSessionUuids(mcpSessionId: string | undefined): ReadonlySet<string> {
+    return mcpSessionId
+      ? this.store.acquiredSessionUuids(mcpSessionId)
+      : this.directAcquiredSessions;
+  }
+
   ownsSession(mcpSessionId: string | undefined, sessionUuid: string): boolean {
     return (
       this.initialSessionUuid === sessionUuid ||
-      this.acquiredSessions.get(mcpSessionId)?.has(sessionUuid) === true
+      this.acquiredSessionUuids(mcpSessionId).has(sessionUuid)
     );
   }
 
@@ -213,7 +234,7 @@ export class SessionToolBinding {
       return undefined;
     }
     if (mcpSessionId) {
-      return this.releasedDeviceSessions.get(mcpSessionId) ?? this.releasedInitialSessionUuid;
+      return this.store.releasedSessionUuid(mcpSessionId) ?? this.releasedInitialSessionUuid;
     }
     return this.releasedDirectDeviceSessionUuid ?? this.releasedInitialSessionUuid;
   }
@@ -237,7 +258,7 @@ export class SessionToolBinding {
   /** Connection-scoped profile, deliberately independent of routing sessions. */
   connectionToolSelectionProfileUuid(mcpSessionId: string | undefined): string | undefined {
     return mcpSessionId
-      ? (this.toolSelectionProfiles.get(mcpSessionId) ?? this.initialToolSelectionProfileUuid)
+      ? (this.store.toolSelectionProfileUuid(mcpSessionId) ?? this.initialToolSelectionProfileUuid)
       : (this.directToolSelectionProfileUuid ?? this.initialToolSelectionProfileUuid);
   }
 
@@ -248,25 +269,15 @@ export class SessionToolBinding {
     if (this.initialSessionUuid && sessionUuid !== this.initialSessionUuid) {
       return false;
     }
-    let acquired = this.acquiredSessions.get(mcpSessionId);
-    if (!acquired) {
-      acquired = new Set<string>();
-      this.acquiredSessions.set(mcpSessionId, acquired);
+    if (mcpSessionId) {
+      return this.store.bind(mcpSessionId, sessionUuid);
     }
-    acquired.add(sessionUuid);
-    if (!mcpSessionId) {
-      if (this.directDeviceSessionUuid === sessionUuid) {
-        return false;
-      }
-      this.directDeviceSessionUuid = sessionUuid;
-      this.releasedDirectDeviceSessionUuid = undefined;
-      return true;
-    }
-    if (this.boundDeviceSessions.get(mcpSessionId) === sessionUuid) {
+    this.directAcquiredSessions.add(sessionUuid);
+    if (this.directDeviceSessionUuid === sessionUuid) {
       return false;
     }
-    this.boundDeviceSessions.set(mcpSessionId, sessionUuid);
-    this.releasedDeviceSessions.delete(mcpSessionId);
+    this.directDeviceSessionUuid = sessionUuid;
+    this.releasedDirectDeviceSessionUuid = undefined;
     return true;
   }
 
@@ -286,16 +297,12 @@ export class SessionToolBinding {
       return false;
     }
     if (mcpSessionId) {
-      if (this.toolSelectionProfiles.get(mcpSessionId) === sessionUuid) {
-        return false;
-      }
-      this.toolSelectionProfiles.set(mcpSessionId, sessionUuid);
-    } else {
-      if (this.directToolSelectionProfileUuid === sessionUuid) {
-        return false;
-      }
-      this.directToolSelectionProfileUuid = sessionUuid;
+      return this.store.bindToolSelectionProfile(mcpSessionId, sessionUuid);
     }
+    if (this.directToolSelectionProfileUuid === sessionUuid) {
+      return false;
+    }
+    this.directToolSelectionProfileUuid = sessionUuid;
     return true;
   }
 
@@ -306,27 +313,25 @@ export class SessionToolBinding {
    * so a later sessionless `tools/list`/`tools/call` on the SAME MCP transport
    * stops enforcing the released session's (now stale) tool-selection profile.
    *
-   * Both binding origins are cleared: any per-transport map entry pointing at the
-   * session AND a seeded `initialSessionUuid` fallback that `effectiveSessionUuid`
-   * would otherwise still return. Idempotent — returns whether anything was
-   * actually removed, so callers can skip a redundant list-changed notification
-   * when a duplicate release signal arrives.
+   * Both binding origins are cleared: every keyed store entry pointing at the
+   * session (for every server sharing the store) AND this instance's seeded
+   * `initialSessionUuid` / direct-slot fallback that `effectiveSessionUuid` would
+   * otherwise still return. Idempotent — returns whether anything was actually
+   * removed, so callers can skip a redundant list-changed notification when a
+   * duplicate release signal arrives.
    */
   unbindSession(sessionUuid: string): boolean {
+    const removed = this.store.releaseSession(sessionUuid);
+    // A detached instance is not reached by the store; an attached one already was.
+    return this.releaseLocalSession(sessionUuid) || removed;
+  }
+
+  /** Clears this instance's seeded and direct-slot bindings for a released session. */
+  releaseLocalSession(sessionUuid: string): boolean {
     if (!sessionUuid) {
       return false;
     }
-    let removed = false;
-    for (const acquired of this.acquiredSessions.values()) {
-      removed = acquired.delete(sessionUuid) || removed;
-    }
-    for (const [mcpSessionId, boundSessionUuid] of this.boundDeviceSessions) {
-      if (boundSessionUuid === sessionUuid) {
-        this.boundDeviceSessions.delete(mcpSessionId);
-        this.releasedDeviceSessions.set(mcpSessionId, sessionUuid);
-        removed = true;
-      }
-    }
+    let removed = this.directAcquiredSessions.delete(sessionUuid);
     if (this.initialSessionUuid === sessionUuid) {
       this.initialSessionUuid = undefined;
       this.releasedInitialSessionUuid = sessionUuid;

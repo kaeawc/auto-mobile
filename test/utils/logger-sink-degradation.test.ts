@@ -1,30 +1,67 @@
 import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { EventEmitter } from "node:events";
+import { Writable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 useRealLogSinks();
 
+/** Shape-complete `fs.WriteStream` stand-in. It extends a real `Writable` and adds the
+ * members only `fs.WriteStream` has, so `createWriteStream` spies can return it uncast. */
+class FakeWriteStreamBase extends Writable {
+  bytesWritten = 0;
+  path = "fake.log";
+  pending = false;
+
+  close(callback?: (error?: NodeJS.ErrnoException | null) => void): void {
+    this.end(() => callback?.());
+  }
+
+  /** Resolves a (chunk, [encoding], [callback]) argument tail to its callback. */
+  protected static callbackOf(
+    encodingOrCallback: unknown,
+    callback: unknown,
+  ): ((error: Error | null | undefined) => void) | undefined {
+    const candidate = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+    return typeof candidate === "function" ? (error) => candidate(error) : undefined;
+  }
+}
+
 /** A stream that constructs successfully but can be made to fail later, the
  * way a real fd surfaces EACCES/ENOSPC asynchronously after open(). */
-class AsyncFailStream extends EventEmitter {
-  destroyed = false;
-  writable = true;
+class AsyncFailStream extends FakeWriteStreamBase {
+  /** When set, the next write fails the way a real fd does: callback error plus 'error'. */
+  failWritesWith: Error | undefined;
 
-  write(_chunk: unknown, callback?: (error: Error | null) => void): boolean {
-    queueMicrotask(() => callback?.(null));
+  override write(chunk: unknown, callback?: (error: Error | null | undefined) => void): boolean;
+  override write(
+    chunk: unknown,
+    encoding: BufferEncoding,
+    callback?: (error: Error | null | undefined) => void,
+  ): boolean;
+  override write(chunk: unknown, encodingOrCallback?: unknown, callback?: unknown): boolean {
+    const done = FakeWriteStreamBase.callbackOf(encodingOrCallback, callback);
+    queueMicrotask(() => {
+      const failure = this.failWritesWith;
+      if (failure) {
+        done?.(failure);
+        this.emit("error", failure);
+        return;
+      }
+      done?.(null);
+    });
     return true;
   }
 
-  end(callback?: () => void): void {
+  override end(callback?: () => void): this {
     queueMicrotask(() => {
       callback?.();
       // Model the fd release so closeLogStream (which awaits `close`, not the
       // end callback) resolves on a clean close — issue #6149.
       this.emit("close");
     });
+    return this;
   }
 }
 
@@ -33,22 +70,28 @@ class AsyncFailStream extends EventEmitter {
  * asserted deterministically instead of racing real fs/epoll timing.
  * `finish` (writable drained) and `close` (fd released) are modelled
  * separately, since closeLogStream must wait for the latter (issue #6149). */
-class ControllableStream extends EventEmitter {
-  destroyed = false;
-  writable = true;
+class ControllableStream extends FakeWriteStreamBase {
   ended = false;
   readonly writes: string[] = [];
   private endCallback: (() => void) | undefined;
 
-  write(chunk: unknown, callback?: (error: Error | null) => void): boolean {
+  override write(chunk: unknown, callback?: (error: Error | null | undefined) => void): boolean;
+  override write(
+    chunk: unknown,
+    encoding: BufferEncoding,
+    callback?: (error: Error | null | undefined) => void,
+  ): boolean;
+  override write(chunk: unknown, encodingOrCallback?: unknown, callback?: unknown): boolean {
     this.writes.push(String(chunk));
-    queueMicrotask(() => callback?.(null));
+    const done = FakeWriteStreamBase.callbackOf(encodingOrCallback, callback);
+    queueMicrotask(() => done?.(null));
     return true;
   }
 
-  end(callback?: () => void): void {
+  override end(callback?: () => void): this {
     this.ended = true;
     this.endCallback = callback;
+    return this;
   }
 
   /** Simulates the stream's fd having actually finished closing: writable
@@ -264,7 +307,7 @@ describe("logger sink degradation on async stream error (Codex P1 on #6210)", ()
     const createWriteStream = spyOn(fs, "createWriteStream");
     createWriteStream.mockImplementationOnce(() => {
       opened = new AsyncFailStream();
-      return opened as unknown as fs.WriteStream;
+      return opened;
     });
     createWriteStream.mockImplementation(() => {
       // The stream stays broken after the async failure: every retry also fails.
@@ -310,7 +353,7 @@ describe("logger sink degradation on async stream error (Codex P1 on #6210)", ()
     let opened: AsyncFailStream | undefined;
     const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
       opened = new AsyncFailStream();
-      return opened as unknown as fs.WriteStream;
+      return opened;
     });
     const stderr = spyStderr();
 
@@ -405,17 +448,9 @@ describe("logger degrades the record itself under a persistent write failure (Co
     // Drive callback + error delivery deterministically. Real Windows EISDIR
     // may arrive during teardown, making this assertion about OS event timing.
     const stream = new AsyncFailStream();
-    const failedWrite = spyOn(stream, "write").mockImplementation((_chunk, callback) => {
-      queueMicrotask(() => {
-        const error = new Error("EISDIR: write failed");
-        callback?.(error);
-        stream.emit("error", error);
-      });
-      return true;
-    });
-    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
-      stream as unknown as fs.WriteStream,
-    );
+    stream.failWritesWith = new Error("EISDIR: write failed");
+    const failedWrite = spyOn(stream, "write");
+    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(stream);
     const stderr = spyStderr();
 
     let mod: typeof import("../../src/utils/logger") | undefined;
@@ -499,7 +534,7 @@ describe("rotation waits for the old stream to fully close before reopening (#61
     const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
       const stream = new ControllableStream();
       opened.push(stream);
-      return stream as unknown as fs.WriteStream;
+      return stream;
     });
 
     // A macrotask tick — real fs I/O (stat/rename on a local tmp file)
@@ -532,7 +567,7 @@ describe("rotation waits for the old stream to fully close before reopening (#61
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       mod.logger.info("triggers rotation");
@@ -586,7 +621,7 @@ describe("writes are serialized across log rotation (#6149)", () => {
     const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
       const stream = new ControllableStream();
       opened.push(stream);
-      return stream as unknown as fs.WriteStream;
+      return stream;
     });
 
     // Real fs I/O (stat/rename on a tmp file) resolves via the libuv
@@ -608,7 +643,7 @@ describe("writes are serialized across log rotation (#6149)", () => {
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       // Record A triggers rotation; its close is withheld (finishClose deferred),
@@ -673,7 +708,7 @@ describe("joined writers recover from a failed shared rotation (#6149)", () => {
       if (opened.length === 2) {
         fs.truncateSync(targetLogFile, 0);
       }
-      return stream as unknown as fs.WriteStream;
+      return stream;
     });
 
     let mod: typeof import("../../src/utils/logger") | undefined;
@@ -688,7 +723,7 @@ describe("joined writers recover from a failed shared rotation (#6149)", () => {
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       // A starts rotation and B joins it before the injected rename failure.
@@ -725,7 +760,7 @@ describe("the oversized-file check itself is serialized, not just the rotation (
     const createWriteStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
       const stream = new ControllableStream();
       opened.push(stream);
-      return stream as unknown as fs.WriteStream;
+      return stream;
     });
     // `fs.existsSync` is called through the `fs` namespace object (unlike
     // io.ts's statAsync, which is destructured at import time
@@ -759,7 +794,7 @@ describe("the oversized-file check itself is serialized, not just the rotation (
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       mod.logger.info("record A triggers rotation");

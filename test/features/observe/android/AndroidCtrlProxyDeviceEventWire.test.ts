@@ -79,15 +79,14 @@ describe("Android CtrlProxy device event wire (#10067, #10068)", () => {
     client = AndroidCtrlProxyClient.createForTesting(
       { deviceId: DEVICE_ID, platform: "android", name: "Device Event Wire" },
       new FakeAdbExecutor(),
-      () => {
-        throw new Error("WebSocket connection is not needed for wire dispatch tests");
+      {
+        webSocketFactory: () => {
+          throw new Error("WebSocket connection is not needed for wire dispatch tests");
+        },
+        timer,
+        installedAppsRepository: repo,
+        sdkEventIngestor: ingestor,
       },
-      timer,
-      repo,
-      undefined,
-      undefined,
-      undefined,
-      ingestor,
     );
     client["workProfileMonitor"] = monitor;
   });

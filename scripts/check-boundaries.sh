@@ -25,17 +25,18 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 parallel_checks=(
   "bun scripts/check-process-safety.ts"
   "bun scripts/check-no-direct-plutil.ts"
-  "bash scripts/check-no-new-direct-git-metadata.sh"
-  "bash scripts/check-utils-import-direction.sh"
-  "bash scripts/check-tier-import-direction.sh"
-  "bash scripts/check-no-local-shell-quote.sh"
-  "bash scripts/check-app-bundle-metadata-boundary.sh"
-  "bash scripts/check-ffmpeg-execution-boundary.sh"
-  "bash scripts/check-child-process-import-boundary.sh"
-  "bash scripts/check-simulator-tcc-sqlite-boundary.sh"
-  "bash scripts/check-daemon-launcher-boundary.sh"
-  "bash scripts/check-android-emulator-boundary.sh"
-  "bash scripts/check-ios-ctrl-proxy-process-boundary.sh"
+  "bun scripts/check-mcp-sdk-boundary.ts"
+  "bun scripts/check-no-new-direct-git-metadata.ts"
+  "bun scripts/check-utils-import-direction.ts"
+  "bun scripts/check-tier-import-direction.ts"
+  "bun scripts/check-no-local-shell-quote.ts"
+  "bun scripts/check-app-bundle-metadata-boundary.ts"
+  "bun scripts/check-ffmpeg-execution-boundary.ts"
+  "bun scripts/check-child-process-import-boundary.ts"
+  "bun scripts/check-simulator-tcc-sqlite-boundary.ts"
+  "bun scripts/check-daemon-launcher-boundary.ts"
+  "bun scripts/check-android-emulator-boundary.ts"
+  "bun scripts/check-ios-ctrl-proxy-process-boundary.ts"
 )
 
 # Git-diff checks — must run serially to avoid `.git` lock contention.
@@ -64,8 +65,10 @@ trap 'rm -rf "$tmp"' EXIT
 run_one() {
   # $1 = tag (unique file prefix), $2 = command string (word-split intentionally)
   local out rc
-  # shellcheck disable=SC2086 # intentional word-split of "cmd arg" entries
-  out="$(${2} 2>&1)"
+  local -a command_words=()
+  # Entries are whitespace-separated words, not shell programs.
+  read -r -d '' -a command_words < <(printf '%s\0' "$2")
+  out="$(${command_words[@]+"${command_words[@]}"} 2>&1)"
   rc=$?
   printf '%s' "$out" > "$tmp/$1.out"
   printf '%s' "$rc" > "$tmp/$1.rc"

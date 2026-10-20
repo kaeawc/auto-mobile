@@ -1,5 +1,6 @@
 import type { HierarchyLayer } from "./HierarchyLayer";
 import type { ImagePointSource } from "./ImageRelativePoint";
+import type { PointerOption } from "./PointerOption";
 
 /** One screen point in the coordinate space the swipe selects. */
 export interface SwipeAtPoint {
@@ -26,6 +27,16 @@ interface SwipeAtGestureOptions {
   layer?: HierarchyLayer;
   /** Android panel key, role, or `active`; points are in that panel's coordinate space. */
   display?: string;
+  /** Stylus instead of a finger (Android 12+; #13081). */
+  pointer?: PointerOption;
+}
+
+/**
+ * Internal, never advertised: filled by `swipeAt` with the screen its absolute endpoints were
+ * resolved against, so a successful-call recording can store them as fractions of that screen.
+ */
+export interface SwipeAtRecordingContext {
+  screenSize?: { width: number; height: number };
 }
 
 export type SwipeAtOptions = SwipeAtGestureOptions &

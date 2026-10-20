@@ -8,7 +8,13 @@ import type { GestureExecutor } from "../../../../src/features/action/swipeon/ty
 import type { SwipeResult } from "../../../../src/models/SwipeResult";
 import type { BootedDevice, Element } from "../../../../src/models";
 import { VOICEOVER_STATE_UNKNOWN_WARNING } from "../../../../src/features/accessibility/interfaces/IosVoiceOverDetector";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+
+const ANDROID_DEVICE: BootedDevice = {
+  name: "emulator",
+  platform: "android",
+  deviceId: "emulator-5554",
+};
+const IOS_DEVICE: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "00001234-ABCD" };
 
 function makeSwipeResult(overrides: Partial<SwipeResult> = {}): SwipeResult {
   return {
@@ -34,7 +40,7 @@ function makeFakeGestureExecutor(): {
     options?: { duration?: number };
   }> = [];
   const executor: GestureExecutor = {
-    swipe: async (x1, y1, x2, y2, options, perf) => {
+    swipe: async (x1, y1, x2, y2, options) => {
       calls.push({ x1, y1, x2, y2, options });
       return makeSwipeResult({ x1, y1, x2, y2, duration: options?.duration ?? 300 });
     },
@@ -74,15 +80,15 @@ describe("VoiceOverSwipeExecutor", () => {
     );
     for (const returnSpeed of [1e-320, 0.02, Infinity, NaN]) {
       await expect(
-        executor.executeBoomerangGesture(
-          100,
-          500,
-          100,
-          200,
-          { duration: 300 },
-          { apexPauseMs: 100, returnSpeed },
+        executor.executeBoomerangGesture({
+          x1: 100,
+          y1: 500,
+          x2: 100,
+          y2: 200,
+          gestureOptions: { duration: 300 },
+          boomerang: { apexPauseMs: 100, returnSpeed },
           perf,
-        ),
+        }),
       ).rejects.toThrow(/returnSpeed/);
       expect(calls).toEqual([]);
       expect(fakeTimer.getSleepHistory()).toEqual([]);
@@ -95,23 +101,23 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "android", id: "emulator-5554" } as any,
+        ANDROID_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-      );
+      });
 
       expect(result.success).toBe(true);
       expect(calls).toHaveLength(1);
@@ -125,24 +131,24 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "android", id: "emulator-5554" } as any,
+        ANDROID_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-        { apexPauseMs: 50, returnSpeed: 1 },
-      );
+        boomerang: { apexPauseMs: 50, returnSpeed: 1 },
+      });
 
       expect(result.success).toBe(true);
       expect(calls).toHaveLength(2);
@@ -156,27 +162,27 @@ describe("VoiceOverSwipeExecutor", () => {
     test("forwards the injected featureFlags to isVoiceOverEnabled on iOS", async () => {
       const { executor } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
-      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", deviceId: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
         sentinelFlags,
       );
 
-      await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-      );
+      });
 
       expect(fakeVoiceOverDetector.isVoiceOverEnabledFeatureFlagsArgs[0]).toBe(sentinelFlags);
     });
@@ -188,23 +194,23 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-      );
+      });
 
       expect(result.success).toBe(true);
       expect(calls).toHaveLength(1);
@@ -216,24 +222,24 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-        { apexPauseMs: 100, returnSpeed: 1 },
-      );
+        boomerang: { apexPauseMs: 100, returnSpeed: 1 },
+      });
 
       expect(result.success).toBe(true);
       expect(calls).toHaveLength(2);
@@ -250,24 +256,24 @@ describe("VoiceOverSwipeExecutor", () => {
       controlledTimer.enableAutoAdvance();
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         controlledTimer,
       );
 
-      await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-        { apexPauseMs: 150, returnSpeed: 1 },
-      );
+        boomerang: { apexPauseMs: 150, returnSpeed: 1 },
+      });
 
       expect(controlledTimer.wasSleepCalled(150)).toBe(true);
     });
@@ -277,24 +283,24 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-        { apexPauseMs: 0, returnSpeed: 1 },
-      );
+        boomerang: { apexPauseMs: 0, returnSpeed: 1 },
+      });
 
       expect(fakeTimer.getSleepCallCount()).toBe(0);
     });
@@ -304,24 +310,24 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-        { apexPauseMs: 0, returnSpeed: 2 },
-      );
+        boomerang: { apexPauseMs: 0, returnSpeed: 2 },
+      });
 
       expect(calls).toHaveLength(2);
       // Return duration = 300 / 2 = 150
@@ -351,7 +357,17 @@ describe("VoiceOverSwipeExecutor", () => {
           fakeIosClient,
           fakeVoiceOverDetector,
           fakeTimer,
-        ).executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf, boomerang);
+        ).executeSwipeGesture({
+          x1: 100,
+          y1: 500,
+          x2: 100,
+          y2: 200,
+          direction: "up",
+          containerElement: null,
+          gestureOptions: { duration: 300 },
+          perf,
+          boomerang,
+        });
 
         expect(result.success).toBe(true);
         expect(calls).toHaveLength(expectedSwipes);
@@ -369,7 +385,16 @@ describe("VoiceOverSwipeExecutor", () => {
         fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
-      ).executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf);
+      ).executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
+        perf,
+      });
 
       expect(calls).toHaveLength(1);
       expect(result.warnings).toBeUndefined();
@@ -385,7 +410,16 @@ describe("VoiceOverSwipeExecutor", () => {
         fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
-      ).executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf);
+      ).executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
+        perf,
+      });
 
       expect(result.success).toBe(false);
       expect(calls).toHaveLength(0);
@@ -398,23 +432,23 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-      );
+      });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not supported");
@@ -430,22 +464,23 @@ describe("VoiceOverSwipeExecutor", () => {
       const container = makeContainerElement({ "resource-id": "com.example:id/list" });
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
+        fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "down",
-        container,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "down",
+        containerElement: container,
+        gestureOptions: { duration: 300 },
         perf,
-      );
+      });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not supported");
@@ -460,22 +495,23 @@ describe("VoiceOverSwipeExecutor", () => {
       const container = makeContainerElement({ "content-desc": "My Scrollable List" });
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
+        fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        container,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: container,
+        gestureOptions: { duration: 300 },
         perf,
-      );
+      });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not supported");
@@ -487,89 +523,75 @@ describe("VoiceOverSwipeExecutor", () => {
     // Both a failing container action (result success:false) and a throwing one
     // must yield the same conservative "not supported" fallback without touching
     // gestures, multi-finger swipes, or reporting a synthesized scroll. The rows
-    // preserve the original pair's distinctions: swipe direction and whether a
-    // FakeTimer is injected.
+    // preserve the original pair's distinction: swipe direction.
     test.each([
       {
         label: "a configured failing container action",
         direction: "down" as const,
         arrange: () =>
           fakeIosClient.setActionResult({ success: false, error: "Element not found" }),
-        withTimer: false,
       },
       {
         label: "a throwing container action",
         direction: "up" as const,
         arrange: () => fakeIosClient.setFailureMode("action", new Error("Connection lost")),
-        withTimer: true,
       },
-    ])(
-      "does not invoke $label while VoiceOver is active",
-      async ({ direction, arrange, withTimer }) => {
-        const { executor, calls } = makeFakeGestureExecutor();
-        fakeVoiceOverDetector.setVoiceOverEnabled(true);
-        arrange();
-        const container = makeContainerElement({ "resource-id": "com.example:id/list" });
+    ])("does not invoke $label while VoiceOver is active", async ({ direction, arrange }) => {
+      const { executor, calls } = makeFakeGestureExecutor();
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      arrange();
+      const container = makeContainerElement({ "resource-id": "com.example:id/list" });
 
-        const device = { platform: "ios", id: "00001234-ABCD" } as any;
-        const voiceOverExecutor = withTimer
-          ? new VoiceOverSwipeExecutor(
-              device,
-              executor,
-              fakeIosClient as any,
-              fakeVoiceOverDetector,
-              fakeTimer,
-            )
-          : new VoiceOverSwipeExecutor(
-              device,
-              executor,
-              fakeIosClient as any,
-              fakeVoiceOverDetector,
-            );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor(
+        IOS_DEVICE,
+        executor,
+        fakeIosClient,
+        fakeVoiceOverDetector,
+        fakeTimer,
+      );
 
-        const result = await voiceOverExecutor.executeSwipeGesture(
-          100,
-          500,
-          100,
-          200,
-          direction,
-          container,
-          { duration: 300 },
-          perf,
-        );
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction,
+        containerElement: container,
+        gestureOptions: { duration: 300 },
+        perf,
+      });
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain("not supported");
-        expect(result.fallbackReason).toContain("do not reach VoiceOver");
-        expect(calls).toHaveLength(0);
-        expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
-        expect(fakeIosClient.getActionHistory()).toHaveLength(0);
-      },
-    );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not supported");
+      expect(result.fallbackReason).toContain("do not reach VoiceOver");
+      expect(calls).toHaveLength(0);
+      expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(0);
+      expect(fakeIosClient.getActionHistory()).toHaveLength(0);
+    });
 
     test("does not report a successful VoiceOver boomerang from synthesized touches", async () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        { platform: "ios", id: "00001234-ABCD" } as any,
+        IOS_DEVICE,
         executor,
-        fakeIosClient as any,
+        fakeIosClient,
         fakeVoiceOverDetector,
         fakeTimer,
       );
 
-      const result = await voiceOverExecutor.executeSwipeGesture(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        null,
-        { duration: 300 },
+      const result = await voiceOverExecutor.executeSwipeGesture({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: null,
+        gestureOptions: { duration: 300 },
         perf,
-        { apexPauseMs: 100, returnSpeed: 1 },
-      );
+        boomerang: { apexPauseMs: 100, returnSpeed: 1 },
+      });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("boomerang");

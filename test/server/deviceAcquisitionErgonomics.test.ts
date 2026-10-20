@@ -5,7 +5,10 @@ import { registerUtilityTools } from "../../src/server/utilityTools";
 import {
   getActiveDeviceSelectionFromResult,
   getDeviceSessionIdFromResult,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Ergonomics fixes for the device-acquisition workflow (issue #5870).

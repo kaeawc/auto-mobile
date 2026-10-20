@@ -30,7 +30,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
       dialect: new BunSqliteDialect({ database: bunDb }),
     });
     // Base failures schema: non-unique idx_failure_groups_signature.
-    await failuresUp(db as unknown as Kysely<unknown>);
+    await failuresUp(db);
   });
 
   afterEach(async () => {
@@ -44,7 +44,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     totalCount: number;
     uniqueSessions: number;
     lastOccurrence?: number;
-    type?: string;
+    type?: "crash" | "anr" | "tool_failure" | "nonfatal";
   }): Promise<void> {
     await db
       .insertInto("failure_groups")
@@ -131,7 +131,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     await seedNotification("occ-a1", "A");
     await seedNotification("occ-b1", "B");
 
-    await uniqueUp(db as unknown as Kysely<unknown>);
+    await uniqueUp(db);
 
     const groups = await db.selectFrom("failure_groups").selectAll().execute();
     expect(groups).toHaveLength(1);
@@ -170,7 +170,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     await seedNotification("occ-a1", "A");
     await seedNotification("occ-b1", "B");
 
-    await uniqueUp(db as unknown as Kysely<unknown>);
+    await uniqueUp(db);
 
     const notifications = await db.selectFrom("failure_notifications").selectAll().execute();
     expect(notifications).toHaveLength(2);
@@ -202,7 +202,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     await seedOccurrence("occ-1", "aaa", "s1");
     await seedOccurrence("occ-2", "bbb", "s1");
 
-    await uniqueUp(db as unknown as Kysely<unknown>);
+    await uniqueUp(db);
 
     const groups = await db.selectFrom("failure_groups").selectAll().execute();
     expect(groups).toHaveLength(1);
@@ -218,7 +218,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
       uniqueSessions: 1,
     });
 
-    await uniqueUp(db as unknown as Kysely<unknown>);
+    await uniqueUp(db);
 
     await expect(
       seedGroup({
@@ -233,9 +233,9 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
 
   test("is a no-op safe on an empty database and idempotent when re-run", async () => {
     // Empty DB (no groups): must not throw and must create the unique index.
-    await uniqueUp(db as unknown as Kysely<unknown>);
+    await uniqueUp(db);
     // Re-running (as #2785's destructive-recovery replay would) must not throw.
-    await uniqueUp(db as unknown as Kysely<unknown>);
+    await uniqueUp(db);
 
     // Unique index is present and enforcing.
     await seedGroup({
@@ -264,8 +264,8 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
       totalCount: 1,
       uniqueSessions: 1,
     });
-    await uniqueUp(db as unknown as Kysely<unknown>);
-    await uniqueDown(db as unknown as Kysely<unknown>);
+    await uniqueUp(db);
+    await uniqueDown(db);
 
     // After down, a duplicate signature must be insertable again.
     await seedGroup({

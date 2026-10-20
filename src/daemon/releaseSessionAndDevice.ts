@@ -2,7 +2,7 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { executionTracker, type ExecutionTracker } from "../server/executionTracker";
+import { executionTracker, type ExecutionTracker } from "./executionTracker";
 
 export interface SessionExecutionCanceller {
   hasActiveSessionUuidExecutions(sessionId: string): boolean;

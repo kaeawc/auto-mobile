@@ -6,7 +6,7 @@ import { projectActionableHierarchy } from "../HierarchyNormalization";
 import { resolveIosObserveRotation } from "../iosObserveRotation";
 import { deriveIosScreenIdentity } from "../ios/IosScreenIdentity";
 import type { PlatformCollectionContext } from "./AndroidObservationCollector";
-import type { HierarchyCollector } from "./HierarchyCollector";
+import type { HierarchyCollectorPort } from "./collectorPorts";
 
 /** Platform-specific hierarchy collection and metadata derivation for iOS observations. */
 export interface IosObservationCollector {
@@ -14,7 +14,7 @@ export interface IosObservationCollector {
 }
 
 export interface IosObservationCollectorDeps {
-  hierarchyCollector: () => HierarchyCollector;
+  hierarchyCollector: () => HierarchyCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
 }
@@ -34,19 +34,16 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     readOptions,
   }: PlatformCollectionContext): Promise<void> {
     perf.serial("ios_collect");
-    await this.deps
-      .hierarchyCollector()
-      .collect(
-        result,
-        queryOptions,
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        signal,
-        readOnly,
-        capturedHierarchy,
-        readOptions,
-      );
+    await this.deps.hierarchyCollector().collect(result, {
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+      readOptions,
+    });
 
     this.applyIosScreenMetadata(result);
     this.applyIosInsetsAndRotation(result);

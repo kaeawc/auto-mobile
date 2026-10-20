@@ -9,10 +9,12 @@ import type {
   TouchTrackFailure,
 } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
-import { AndroidCtrlProxyClient } from "../../observe/android";
+import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
-import { discoverTouchNode } from "./TouchNodeDiscovery";
+import { discoverInputNodes } from "./InputNodeDiscovery";
+import type { TouchInputNode } from "./TouchNodeDiscovery";
 import { queryDensity, queryDisplaySize } from "./AxisRanges";
+import { normalizedAxis } from "../normalizedAxis";
 import { ROTATION_UNKNOWN_CAVEAT, ScreenGeometryTimeline } from "./ScreenGeometryTimeline";
 import {
   createAdbGeometryProbe,
@@ -95,7 +97,7 @@ export class DualTrackRecorder {
   private activeEmitter: GestureEmitter | null = null;
   private unsubscribeA11y: (() => void) | null = null;
   /** Reference to the real AndroidCtrlProxyClient when not in test mode */
-  private activeA11y: AndroidCtrlProxyClient | null = null;
+  private activeA11y: Pick<AndroidCtrlProxyClient, "notifyRecordingStopped"> | null = null;
   private stopped = false;
   private firstTouchTrackFailure?: TouchTrackFailure;
   /** Rotation/size timeline for the touch track; built at start in real mode (#10174). */
@@ -137,7 +139,7 @@ export class DualTrackRecorder {
   async start(): Promise<void> {
     // In real mode (no test override), obtain the AndroidCtrlProxyClient directly
     // so we can send start/stop recording notifications to the Kotlin service.
-    let a11yClient: AndroidCtrlProxyClient | undefined;
+    let a11yClient: AndroidCtrlProxy | undefined;
     if (!this.a11ySource) {
       a11yClient = AndroidCtrlProxyClient.getInstance(this.device);
     }
@@ -241,7 +243,9 @@ export class DualTrackRecorder {
   // Private: display geometry (rotation / size) during the recording
   // -------------------------------------------------------------------------
 
-  private subscribeDisplayChanges(a11yClient?: AndroidCtrlProxyClient): void {
+  private subscribeDisplayChanges(
+    a11yClient?: Pick<AndroidCtrlProxyClient, "onDisplayTransition">,
+  ): void {
     const source = this.displaySource ?? (a11yClient ? clientDisplaySource(a11yClient) : undefined);
     const geometry = this.geometry;
     if (source && geometry) {
@@ -664,10 +668,13 @@ export class DualTrackRecorder {
 
   private async createGetEventReader(): Promise<GestureEmitter> {
     const adb = defaultAdbClientFactory.create(this.device);
-    const node = await discoverTouchNode(adb);
+    const { touch, pen } = await discoverInputNodes(adb);
+    // A pen-only device records through its first digitizer.
+    const node = touch ?? pen[0];
     if (!node) {
       throw new Error("[DualTrackRecorder] No multitouch input device found on this device");
     }
+    const penNodes = touch ? pen : pen.slice(1);
     const density = await queryDensity(adb);
     const probe = createAdbGeometryProbe(adb);
     const display = await queryDisplaySize(adb);
@@ -679,28 +686,48 @@ export class DualTrackRecorder {
       caveats,
     );
     this.geometry = new DisplayGeometryTracker(timeline, probe, this.timer);
+    const penReaders = followWithPenTimelines(
+      timeline,
+      penNodes,
+      { rotation, display },
+      this.timer.now(),
+      caveats,
+    );
 
     const reader = new GetEventReader({
       adb,
       touchNode: node,
+      penNodes: penReaders,
       // Each touch is mapped with the geometry in force at its DOWN, not at recording start.
       scaler: timeline,
       density,
       timer: this.timer,
     });
-    const rotated = rotation % 2 !== 0;
-    const geometry = {
-      platform: "android" as const,
-      deviceWidth: rotated ? display.height : display.width,
-      deviceHeight: rotated ? display.width : display.height,
-      orientation: rotation,
-    };
-    return {
-      start: (onGesture, onError) =>
-        reader.start((event) => onGesture({ ...event, geometry }), onError),
-      stop: () => reader.stop(),
-    };
+    return withTimelineGeometry(reader, timeline, this.timer);
   }
+}
+
+/**
+ * Pen digitizers have their own raw ranges but share the display geometry, so each gets a
+ * timeline that mirrors the primary one.
+ */
+function followWithPenTimelines(
+  primary: ScreenGeometryTimeline,
+  penNodes: ReadonlyArray<TouchInputNode>,
+  initial: { rotation: number; display: { width: number; height: number } },
+  startedAt: number,
+  caveats: readonly string[],
+): Array<{ node: TouchInputNode; scaler: ScreenGeometryTimeline }> {
+  return penNodes.map((node) => {
+    const penTimeline = new ScreenGeometryTimeline(
+      { xMin: node.axisXMin, xMax: node.axisXMax, yMin: node.axisYMin, yMax: node.axisYMax },
+      initial,
+      startedAt,
+      caveats,
+    );
+    primary.follow(penTimeline);
+    return { node, scaler: penTimeline };
+  });
 }
 
 /**
@@ -729,7 +756,9 @@ async function readStartRotation(
  * Adapt the CtrlProxy client's single-slot display observer to a subscription,
  * chaining any observer already installed and restoring it on unsubscribe.
  */
-function clientDisplaySource(client: AndroidCtrlProxyClient): DisplayChangeSource {
+function clientDisplaySource(
+  client: Pick<AndroidCtrlProxyClient, "onDisplayTransition">,
+): DisplayChangeSource {
   return {
     onDisplayChange(listener) {
       const previous = client.onDisplayTransition;
@@ -902,11 +931,6 @@ function isDiagonalSwipe({ from, to }: SwipeEndpoints): boolean {
   return Math.min(dx, dy) >= Math.max(dx, dy) * DIAGONAL_SWIPE_MIN_OFF_AXIS_RATIO;
 }
 
-/** Four decimals keep a point within a quarter pixel on a 2400 px axis without float noise. */
-function normalizedAxis(value: number, size: number): number {
-  return Math.round(Math.min(1, Math.max(0, value / size)) * 10_000) / 10_000;
-}
-
 function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): PlanStep {
   const params: Record<string, unknown> = { from: endpoints.from, to: endpoints.to };
   const width = gesture.geometry?.deviceWidth;
@@ -1008,5 +1032,32 @@ function buildPinchStep(gesture: GestureEvent): PlanStep | null {
       direction: gesture.pinchDirection,
       scale: gesture.scale,
     },
+  };
+}
+
+/**
+ * Stamp each gesture with the display geometry in force at its DOWN, not the geometry at
+ * recording start, so tapAt provenance and swipeAt normalization survive a mid-recording
+ * rotation (#12880).
+ */
+export function withTimelineGeometry(
+  reader: GestureEmitter,
+  timeline: ScreenGeometryTimeline,
+  timer: Timer,
+): GestureEmitter {
+  return {
+    start: (onGesture, onError) =>
+      reader.start(
+        (event) =>
+          onGesture({
+            ...event,
+            geometry: {
+              platform: "android" as const,
+              ...timeline.geometryAt(event.downAt ?? timer.now()),
+            },
+          }),
+        onError,
+      ),
+    stop: () => reader.stop(),
   };
 }

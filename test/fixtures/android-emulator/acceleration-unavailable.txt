@@ -1,0 +1,4 @@
+INFO    | Android emulator version 36.1.9.0
+ERROR   | x86 emulation currently requires hardware acceleration!
+ERROR   | KVM is not available on this host.
+ERROR   | hypervisor acceleration is not supported

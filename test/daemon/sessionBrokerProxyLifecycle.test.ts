@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/constants";
 import type { SessionConfig } from "../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -167,6 +167,65 @@ describe("session broker proxy lifecycle", () => {
         params: { sessionId: SESSION, livenessOwnerToken: TOKEN, reason: "session_owner_exited" },
       },
     ]);
+  });
+
+  const releaseCalls = (clients: FakeDaemonClient[]) =>
+    clients
+      .flatMap((client) => client.callDaemonMethodCalls)
+      .filter(({ method }) => method === DAEMON_RELEASE_BROKER_SESSION_METHOD);
+
+  test("a reason-free close after stdin EOF still records session_owner_exited when the owner is gone (#12986)", async () => {
+    const { proxy, clients } = setup((method) =>
+      method === DAEMON_RELEASE_BROKER_SESSION_METHOD
+        ? { sessionUuid: SESSION, outcome: "cleanup_pending" }
+        : undefined,
+    );
+    expect(await proxy.acquireBrokerSession(config)).toEqual(ready);
+    // The owner died, but the 1 s owner poll has not noticed: EOF reaches close first.
+    proxy.setExecutionOwnerLossProbe(() => true);
+
+    await proxy.close();
+
+    expect(releaseCalls(clients)).toEqual([
+      {
+        method: DAEMON_RELEASE_BROKER_SESSION_METHOD,
+        params: { sessionId: SESSION, livenessOwnerToken: TOKEN, reason: "session_owner_exited" },
+      },
+    ]);
+  });
+
+  test("a live owner keeps an EOF close an ordinary release (#12986)", async () => {
+    const { proxy, clients } = setup((method) =>
+      method === DAEMON_RELEASE_BROKER_SESSION_METHOD
+        ? { sessionUuid: SESSION, outcome: "released" }
+        : undefined,
+    );
+    await proxy.acquireBrokerSession(config);
+    proxy.setExecutionOwnerLossProbe(() => false);
+
+    await proxy.close();
+
+    expect(releaseCalls(clients)).toEqual([
+      {
+        method: DAEMON_RELEASE_BROKER_SESSION_METHOD,
+        params: { sessionId: SESSION, livenessOwnerToken: TOKEN },
+      },
+    ]);
+  });
+
+  test("a throwing owner probe falls back to an ordinary release (#12986)", async () => {
+    const { proxy, clients } = setup();
+    await proxy.acquireBrokerSession(config);
+    proxy.setExecutionOwnerLossProbe(() => {
+      throw new Error("ps unavailable");
+    });
+
+    await proxy.close();
+
+    expect(releaseCalls(clients)[0]?.params).toEqual({
+      sessionId: SESSION,
+      livenessOwnerToken: TOKEN,
+    });
   });
 
   test("reconnect registers the exact durable receipt without private allocation keys", async () => {

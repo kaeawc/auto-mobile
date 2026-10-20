@@ -3,7 +3,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DeepLinkManager } from "../utility/DeepLinkManager";
 import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
-import { BaseVisualChange } from "./BaseVisualChange";
+import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
@@ -16,7 +16,7 @@ export class HandleIntentChooser extends BaseVisualChange {
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbClient instance for testing
+   * @param adb - Optional AdbExecutor instance for testing
    */
   constructor(
     device: BootedDevice,
@@ -24,20 +24,11 @@ export class HandleIntentChooser extends BaseVisualChange {
     deepLinkManagerFactory: (
       signal?: AbortSignal,
     ) => Pick<DeepLinkManager, "handleIntentChooser"> = (signal) =>
-      new DeepLinkManager(
-        device,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        timer,
-        signal,
-      ),
+      new DeepLinkManager(device, undefined, { timer, chooserSignal: signal }),
     timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
     this.device = device;
     this.deepLinkManagerFactory = deepLinkManagerFactory;
   }

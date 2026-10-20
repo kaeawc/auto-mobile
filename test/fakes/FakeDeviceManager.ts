@@ -1,9 +1,12 @@
+import { ActionableError } from "../../src/models/ActionableError";
 import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import {
   BootedDeviceDiscovery,
+  DeviceDestroyOptions,
   DeviceImageDiscovery,
   DeviceImageDiscoveryOptions,
+  DeviceShutdownOptions,
   DeviceStartResult,
   PlatformDeviceManager,
 } from "../../src/devices/deviceUtils";
@@ -109,9 +112,14 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     if (device.isRunning) {
       return true;
     }
-    const id = device.deviceId ?? device.name;
-    return this.bootedDevices.some(
-      (booted) => booted.deviceId === id || booted.name === device.name,
+    // As the real manager: an Android image is matched by AVD name (its serial is per-boot), an
+    // iOS simulator by UDID with a name fallback only for an image that has none.
+    return this.bootedDevices.some((booted) =>
+      device.platform === "android"
+        ? booted.platform === "android" && booted.name === device.name
+        : booted.platform === "ios" &&
+          (booted.deviceId === device.deviceId ||
+            (device.deviceId === undefined && booted.name === device.name)),
     );
   }
 
@@ -233,7 +241,32 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     };
   }
 
-  async killDevice(_: BootedDevice): Promise<void> {}
+  async killDevice(_: BootedDevice, _options?: DeviceShutdownOptions): Promise<void> {}
+
+  destroyedDevices: DeviceInfo[] = [];
+
+  /**
+   * Deleting a device image removes it from the image list, as the real manager does: an Android
+   * AVD is deleted by name, an iOS simulator by its exact UDID (two simulators may share a name,
+   * and a name-only iOS target is refused).
+   */
+  async destroyDevice(device: DeviceInfo, _options?: DeviceDestroyOptions): Promise<void> {
+    if (device.platform === "ios" && !device.deviceId) {
+      throw new ActionableError(
+        `Cannot delete iOS simulator '${device.name}' without a simulator UDID`,
+      );
+    }
+    this.destroyedDevices.push(device);
+    this.deviceImages = this.deviceImages.filter(
+      (image) =>
+        !(
+          image.platform === device.platform &&
+          (device.platform === "ios"
+            ? image.deviceId === device.deviceId
+            : image.name === device.name)
+        ),
+    );
+  }
 
   async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
     const id =

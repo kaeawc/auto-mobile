@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -5,14 +6,17 @@ import { ActionableError, BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { TalkBackToggle } from "../features/accessibility/TalkBackToggle";
 import { VoiceOverToggle } from "../features/accessibility/VoiceOverToggle";
-import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
+import {
+  FeatureFlagService,
+  type FeatureFlagReader,
+} from "../features/featureFlags/FeatureFlagService";
+import { accessibilityDetector } from "../ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../features/accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../utils/logger";
 import { accessibilityStateSchema } from "./toolOutputSchemas";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
 import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
@@ -40,7 +44,7 @@ type AccessibilityArgs = z.output<DeviceToolSchema<typeof accessibilityInput>>;
  * `enabled` is what the device reports, this says what the tools will treat it as. Force wins
  * over auto-detect-off, matching `resolveState`/`resolveVoiceOverState`.
  */
-function detectionOverride(featureFlags: FeatureFlagService): {
+function detectionOverride(featureFlags: FeatureFlagReader): {
   detectionOverride?: { mode: "forced-on" | "auto-detect-off"; effectiveEnabled: boolean };
 } {
   if (featureFlags.isEnabled("force-accessibility-mode")) {
@@ -64,11 +68,9 @@ async function toggleRecordingPreviousState<
   device: BootedDevice,
   args: AccessibilityArgs,
   run: (options: ScreenReaderToggleOptions) => Promise<R>,
+  daemon: DaemonContext = defaultDaemonContext,
 ): Promise<R> {
-  const manager =
-    args.sessionUuid && DaemonState.getInstance().isInitialized()
-      ? DaemonState.getInstance().getSessionManager()
-      : undefined;
+  const manager = args.sessionUuid ? daemon.sessionManager() : undefined;
   const platform = device.platform === "ios" ? "ios" : "android";
   return runSessionScreenReaderMutation(
     manager,
@@ -228,6 +230,7 @@ const accessibilityTool = defineDeviceTool({
     throw new ActionableError(`Unsupported platform: ${device.platform}`);
   },
   options: {
+    ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: accessibilityStateSchema,
     // The check form (no talkback/voiceover) reads (#10965); a toggle is control.

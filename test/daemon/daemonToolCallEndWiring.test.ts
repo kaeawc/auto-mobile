@@ -1,21 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Owner decision 2026-10-08: a session's idle window counts from the END of its last tool call.
 // The daemon wires the execution tracker's end-of-execution signal to the session manager, from
 // start() rather than the constructor (#10712).
-
-interface DaemonSessionTimerInternals {
-  /** What `start()` runs to subscribe the daemon to the global tracker (#10712). */
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
 
 describe("Daemon tool-call-end idle wiring", () => {
   afterEach(() => {
@@ -27,7 +21,7 @@ describe("Daemon tool-call-end idle wiring", () => {
 
   test("the end of a session's tool call restarts its idle window from that moment", async () => {
     const timer = new FakeTimer();
-    const daemon = new Daemon(
+    const daemon = new DaemonLifecycleHarness(
       {},
       {
         timer,
@@ -35,7 +29,6 @@ describe("Daemon tool-call-end idle wiring", () => {
       },
     );
     const sessionManager = daemon.getSessionManager();
-    const internals = daemon as unknown as DaemonSessionTimerInternals;
     try {
       const session = await sessionManager.createSession(
         "tool-call-end-wiring",
@@ -56,8 +49,8 @@ describe("Daemon tool-call-end idle wiring", () => {
       expect(session.expiresAt).toBe(createdExpiry);
 
       // start() subscribes; subscribing twice must not stack listeners.
-      internals.subscribeToolCallEndActivity();
-      internals.subscribeToolCallEndActivity();
+      daemon.subscribeToolCallEnd();
+      daemon.subscribeToolCallEnd();
 
       // A call refused at admission is not use (#10824): its end leaves the window alone.
       const refused = executionTracker.startExecution("tapOn", undefined, "tool-call-end-wiring");
@@ -76,14 +69,14 @@ describe("Daemon tool-call-end idle wiring", () => {
       expect(session.expiresAt).toBeGreaterThan(createdExpiry);
 
       // Shutdown unsubscribes: a later call end no longer reaches this daemon's sessions.
-      internals.stopSessionTimers();
+      daemon.stopTimers();
       const afterStop = executionTracker.startExecution("tapOn", undefined, "tool-call-end-wiring");
       executionTracker.markSessionAdmitted(afterStop.id);
       timer.advanceTime(10_000);
       executionTracker.endExecution(afterStop.id);
       expect(session.lastUsedAt).toBe(90_000);
     } finally {
-      internals.stopSessionTimers();
+      daemon.stopTimers();
     }
   });
 });

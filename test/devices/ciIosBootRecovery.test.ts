@@ -106,8 +106,7 @@ describe("CI iOS boot recovery", () => {
         }
         return createExecResult("", "");
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
 
     const configuration = await createCiIosBootConfiguration(

@@ -1,4 +1,4 @@
-import type { RawTouchFrame, GestureEvent } from "./types";
+import type { RawTouchFrame, GestureEvent, PointerToolType, StylusButton } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import type { CoordScaler, GestureScaler } from "./AxisRanges";
 
@@ -13,12 +13,31 @@ interface ContactInfo {
   /** Scaler in force when the contact went down; a rotation later does not change it. */
   scaler: CoordScaler;
   unknownAxes?: GestureEvent["unknownAxes"];
+  /** Pen/pressure observed over the contact; empty for plain finger contacts. */
+  pen: PenObservation;
+}
+
+interface PenObservation {
+  toolType?: PointerToolType;
+  buttons: Set<StylusButton>;
+  pressureCount: number;
+  pressureSum: number;
+  pressureMin: number;
+  pressureMax: number;
+}
+
+/** Axis range of the pressure axis from `getevent -p`; absent means raw units are reported. */
+export interface PressureRange {
+  min: number;
+  max: number;
 }
 
 interface LastTap {
   screenX: number;
   screenY: number;
   arrivedAt: number;
+  /** Pen tool of the tap; undefined for a finger. Taps by different tools never pair. */
+  toolType: PointerToolType | undefined;
 }
 
 interface PinchState {
@@ -57,6 +76,7 @@ export class GestureClassifier {
   constructor(
     private readonly scaler: GestureScaler,
     private readonly densityDp: number,
+    private readonly pressureRange?: PressureRange,
   ) {}
 
   private scalerAt(time: number): CoordScaler {
@@ -116,6 +136,14 @@ export class GestureClassifier {
   // -------------------------------------------------------------------------
 
   private updateContacts(frame: RawTouchFrame): void {
+    // A release packet can carry the contact's last move; only the position counts (pressure is 0).
+    for (const slot of frame.releasedFinalSamples ?? []) {
+      const existing = this.contacts.get(slot.slotId);
+      if (existing) {
+        existing.lastX = slot.x;
+        existing.lastY = slot.y;
+      }
+    }
     for (const slot of frame.activeSlots) {
       const existing = this.contacts.get(slot.slotId);
       if (existing) {
@@ -130,7 +158,10 @@ export class GestureClassifier {
         existing.lastX = slot.x;
         existing.lastY = slot.y;
         existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
+        observePen(existing.pen, slot);
       } else {
+        const pen = newPenObservation();
+        observePen(pen, slot);
         this.contacts.set(slot.slotId, {
           startX: slot.x,
           startY: slot.y,
@@ -139,6 +170,7 @@ export class GestureClassifier {
           lastY: slot.y,
           scaler: this.scalerAt(frame.arrivedAt),
           unknownAxes: slot.unknownAxes,
+          pen,
         });
       }
     }
@@ -172,7 +204,10 @@ export class GestureClassifier {
     }
 
     if (contact.unknownAxes?.length) {
-      return this.evaluateUnknownContact(contact, frame.arrivedAt);
+      return {
+        ...this.evaluateUnknownContact(contact, frame.arrivedAt),
+        ...this.penFields(contact),
+      };
     }
 
     const { x: downX, y: downY } = contact.scaler.toScreenPoint(contact.startX, contact.startY);
@@ -183,9 +218,40 @@ export class GestureClassifier {
 
     const gesture =
       displacement < slopPx
-        ? this.evaluateTapOrLongPress(downX, downY, durationMs, frame.arrivedAt)
+        ? this.evaluateTapOrLongPress(
+            downX,
+            downY,
+            durationMs,
+            frame.arrivedAt,
+            contact.pen.toolType,
+          )
         : this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
-    return { ...gesture, ...this.downStamp(contact) };
+    return { ...gesture, ...this.downStamp(contact), ...this.penFields(contact) };
+  }
+
+  /** Optional pen/pressure fields; empty (so the event keeps its finger shape) without pen data. */
+  private penFields(contact: ContactInfo): Partial<GestureEvent> {
+    const { toolType, buttons, pressureCount, pressureSum, pressureMin, pressureMax } = contact.pen;
+    const fields: Partial<GestureEvent> = {};
+    if (toolType) {
+      fields.toolType = toolType;
+    }
+    if (pressureCount > 0) {
+      const range = this.pressureRange;
+      const scale = (raw: number): number =>
+        Math.round((range ? clamp01((raw - range.min) / (range.max - range.min)) : raw) * 1e4) /
+        1e4;
+      fields.pressure = {
+        min: scale(pressureMin),
+        max: scale(pressureMax),
+        mean: scale(pressureSum / pressureCount),
+        normalized: range !== undefined,
+      };
+    }
+    if (buttons.size > 0) {
+      fields.buttons = [...buttons];
+    }
+    return fields;
   }
 
   private evaluateUnknownContact(contact: ContactInfo, arrivedAt: number): GestureEvent {
@@ -241,13 +307,14 @@ export class GestureClassifier {
     screenY: number,
     durationMs: number,
     arrivedAt: number,
+    toolType: PointerToolType | undefined,
   ): GestureEvent {
     if (durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS) {
       return { type: "longPress", arrivedAt, screenX, screenY, durationMs };
     }
 
     // Check for double-tap
-    if (this.lastTap) {
+    if (this.lastTap && this.lastTap.toolType === toolType) {
       const timeSinceLast = arrivedAt - this.lastTap.arrivedAt;
       const separation = dist(screenX, screenY, this.lastTap.screenX, this.lastTap.screenY);
       const slopPx = GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP * this.densityDp;
@@ -259,7 +326,7 @@ export class GestureClassifier {
       }
     }
 
-    this.lastTap = { screenX, screenY, arrivedAt };
+    this.lastTap = { screenX, screenY, arrivedAt, toolType };
     return { type: "tap", arrivedAt, screenX, screenY };
   }
 
@@ -319,4 +386,35 @@ function mergeUnknownAxes(
     return undefined;
   }
   return [...new Set([...(first ?? []), ...(second ?? [])])];
+}
+
+function newPenObservation(): PenObservation {
+  return {
+    buttons: new Set(),
+    pressureCount: 0,
+    pressureSum: 0,
+    pressureMin: Infinity,
+    pressureMax: -Infinity,
+  };
+}
+
+function observePen(pen: PenObservation, slot: RawTouchFrame["activeSlots"][number]): void {
+  if (slot.toolType) {
+    pen.toolType = slot.toolType;
+  }
+  for (const button of slot.buttons ?? []) {
+    pen.buttons.add(button);
+  }
+  // A zero pressure sample means "not reported" for fingers and "no force" for a pen; neither
+  // is a measurement worth averaging.
+  if (slot.pressure > 0) {
+    pen.pressureCount += 1;
+    pen.pressureSum += slot.pressure;
+    pen.pressureMin = Math.min(pen.pressureMin, slot.pressure);
+    pen.pressureMax = Math.max(pen.pressureMax, slot.pressure);
+  }
+}
+
+function clamp01(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
 }

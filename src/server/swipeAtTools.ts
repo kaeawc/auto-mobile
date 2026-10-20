@@ -1,28 +1,31 @@
 import { z } from "zod/v4";
+import { PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import type { BootedDevice } from "../models";
-import type { SwipeAtOptions } from "../models/SwipeAtOptions";
+import type { SwipeAtOptions, SwipeAtRecordingContext } from "../models/SwipeAtOptions";
+import { swipeAtResultSchema } from "./gestureToolOutputSchemas";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import {
   SWIPE_DURATION_MAX_MS,
   SWIPE_DURATION_MIN_MS,
   validateDurationMs,
 } from "../features/action/swipeon/swipeTiming";
-import { hierarchyLayerSchema } from "./elementSelectorSchemas";
+import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
+import { pointerSchema } from "./pointerSchema";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 
-export type SwipeAtArgs = SwipeAtOptions & {
-  platform?: "android" | "ios";
-  raw?: boolean;
-  project?: "full" | "skeleton";
+// The handler's arguments are the parsed wire schema; its exclusivity refinement (image xor
+// from/to) is narrowed where the options are built.
+export type SwipeAtArgs = z.output<typeof swipeAtSchema> & {
+  __swipeAtRecordingContext?: SwipeAtRecordingContext;
 };
 
 const swipeAtPointSchema = z
@@ -126,6 +129,7 @@ export const swipeAtSchema = withJsonSchemaOverride(
             "Target panel key, role, or active; from/to/image resolve against that panel's observed screenSize (Android only)",
           ),
         layer: hierarchyLayerSchema.optional(),
+        pointer: pointerSchema.optional(),
         platform: platformSchema.optional(),
         ...responseShapeControlFields,
       })
@@ -192,8 +196,9 @@ export function createSwipeAtHandler({
         durationMs: args.durationMs,
         layer: args.layer,
         display: args.display,
+        pointer: args.pointer,
       } as SwipeAtOptions,
-      { progress, signal },
+      { progress, signal, recordingContext: args.__swipeAtRecordingContext },
     );
     const message = result.success
       ? `Swiped from (${result.x1}, ${result.y1}) to (${result.x2}, ${result.y2})`
@@ -219,6 +224,11 @@ export function registerSwipeAtTools() {
     "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     swipeAtSchema,
     swipeAtHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: swipeAtResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 }

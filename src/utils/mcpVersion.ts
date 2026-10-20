@@ -2,11 +2,13 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { testOverrides } from "./testOverrides";
+import { tryOrElse } from "../models/tryOrElse";
 import {
   defaultGitMetadataClient,
   type GitMetadataClient,
   type GitVersionInfo,
 } from "./GitMetadataClient";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 export type { GitVersionInfo } from "./GitMetadataClient";
 
@@ -48,13 +50,14 @@ const findPackageJson = (startDir: string): string | null => {
 const moduleDir = (): string => path.dirname(fileURLToPath(import.meta.url));
 
 const readPackageName = (dir: string): string | null => {
-  try {
-    const raw = fs.readFileSync(path.join(dir, "package.json"), "utf-8");
-    return (JSON.parse(raw) as { name?: string }).name ?? null;
-  } catch {
-    // Version probing runs before logger setup; fall back to unstamped metadata.
-  }
-  return null;
+  // Version probing runs before logger setup; fall back to unstamped metadata.
+  return tryOrElse(
+    () => {
+      const raw = fs.readFileSync(path.join(dir, "package.json"), "utf-8");
+      return (JSON.parse(raw) as { name?: string }).name ?? null;
+    },
+    () => null,
+  );
 };
 
 const readPackageVersionFromDisk = (): string | null => {
@@ -62,14 +65,15 @@ const readPackageVersionFromDisk = (): string | null => {
   if (!packagePath) {
     return null;
   }
-  try {
-    const raw = fs.readFileSync(packagePath, "utf-8");
-    const parsed = JSON.parse(raw) as { version?: string };
-    return parsed.version ?? null;
-  } catch {
-    // Version probing runs before logger setup; fall back to other version sources.
-  }
-  return null;
+  // Version probing runs before logger setup; fall back to other version sources.
+  return tryOrElse(
+    () => {
+      const raw = fs.readFileSync(packagePath, "utf-8");
+      const parsed = JSON.parse(raw) as { version?: string };
+      return parsed.version ?? null;
+    },
+    () => null,
+  );
 };
 
 /**
@@ -151,8 +155,8 @@ export const getMcpServerVersion = (): string => {
 
   cachedVersion = resolveMcpServerVersion({
     env: {
-      MCP_SERVER_VERSION: process.env.MCP_SERVER_VERSION,
-      npm_package_version: process.env.npm_package_version,
+      MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
+      npm_package_version: readEnvRaw(AMBIENT_ENV.NPM_PACKAGE_VERSION),
     },
     readPackageVersion: readPackageVersionFromDisk,
     readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),

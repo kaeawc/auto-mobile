@@ -96,6 +96,7 @@ test("unchanged instants reuse their wall stamps; newer and stale instants still
     expiresAtMs: 100,
     sessionTimeoutMs: 90,
     heartbeatTimeoutMs: 10_000,
+    hasReceivedHeartbeat: false,
   });
   offset--;
   const activity = {
@@ -103,6 +104,7 @@ test("unchanged instants reuse their wall stamps; newer and stale instants still
     expiresAtMs: 100,
     sessionTimeoutMs: 90,
     heartbeatTimeoutMs: 10_000,
+    hasReceivedHeartbeat: false,
     livenessPolicy: "managed-execution" as const,
   };
   converted.length = 0;
@@ -156,12 +158,14 @@ test("stale activity preserves the newer stamp for a managed policy write under 
     expiresAtMs: 110,
     sessionTimeoutMs: 90,
     heartbeatTimeoutMs: 10_000,
+    hasReceivedHeartbeat: false,
   });
   const activity = {
     lastUsedAtMs: 20,
     expiresAtMs: 110,
     sessionTimeoutMs: 90,
     heartbeatTimeoutMs: 10_000,
+    hasReceivedHeartbeat: false,
   };
   const original = await repository.getSession(SESSION);
   converted.length = 0;

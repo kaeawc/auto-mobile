@@ -1,8 +1,9 @@
+import { makePool } from "../helpers/makePool";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -20,14 +21,12 @@ import type { DeviceSession } from "../../src/db/types";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { ActionableError } from "../../src/models/ActionableError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 
 /**
  * #6227: `createToolExecutionContext`'s persisted daemon-session path — a
@@ -63,13 +62,22 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     session_timeout_ms: 60_000,
     heartbeat_timeout_ms: 60_000,
     has_received_heartbeat: 1,
+    activity_seq: 0,
+    stable_identity_generation: 0,
+    heartbeat_timeout_source: null,
+    liveness_contract_generation: 0,
+    liveness_owner_token: null,
+    liveness_policy: null,
+    pre_cli_heartbeat_timeout_ms: null,
+    pre_cli_heartbeat_timeout_source: null,
+    pre_cli_session_timeout_ms: null,
+
     created_at: "2026-09-03T00:00:00.000Z",
     updated_at: "2026-09-03T00:00:00.000Z",
   });
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let daemonSessionManager: SessionManager | undefined;
   let ctrlProxyStub: CtrlProxySetupStub;
   let restoreInventory: () => void;
@@ -135,15 +143,11 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     daemonSessionManager.stopCleanupTimer();
     const incidents = new InMemoryEmulatorLossIncidentStore(timer);
     const manager = new FakeDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(daemonSessionManager, "new-daemon", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        emulatorLossIncidentStore: incidents,
-      }),
-    );
+    const pool = makePool(daemonSessionManager, "new-daemon", {
+      timer,
+      deviceManager: manager,
+      emulatorLossIncidentStore: incidents,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const targets: (SessionRecoveryTarget | undefined)[] = [];
     const assign = pool.assignDeviceToSession.bind(pool);
@@ -173,19 +177,19 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", {
-      async recordToolCall(): Promise<void> {},
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
+      },
     });
     ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
     restoreInventory();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
@@ -284,7 +288,9 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     expect(result.isError).toBe(true);
     expect(result).not.toHaveProperty("structuredContent");
     const payload = JSON.parse(result.content[0].text);
-    expect(payload).toEqual({ error: { message: error.message, ...details } });
+    expect(payload).toEqual({
+      error: { message: error instanceof Error ? error.message : String(error), ...details },
+    });
     expect(payload.error.message).toContain("(120 seconds remaining)");
     expect(payload.error.message.toLowerCase().match(/acquire a new device/g)).toHaveLength(1);
     expect(payload.error.message.indexOf("The session can still resume")).toBeLessThan(
@@ -300,7 +306,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       failure = error;
     });
     await drainUntilQuiescent(timer);
-    expect(targets[0]?.requestDeadlineMs).toBeUndefined();
+    expect(targets[0]).not.toHaveProperty("requestDeadlineMs");
     expect(targets[0]?.onRecoveryWait).toBeFunction();
     expect(targets[0]?.restartRecoveryDeadlineMs).toBe(DEFAULT_DEVICE_READY_TIMEOUT_MS);
     timer.advanceTime(2_499);
@@ -338,7 +344,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       failure = error;
     });
     await drainUntilQuiescent(timer);
-    expect(targets[0]?.requestDeadlineMs).toBeUndefined();
+    expect(targets[0]).not.toHaveProperty("requestDeadlineMs");
     timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS - 1);
     await drainUntilQuiescent(timer);
     expect(failure).toBeUndefined();
@@ -360,10 +366,10 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       const second = call(secondDeadline).catch((error: unknown) => error);
       await drainUntilQuiescent(timer);
       expect(targets).toHaveLength(2);
-      expect(targets[1]?.requestDeadlineMs).toBeUndefined();
+      expect(targets[1]).not.toHaveProperty("requestDeadlineMs");
       expect(targets[1]?.onRecoveryWait).toBeFunction();
       expect(targets[1]).not.toBe(targets[0]);
-      expect(targets[0]?.requestDeadlineMs).toBeUndefined();
+      expect(targets[0]).not.toHaveProperty("requestDeadlineMs");
       expect(targets[0]?.onRecoveryWait).toBeFunction();
       expect(await persistence.getSession(persisted.session_uuid)).not.toHaveProperty(
         "requestDeadlineMs",

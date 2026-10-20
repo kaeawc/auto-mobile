@@ -2,7 +2,11 @@ import { runWithAbortSignal } from "../../utils/AbortContext";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { BootedDevice, ShakeOptions, ShakeResult } from "../../models";
 import {
   SHAKE_DURATION_MAX_MS,
@@ -22,12 +26,19 @@ import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
 // Issue #10250 reports this as the emulator's default resting gravity vector.
 const FALLBACK_RESTING_ACCELERATION = "0:9.77622:0";
+/** Bound on the best-effort emulator sensor restore after a shake. */
+const SHAKE_RESTORE_TIMEOUT_MS = 1_000;
 
 export class Shake extends BaseVisualChange {
   private shakeTimer: Timer;
 
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
-    super(device, adb, timer);
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
+  ) {
+    super(device, adb, timer, undefined, collaborators);
     this.shakeTimer = timer;
   }
 
@@ -191,9 +202,13 @@ export class Shake extends BaseVisualChange {
         raceWithDeadline(
           () =>
             this.adb.executeCommand(`emu sensor set acceleration ${acceleration}`, {
-              timeoutMs: 1000,
+              timeoutMs: SHAKE_RESTORE_TIMEOUT_MS,
             }),
-          { timer: this.shakeTimer, timeoutMs: 1000, label: "Restore shake acceleration" },
+          {
+            timer: this.shakeTimer,
+            timeoutMs: SHAKE_RESTORE_TIMEOUT_MS,
+            label: "Restore shake acceleration",
+          },
         ),
       );
       if (emulatorConsoleReportsFailure(result.stdout, result.stderr)) {

@@ -78,22 +78,18 @@ describe("NavigateTo replay safety", () => {
     waiter: ScreenTransitionWaiter | null = { waitForScreen: async () => true },
     setup = noSetup,
   ): NavigateTo {
-    return new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      setup,
-      waiter,
-      graph,
+    return new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: setup,
+      screenWaiter: waiter,
+      navigationManager: graph,
       timer,
-      undefined,
-      undefined,
-      () => cleanForegroundObserver,
-    );
+      foregroundObserverProvider: () => cleanForegroundObserver,
+    });
   }
 
   test("replay routes on the current device after stripping stored routing metadata", async () => {
     const captured: Record<string, unknown>[] = [];
-    ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+    ToolRegistry.register("tapOn", "Fake tap", z.record(z.string(), z.unknown()), async (args) => {
       captured.push(args);
       return { success: true };
     });
@@ -160,7 +156,9 @@ describe("NavigateTo replay safety", () => {
           return false;
         },
       }).execute(options, async (_current, _total, message) => {
-        progressMessages.push(message);
+        if (message !== undefined) {
+          progressMessages.push(message);
+        }
       });
       expect(result).toEqual({
         success: true,
@@ -477,14 +475,12 @@ describe("NavigateTo replay safety", () => {
     const adb = new FakeAdbClientFactory();
     timer.enableAutoAdvance();
     try {
-      const nav = new NavigateTo(
-        { ...device, platform: "android" },
-        adb,
-        noSetup,
-        { waitForScreen: async () => true },
-        graph,
+      const nav = new NavigateTo({ ...device, platform: "android" }, adb, {
+        uiStateSetup: noSetup,
+        screenWaiter: { waitForScreen: async () => true },
+        navigationManager: graph,
         timer,
-      );
+      });
       await expect(
         nav.execute({ ...options, platform: "android" }, undefined, controller.signal),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
@@ -511,10 +507,15 @@ describe("NavigateTo replay safety", () => {
     });
     const controller = new AbortController();
     let presses = 0;
-    ToolRegistry.register("pressButton", "Fake back", {}, async () => {
-      presses++;
-      return { success: true };
-    });
+    ToolRegistry.register(
+      "pressButton",
+      "Fake back",
+      z.record(z.string(), z.unknown()),
+      async () => {
+        presses++;
+        return { success: true };
+      },
+    );
     let outcome: unknown;
     const execution = makeNav()
       .execute(options, undefined, controller.signal)
@@ -545,7 +546,10 @@ describe("NavigateTo replay safety", () => {
   test("scroll setup receives the signal and its abort prevents UI setup and replay", async () => {
     const controller = new AbortController();
     const first = edge("A", "B");
-    first.uiState = { scrollPosition: { targetElement: { text: "toB" }, direction: "down" } };
+    first.uiState = {
+      selectedElements: [],
+      scrollPosition: { targetElement: { text: "toB" }, direction: "down" },
+    };
     graph.setPathResult({ found: true, path: [first], startScreen: "A", targetScreen: "B" });
     const actions: string[] = [];
     const setup: UIStateSetup = {

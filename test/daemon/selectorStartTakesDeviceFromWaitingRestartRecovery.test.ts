@@ -1,13 +1,13 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 // Hunt 2026-10-11, device-restart recovery, cell 2 (who can take the device during S's recovery
@@ -36,12 +36,13 @@ const SIMULATOR: BootedDevice = {
 const HOLDER = "session-holding-the-simulator";
 const NEWCOMER = "session-starting-by-selector";
 
-interface DevicePoolLossInternals {
-  evictMissingPooledDevice(
-    device: PooledDevice,
-    reason: string,
-    options?: { attemptDeviceLossRecovery?: boolean },
-  ): Promise<void>;
+/** A real pool that lets the test report the simulator missing, as device discovery would. */
+class EvictablePool extends DevicePool {
+  override evictMissingPooledDevice(
+    ...args: Parameters<DevicePool["evictMissingPooledDevice"]>
+  ): Promise<void> {
+    return super.evictMissingPooledDevice(...args);
+  }
 }
 
 describe("a session waiting in flight for its restarting device", () => {
@@ -67,25 +68,23 @@ describe("a session waiting in flight for its restarting device", () => {
     const sessions = new SessionManager(timer, persistence);
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager([], [SIMULATOR]);
-    const pool = new DevicePool(
+    const pool = new EvictablePool(
       createDevicePoolDependencies(sessions, "daemon", {
-        timer,
         installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
         retryExecutor: new DefaultRetryExecutor(timer),
+        timer,
+        deviceManager: manager,
         recoveryPolicy: { onLoss: false, maxAttempts: 1 },
         deviceSessionContinuityEnabled: true,
       }),
     );
     await pool.initializeWithDevices([SIMULATOR]);
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      SIMULATOR.deviceId,
-      "ios",
-      undefined,
-      undefined,
-      SIMULATOR,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: SIMULATOR.deviceId,
+      platform: "ios",
+      expectedIdentity: SIMULATOR,
+    });
     const held = pool.getDevice(SIMULATOR.deviceId);
     if (!held) {
       throw new Error("expected the simulator to be pooled");
@@ -98,11 +97,9 @@ describe("a session waiting in flight for its restarting device", () => {
     active = fixtures[index];
     const { timer, persistence, sessions, manager, pool, held } = active;
     manager.bootedDevices = [];
-    await (pool as unknown as DevicePoolLossInternals).evictMissingPooledDevice(
-      held,
-      "not present in iOS simulator discovery",
-      { attemptDeviceLossRecovery: true },
-    );
+    await pool.evictMissingPooledDevice(held, "not present in iOS simulator discovery", {
+      attemptDeviceLossRecovery: true,
+    });
     expect((await persistence.getSession(HOLDER))?.release_reason).toBe(
       `device-restart:${SIMULATOR.deviceId}`,
     );
@@ -111,7 +108,7 @@ describe("a session waiting in flight for its restarting device", () => {
     const record = (who: string, call: Promise<{ assignedDevice: string }>) =>
       call.then(
         (session) => (answers[who] = `holds ${session.assignedDevice}`),
-        (error: unknown) => (answers[who] = (error as Error).name),
+        (error: unknown) => (answers[who] = error instanceof Error ? error.name : String(error)),
       );
     const holderCall = record(
       HOLDER,

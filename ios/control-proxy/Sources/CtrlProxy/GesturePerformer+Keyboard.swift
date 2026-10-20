@@ -95,60 +95,11 @@ import os
                 return KeyboardActionResult(open: false)
             }
 
-            // A focused text view treats Return as content, so only a hide key
-            // or Escape may dismiss its keyboard without changing the field.
-            let isMultiline: Bool
-            do {
-                isMultiline = try catchingObjCException {
-                    let focused = app.descendants(matching: .any)
-                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                        .firstMatch
-                    return focused.exists && focused.elementType == .textView
-                }
-            } catch {
-                print("[GesturePerformer] keyboard close focus lookup failed: \(error)")
-                isMultiline = true
-            }
-
-            var enabledKey: (element: XCUIElement, method: String)?
-            var hasSubmitKey = false
-            if !isMultiline {
-                do {
-                    hasSubmitKey = try catchingObjCException {
-                        app.keyboards.buttons.matching(NSPredicate(
-                            format: "identifier IN[c] %@ OR label IN[c] %@",
-                            Self.submitButtonNames,
-                            Self.submitButtonNames
-                        )).firstMatch.exists
-                    }
-                } catch {
-                    print("[GesturePerformer] keyboard close submit key lookup failed: \(error)")
-                }
-            }
-            do {
-                let keys = try catchingObjCException {
-                    app.keyboards.buttons.matching(NSPredicate(
-                        format: "identifier IN[c] %@ OR label IN[c] %@",
-                        Self.closeButtonNames,
-                        Self.closeButtonNames
-                    )).allElementsBoundByIndex
-                }
-                var labels: [(label: String, identifier: String)] = []
-                for key in keys {
-                    guard clock.now < closeDeadline else { break }
-                    try labels.append(catchingObjCException { (label: key.label, identifier: key.identifier) })
-                }
-                for candidate in Self.closeKeyCandidates(labels, isMultiline: isMultiline) {
-                    guard clock.now < closeDeadline else { break }
-                    let key = keys[candidate.index]
-                    if try catchingObjCException({ key.isEnabled }) {
-                        enabledKey = (element: key, method: candidate.method)
-                        break
-                    }
-                }
-            } catch {
-                print("[GesturePerformer] keyboard close key lookup failed: \(error)")
-            }
+            let isMultiline = keyboardCloseIsMultiline(app: app)
+            let hasSubmitKey = !isMultiline && keyboardHasSubmitKey(app: app)
+            let enabledKey = enabledKeyboardCloseKey(
+                app: app, isMultiline: isMultiline, closeDeadline: closeDeadline, clock: clock
+            )
 
             for attempt in Self.closeAttemptOrder(
                 hasEnabledMatch: enabledKey != nil,
@@ -187,6 +138,70 @@ import os
                 open: open,
                 error: open && isMultiline ? Self.multilineCloseError : nil
             )
+        }
+
+        /// Return may insert content in a text view; failed focus reads remain conservative.
+        private func keyboardCloseIsMultiline(app: XCUIApplication) -> Bool {
+            do {
+                return try catchingObjCException {
+                    let focused = app.descendants(matching: .any)
+                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                        .firstMatch
+                    return focused.exists && focused.elementType == .textView
+                }
+            } catch {
+                print("[GesturePerformer] keyboard close focus lookup failed: \(error)")
+                return true
+            }
+        }
+
+        private func keyboardHasSubmitKey(app: XCUIApplication) -> Bool {
+            do {
+                return try catchingObjCException {
+                    app.keyboards.buttons.matching(NSPredicate(
+                        format: "identifier IN[c] %@ OR label IN[c] %@",
+                        Self.submitButtonNames,
+                        Self.submitButtonNames
+                    )).firstMatch.exists
+                }
+            } catch {
+                print("[GesturePerformer] keyboard close submit key lookup failed: \(error)")
+                return false
+            }
+        }
+
+        private func enabledKeyboardCloseKey<C: Clock>(
+            app: XCUIApplication, isMultiline: Bool, closeDeadline: C.Instant, clock: C
+        )
+            -> (element: XCUIElement, method: String)? where C.Duration == Duration
+        {
+            var enabledKey: (element: XCUIElement, method: String)?
+            do {
+                let keys = try catchingObjCException {
+                    app.keyboards.buttons.matching(NSPredicate(
+                        format: "identifier IN[c] %@ OR label IN[c] %@",
+                        Self.closeButtonNames,
+                        Self.closeButtonNames
+                    )).allElementsBoundByIndex
+                }
+                var labels: [(label: String, identifier: String)] = []
+                for key in keys {
+                    guard clock.now < closeDeadline else { break }
+                    try labels.append(catchingObjCException { (label: key.label, identifier: key.identifier) })
+                }
+                for candidate in Self.closeKeyCandidates(labels, isMultiline: isMultiline) {
+                    guard clock.now < closeDeadline else { break }
+                    let key = keys[candidate.index]
+                    if try catchingObjCException({ key.isEnabled }) {
+                        enabledKey = (element: key, method: candidate.method)
+                        break
+                    }
+                }
+            } catch {
+                print("[GesturePerformer] keyboard close key lookup failed: \(error)")
+            }
+
+            return enabledKey
         }
 
         private func waitForKeyboardVisibility(

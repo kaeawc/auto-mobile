@@ -1,11 +1,9 @@
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Pins the releasedDeviceCaptures fence (#11802): an explicit session release records which pooled
 // device incarnation and assignment generation it owns, so the later caller-ordered pool release
@@ -19,16 +17,17 @@ async function createContext() {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE, OTHER];
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "released-captures-test", {
-      timer,
-      deviceManager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-    }),
-  );
+  const pool = makePool(manager, "released-captures-test", {
+    timer,
+    deviceManager,
+  });
   await pool.initializeWithDevices([DEVICE, OTHER]);
-  await pool.bindOrReuseDeviceSession(HOLDER, DEVICE.deviceId, "android");
-  const captures = pool["releasedDeviceCaptures"];
+  await pool.bindOrReuseDeviceSession({
+    sessionId: HOLDER,
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+  });
+  const captures = pool.testHooks.releasedDeviceCaptures;
   return { timer, manager, pool, captures };
 }
 
@@ -41,7 +40,7 @@ test("a capture records the held device and its assignment generation", async ()
   const context = await createContext();
   try {
     const { pool, captures } = context;
-    pool["captureReleasedDevice"](HOLDER, DEVICE.deviceId);
+    pool.testHooks.captureReleasedDevice(HOLDER, DEVICE.deviceId);
 
     const device = pool.getDevice(DEVICE.deviceId)!;
     expect(captures.get(HOLDER)).toEqual({
@@ -58,8 +57,8 @@ test("a capture is not recorded for a session that does not hold the device", as
   const context = await createContext();
   try {
     const { pool, captures } = context;
-    pool["captureReleasedDevice"]("someone-else", DEVICE.deviceId);
-    pool["captureReleasedDevice"](HOLDER, "missing-device");
+    pool.testHooks.captureReleasedDevice("someone-else", DEVICE.deviceId);
+    pool.testHooks.captureReleasedDevice(HOLDER, "missing-device");
 
     expect(captures.size).toBe(0);
   } finally {
@@ -71,12 +70,12 @@ test("discarding a capture only removes the capture for the named device", async
   const context = await createContext();
   try {
     const { pool, captures } = context;
-    pool["captureReleasedDevice"](HOLDER, DEVICE.deviceId);
+    pool.testHooks.captureReleasedDevice(HOLDER, DEVICE.deviceId);
 
-    pool["discardReleasedCapture"](HOLDER, OTHER.deviceId);
+    pool.testHooks.discardReleasedCapture(HOLDER, OTHER.deviceId);
     expect(captures.has(HOLDER)).toBe(true);
 
-    pool["discardReleasedCapture"](HOLDER, DEVICE.deviceId);
+    pool.testHooks.discardReleasedCapture(HOLDER, DEVICE.deviceId);
     expect(captures.has(HOLDER)).toBe(false);
   } finally {
     dispose(context);
@@ -87,7 +86,7 @@ test("the pool release consumes the capture and frees the captured device exactl
   const context = await createContext();
   try {
     const { pool, captures } = context;
-    pool["captureReleasedDevice"](HOLDER, DEVICE.deviceId);
+    pool.testHooks.captureReleasedDevice(HOLDER, DEVICE.deviceId);
 
     await pool.releaseDevice(DEVICE.deviceId, HOLDER);
 
@@ -102,7 +101,7 @@ test("the pool release does not free a same-UUID replacement assigned after the 
   const context = await createContext();
   try {
     const { pool, captures } = context;
-    pool["captureReleasedDevice"](HOLDER, DEVICE.deviceId);
+    pool.testHooks.captureReleasedDevice(HOLDER, DEVICE.deviceId);
     // A same-UUID replacement assignment bumps the generation before the caller-ordered release.
     pool.getDevice(DEVICE.deviceId)!.assignmentCount++;
 
@@ -119,10 +118,14 @@ test("a capture recorded for a non-holder cannot block that session's later rele
   const context = await createContext();
   try {
     const { pool, manager } = context;
-    pool["captureReleasedDevice"]("later-session", DEVICE.deviceId);
+    pool.testHooks.captureReleasedDevice("later-session", DEVICE.deviceId);
     await manager.releaseSession(HOLDER, "explicit-release");
     await pool.releaseDevice(DEVICE.deviceId, HOLDER);
-    await pool.bindOrReuseDeviceSession("later-session", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "later-session",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
 
     await pool.releaseDevice(DEVICE.deviceId, "later-session");
 
@@ -138,7 +141,7 @@ test("device-loss release drops the capture the session release recorded (#11123
     const { pool, captures } = context;
     const device = pool.getDevice(DEVICE.deviceId)!;
 
-    const released = await pool["releaseSessionForEvictedDevice"](device, undefined);
+    const released = await pool.testHooks.releaseSessionForEvictedDevice(device, undefined);
 
     expect(released).toBe(true);
     expect(device.sessionId).toBeNull();

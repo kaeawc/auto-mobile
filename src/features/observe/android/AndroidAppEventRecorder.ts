@@ -2,7 +2,7 @@
 import type { InstalledAppsStore } from "../../../models/InstalledAppsStore";
 import type { DbWriteBarrier } from "../../../db/dbWriteBarrier";
 import type { InstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
-import type { StackTraceElement } from "../../../server/failuresResources";
+import type { StackTraceElement } from "../../../models/failureAnalytics";
 import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
@@ -226,7 +226,7 @@ export function parseStackTrace(stackTrace: string, packageName: string): StackT
     const match = trimmed.match(/^at\s+([a-zA-Z0-9$_.]+)\.([a-zA-Z0-9$_<>]+)\(([^:)]+):?(\d+)?\)$/);
     if (match) {
       const [, fullClassName, methodName, fileName, lineNumberStr] = match;
-      const lineNumber = lineNumberStr ? parseInt(lineNumberStr, 10) : undefined;
+      const lineNumber = lineNumberStr ? parseInt(lineNumberStr, 10) : null;
 
       const isAppCode =
         fullClassName.startsWith(packageName) ||

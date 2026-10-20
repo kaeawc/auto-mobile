@@ -4,11 +4,14 @@ import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { AndroidCommandTerminatedError, runAndroidCommand } from "./runAndroidCommand";
+import {
+  AndroidCommandTerminatedError,
+  runAndroidCommand,
+  type AndroidCommandChild,
+} from "./runAndroidCommand";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
-  type HostChildProcess as ChildProcess,
   type HostProcessExecutor,
   type HostSpawnOptions as SpawnOptions,
 } from "../HostCommandExecutor";
@@ -22,6 +25,9 @@ import {
   type AndroidToolsLocation,
 } from "./detection";
 import type { AvdInfo, CreateAvdParams, DeviceProfile } from "./avdmanager";
+import { AvdCreateInterruptedError } from "./AvdCreateInterruptedError";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
+export { AvdCreateInterruptedError } from "./AvdCreateInterruptedError";
 
 export interface AvdManagerExecutionOptions {
   signal?: AbortSignal;
@@ -29,8 +35,8 @@ export interface AvdManagerExecutionOptions {
 }
 
 export interface AvdManagerClientDependencies {
-  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-  existsSync: typeof existsSync;
+  spawn: (command: string, args: string[], options: SpawnOptions) => AndroidCommandChild;
+  existsSync: (path: string) => boolean;
   logger: Pick<typeof logger, "info" | "warn" | "error">;
   detectAndroidCommandLineTools: typeof detectAndroidCommandLineTools;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
@@ -156,22 +162,6 @@ function createAvdArgs(params: CreateAvdParams): string[] {
     }
   }
   return args;
-}
-
-/**
- * `avdmanager create avd` was killed (timeout or signal) before it reported an
- * outcome, so the AVD may exist half-written. Unlike a clean non-zero exit
- * (`success: false`), the caller must treat the AVD as possibly created and
- * roll it back (#11155).
- */
-export class AvdCreateInterruptedError extends ActionableError {
-  constructor(
-    public readonly avdName: string,
-    detail: string,
-  ) {
-    super(`Failed to create AVD ${avdName}: ${detail}. The AVD may have been partially created.`);
-    this.name = "AvdCreateInterruptedError";
-  }
 }
 
 export class AvdManagerClient {
@@ -472,7 +462,8 @@ export class AvdManagerClient {
 
     const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
     return {
-      command: environment?.ComSpec ?? environment?.COMSPEC ?? "cmd.exe",
+      command:
+        (environment ? readEnvRaw(AMBIENT_ENV.COMSPEC, environment) : undefined) ?? "cmd.exe",
       args: ["/d", "/v:off", "/s", "/c", command],
     };
   }

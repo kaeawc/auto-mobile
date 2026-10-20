@@ -1,4 +1,4 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
@@ -51,13 +51,13 @@ async function foldResourceDiscovery(
   source: string,
   signal?: AbortSignal,
 ): Promise<BootedDevice[]> {
-  const state = DaemonState.getInstance();
+  const pool = defaultDaemonContext.devicePool();
   const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
   const devices =
     platform === "ios"
       ? rawDevices
-      : state.isInitialized()
-        ? state.getDevicePool().mapAndroidDiscovery(rawDevices)
+      : pool
+        ? pool.mapAndroidDiscovery(rawDevices)
         : aliases.fold(rawDevices, await aliases.prepare(rawDevices), new Set());
   // FUNNEL 1. In daemon mode this can await the identity quarantine, which
   // cancels and drains the owning session's executions — so a cancellation

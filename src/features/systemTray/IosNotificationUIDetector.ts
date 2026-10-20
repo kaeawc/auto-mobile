@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import {
   ActionableError,
   BootedDevice,
@@ -34,7 +35,7 @@ export interface IosNotificationUIDetectorDeps {
     y2: number,
     duration?: number,
   ): Promise<IosGestureResult>;
-  requestTapCoordinates(x: number, y: number): Promise<IosGestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<IosGestureResult>;
   /** Host-side monotonic clock used as the iOS observation timestamp. */
   now(): number;
 }
@@ -105,7 +106,7 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
   async tapElement(element: Element): Promise<void> {
     const geometry = new DefaultElementGeometry();
     const center = geometry.getElementCenter(element);
-    const result = await this.deps.requestTapCoordinates(center.x, center.y);
+    const result = await this.deps.requestTapCoordinates({ x: center.x, y: center.y });
     this.requireGestureSuccess(result, "tap notification");
   }
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { BootedDevice } from "../../../../src/models";
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
 import type { CtrlProxyForwardLease } from "../../../../src/features/observe/android/CtrlProxyForwardLease";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { PortManager } from "../../../../src/utils/PortManager";
@@ -31,18 +30,15 @@ class HeldLease implements CtrlProxyForwardLease {
 
 describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () => {
   let timer: FakeTimer;
-  let restoreManagers: () => void;
 
   beforeEach(() => {
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    restoreManagers = installFakeCtrlProxyManagers();
   });
 
   afterEach(async () => {
     await AndroidCtrlProxyClient.getExistingInstance(DEVICE.deviceId)?.close();
-    restoreManagers();
     AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
     expect(AndroidCtrlProxyClient.getExistingInstance(DEVICE.deviceId)).toBeNull();
     PortManager.reset();
@@ -51,21 +47,11 @@ describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () 
   });
 
   test("counts every CtrlProxy request, not just tool calls, and floors idleness at lease acquisition", async () => {
-    const client = AndroidCtrlProxyClient.createForTesting(
-      DEVICE,
-      new FakeAdbExecutor(),
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    const client = AndroidCtrlProxyClient.createForTesting(DEVICE, new FakeAdbExecutor(), {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      new HeldLease(1_000),
-    );
+      ctrlProxyForwardLease: new HeldLease(1_000),
+    });
     AndroidCtrlProxyClient.registerForTesting(client, DEVICE.deviceId);
     expect(AndroidCtrlProxyClient.getForwardLeaseHeldDeviceIds()).toEqual([DEVICE.deviceId]);
 
@@ -104,21 +90,11 @@ describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () 
   test("readiness holds keep the idle releaser and lease status busy until idempotent release", async () => {
     const timer = new FakeTimer();
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
-    const client = AndroidCtrlProxyClient.createForTesting(
-      DEVICE,
-      new FakeAdbExecutor(),
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    const client = AndroidCtrlProxyClient.createForTesting(DEVICE, new FakeAdbExecutor(), {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      new HeldLease(0),
-    );
+      ctrlProxyForwardLease: new HeldLease(0),
+    });
     AndroidCtrlProxyClient.registerForTesting(client, DEVICE.deviceId);
     try {
       const activity = (deviceId: string) =>

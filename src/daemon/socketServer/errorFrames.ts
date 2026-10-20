@@ -1,15 +1,12 @@
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError } from "@modelcontextprotocol/server";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../../models/deviceSessionRecovery";
 import { typedRefusalFields } from "../../models/typedRefusalFields";
-import {
-  recoveryIdentityLoss,
-  recoveryIdentityLossDetails,
-} from "../../server/deviceSessionResult";
+import { recoveryIdentityLoss, recoveryIdentityLossDetails } from "../deviceSessionResult";
 import {
   isSessionNotActiveWireError,
   isToolUnavailableWireError,
   unknownToolWireName,
-} from "../../server/toolUnavailableError";
+} from "../toolUnavailableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   McpOverloadError,
@@ -194,7 +191,7 @@ export function mcpRequestFailureDetails(
       : {}),
     // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed
     // resource URI) so the proxy can return -32602 instead of -32603.
-    ...(error instanceof McpError && "code" in error && error.code === JSONRPC_INVALID_PARAMS
+    ...(error instanceof ProtocolError && "code" in error && error.code === JSONRPC_INVALID_PARAMS
       ? { code: JSONRPC_INVALID_PARAMS }
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),

@@ -218,14 +218,28 @@ export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
   key: K,
 ): TPayload[K] | undefined => {
   const structuredContent = response?.structuredContent;
-  if (structuredContent && typeof structuredContent === "object") {
-    if (!Object.hasOwn(structuredContent, key)) {
-      return undefined;
-    }
-    return (structuredContent as TPayload)[key];
+  if (hasOwnPayloadField(structuredContent, key)) {
+    return structuredContent[key];
   }
   return undefined;
 };
+
+function hasOwnPayloadField(payload: unknown, key: string): payload is Record<string, unknown> {
+  return payload !== null && typeof payload === "object" && Object.hasOwn(payload, key);
+}
+
+/** Runtime boundary for untyped envelopes; typed callers use getStructuredField. */
+export function readUnknownStructuredField(response: unknown, key: string): unknown {
+  if (
+    response === null ||
+    (typeof response !== "object" && typeof response !== "function") ||
+    !("structuredContent" in response)
+  ) {
+    return undefined;
+  }
+  const structuredContent = response.structuredContent;
+  return hasOwnPayloadField(structuredContent, key) ? structuredContent[key] : undefined;
+}
 
 /** Resolve runtime-hidden device loss before falling back to ordinary cancellation. */
 export const abortErrorFromSignal = (signal: AbortSignal, preserveReason = true): unknown =>
@@ -286,3 +300,13 @@ export const awaitWhileRequestIsLive = async <T>(
     );
   });
 };
+
+/**
+ * Locate the ObserveResult inside a tool's structured payload (#11830): `observe` returns the
+ * ObserveResult as its top-level payload, every action tool nests the same snapshot under
+ * `.observation`. The one place that encodes that difference.
+ */
+export const observationOfPayload = (
+  toolName: string,
+  payload: Record<string, unknown>,
+): unknown => (toolName === "observe" ? payload : payload.observation);

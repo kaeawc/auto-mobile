@@ -1,20 +1,19 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { makePool } from "../helpers/makePool";
 import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, type PoolStatusBucket } from "../../src/daemon/devicePool";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { poolHoldFor } from "../../src/server/deviceDescription";
+import { poolHoldFor } from "../../src/daemon/deviceDescription";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { listDevicePayloads } from "../../src/server/deviceTools";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: every surface reports the same status for a device. A device in the pool's
 // `error` state that is also reserved (restart-recovery reservation) is reported `error` by
@@ -31,30 +30,38 @@ describe("pool stats for an errored device that is also reserved", () => {
   let pool: DevicePool;
   let healthMarkers: InMemoryDeviceHealthMarkers;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     healthMarkers = new InMemoryDeviceHealthMarkers(timer);
     const manager = new FakeDeviceManager();
     manager.bootedDevices = [ios(SIM_A)];
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "inventory-error-reserved", {
-        timer,
-        deviceHealthMarkers: healthMarkers,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(sessions, "inventory-error-reserved", {
+      timer,
+      deviceHealthMarkers: healthMarkers,
+      deviceManager: manager,
+    });
     await pool.initializeWithDevices([ios(SIM_A)]);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessions.stopCleanupTimer();
     timer.reset();
   });
 
-  test("listing JSON and report text retain legacy status without exposing health", () => {
+  arranged("listing JSON and report text retain legacy status without exposing health", () => {
     const device = pool.getDevice(SIM_A)!;
     const listed = () => JSON.stringify(listDevicePayloads([ios(SIM_A)], pool, new Map()));
     const healthy = listed();
@@ -75,7 +82,7 @@ describe("pool stats for an errored device that is also reserved", () => {
     expect(pool.getStatusReport()).toContain(`  ❌ ${SIM_A}: error (owner) (0 uses, 0 errors)`);
   });
 
-  test("each device lands in exactly one stats bucket", async () => {
+  arranged("each device lands in exactly one stats bucket", async () => {
     await pool.reserveDevicesForRehydration([
       { sessionId: "row-a", target: { platform: "ios", stableDeviceId: SIM_A, deviceId: SIM_A } },
     ]);
@@ -91,15 +98,18 @@ describe("pool stats for an errored device that is also reserved", () => {
 
   // An idle device carrying an unhealthy marker is `idle` on listDevices/booted resources (pool
   // status) yet getStats() counts it nowhere: not idle (ineligible), not assigned, not error.
-  test("an idle unhealthy device is still counted in a bucket matching its listed status", () => {
-    const incarnation = pool.getDeviceIncarnation(SIM_A) ?? 0;
-    healthMarkers.mark(SIM_A, incarnation, "app-cleanup");
-    expect(pool.getDeviceHealthMarker(SIM_A)).toBeDefined();
-    expect(pool.getDevice(SIM_A)?.status).toBe("idle");
+  arranged(
+    "an idle unhealthy device is still counted in a bucket matching its listed status",
+    () => {
+      const incarnation = pool.getDeviceIncarnation(SIM_A) ?? 0;
+      healthMarkers.mark(SIM_A, incarnation, "app-cleanup");
+      expect(pool.getDeviceHealthMarker(SIM_A)).toBeDefined();
+      expect(pool.getDevice(SIM_A)?.status).toBe("idle");
 
-    const stats = pool.getStats();
-    expect(stats.idle + stats.assigned + stats.error).toBe(stats.total);
-  });
+      const stats = pool.getStats();
+      expect(stats.idle + stats.assigned + stats.error).toBe(stats.total);
+    },
+  );
 });
 
 // #11387: one pool built with every state; stats, per-device status and listDevices agree.
@@ -110,7 +120,7 @@ describe("every pooled device is in exactly one stats bucket matching its listed
   let pool: DevicePool;
   let devices: BootedDevice[];
 
-  beforeEach(async () => {
+  async function arrangeHarness2(): Promise<void> {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const registry = new FakeBindingRegistry(timer);
@@ -119,16 +129,12 @@ describe("every pooled device is in exactly one stats bucket matching its listed
     const manager = new FakeDeviceManager();
     devices = ids.map(ios);
     manager.bootedDevices = devices;
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "stats-buckets", {
-        timer,
-        deviceHealthMarkers: healthMarkers,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
-      }),
-    );
+    pool = makePool(sessions, "stats-buckets", {
+      timer,
+      deviceHealthMarkers: healthMarkers,
+      deviceManager: manager,
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+    });
     await pool.initializeWithDevices(devices);
     await pool.bindingStableIds("ios");
     await pool.reserveDevicesForRehydration(
@@ -145,17 +151,29 @@ describe("every pooled device is in exactly one stats bucket matching its listed
     healthMarkers.mark("UNHEALTHY", pool.getDeviceIncarnation("UNHEALTHY") ?? 0, "app-cleanup");
     const busy = pool.getDevice("BUSY");
     if (busy) {
-      busy.status = "busy";
+      patchDeviceBinding(busy, { status: "busy" });
     }
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged2(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness2();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessions.stopCleanupTimer();
     timer.reset();
   });
 
-  test("stats partition the pool and match each device's listed status", () => {
-    const expected: Record<string, string> = {
+  arranged2("stats partition the pool and match each device's listed status", () => {
+    const expected: Record<string, PoolStatusBucket> = {
       BUSY: "assigned",
       ERR: "error",
       "ERR-RES": "error",
@@ -166,8 +184,12 @@ describe("every pooled device is in exactly one stats bucket matching its listed
     };
     const listed = listDevicePayloads(devices, pool, new Map());
     for (const entry of listed) {
-      expect(entry.runtime.poolStatus).toBe(expected[entry.runtime.deviceId]!);
-      expect(pool.poolBucket(entry.runtime.deviceId)).toBe(expected[entry.runtime.deviceId]!);
+      const deviceId = entry.runtime.deviceId;
+      if (deviceId === null) {
+        throw new Error("listed device has no deviceId");
+      }
+      expect(entry.runtime.poolStatus).toBe(expected[deviceId]!);
+      expect(pool.poolBucket(deviceId)).toBe(expected[deviceId]!);
     }
     for (const stats of [pool.getStats(), pool.getStatsForPlatform("ios")]) {
       expect(stats).toMatchObject({ total: 7, idle: 1, assigned: 4, error: 2 });

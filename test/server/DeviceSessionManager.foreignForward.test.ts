@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { PortManager } from "../../src/utils/PortManager";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import type { BootedDevice } from "../../src/models";
 import type { ForeignCtrlProxyForwardVerdict } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import {
@@ -55,23 +56,21 @@ function harness(
   const actualCtrlProxyManager = realManager
     ? AndroidCtrlProxyManager.getInstance(device, { create: () => adb })
     : ctrlProxyManager;
-  const waitForConnection = mock(async () => false);
-  const ctrlProxyClient =
-    clientFactory?.(device, adb) ??
-    ({
-      isConnected: () => false,
-      waitForConnection,
-      verifyServiceReady: async () => true,
-      isLastConnectionFailureForwardingLeaseConflict: () => true,
-      getLastConnectionFailureMessage: () => refusal.message,
-      resetConnectionBudget: () => {},
-    } as unknown as AndroidCtrlProxy);
+  const fakeClient = new FakeCtrlProxy();
+  fakeClient.setConnected(false);
+  fakeClient.setWaitForConnectionResult(false);
+  fakeClient.setLastConnectionFailure({
+    forwardingLeaseConflict: true,
+    message: refusal.message,
+  });
+  const providedClient: AndroidCtrlProxy = clientFactory?.(device, adb) ?? fakeClient;
+  const waitForConnection = spyOn(fakeClient, "waitForConnection");
   const appearance = mock(async () => {});
   const manager = DeviceSessionManager.createInstance(
     new FakeDeviceClientProvider(adb, devices, new FakeSimctl(), {
       window,
       ctrlProxyManager: actualCtrlProxyManager,
-      ctrlProxyClient,
+      ctrlProxyClient: providedClient,
     }),
     { create: () => adb },
     {
@@ -92,7 +91,7 @@ function harness(
     adb,
     manager,
     ctrlProxyManager,
-    ctrlProxyClient,
+    ctrlProxyClient: fakeClient,
     waitForConnection,
     guard,
     appearance,
@@ -131,7 +130,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
     "F4a connected responsive %s uses no forward evidence",
     async (intent) => {
       const h = harness(true, true);
-      h.ctrlProxyClient.isConnected = () => true;
+      h.ctrlProxyClient.setConnected(true);
       await expect(
         h.manager.ensureDeviceReady("android", h.device.deviceId, {
           intent,
@@ -237,7 +236,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
 
   test("F6b real session manager, manager and client preserve foreign tcp:8767", async () => {
     let realClient: AndroidCtrlProxyClient | undefined;
-    const socketFactory = mock((_url: string): WebSocket => {
+    const socketFactory = mock((_url: string): never => {
       throw new Error("socket must not be created");
     });
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
@@ -245,24 +244,19 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
       const h = harness(true, true, true, true, (device, adb) => {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
-        realClient = AndroidCtrlProxyClient.createForTesting(
-          device,
-          adb,
-          socketFactory,
+        realClient = AndroidCtrlProxyClient.createForTesting(device, adb, {
+          webSocketFactory: socketFactory,
           timer,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          { tryAcquire: () => true, release: () => {}, ownsForward: () => false },
-          () => {
+          ctrlProxyForwardLease: {
+            tryAcquire: () => true,
+            release: () => {},
+            ownsForward: () => false,
+            getLastOwnerPid: () => undefined,
+          },
+          serviceManagerFactory: () => {
             throw new Error("service recovery must not run");
           },
-        );
+        });
         realClient.forwardClientProbe = { findClientPids: async () => [4242] };
         realClient.forwardClientProcessIsRunning = () => true;
         AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting(
@@ -398,7 +392,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
     test(`#12220 adb forward evidence refuses before ${installed ? (enabled ? "connect" : "enable") : "install"}`, async () => {
       const h = harness(installed, enabled, true);
       installAdbForwardEvidence(h.adb, "foreign");
-      const real = AndroidCtrlProxyManager.getInstance(h.device, { create: () => h.adb });
+      const real = AndroidCtrlProxyManager.getInstanceForTesting(h.device, { create: () => h.adb });
       const isInstalled = spyOn(real, "isInstalled");
       const isEnabled = spyOn(real, "isEnabled");
       await expect(
@@ -421,7 +415,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
   test("#12220 real not-installed control refuses foreign adb forward before install", async () => {
     const h = harness(false, false, true);
     installAdbForwardEvidence(h.adb, "foreign");
-    const real = AndroidCtrlProxyManager.getInstance(h.device, { create: () => h.adb });
+    const real = AndroidCtrlProxyManager.getInstanceForTesting(h.device, { create: () => h.adb });
     spyOn(real, "isInstalled").mockResolvedValue(false);
     spyOn(real, "isEnabled").mockResolvedValue(false);
     spyOn(real, "ensureCompatibleVersion").mockResolvedValue({ status: "not_installed" });
@@ -483,7 +477,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
     test(`#12220 ${mode} adb forward permits real install, enable, and stylus`, async () => {
       const h = harness(false, false, true);
       installAdbForwardEvidence(h.adb, mode);
-      const real = AndroidCtrlProxyManager.getInstance(h.device, { create: () => h.adb });
+      const real = AndroidCtrlProxyManager.getInstanceForTesting(h.device, { create: () => h.adb });
       spyOn(real, "isInstalled").mockResolvedValue(false);
       spyOn(real, "isEnabled").mockResolvedValue(false);
       spyOn(real, "ensureCompatibleVersion").mockResolvedValue({ status: "not_installed" });

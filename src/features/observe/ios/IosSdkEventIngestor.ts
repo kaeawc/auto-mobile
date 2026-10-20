@@ -22,7 +22,7 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import type { NavigationEvent } from "../../../utils/interfaces/NavigationGraph";
-import type { ViewHierarchyResult } from "../../../models";
+import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "./types";
 import { decodeSdkNetworkVersion, IOS_SDK_NETWORK_DIAGNOSTIC_TAG } from "./IosSdkNetworkWire";
@@ -74,6 +74,9 @@ export interface IosSdkEventIngestor extends SdkEventIngestor {
   recordLayoutTelemetryEvent(hierarchy: ViewHierarchyResult): void;
 }
 
+/** The slice of `NavigationScreenshotManager` the ingestor stores screenshots through. */
+export type NavigationScreenshotStore = Pick<NavigationScreenshotManager, "storeScreenshot">;
+
 /** Injected dependencies for {@link DefaultIosSdkEventIngestor}. */
 export interface IosSdkEventIngestorDeps {
   /** The iOS device/simulator UDID that owns these events. */
@@ -90,6 +93,8 @@ export interface IosSdkEventIngestorDeps {
   failureRecorder?: FailureRecorderService;
   /** Whether navigation screenshots are enabled; defaults to server config. */
   navigationScreenshotsEnabled?: () => boolean;
+  /** Stores captured navigation screenshots; defaults to the shared manager. */
+  navigationScreenshotStore?: NavigationScreenshotStore;
 }
 
 export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
@@ -105,6 +110,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly telemetryRecorderOverride?: IosTelemetryRecorder;
   private readonly failureRecorderOverride?: FailureRecorderService;
   private readonly navigationScreenshotsEnabled: () => boolean;
+  private readonly navigationScreenshotStoreOverride?: NavigationScreenshotStore;
 
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
@@ -116,6 +122,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     this.failureRecorderOverride = deps.failureRecorder;
     this.navigationScreenshotsEnabled =
       deps.navigationScreenshotsEnabled ?? (() => serverConfig.isNavigationScreenshotsEnabled());
+    this.navigationScreenshotStoreOverride = deps.navigationScreenshotStore;
   }
 
   /**
@@ -617,7 +624,8 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     try {
       const result = await this.captureScreenshot(3000);
       if (result?.data) {
-        const screenshotManager = NavigationScreenshotManager.getInstance();
+        const screenshotManager =
+          this.navigationScreenshotStoreOverride ?? NavigationScreenshotManager.getInstance();
         const bytes = Buffer.from(result.data, "base64");
         return await screenshotManager.storeScreenshot(
           applicationId,
@@ -643,7 +651,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     try {
       prevContext = recorder.getContext();
       recorder.setContext(this.deviceId, null);
-      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy);
+      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy.node);
       // Use the converted ViewHierarchyResult format — same data as the observation stream
       const hierarchyJson = JSON.stringify({
         nodeCount,
@@ -689,21 +697,14 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     }
   }
 
-  private countViewHierarchyNodes(node: unknown): number {
-    if (!node || typeof node !== "object") {
+  /** Counts converted nodes; the converter emits a lone child as an object, not a one-item array. */
+  private countViewHierarchyNodes(node: ViewHierarchyNode | undefined): number {
+    if (!node) {
       return 0;
     }
-    const obj = node as Record<string, unknown>;
-    let count = 0;
-    if (obj["$"] || obj["node"]) {
-      count = 1;
-    }
-    const children = obj["node"];
-    if (Array.isArray(children)) {
-      for (const child of children) {
-        count += this.countViewHierarchyNodes(child);
-      }
-    }
-    return count;
+    const own = node.$ || node.node ? 1 : 0;
+    return [node.node ?? []]
+      .flat()
+      .reduce((count, child) => count + this.countViewHierarchyNodes(child), own);
   }
 }

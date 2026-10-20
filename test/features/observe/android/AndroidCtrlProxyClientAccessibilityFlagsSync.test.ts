@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
@@ -27,13 +28,12 @@ describe("AndroidCtrlProxyClient - accessibility flags re-sync on ensureConnecte
     fakeTimer.enableAutoAdvance();
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
 
     testDevice = {
       deviceId: "test-device-a11y-flags-sync",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -124,7 +124,10 @@ describe("AndroidCtrlProxyClient - accessibility flags re-sync on ensureConnecte
   test("pushes set_accessibility_flags with occlusionEnabled=false on the first connect", async function () {
     serverConfig.setOcclusionEnabled(false);
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -142,7 +145,10 @@ describe("AndroidCtrlProxyClient - accessibility flags re-sync on ensureConnecte
   test("re-syncs set_accessibility_flags on ensureConnected even when reusing an already-open connection", async function () {
     serverConfig.setOcclusionEnabled(false);
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -170,7 +176,10 @@ describe("AndroidCtrlProxyClient - accessibility flags re-sync on ensureConnecte
     // reportViewIds/includeNotImportantViews/retrieveInteractiveWindows all being
     // default-enabled, so the allEnabled early-return should skip the push entirely.
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);

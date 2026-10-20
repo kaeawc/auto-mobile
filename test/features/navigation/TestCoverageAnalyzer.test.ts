@@ -55,7 +55,7 @@ class FakeNavigationRepository {
 class NoRepeatedScanEdges extends Array<NavigationEdge> {
   iterationCount = 0;
 
-  override [Symbol.iterator](): IterableIterator<NavigationEdge> {
+  override [Symbol.iterator](): ArrayIterator<NavigationEdge> {
     this.iterationCount++;
     if (this.iterationCount > 1) {
       throw new Error("expected edges to be indexed once, not scanned again per gap");
@@ -67,7 +67,7 @@ class NoRepeatedScanEdges extends Array<NavigationEdge> {
 class NoRepeatedScanNodes extends Array<NavigationNode> {
   iterationCount = 0;
 
-  override [Symbol.iterator](): IterableIterator<NavigationNode> {
+  override [Symbol.iterator](): ArrayIterator<NavigationNode> {
     this.iterationCount++;
     if (this.iterationCount > 1) {
       throw new Error("expected nodes to be indexed once, not scanned again per gap");

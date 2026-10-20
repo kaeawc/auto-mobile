@@ -26,7 +26,12 @@ class McpHttpClientStreamableIntegrationTest {
   @Before
   fun setUp() {
     daemon = TestDaemonInstance()
-    client = McpHttpClient("http://localhost:${daemon.start()}/auto-mobile/streamable")
+    client =
+      McpHttpClient(
+        dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+          "http://localhost:${daemon.start()}/auto-mobile/streamable",
+        ),
+      )
   }
 
   @After

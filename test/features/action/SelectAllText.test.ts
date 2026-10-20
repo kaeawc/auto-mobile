@@ -1,3 +1,5 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 import { expect, describe, test, spyOn } from "bun:test";
 import { SelectAllText } from "../../../src/features/action/SelectAllText";
 import { BootedDevice } from "../../../src/models";
@@ -24,12 +26,9 @@ describe("SelectAllText Android", () => {
         requestSelectAll: async () => ({ success: true, totalTimeMs: 1 }),
       };
     });
-    const observedSpy = spyOn(
-      selectAllText as unknown as {
-        observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: () => Promise<unknown>) => fn());
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
+      runBlockWith(() => createObserveResultForTest()),
+    );
 
     await selectAllText.execute();
 
@@ -51,12 +50,9 @@ describe("SelectAllText outcomes", () => {
   const iosDevice: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "ios-1" };
 
   const runWithoutObservation = (selectAllText: SelectAllText) => {
-    const observedSpy = spyOn(
-      selectAllText as unknown as {
-        observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: () => Promise<unknown>) => fn());
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
+      runBlockWith(() => createObserveResultForTest()),
+    );
     return { promise: selectAllText.execute(), observedSpy };
   };
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { ActionableError } from "../../src/models";
+import { ActionableError, type DeviceInfo } from "../../src/models";
 import { createAcquisitionHandlers } from "../../src/server/deviceToolsAcquisition";
 import {
   resetDeviceToolsDependencies,
@@ -21,6 +21,7 @@ beforeEach(() => {
     deviceManagerFactory: () => deviceUtils,
     deviceMatcherFactory: () => matcher,
     lifecycleCoordinator: {
+      isReserved: () => false,
       reserve: async (identity) => {
         events.push(`reserve:${identity.kind}`);
         return {
@@ -45,7 +46,7 @@ for (const platform of ["android", "ios"] as const) {
     const failure = new ActionableError("characterized preparation failure");
     const controller = new AbortController();
     const handlers = createAcquisitionHandlers({
-      getBootAndPrepareDevice: () => async (args, budgets, _deps, _utils, context) => {
+      bootAndPrepareDevice: async (args, budgets, _deps, _utils, context) => {
         events.push("prepare");
         expect(args).toMatchObject({
           platform,
@@ -86,11 +87,17 @@ for (const platform of ["android", "ios"] as const) {
 
 for (const changed of [false, true]) {
   test(`legacy iOS name discovery revalidates identity after reservation, changed=${changed}`, async () => {
-    const image = { platform: "ios" as const, name: "iPhone", deviceId: "first", isVirtual: true };
+    const image: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone",
+      deviceId: "first",
+      isRunning: false,
+    };
     deviceUtils.setDeviceImages("ios", [image]);
     matcher.setImageResult(image);
     setDeviceToolsDependencies({
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async (identity) => {
           events.push("reserve");
           if (changed) {
@@ -109,7 +116,7 @@ for (const changed of [false, true]) {
       },
     });
     const handlers = createAcquisitionHandlers({
-      getBootAndPrepareDevice: () => async () => {
+      bootAndPrepareDevice: async () => {
         events.push("prepare");
         throw new ActionableError("reached preparation");
       },

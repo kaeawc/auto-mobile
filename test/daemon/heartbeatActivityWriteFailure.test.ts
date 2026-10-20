@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -44,7 +45,7 @@ describe("heartbeat activity writes (#11079)", () => {
   let manager: SessionManager;
   let monitor: SessionHeartbeatMonitor;
   let released: string[];
-  let warn: ReturnType<typeof spyOn>;
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -75,7 +76,7 @@ describe("heartbeat activity writes (#11079)", () => {
   async function heartbeatFor(durationMs: number): Promise<void> {
     for (let elapsed = 0; elapsed < durationMs; elapsed += PROXY_HEARTBEAT_INTERVAL_MS) {
       await timer.advanceTimeAsync(PROXY_HEARTBEAT_INTERVAL_MS);
-      manager.recordHeartbeat(SESSION);
+      await deliverDaemonHeartbeat(manager, SESSION);
       expect(effectiveLastHeartbeat(manager.getSession(SESSION)!)).toBe(timer.now());
     }
   }
@@ -84,7 +85,7 @@ describe("heartbeat activity writes (#11079)", () => {
     persistence.mode = "reject";
     monitor.start();
 
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     await heartbeatFor(12_000);
 
     const session = manager.getSession(SESSION);
@@ -106,7 +107,7 @@ describe("heartbeat activity writes (#11079)", () => {
   });
 
   test("heartbeats that change no persisted field issue no DB write", async () => {
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     await timer.advanceTimeAsync(0);
     expect(persistence.writes).toHaveLength(1);
     expect(persistence.writes[0]!.hasReceivedHeartbeat).toBe(true);
@@ -122,7 +123,7 @@ describe("heartbeat activity writes (#11079)", () => {
 
   test("a failed write is retried by the next heartbeat until the row is stored", async () => {
     persistence.mode = "reject";
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     await timer.advanceTimeAsync(0);
     expect(persistence.writes).toHaveLength(1);
 
@@ -139,7 +140,7 @@ describe("heartbeat activity writes (#11079)", () => {
     persistence.mode = "hang";
     monitor.start();
 
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     await heartbeatFor(12_000);
 
     // The in-flight write already carries this row, so later heartbeats queue nothing behind it,

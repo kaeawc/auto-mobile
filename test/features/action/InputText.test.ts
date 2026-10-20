@@ -1,3 +1,5 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -5,30 +7,13 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { InputTextMode } from "../../../src/features/action/InputText";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import {
   AdbClient,
   AdbCommandTimeoutError,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
-
-interface TestInputText {
-  executeAndroidTextInput: (
-    text: string,
-    imeAction?: undefined,
-    dismissKeyboard?: boolean,
-    mode?: InputTextMode,
-    signal?: AbortSignal,
-  ) => Promise<{
-    success: boolean;
-    error?: string;
-    method?: string;
-    keyboardDismissed?: boolean;
-    warnings?: string[];
-  }>;
-}
+import { DeviceLostError } from "../../../src/utils/deviceLossOutcome";
 
 type RequestSetText = (
   text: string,
@@ -40,14 +25,12 @@ type RequestSetText = (
   },
 ) => Promise<{ success: boolean; error?: string; totalTimeMs: number }>;
 
-function testInputText(inputText: InputText): TestInputText {
-  return inputText as unknown as TestInputText;
-}
-
 function stubAndroidSetText(requestSetText: RequestSetText): void {
-  AndroidCtrlProxyClient.getInstance = (() => ({
-    requestSetText,
-  })) as typeof AndroidCtrlProxyClient.getInstance;
+  AndroidCtrlProxyClient.getInstance = (device, factory = new FakeAdbClientFactory()) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, factory.create(device));
+    client.requestSetText = requestSetText;
+    return client;
+  };
 }
 
 function execResult(stdout: string): ExecResult {
@@ -71,18 +54,21 @@ function observeResultWithFocusedText(
   text: string,
   properties: Record<string, unknown> = {},
 ): ObserveResult {
-  return {
+  return buildObserveResult({
+    updatedAt: 0,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           focused: true,
           class: "android.widget.EditText",
           text,
           ...properties,
-        },
+        }),
       },
     },
-  } as ObserveResult;
+  });
 }
 
 describe("InputText", () => {
@@ -112,25 +98,21 @@ describe("InputText", () => {
   // first ctrl-proxy call per device. Asserts the factory is forwarded.
   test("forwards adbFactory (not adb executor) to AndroidCtrlProxyClient.getInstance (regression for #2229)", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
 
-    let capturedFactory: unknown = undefined;
-    AndroidCtrlProxyClient.getInstance = ((_device: BootedDevice, adbFactory: AdbClientFactory) => {
+    let capturedFactory: AdbClientFactory | undefined;
+    AndroidCtrlProxyClient.getInstance = (device, adbFactory = factory) => {
       capturedFactory = adbFactory;
-      return {
-        requestSetText: async () => ({ success: false, totalTimeMs: 0 }),
-      };
-    }) as typeof AndroidCtrlProxyClient.getInstance;
+      const client = AndroidCtrlProxyClient.createForTesting(device, adbFactory.create(device));
+      client.requestSetText = async () => ({ success: false, totalTimeMs: 0 });
+      return client;
+    };
 
-    await (
-      inputText as unknown as {
-        executeAndroidTextInput: (text: string) => Promise<unknown>;
-      }
-    ).executeAndroidTextInput("hello");
+    await inputText.testHooks.executeAndroidTextInput("hello");
 
     expect(capturedFactory).toBeDefined();
-    expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");
-    expect(capturedFactory).toBe(factory as unknown as AdbClientFactory);
+    expect(typeof capturedFactory?.create).toBe("function");
+    expect(capturedFactory).toBe(factory);
   });
 
   test("does not turn device-loss cancellation into a success:false input result", async () => {
@@ -145,11 +127,16 @@ describe("InputText", () => {
     });
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
-    (inputText as any).observeScreen = observe;
-    (inputText as any).awaitIdle = new FakeAwaitIdle();
+    const inputText = new InputText(
+      androidDevice,
+      new FakeAdbClientFactory(),
+      undefined,
+      timer,
+      undefined,
+      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
+    );
 
     await expect(
       inputText.execute("hello", undefined, false, undefined, controller.signal),
@@ -161,12 +148,17 @@ describe("InputText", () => {
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
+    const inputText = new InputText(
+      androidDevice,
+      new FakeAdbClientFactory(),
+      undefined,
+      timer,
+      undefined,
+      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
+    );
     observe.enableAutoVaryHierarchy();
-    (inputText as any).observeScreen = observe;
-    (inputText as any).awaitIdle = new FakeAwaitIdle();
 
     await inputText.execute("hello", undefined, false, undefined, controller.signal);
 
@@ -178,7 +170,7 @@ describe("InputText", () => {
 
   test("eventLast sets prefix with a11y and sends final ASCII key event", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
 
     stubAndroidSetText(async (text, options) => {
@@ -186,7 +178,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "@Jason Pearson",
       undefined,
       false,
@@ -201,7 +193,7 @@ describe("InputText", () => {
 
   test("eventLast restores suffix with final a11y setText", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
 
     stubAndroidSetText(async (text, options) => {
@@ -209,7 +201,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc def  ",
       undefined,
       false,
@@ -226,12 +218,12 @@ describe("InputText", () => {
 
   test("eventLast uses shifted key combination for uppercase ASCII on Android 12+", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "HellO",
       undefined,
       false,
@@ -246,7 +238,7 @@ describe("InputText", () => {
 
   test("eventLast falls back to a11y for shifted ASCII before Android 12", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
 
@@ -255,7 +247,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "HellO",
       undefined,
       false,
@@ -270,7 +262,7 @@ describe("InputText", () => {
 
   test("eventLast falls back to a11y when no printable non-whitespace ASCII exists", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
 
     stubAndroidSetText(async (text) => {
@@ -278,7 +270,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "  你好  ",
       undefined,
       false,
@@ -293,7 +285,7 @@ describe("InputText", () => {
 
   test("eventAll sends mappable ASCII text as key events", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
 
@@ -302,7 +294,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "@ab C",
       undefined,
       false,
@@ -329,13 +321,13 @@ describe("InputText", () => {
     );
     const factory = new FakeAdbClientFactory();
     const fakeClient = factory.getFakeClient();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
     const originalExecuteCommand = fakeClient.executeCommand.bind(fakeClient);
     const executeSpy = spyOn(fakeClient, "executeCommand").mockImplementation(
-      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
-        const result = await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      async (command, options) => {
+        const result = await originalExecuteCommand(command, options);
         if (command === "shell input keyevent KEYCODE_A") {
           controller.abort(deviceLoss);
         }
@@ -345,7 +337,7 @@ describe("InputText", () => {
 
     try {
       await expect(
-        testInputText(inputText).executeAndroidTextInput(
+        inputText.testHooks.executeAndroidTextInput(
           "abc",
           undefined,
           false,
@@ -361,7 +353,7 @@ describe("InputText", () => {
 
   test("eventAll alternates a11y for Unicode runs and key events for ASCII", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
 
     stubAndroidSetText(async (text) => {
@@ -369,7 +361,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab你好c😊d",
       undefined,
       false,
@@ -413,7 +405,7 @@ describe("InputText", () => {
       };
     });
     try {
-      const result = await testInputText(inputText).executeAndroidTextInput(
+      const result = await inputText.testHooks.executeAndroidTextInput(
         "a你好b",
         undefined,
         true,
@@ -438,7 +430,7 @@ describe("InputText", () => {
 
   test("eventAll fails before key events when initial a11y clear fails", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
 
     stubAndroidSetText(async () => ({
       success: false,
@@ -446,7 +438,7 @@ describe("InputText", () => {
       totalTimeMs: 1,
     }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       false,
@@ -461,7 +453,7 @@ describe("InputText", () => {
 
   test("eventAll uses a11y instead of shifted keyevents before Android 12", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
 
@@ -470,7 +462,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "a+B",
       undefined,
       false,
@@ -485,7 +477,7 @@ describe("InputText", () => {
 
   test("eventAll falls back to a11y for shifted-only text before Android 12", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
 
@@ -494,7 +486,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "B+",
       undefined,
       false,
@@ -509,7 +501,7 @@ describe("InputText", () => {
 
   test("eventAll falls back to a11y when there are no key-event-mappable characters", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
 
     stubAndroidSetText(async (text) => {
@@ -517,7 +509,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "你好😊",
       undefined,
       false,
@@ -552,7 +544,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
@@ -577,11 +569,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "hello",
-      undefined,
-      false,
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, false);
 
     expect(result.success).toBe(true);
     expect(closeCalls).toEqual([]);
@@ -609,20 +597,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await (
-      inputText as unknown as {
-        executeAndroidTextInput: (
-          text: string,
-          imeAction?: string,
-          dismissKeyboard?: boolean,
-        ) => Promise<{
-          success: boolean;
-          error?: string;
-          keyboardDismissed?: boolean;
-          warnings?: string[];
-        }>;
-      }
-    ).executeAndroidTextInput("hello", "done", true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", "done", true);
 
     // The dismissal failure surfaces as a warning on a SUCCESSFUL result (#6868),
     // and the IME action (Enter) already ran — pre-#5887 the dismiss-first
@@ -649,7 +624,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     // #6868: the text landed; only the dismissal epilogue failed.
     expect(result.success).toBe(true);
@@ -671,7 +646,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab",
       undefined,
       true,
@@ -695,7 +670,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       true,
@@ -722,7 +697,7 @@ describe("InputText", () => {
       }),
     }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       true,
@@ -750,7 +725,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab",
       undefined,
       true,
@@ -775,7 +750,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       true,
@@ -803,7 +778,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
@@ -830,7 +805,7 @@ describe("InputText", () => {
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
     await expect(
-      testInputText(inputText).executeAndroidTextInput(
+      inputText.testHooks.executeAndroidTextInput(
         "hello",
         undefined,
         true,
@@ -853,7 +828,7 @@ describe("InputText", () => {
       totalTimeMs: 1,
     }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("accessibility service unavailable");
@@ -862,7 +837,7 @@ describe("InputText", () => {
 
   test("a11y reports setText timeouts without sending key events", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
 
     stubAndroidSetText(async (text) => {
@@ -870,7 +845,7 @@ describe("InputText", () => {
       return { success: false, error: "Set text timed out after 5000ms", totalTimeMs: 5000 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "next",
       undefined,
       false,
@@ -886,7 +861,7 @@ describe("InputText", () => {
 
   test("a11y does not fall back to key events for non-timeout failures", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
 
     stubAndroidSetText(async (text) => {
@@ -894,7 +869,7 @@ describe("InputText", () => {
       return { success: false, error: "No focused editable node found", totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "next",
       undefined,
       false,
@@ -946,7 +921,7 @@ describe("InputText", () => {
   // them leaves only the last character and wipes whatever was in the field.
   test("append types with key events and never clears or sets text", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
 
@@ -955,7 +930,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab",
       undefined,
       false,
@@ -977,7 +952,7 @@ describe("InputText", () => {
     // Three separate single-character calls, as a keyboard-mirroring client
     // makes them. None may clear, or "abc" would end up as "c".
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
 
@@ -999,7 +974,7 @@ describe("InputText", () => {
     // The fallback every other mode performs would REPLACE the field, which is
     // exactly what append exists to avoid. An actionable error is correct.
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
 
     stubAndroidSetText(async (text) => {
@@ -1007,7 +982,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "😊",
       undefined,
       false,
@@ -1027,7 +1002,7 @@ describe("InputText", () => {
   // could even consume the budget and drop the keystroke.
   test("append does not probe the API level for characters that never need it (cold cache)", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     // Cold cache: no getprop result configured, and the probe must never run.
     const result = await inputText.appendText("a1 .");
 
@@ -1049,7 +1024,7 @@ describe("InputText", () => {
     // The other direction: an uppercase character DOES need `input keycombination`,
     // so the probe must run — skipping it for the whole batch would be wrong.
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
 
     const result = await inputText.appendText("A");
@@ -1069,7 +1044,7 @@ describe("InputText", () => {
   // prefix already typed would corrupt the field ("ab" after "a" -> "aab").
   test("append reports charsSent for a fully successful batch", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
 
     const result = await inputText.appendText("abc");
 
@@ -1082,7 +1057,7 @@ describe("InputText", () => {
     // field holds "a". The result must say charsSent=1 and KEYCODE_C must never run,
     // so a caller resumes from text.slice(1) instead of re-appending "abc".
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     factory
       .getFakeClient()
       .setCommandError("shell input keyevent KEYCODE_B", new Error("device offline"));
@@ -1104,7 +1079,7 @@ describe("InputText", () => {
   // outcome that must never happen is a silent success that typed nothing.
   test("append reports an actionable failure for uppercase below API 31", async () => {
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     const setTextCalls: string[] = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
 
@@ -1126,7 +1101,7 @@ describe("InputText", () => {
     // The other direction: the failure above must be the device's limitation, not
     // the append path refusing capitals outright.
     const factory = new FakeAdbClientFactory();
-    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const inputText = new InputText(androidDevice, factory);
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
@@ -1160,7 +1135,7 @@ describe("InputText", () => {
       // Key events (and anything else) succeed.
       return Promise.resolve(execResult(""));
     };
-    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     // Inject a FakeTimer into InputText too: createBudget reads THIS clock, so a
     // wall clock here would race the 5ms budget against the char-unmappable path
     // (repo rule: no real timers in unit tests). Never advanced, so the budget
@@ -1202,7 +1177,7 @@ describe("InputText", () => {
       }
       return Promise.resolve(execResult(""));
     };
-    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     // FakeTimer into InputText as well, so createBudget never reads the wall clock
     // (repo rule: no real timers). Never advanced, so the budget cannot expire and
     // the assertion is purely about the retry count, not timing.
@@ -1228,7 +1203,7 @@ describe("InputText", () => {
       }
       return Promise.resolve(execResult(""));
     };
-    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
 
     const result = await inputText.appendText("ab", 5000);

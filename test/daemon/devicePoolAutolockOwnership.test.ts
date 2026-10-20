@@ -1,9 +1,8 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { expect, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
-import type { ChildProcess } from "node:child_process";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up } from "../../src/db/migrations/2026_04_02_000_device_sessions";
 import { up as addStableDeviceIdentity } from "../../src/db/migrations/2026_09_14_000_device_session_stable_identity";
@@ -14,15 +13,12 @@ import { up as addLivenessWriterFence } from "../../src/db/migrations/2026_09_17
 import { up as addActivitySequence } from "../../src/db/migrations/2026_10_15_000_device_session_activity_seq";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
-import { DeviceShuttingDownError } from "../../src/daemon/deviceAcquisitionRefusals";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceShuttingDownError } from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../../test/fakes/FakeTimer";
 import { FakeIdGenerator } from "../../test/fakes/FakeIdGenerator";
 import { FakeDeviceManager } from "../../test/fakes/FakeDeviceManager";
-import { FakeInstalledAppsRepository } from "../../test/fakes/FakeInstalledAppsRepository";
 import { FakeDbWriteBarrier } from "../../test/fakes/FakeDbWriteBarrier";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceMatcher } from "../../test/fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../../test/fakes/FakeDeviceUtils";
@@ -34,8 +30,11 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 async function harness(deviceUtils?: FakeDeviceUtils) {
   const db = new Kysely<Database>({
@@ -56,18 +55,14 @@ async function harness(deviceUtils?: FakeDeviceUtils) {
     [],
     [{ deviceId: "emulator-5554", name: "Agent A AVD", platform: "android" }],
   );
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "hunt-daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: deviceUtils ?? devices,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      deviceSessionRepository: repository,
-      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
-      idGenerator: new FakeIdGenerator(),
-      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
-    }),
-  );
+  const pool = makePool(manager, "hunt-daemon", {
+    timer,
+    deviceManager: deviceUtils ?? devices,
+    deviceSessionRepository: repository,
+    recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+    idGenerator: new FakeIdGenerator(),
+    lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+  });
   await pool.initializeWithDevices(devices.bootedDevices);
   return {
     db,
@@ -335,14 +330,14 @@ test.each(["agent-B", "agent-A"])(
       const device = h.devices.bootedDevices[0];
       const image = { ...device, deviceId: "emulator-5556", isRunning: false };
       const recoveredProcess = new FakeChildProcess(h.timer);
-      deviceUtils.setMockChildProcess(image.name, recoveredProcess as unknown as ChildProcess);
+      deviceUtils.setMockChildProcess(image.name, recoveredProcess);
       deviceUtils.setBootedDevices("android", [device]);
       deviceUtils.setDeviceImages("android", [image]);
       matcher.setBootedResult(device);
       matcher.setImageResult(image);
       const kill = deviceUtils.killDevice.bind(deviceUtils);
-      deviceUtils.killDevice = async (target, options) => {
-        await kill(target, options);
+      deviceUtils.killDevice = async (target) => {
+        await kill(target);
         deviceUtils.setBootedDevices("android", []);
       };
       let readinessAttempts = 0;
@@ -473,14 +468,14 @@ test.each([false, true])(
       const image = { ...device, deviceId: "emulator-5556", isRunning: false };
       const otherDevice = { ...device, deviceId: "emulator-5558", name: "Other AVD" };
       const recoveredProcess = new FakeChildProcess(h.timer);
-      deviceUtils.setMockChildProcess(image.name, recoveredProcess as unknown as ChildProcess);
+      deviceUtils.setMockChildProcess(image.name, recoveredProcess);
       deviceUtils.setBootedDevices("android", [device]);
       deviceUtils.setDeviceImages("android", [image]);
       matcher.setBootedResult(device);
       matcher.setImageResult(image);
       const kill = deviceUtils.killDevice.bind(deviceUtils);
-      deviceUtils.killDevice = async (target, options) => {
-        await kill(target, options);
+      deviceUtils.killDevice = async (target) => {
+        await kill(target);
         deviceUtils.setBootedDevices("android", []);
       };
       let readinessAttempts = 0;

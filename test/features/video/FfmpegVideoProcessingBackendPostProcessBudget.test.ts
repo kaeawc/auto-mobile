@@ -18,7 +18,6 @@ import {
   ProcessTeardownUnconfirmedError,
   trackProcess,
 } from "../../../src/utils/ChildProcessTracker";
-import { EventEmitter } from "node:events";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { settleByFakeEvents } from "../../helpers/fakeTimerStepping";
@@ -126,8 +125,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
   }
 
   function captureTracker(recorderSignal: NodeJS.Signals | null = null): ProcessTracker {
-    const process = new EventEmitter() as ProcessTracker["process"];
-    process.stderr = new EventEmitter() as ProcessTracker["process"]["stderr"];
+    const process = new FakeChildProcess(timer);
     process.exitCode = recorderSignal ? null : 0;
     process.signalCode = recorderSignal;
     process.killed = false;
@@ -152,21 +150,20 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
     recording: VideoCaptureConfig,
     options: StopOptions = { rawCodec: "hevc" },
   ): Promise<RecordingResult> {
-    const backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      undefined,
-      startEncoder(behavior),
-      () => "win32",
-      { codec: async (filePath) => (filePath === RAW_PATH ? options.rawCodec : "hevc") },
+    const backend = new FfmpegVideoProcessingBackend(undefined, {
+      ffmpegClient: startEncoder(behavior),
+      platformProvider: () => "win32",
+      codecProbe: {
+        codec: async (filePath) => (filePath === RAW_PATH ? options.rawCodec : "hevc"),
+      },
       timer,
-      {
+      captureFileRemover: {
         remove: async (filePath) => {
           removed.push(filePath);
         },
       },
-      undefined,
-      { size: async () => 4096 },
-    );
+      recordingFileProbe: { size: async () => 4096 },
+    });
     const handle: RecordingHandle = {
       recordingId: recording.recordingId,
       outputPath: recording.outputPath,

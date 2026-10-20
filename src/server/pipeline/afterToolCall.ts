@@ -1,5 +1,5 @@
 import { classifyToolResult } from "../../utils/toolEnvelopePayload";
-import { BootedDevice, type ViewHierarchyResult } from "../../models";
+import { BootedDevice, isViewHierarchyResult, type ViewHierarchyResult } from "../../models";
 import { NavigationGraphManager } from "../../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../../features/observe/ObserveScreen";
@@ -9,11 +9,11 @@ import { settleEmbeddedObservationInResponse } from "../embeddedObservationSettl
 import { serverConfig } from "../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../features/telemetry/TelemetryRecorder";
 import { logger } from "../../utils/logger";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Timer } from "../../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/constants";
-import { getToolCallRecorder } from "../toolCallRecordingManager";
+import { getToolCallRecorder } from "../../daemon/toolCallRecordingManager";
 import { formatToolResultLog } from "../toolResultLog";
 import { formatStructuredToolError } from "../../utils/formatStructuredToolError";
 import {
@@ -21,10 +21,10 @@ import {
   type ObservationArtifactWriter,
   type ObservationBaselineStore,
 } from "../finalizeToolResponse";
-import { getStructuredField } from "../../utils/toolUtils";
-import { readToolEnvelopePayload } from "../toolEnvelopePayload";
+import { getStructuredField, observationOfPayload } from "../../utils/toolUtils";
+import { readToolEnvelopePayload } from "../../daemon/toolEnvelopePayload";
 import { isMarkedToolFailure } from "../../utils/toolFailureSignal";
-import { narrowInternalToolEnvelope } from "../internalToolPayloads";
+import { narrowInternalToolEnvelope } from "../../utils/internalToolPayloads";
 import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactRetention,
@@ -78,10 +78,6 @@ export function isToolResponseFailure(response: unknown): boolean {
   return isMarkedToolFailure(response);
 }
 
-function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
-  return isRecord(value) && isRecord(value.hierarchy);
-}
-
 /**
  * Read an unprojected observation hierarchy from a completed tool envelope.
  *
@@ -99,7 +95,7 @@ function getObservedHierarchy(
     return undefined;
   }
 
-  const observation = name === "observe" ? payload : payload.observation;
+  const observation = observationOfPayload(name, payload);
   if (!isRecord(observation) || !isViewHierarchyResult(observation.viewHierarchy)) {
     return undefined;
   }
@@ -177,7 +173,6 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       device,
       response,
       sessionUuid,
-      shouldResolveDevice,
       signal,
       timer,
       toolStartMs,
@@ -187,23 +182,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     // Pipeline failure classification uses explicit status and the out-of-band mark.
     const unwrapped = unwrapToolResponse(response, name);
 
-    const toolSuccess =
-      unwrapped && typeof unwrapped === "object" && "success" in unwrapped
-        ? unwrapped.success !== false
-        : true;
-    const toolError =
-      unwrapped && typeof unwrapped === "object" && "error" in unwrapped
-        ? (formatStructuredToolError(unwrapped.error) ?? String(unwrapped.error ?? ""))
-        : null;
-    if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
-      const resultLog = formatToolResultLog({
-        toolName: name,
-        success: unwrapped.success !== false,
-        error: toolError ?? unwrapped.error,
-        callerTimedOut: signal?.aborted ?? false,
-      });
-      logger[resultLog.level](resultLog.message);
-    }
+    const { toolSuccess, toolError } = logToolResponse(unwrapped, name, signal);
 
     // Issue #6866: a navigation-class action's embedded observation can be
     // captured before the destination screen finishes inflating, so the client's
@@ -239,61 +218,10 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     // a non-hoisted field off the envelope top level (`swipeEnvelope.found`) is a
     // compile error, and `getStructuredField`'s key is checked against the
     // payload — the stringly-typed dead-read footgun is gone.
-    if (name === "swipeOn" && args.lookFor) {
-      const swipeEnvelope = narrowInternalToolEnvelope("swipeOn", response);
-      if (
-        getStructuredField(swipeEnvelope, "success") &&
-        getStructuredField(swipeEnvelope, "found")
-      ) {
-        const scrollPosition = UIStateExtractor.createScrollPosition(args);
-        if (scrollPosition) {
-          const scrollNavManager = sessionUuid
-            ? NavigationGraphManager.getInstanceForSession(sessionUuid)
-            : NavigationGraphManager.getInstance();
-          scrollNavManager.updateScrollPosition(scrollPosition);
-        }
-      }
-    }
+    updateScrollPosition(input);
+    const sessionManager = cacheObservedHierarchy(input);
 
-    if (
-      shouldResolveDevice &&
-      sessionUuid &&
-      !(name === "observe" && args.display === "all") &&
-      DaemonState.getInstance().isInitialized()
-    ) {
-      const sessionManager = DaemonState.getInstance().getSessionManager();
-      const observedHierarchy = getObservedHierarchy(name, response);
-      if (observedHierarchy) {
-        sessionManager.setLastHierarchy(sessionUuid, observedHierarchy);
-      }
-      // NOTE: there is deliberately no `screenshot` read here. Production
-      // `observe` never emitted a `screenshot` payload field and the session
-      // `lastScreenshot` slot had no reader, so the whole cache chain was dead
-      // and was removed (issue #3221). If observe ever attaches a screenshot,
-      // reintroduce the write together with a real consumer.
-    }
-
-    const baselineStore: ObservationBaselineStore | undefined =
-      sessionUuid && DaemonState.getInstance().isInitialized()
-        ? {
-            get: (uuid) =>
-              DaemonState.getInstance().getSessionManager().getLastRenderedObservation(uuid),
-            set: (uuid, observation, displayRevision) =>
-              DaemonState.getInstance()
-                .getSessionManager()
-                .setLastRenderedObservation(uuid, observation, displayRevision),
-            getActionMetadata: (uuid, deviceId) =>
-              DaemonState.getInstance().getSessionManager().getLastActionMetadata(uuid, deviceId),
-            setActionMetadata: (uuid, deviceId, blocks) =>
-              DaemonState.getInstance()
-                .getSessionManager()
-                .setLastActionMetadata(uuid, deviceId, blocks),
-            setDisplayRevision: (uuid, revision, key, generation) =>
-              DaemonState.getInstance()
-                .getSessionManager()
-                .setLastRenderedDisplayRevision(uuid, revision, key, generation),
-          }
-        : undefined;
+    const baselineStore = observationBaselineStore(sessionUuid, sessionManager);
     const configuredArtifactDirectory = serverConfig.getToolOutputsDir();
     const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
     const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
@@ -304,6 +232,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const finalizedResponse = finalizeToolResponse(response, {
       name,
       loudArtifactWrites: traits?.loudArtifactWrites,
+      defaultsToSkeletonObservation: traits?.defaultsToSkeletonObservation,
       outputSchema,
       args,
       sessionUuid,
@@ -320,24 +249,135 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       delivered: !isClientCancelled(signal) && (toolSuccess || !signal?.aborted),
     });
 
-    const telemetryArgs = { ...args };
-    deleteInternalToolParams(telemetryArgs);
-    TelemetryRecorder.getInstance().recordToolCallEvent({
-      timestamp: toolStartMs,
-      toolName: name,
-      durationMs,
-      success: toolSuccess,
-      error: toolError,
-      args: typeof args === "object" ? telemetryArgs : null,
-    });
-
-    if (toolSuccess) {
-      getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(name, args);
-    }
+    recordCompletedToolCall(input, { durationMs, toolSuccess, toolError });
 
     return {
       durationMs,
       finalizedResponse,
     };
+  }
+}
+
+function logToolResponse(
+  unwrapped: ReturnType<typeof unwrapToolResponse>,
+  name: string,
+  signal?: AbortSignal,
+) {
+  const toolSuccess =
+    unwrapped && typeof unwrapped === "object" && "success" in unwrapped
+      ? unwrapped.success !== false
+      : true;
+  const toolError = toolResponseError(unwrapped);
+  if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
+    const resultLog = formatToolResultLog({
+      toolName: name,
+      success: unwrapped.success !== false,
+      error: toolError ?? unwrapped.error,
+      callerTimedOut: signal?.aborted ?? false,
+    });
+    logger[resultLog.level](resultLog.message);
+  }
+
+  return { toolSuccess, toolError };
+}
+
+function updateScrollPosition(input: AfterToolCallInput): void {
+  const { name, args, response, sessionUuid } = input;
+  if (name === "swipeOn" && args.lookFor) {
+    const swipeEnvelope = narrowInternalToolEnvelope("swipeOn", response);
+    if (
+      getStructuredField(swipeEnvelope, "success") &&
+      getStructuredField(swipeEnvelope, "found")
+    ) {
+      const scrollPosition = UIStateExtractor.createScrollPosition(args);
+      if (scrollPosition) {
+        const scrollNavManager = sessionUuid
+          ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+          : NavigationGraphManager.getInstance();
+        scrollNavManager.updateScrollPosition(scrollPosition);
+      }
+    }
+  }
+}
+
+function cacheObservedHierarchy(input: AfterToolCallInput) {
+  const { name, args, response, sessionUuid, shouldResolveDevice } = input;
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (
+    shouldResolveDevice &&
+    sessionUuid &&
+    !(name === "observe" && args.display === "all") &&
+    sessionManager
+  ) {
+    const observedHierarchy = getObservedHierarchy(name, response);
+    if (observedHierarchy) {
+      sessionManager.setLastHierarchy(sessionUuid, observedHierarchy);
+    }
+    // NOTE: there is deliberately no `screenshot` read here. Production
+    // `observe` never emitted a `screenshot` payload field and the session
+    // `lastScreenshot` slot had no reader, so the whole cache chain was dead
+    // and was removed (issue #3221). If observe ever attaches a screenshot,
+    // reintroduce the write together with a real consumer.
+  }
+
+  return sessionManager;
+}
+
+function observationBaselineStore(
+  sessionUuid: string | undefined,
+  sessionManager: ReturnType<typeof defaultDaemonContext.sessionManager>,
+): ObservationBaselineStore | undefined {
+  const baselineStore: ObservationBaselineStore | undefined =
+    sessionUuid && sessionManager
+      ? {
+          get: (uuid) => sessionManager.getLastRenderedObservation(uuid),
+          set: (uuid, observation, displayRevision) =>
+            sessionManager.setLastRenderedObservation(uuid, observation, displayRevision),
+          getActionMetadata: (uuid, deviceId) =>
+            sessionManager.getLastActionMetadata(uuid, deviceId),
+          setActionMetadata: (uuid, deviceId, blocks) =>
+            sessionManager.setLastActionMetadata(uuid, deviceId, blocks),
+          setDisplayRevision: (uuid, revision, key, generation) =>
+            sessionManager.setLastRenderedDisplayRevision(uuid, revision, key, generation),
+        }
+      : undefined;
+  return baselineStore;
+}
+
+function toolResponseError(unwrapped: ReturnType<typeof unwrapToolResponse>) {
+  const toolError =
+    unwrapped && typeof unwrapped === "object" && "error" in unwrapped
+      ? (formatStructuredToolError(unwrapped.error) ?? String(unwrapped.error ?? ""))
+      : null;
+  return toolError;
+}
+
+function recordCompletedToolCall(
+  input: AfterToolCallInput,
+  result: {
+    durationMs: number;
+    toolSuccess: boolean;
+    toolError: ReturnType<typeof toolResponseError>;
+  },
+) {
+  const { args, name, toolStartMs, traits } = input;
+  const { durationMs, toolSuccess, toolError } = result;
+  const telemetryArgs = { ...args };
+  deleteInternalToolParams(telemetryArgs);
+  TelemetryRecorder.getInstance().recordToolCallEvent({
+    timestamp: toolStartMs,
+    toolName: name,
+    durationMs,
+    success: toolSuccess,
+    error: toolError,
+    args: typeof args === "object" ? telemetryArgs : null,
+  });
+
+  if (toolSuccess) {
+    getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(
+      name,
+      args,
+      traits,
+    );
   }
 }

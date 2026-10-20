@@ -1,6 +1,8 @@
+import { makePool } from "../helpers/makePool";
+import { listDevicesOutputSchema } from "../../src/server/deviceTools";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -14,12 +16,12 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Inventory contract: every surface reports the same holder for a device. The listDevices tool
 // names the session from the pool's own assignment (`pooled.sessionId`); the booted resource names
@@ -60,14 +62,7 @@ describe("session attribution on the tool and the resource", () => {
     manager.setBootedDevices("android", [android]);
     manager.setBootedDevices("ios", []);
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "hunt-session-parity", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    const pool = makePool(sessions, "hunt-session-parity", { timer, deviceManager: manager });
     await pool.initializeWithDevices([android]);
     await sessions.createSession("session-pointing-at-device", android.deviceId, "android");
     expect(pool.getDevice(android.deviceId)?.sessionId).toBeNull();
@@ -81,13 +76,11 @@ describe("session attribution on the tool and the resource", () => {
 
     const resource = await getBootedDevicesForPlatforms(["android"], timer);
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = listDevicesOutputSchema.parse(toolStructured(response));
 
     const fromResource = resource.devices.find((d) => d.runtime.deviceId === android.deviceId)!;
-    const fromTool = payload.devices.find(
-      (d: { runtime: { deviceId: string } }) => d.runtime.deviceId === android.deviceId,
-    );
+    const fromTool = payload.devices.find((d) => d.runtime.deviceId === android.deviceId)!;
     expect(fromTool.runtime.poolStatus).toBe(fromResource.runtime.poolStatus);
-    expect(fromResource.runtime.session).toEqual(fromTool.runtime.session);
+    expect(fromResource.runtime.session).toEqual(fromTool.runtime.session ?? null);
   });
 });

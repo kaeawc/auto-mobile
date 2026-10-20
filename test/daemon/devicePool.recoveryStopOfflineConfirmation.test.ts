@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { getHostEmulatorProcessStopper } from "../../src/devices/hostEmulatorProcessStopper";
 import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -6,16 +7,12 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DeviceShutdownOptions } from "../../src/devices/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 
 /**
@@ -77,25 +74,20 @@ async function setup() {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new KillGoesOfflineManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   const recover = async (): Promise<RecoveryOutcome> =>
     await settleWithFakeTime(
@@ -264,7 +256,10 @@ for (const offline of [false, true]) {
         }
         return result;
       };
-      const client = new AndroidEmulatorClient(null, null, s.timer, new FakeAdbClientFactory(adb));
+      const client = new AndroidEmulatorClient({
+        timer: s.timer,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
       const stopper = new FakeEmulatorProcessStopper();
       stopper.outcome = { kind: "stopped", pid: 42, signal: "SIGTERM" };
       stopper.onStop = () => {

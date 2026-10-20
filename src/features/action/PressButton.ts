@@ -5,10 +5,14 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import { typedRefusalFields } from "../../models/typedRefusalFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { BootedDevice, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
@@ -32,16 +36,55 @@ export function unsupportedIosButtonResult(button: string, error: string): Press
   };
 }
 
+/** CtrlProxy slices a button press uses; each defaults to the device's real client. */
+export interface PressButtonCtrlProxyOverrides {
+  globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+  frameContextClient?: Pick<AndroidCtrlProxyClient, "validateFrameContext">;
+}
+
 export class PressButton extends BaseVisualChange {
+  private readonly globalActionClient?: PressButtonCtrlProxyOverrides["globalActionClient"];
+  private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
+
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
     private readonly holdRequest?: DispatchedRequestHold,
+    collaborators: DisplayFenceDependencies & PressButtonCtrlProxyOverrides = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
     this.device = device;
+    this.globalActionClient = collaborators.globalActionClient;
+    this.frameContextClient = collaborators.frameContextClient;
+  }
+
+  private globalActionTransport(): Pick<AndroidCtrlProxyClient, "requestGlobalAction"> {
+    return (
+      this.globalActionClient ?? AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory)
+    );
+  }
+
+  private frameContextTransport(): Pick<AndroidCtrlProxyClient, "validateFrameContext"> {
+    return (
+      this.frameContextClient ?? AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory)
+    );
+  }
+
+  /** Typed test view so tests can drive the deadline gate and the per-platform dispatch without a full press. */
+  get testHooks(): {
+    verifyAndroidHomeForeground: (
+      options?: Parameters<BaseVisualChange["verifyAndroidHomeForeground"]>[0],
+    ) => Promise<boolean>;
+    executeAndroidButtonPress: PressButton["press"];
+    executeiOSButtonPress: PressButton["press"];
+  } {
+    return {
+      verifyAndroidHomeForeground: (options = {}) => this.verifyAndroidHomeForeground(options),
+      executeAndroidButtonPress: (...args) => this.executeAndroidButtonPress(...args),
+      executeiOSButtonPress: (...args) => this.executeiOSButtonPress(...args),
+    };
   }
 
   private assertHeldRequestLive(signal?: AbortSignal): void {
@@ -356,7 +399,7 @@ export class PressButton extends BaseVisualChange {
     });
     try {
       throwIfAborted(signal);
-      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+      const client = this.globalActionTransport();
       const result = await this.awaitDispatchedRequest(
         signal,
         globalActionTimeout,
@@ -431,7 +474,7 @@ export class PressButton extends BaseVisualChange {
       };
     }
 
-    const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const client = this.frameContextTransport();
     const validation = await client.validateFrameContext(frameContext, validationBudget, signal);
     if (validation.success) {
       return undefined;
@@ -528,7 +571,7 @@ export class PressButton extends BaseVisualChange {
   }
 
   private async executeiOSNavigationButton(
-    client: IOSCtrlProxyClient,
+    client: IosCtrlProxy,
     button: string,
     timeoutMs?: number,
     frameContext?: string,

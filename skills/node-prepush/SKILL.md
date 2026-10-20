@@ -24,7 +24,7 @@ Use this workflow before pushing a Node or TypeScript change.
 ## What the gate reproduces, and what stays CI-only
 
 `prepush-node.sh` runs: stale-base guard, `format:check`, `typecheck`, `lint`
-(oxlint, ratchet, `check-boundaries.sh`), the test as-any ratchet, tool
+(oxlint, ratchet, `check-boundaries.sh`), `typecheck:test`, tool
 definitions drift, the static Fast Validation subset (`yaml`, `runtime-pins`,
 `stdlib-first`, `shared-process-allowlist`, `docs-assets`, `env-var-docs`,
 `lfs-pointers`, `lychee-offline`, and the other tool-free checks named in

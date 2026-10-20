@@ -33,7 +33,7 @@ describe("NavigationGraphManager app resume (#10193)", () => {
     timer.setCurrentTime(T0);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
   });
@@ -181,7 +181,7 @@ describe("NavigationGraphManager app resume (#10193)", () => {
     timer.setCurrentTime(T0 + 8000);
     await manager.recordAppForeground(APP);
 
-    await manager.recordBackStack({ depth: 4, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth: 4 });
 
     expect((await repository.getNode(APP, "Home"))?.back_stack_depth).toBeNull();
   });

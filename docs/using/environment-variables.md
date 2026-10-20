@@ -164,7 +164,7 @@ export AUTOMOBILE_DB_PATH="$PWD/.auto-mobile/auto-mobile.db"
 ```
 
 Do not use `AUTOMOBILE_DB_PATH=:memory:` in production. It is allowed only
-for tests that also set `AUTOMOBILE_ALLOW_IN_MEMORY_DB=1`.
+for tests that also set `AUTOMOBILE_ALLOW_IN_MEMORY_DB` to `1`, `true` or `yes`.
 
 ## Tool defaults
 
@@ -805,6 +805,38 @@ one: only restarts within the last `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`
 exhaust the budget of a long-lived daemon. A recovery cancelled before it
 touches the emulator (an ADB-reset takeover, or an intentional `killDevice`)
 does not spend an attempt either way.
+
+### Ambient Android and OS variables
+
+Not AutoMobile-specific; read to locate the Android emulator and the default SDK locations.
+
+| Variable                                                                     | Use                                                                                                                                                                                                                          | Default          |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_SDK_HOME`                       | Android SDK root used to find `emulator/emulator`; the first that is set and exists wins, in that order. `ANDROID_SDK_HOME` is the last-resort fallback and also names the user-data home in emulator-not-found diagnostics. | unset            |
+| `HOME`                                                                       | POSIX home directory; used to probe the default Android SDK locations.                                                                                                                                                       | unset            |
+| `USERPROFILE`                                                                | Windows home directory, consulted when `HOME` is unset or empty.                                                                                                                                                             | unset            |
+| `PATH`                                                                       | Executable search path; only reported in emulator-not-found diagnostics.                                                                                                                                                     | unset            |
+| `JAVA_HOME`                                                                  | Java installation root checked by `doctor`.                                                                                                                                                                                  | unset            |
+| `DISPLAY`, `WAYLAND_DISPLAY`                                                 | Linux display servers; when neither is set (or both blank) emulator launches default to `-no-window`.                                                                                                                        | unset            |
+| `USER`, `LOGNAME`                                                            | POSIX account name (`USER` first) used to find the running emulator's advertisement directory.                                                                                                                               | unset            |
+| `XDG_RUNTIME_DIR`                                                            | Linux per-user runtime directory searched for running emulator advertisements.                                                                                                                                               | unset            |
+| `ANTHROPIC_API_KEY`                                                          | Anthropic API key used by vision features when none is configured explicitly.                                                                                                                                                | unset            |
+| `AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR`                                     | Test-only: the data directory the unit-test preload isolated; not for normal use.                                                                                                                                            | unset            |
+| `ANDROID_USER_HOME`, `ANDROID_AVD_HOME`, `ANDROID_EMULATOR_HOME`             | Android user, AVD and emulator home overrides used to locate AVD definitions.                                                                                                                                                | unset            |
+| `CI`, `GITHUB_ACTIONS`                                                       | Both exactly `true` on a GitHub Actions runner, where AutoMobile owns the iOS simulator lifecycle.                                                                                                                           | unset            |
+| `GITHUB_WORKSPACE`                                                           | GitHub Actions checkout directory, searched for `schemas/test-plan.schema.json`.                                                                                                                                             | unset            |
+| `ComSpec`, `COMSPEC`                                                         | Windows command interpreter used to run `.bat` Android tools (`ComSpec` first).                                                                                                                                              | `cmd.exe`        |
+| `LOCALAPPDATA`                                                               | Windows local app data directory used to find the default Android SDK.                                                                                                                                                       | unset            |
+| `Path`                                                                       | Windows spelling of the executable search path; consulted when `PATH` is unset.                                                                                                                                              | unset            |
+| `PATHEXT`                                                                    | Windows executable extensions used to locate `bunx`; only `.com` and `.exe` entries count.                                                                                                                                   | `.COM;.EXE`      |
+| `USERNAME`                                                                   | Windows account name, used instead of a UID in the default daemon state-file names.                                                                                                                                          | unset            |
+| `ADB_SERVER_SOCKET`, `ANDROID_ADB_SERVER_ADDRESS`, `ANDROID_ADB_SERVER_PORT` | The variables `adb` itself reads; they identify the ADB server so daemons sharing one share its device claims. The socket spec wins, then address and port.                                                                  | `localhost:5037` |
+| `CTRL_PROXY_IOS_BUNDLE_ID`, `CTRL_PROXY_IOS_TIMEOUT`                         | Target app bundle id and runner lifetime in seconds, passed to the iOS CtrlProxy runner.                                                                                                                                     | unset, `86400`   |
+| `NODE_ENV`                                                                   | Exact `test` arms the test-only guards and test defaults.                                                                                                                                                                    | unset            |
+| `MCP_SERVER_VERSION`                                                         | Exact override of the reported MCP server version (CI and test pin).                                                                                                                                                         | unset            |
+| `npm_package_version`                                                        | Package version exported by npm; used only when the manifest version is unavailable.                                                                                                                                         | unset            |
+| `DEBUG_ADB_EXEC`                                                             | Any value logs real adb execution with stack traces.                                                                                                                                                                         | unset            |
+| `EMULATOR_POLLING_INTERVAL_MS`                                               | Emulator readiness polling interval in ms; minimum `100`.                                                                                                                                                                    | `500`            |
 
 ### Boot capacity
 

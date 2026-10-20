@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolIsError, toolStructured, toolText } from "../helpers/toolResponse";
+import { appLifecycleResultSchema } from "../../src/server/appToolOutputSchemas";
 import {
   appLifecycleSchema,
-  appLifecycleResultSchema,
   registerAppTools,
   resetInstalledAppResourceRefresh,
   setInstalledAppResourceRefresh,
@@ -10,6 +11,9 @@ import type { AppLifecycleResult, BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
 import type { AppLifecycleExecutionOptions } from "../../src/features/action/AppLifecycle";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "fake", name: "Fake", platform: "android" };
 const appId = "com.example.app";
@@ -79,8 +83,8 @@ describe("appLifecycle registration and handler", () => {
       },
     });
     const response = await handler()(device, args, undefined, controller.signal);
-    expect(response.structuredContent).toMatchObject(successful);
-    expect(appLifecycleResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolStructured(response)).toMatchObject(successful);
+    expect(appLifecycleResultSchema.safeParse(toolStructured(response)).success).toBe(true);
     expect(refreshes).toEqual([device.deviceId]);
   });
   for (const failure of [
@@ -106,9 +110,9 @@ describe("appLifecycle registration and handler", () => {
         },
       });
       const response = await handler()(device, args);
-      expect(response.structuredContent).toMatchObject({ success: false, message: failure.error });
-      expect(response.isError).toBe(true);
-      expect(response.content[0].text).toBe(JSON.stringify({ ...failure, message: failure.error }));
+      expect(toolStructured(response)).toMatchObject({ success: false, message: failure.error });
+      expect(toolIsError(response)).toBe(true);
+      expect(toolText(response)).toBe(JSON.stringify({ ...failure, message: failure.error }));
       expect(refreshes).toEqual([]);
     });
   }
@@ -143,7 +147,7 @@ describe("appLifecycle registration and handler", () => {
         }),
       },
     });
-    expect((await handler()(device, args)).structuredContent).toMatchObject({
+    expect(toolStructured(await handler()(device, args))).toMatchObject({
       message: "Process was not reclaimed",
       success: true,
     });
@@ -165,7 +169,7 @@ describe("appLifecycle registration and handler", () => {
         }),
       },
     });
-    expect((await handler()(device, args)).structuredContent).toMatchObject({
+    expect(toolStructured(await handler()(device, args))).toMatchObject({
       message: "kill failed",
       success: false,
     });

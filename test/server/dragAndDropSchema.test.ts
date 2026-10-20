@@ -1,36 +1,38 @@
 import { expect } from "bun:test";
 import { z } from "zod/v4";
 import {
+  type InteractionToolDependencies,
   dragAndDropSchema,
   dragAndDropHandler,
-  setDragAndDropFactory,
-  resetDragAndDropFactory,
   registerInteractionTools,
 } from "../../src/server/interactionTools";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { DragAndDropOptions } from "../../src/models";
 import { warmedTests } from "../helpers/warmedTests";
 
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 
 // First-use costs (schema conversion, handler path) are paid in beforeAll, outside CI's per-test time.
-const test = warmedTests(() => resetDragAndDropFactory());
+const test = warmedTests(() => {
+  delete interactionDeps.dragAndDropFactory;
+});
 
 const container = { elementId: "item_42", container: { text: "Cart", index: 0 } };
 const endpoints = { source: { elementId: "remove" }, target: { text: "Drop" } };
 for (const endpoint of ["source", "target"] as const) {
   test(`${endpoint} accepts its own recursive scope and every resolver strategy`, () => {
-    for (const selectionStrategy of ["first", "random", "unique"]) {
+    for (const selectionStrategy of ["first", "random", "unique"] as const) {
       const selector = { ...endpoints[endpoint], container, selectionStrategy };
       expect(dragAndDropSchema.parse({ ...endpoints, [endpoint]: selector })[endpoint]).toEqual(
         selector,
       );
     }
   });
-  test.each([
+  const malformedSelectors: unknown[] = [
     {},
     { elementId: "remove", text: "Remove" },
     { elementId: "remove", unknown: true },
@@ -45,9 +47,15 @@ for (const endpoint of ["source", "target"] as const) {
       { elementId: "cart", index: 0.5 },
       { elementId: "cart", selectionStrategy: "last" },
     ].map((outer) => ({ elementId: "remove", container: { elementId: "item", container: outer } })),
-  ])(`${endpoint} rejects malformed or unsupported endpoint %j`, (selector) => {
-    expect(dragAndDropSchema.safeParse({ ...endpoints, [endpoint]: selector }).success).toBe(false);
-  });
+  ];
+  test.each(malformedSelectors)(
+    `${endpoint} rejects malformed or unsupported endpoint %j`,
+    (selector) => {
+      expect(dragAndDropSchema.safeParse({ ...endpoints, [endpoint]: selector }).success).toBe(
+        false,
+      );
+    },
+  );
 }
 test("scope and strategy belong to endpoints, not the top-level options", () => {
   for (const extra of [{ container }, { selectionStrategy: "unique" }]) {
@@ -81,7 +89,7 @@ test("JSON schema retains strict endpoint alternatives and bounded recursive def
       ],
     });
   }
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   const advertised = ToolRegistry.getToolDefinitions().find(
     (tool) => tool.name === "dragAndDrop",
   )?.inputSchema;
@@ -92,7 +100,7 @@ test("JSON schema retains strict endpoint alternatives and bounded recursive def
 });
 test("handler forwards both complete endpoints after schema parsing", async () => {
   const calls: DragAndDropOptions[] = [];
-  setDragAndDropFactory(() => ({
+  interactionDeps.dragAndDropFactory = () => ({
     execute: async (options) => {
       calls.push(options);
       return {
@@ -102,7 +110,7 @@ test("handler forwards both complete endpoints after schema parsing", async () =
         error: "dragAndDrop target: Target ambiguous",
       };
     },
-  }));
+  });
   try {
     const scoped = {
       source: { ...endpoints.source, container, selectionStrategy: "unique" },
@@ -115,11 +123,14 @@ test("handler forwards both complete endpoints after schema parsing", async () =
     const response = await dragAndDropHandler(
       { name: "fake", deviceId: "fake-drag-handler", platform: "android" },
       dragAndDropSchema.parse(scoped),
+      undefined,
+      undefined,
+      interactionDeps,
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject(scoped);
     expect(response).toMatchObject({ isError: true });
   } finally {
-    resetDragAndDropFactory();
+    delete interactionDeps.dragAndDropFactory;
   }
 });

@@ -1,3 +1,4 @@
+import type { GestureStartRequest } from "../observe/android/CtrlProxyGestures";
 import type { A11ySwipeResult } from "../observe/android/types";
 import type { Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -8,14 +9,7 @@ import type { DragPathPlan } from "./dragPathPlan";
 
 /** The streaming-stroke subset of the CtrlProxy client a path drag needs. */
 export interface StrokeClient {
-  requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    perf?: undefined,
-    displayId?: number,
-  ): Promise<A11ySwipeResult>;
+  requestGestureStart(request: GestureStartRequest): Promise<A11ySwipeResult>;
   requestGestureMove(
     gestureId: string,
     x: number,
@@ -69,25 +63,27 @@ export async function runDragPathStroke(
   const { gestureId, timer, signal } = options;
   throwIfAborted(signal);
   options.assertCurrent?.();
-  const started = await client.requestGestureStart(
-    gestureId,
-    plan.start.x,
-    plan.start.y,
-    DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-    undefined,
-    options.displayId,
-  );
-  if (!started.success) {
-    return {
-      success: false,
-      moveCount: 0,
-      error: started.error ?? "Gesture start was refused",
-    };
-  }
+  // The down may have landed even when its correlated reply is lost or times out, so the start
+  // sits inside the cleanup scope: a throw lifts the finger, an explicit refusal does not (#12994).
   let open = true;
   let moveCount = 0;
   let last = plan.start;
   try {
+    const started = await client.requestGestureStart({
+      gestureId,
+      x: plan.start.x,
+      y: plan.start.y,
+      timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      displayId: options.displayId,
+    });
+    if (!started.success) {
+      open = false;
+      return {
+        success: false,
+        moveCount: 0,
+        error: started.error ?? "Gesture start was refused",
+      };
+    }
     await sleepWhileLive(timer, plan.holdMs, signal);
     const travelStart = timer.now();
     for (const step of plan.moves) {

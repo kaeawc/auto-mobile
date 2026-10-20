@@ -1,7 +1,7 @@
 import type { TypingSession } from "./TypingSession";
 import type { SendKeysTextClient, TextActionResult } from "../SendKeys";
 import type { KeyboardProfileId } from "../keyboardProfiles";
-import type { ImeSubtypeSnapshot } from "../AndroidImeCatalog";
+import type { ImeCatalogState, ImeSubtypeSnapshot } from "../AndroidImeCatalog";
 import type { BootedDevice } from "../../../models";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -15,7 +15,7 @@ import {
   pinnedUser,
 } from "../AndroidImeCatalog";
 import { quarantineAndroidIme, type AndroidImeRecoverySnapshot } from "../androidImeLock";
-import { ImeRestorationError } from "./ImeSpan";
+import { ImeRestorationError } from "./ImeRestorationError";
 export interface SendKeysImeRecoverySnapshot extends AndroidImeRecoverySnapshot {
   /** Verify the captured user's state even if the foreground user has since changed. */
   userId?: number;
@@ -85,30 +85,58 @@ export class ImeRestore {
       return false;
     }
     try {
-      const catalog = await new AndroidImeCatalog(
+      const userId =
+        snapshot.userId ??
+        (await createForegroundUserSource(this.host.adb).foregroundUserId(signal));
+      const catalog = new AndroidImeCatalog(
         this.host.adb,
         this.host.device.deviceId,
-        snapshot.userId === undefined
-          ? createForegroundUserSource(this.host.adb)
-          : pinnedUser(snapshot.userId),
-      ).pinForeground(signal);
+        pinnedUser(userId),
+      );
       const state = await catalog.list(signal);
-      const safe = state.installed.some(
-        (ime) => ime.id === snapshot.imeId && ime.enabled && ime.active,
-      );
-      const commitImeEnabled =
-        state.installed.find((ime) => ime.id === AUTO_MOBILE_IME_ID)?.enabled ?? false;
-      const commitImeStateMatches = snapshot.wasEnabled ? commitImeEnabled : !commitImeEnabled;
-      return (
-        commitImeStateMatches &&
-        safe &&
+      const keyboardRestored =
+        state.installed.some((ime) => ime.id === snapshot.imeId && ime.enabled && ime.active) &&
         state.activeImeId === snapshot.imeId &&
-        (await catalog.readSubtype(snapshot.imeId, signal)).id === snapshot.subtypeId
-      );
+        (await catalog.readSubtype(snapshot.imeId, signal)).id === snapshot.subtypeId;
+      if (!keyboardRestored) {
+        return false;
+      }
+      return await this.settleCommitImeEnabled(catalog, state, userId, snapshot.wasEnabled, signal);
     } catch (error) {
       logger.warn("[SendKeys] Quarantined keyboard recovery could not be verified", error);
       return false;
     }
+  }
+
+  private async settleCommitImeEnabled(
+    catalog: AndroidImeCatalog,
+    state: ImeCatalogState,
+    userId: number,
+    wasEnabled: boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const isEnabled = (s: ImeCatalogState) =>
+      s.installed.find((ime) => ime.id === AUTO_MOBILE_IME_ID)?.enabled ?? false;
+    if (isEnabled(state) === wasEnabled) {
+      return true;
+    }
+    if (wasEnabled) {
+      return false;
+    }
+    // A transient `ime list` timeout (#13158) can fail restoration after the original
+    // keyboard is active again but before the commit IME was disabled. Finish that last step
+    // here instead of refusing forever.
+    const user = imeUserArgs(userId)
+      .map((arg) => ` ${arg}`)
+      .join("");
+    const disabled = await this.host.adb.executeCommand(
+      `shell ime disable${user} ${AUTO_MOBILE_IME_ID}`,
+    );
+    if (disabled.stderr.trim()) {
+      logger.warn(`[SendKeys] Failed to disable the text-commit IME: ${disabled.stderr.trim()}`);
+      return false;
+    }
+    return !isEnabled(await catalog.list(signal));
   }
 
   async checkKeyboardProfileSupport(profile?: KeyboardProfileId): Promise<TextActionResult> {

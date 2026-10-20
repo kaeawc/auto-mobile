@@ -7,6 +7,7 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
 import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { buildObserveResult } from "../helpers/observeFixture";
 
 /**
  * Issue #10081: a call whose request was cancelled or timed out has its response
@@ -18,19 +19,19 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
   const SESSION = "session-1";
   const metadata = {
     deviceId: "emulator-5554",
-    backStack: { depth: 1 },
-    deviceLock: { isLocked: false },
+    backStack: { depth: 1, activities: [], tasks: [] },
+    deviceLock: { locked: false, keyguardShowing: false },
   };
 
   let baselines: Map<string, ObserveResult>;
   let snapshots: Map<string, Record<string, unknown>>;
-  let originalManager: unknown;
+  let originalManager: ReturnType<DaemonState["setSessionManagerForTesting"]>;
   let originalDiff: boolean;
   let originalCompact: boolean;
   let initialized: ReturnType<typeof spyOn>;
 
   function screen(): ObserveResult {
-    return {
+    return buildObserveResult({
       updatedAt: 1,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -45,13 +46,14 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
         },
       },
       ...structuredClone(metadata),
-    } as ObserveResult;
+    });
   }
 
   async function call(signal?: AbortSignal) {
     const handler = new DefaultAfterToolCallHandler();
     const result = await handler.handle({
       name: "tapOn",
+      outputSchema: undefined,
       args: {},
       device: undefined,
       internalCall: false,
@@ -69,8 +71,7 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
     baselines = new Map();
     snapshots = new Map();
     const daemon = DaemonState.getInstance();
-    originalManager = Reflect.get(daemon, "sessionManager");
-    Reflect.set(daemon, "sessionManager", {
+    originalManager = daemon.setSessionManagerForTesting({
       getLastRenderedObservation: (uuid: string) => baselines.get(uuid),
       setLastRenderedObservation: (uuid: string, observation: ObserveResult) => {
         baselines.set(uuid, observation);
@@ -90,7 +91,7 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
 
   afterEach(() => {
     initialized.mockRestore();
-    Reflect.set(DaemonState.getInstance(), "sessionManager", originalManager);
+    DaemonState.getInstance().setSessionManagerForTesting(originalManager);
     serverConfig.setActionsDiffObserveEnabled(originalDiff);
     serverConfig.setActionsCompactMetadataEnabled(originalCompact);
   });
@@ -188,6 +189,7 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
       const handler = new DefaultAfterToolCallHandler();
       await handler.handle({
         name: "tapOn",
+        outputSchema: undefined,
         args: {},
         device: undefined,
         internalCall: false,

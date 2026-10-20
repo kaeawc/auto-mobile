@@ -11,7 +11,11 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 
 function observation(text: string): ObserveResult {
   return {
-    timestamp: 1,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     viewHierarchy: {
       hierarchy: {
         node: {

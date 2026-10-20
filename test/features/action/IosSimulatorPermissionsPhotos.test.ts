@@ -84,6 +84,9 @@ function expectUnverified(result: Awaited<ReturnType<IosSimulatorPermissions["se
   });
   expect(result).not.toHaveProperty("error");
   expect(result.results[0]).not.toHaveProperty("error");
+  if (typeof result.results[0].warning !== "string") {
+    throw new Error("Expected warning");
+  }
   expect(result.warnings).toEqual([result.results[0].warning]);
   expect(result.results[0].warning).toContain("dispatched via simctl");
   expect(result.results[0].warning).toContain(
@@ -194,7 +197,7 @@ describe("iOS simulator Photos permission honesty", () => {
   ])(
     "$name stored state cannot establish full access and leaves add-only dispatch unchanged",
     async ({ rows }) => {
-      const { permissions } = fixture(rows);
+      const { permissions } = fixture([...rows]);
       const result = await permissions.setPermissions("grant", appId, ["photos"]);
       expectUnverified(result);
       expect(result.results[0]).not.toHaveProperty("evidence");
@@ -342,6 +345,9 @@ describe("iOS simulator Photos permission honesty", () => {
       success: true,
       code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
     });
+    if (typeof result.results[0].warning !== "string") {
+      throw new Error("Expected warning");
+    }
     expect(result.warnings).toEqual([result.results[0].warning]);
   });
 
@@ -405,6 +411,9 @@ describe("iOS simulator Photos permission honesty", () => {
           code: "PHOTOS_FULL_ACCESS_UNVERIFIED",
           accessLevel: "readWrite",
         });
+        if (typeof result.results[1].warning !== "string") {
+          throw new Error("Expected warning");
+        }
         expect(result.warnings).toEqual([result.results[1].warning]);
         expect(result).not.toHaveProperty("error");
       } else {
@@ -422,48 +431,48 @@ describe("iOS simulator Photos permission honesty", () => {
     },
   );
 
-  test.each([
-    ["camera", "photos"],
-    ["photos", "camera"],
-  ])("first failure supplies the batch error for %j", async (...batch) => {
-    const { permissions, simctl, reader } = fixture(
-      [photosRow],
-      undefined,
-      true,
-      new FakePhotosAuthorizationVerifier("denied"),
-    );
-    const cameraError = "camera simctl dispatch failed";
-    simctl.setCommandArgsError(command("grant", "camera"), new Error(cameraError));
-    const result = await permissions.setPermissions("grant", appId, batch);
-    expect(result).toMatchObject({
-      success: false,
-      changedCount: 0,
-      failedCount: 2,
-    });
-    expect(result.error).toBe(result.results[0].error);
-    if (batch[0] === "camera") {
-      expect(result.error).toBe(cameraError);
-    } else {
-      expect(result.error).toContain("Photos grant was dispatched via simctl");
-    }
-    expect(result.results.find((item) => item.permission === "camera")).toMatchObject({
-      success: false,
-      error: cameraError,
-    });
-    expect(result.results.find((item) => item.permission === "photos")).toMatchObject({
-      success: false,
-      applied: true,
-      verified: false,
-      code: "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED",
-      error: expect.stringContaining("Photos grant was dispatched via simctl"),
-    });
-    expect(result).not.toHaveProperty("warnings");
-    expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args)).toEqual(
-      batch.map((permission) => command("grant", permission)),
-    );
-    expect(reader.calls).toEqual([{ deviceId: device.deviceId, appId, permissions: ["photos"] }]);
-    expect(reader.commandCounts).toEqual([batch.indexOf("photos") + 1]);
-  });
+  test.each([{ batch: ["camera", "photos"] }, { batch: ["photos", "camera"] }])(
+    "first failure supplies the batch error for %j",
+    async ({ batch }) => {
+      const { permissions, simctl, reader } = fixture(
+        [photosRow],
+        undefined,
+        true,
+        new FakePhotosAuthorizationVerifier("denied"),
+      );
+      const cameraError = "camera simctl dispatch failed";
+      simctl.setCommandArgsError(command("grant", "camera"), new Error(cameraError));
+      const result = await permissions.setPermissions("grant", appId, [...batch]);
+      expect(result).toMatchObject({
+        success: false,
+        changedCount: 0,
+        failedCount: 2,
+      });
+      expect(result.error).toBe(result.results[0].error);
+      if (batch[0] === "camera") {
+        expect(result.error).toBe(cameraError);
+      } else {
+        expect(result.error).toContain("Photos grant was dispatched via simctl");
+      }
+      expect(result.results.find((item) => item.permission === "camera")).toMatchObject({
+        success: false,
+        error: cameraError,
+      });
+      expect(result.results.find((item) => item.permission === "photos")).toMatchObject({
+        success: false,
+        applied: true,
+        verified: false,
+        code: "PHOTOS_FULL_ACCESS_NOT_ESTABLISHED",
+        error: expect.stringContaining("Photos grant was dispatched via simctl"),
+      });
+      expect(result).not.toHaveProperty("warnings");
+      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args)).toEqual(
+        batch.map((permission) => command("grant", permission)),
+      );
+      expect(reader.calls).toEqual([{ deviceId: device.deviceId, appId, permissions: ["photos"] }]);
+      expect(reader.commandCounts).toEqual([batch.indexOf("photos") + 1]);
+    },
+  );
 
   test("mixed grants preserve sequential dispatch and locked readback", async () => {
     const { permissions, simctl, reader } = fixture(
@@ -577,13 +586,17 @@ describe("captured Photos readback", () => {
     }
   });
 
-  test.each(photosTccCases)("native probe agrees with add-only readback: %s", async (name) => {
+  test.each([...photosTccCases])("native probe agrees with add-only readback: %s", async (name) => {
     const reader = new FixtureTccReader(name);
     const permissions = new IosSimulatorPermissions(device27, new FakeSimctl(), reader);
     const { probe } = await loadPhotosTccCase(name);
     const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);
     const [photos, add] = result.permissions;
-    const nativeStates = { authorized: "granted", denied: "denied", notDetermined: "unknown" };
+    const nativeStates = {
+      authorized: "granted",
+      denied: "denied",
+      notDetermined: "unknown",
+    } as const;
     expect(add.state).toBe(nativeStates[probe.addOnly.name]);
     expect(photos.state).toBe(name === "revoked" ? "denied" : "unknown");
     if (name === "full" || name === "full2") {
@@ -598,7 +611,7 @@ describe("captured Photos readback", () => {
 });
 
 describe("iOS 26.5 Photos captures", () => {
-  test.each(photosTccCases265)("reports PhotoKit add-only probe for %s", async (name) => {
+  test.each([...photosTccCases265])("reports PhotoKit add-only probe for %s", async (name) => {
     const reader = new FixtureTccReader(name, "ios26.5");
     const permissions = new IosSimulatorPermissions(
       { ...device, iosVersion: "26.5" },
@@ -608,7 +621,11 @@ describe("iOS 26.5 Photos captures", () => {
     const { probe, rows } = await loadPhotosTccCase(name, "ios26.5");
     const result = await permissions.getPermissions(appId, ["photos", "photos-add"]);
     const [photos, add] = result.permissions;
-    const nativeStates = { authorized: "granted", denied: "denied", notDetermined: "unknown" };
+    const nativeStates = {
+      authorized: "granted",
+      denied: "denied",
+      notDetermined: "unknown",
+    } as const;
     expect(add.state).toBe(nativeStates[probe.addOnly.name]);
     expect(add).not.toHaveProperty("evidence");
     expect(add).not.toHaveProperty("verified");

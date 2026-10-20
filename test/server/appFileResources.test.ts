@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { registerAppFileResources } from "../../src/server/appFileResources";
 import type { AppFileService } from "../../src/server/appFileService";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -63,7 +64,7 @@ describe("App file resources", () => {
     );
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     expect(content.mimeType).toBe("application/json");
     const payload = JSON.parse(content.text!);
     expect(payload).toMatchObject({
@@ -88,7 +89,7 @@ describe("App file resources", () => {
     );
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     expect(content.uri).toBe(
       "automobile:devices/device%201/apps/com.example.app/files/documents/fixtures/onboarding/welcome%20image.png",
     );
@@ -117,7 +118,7 @@ describe("App file resources", () => {
     );
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     expect(content.uri).toBe(
       "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/config/settings.json",
     );
@@ -137,7 +138,7 @@ describe("App file resources", () => {
       const match = ResourceRegistry.matchTemplate(uri);
       expect(match).toBeDefined();
 
-      const error = await match!.template.handler(match!.params).then(
+      const error = await invokeResourceTemplate(match!).then(
         () => undefined,
         (caught: unknown) => caught,
       );
@@ -164,7 +165,7 @@ describe("App file resources", () => {
     ]) {
       const match = ResourceRegistry.matchTemplate(`${base}?${query}`);
       expect(match).toBeDefined();
-      await expect(match!.template.handler(match!.params)).rejects.toThrow(
+      await expect(invokeResourceTemplate(match!)).rejects.toThrow(
         `App file resource does not accept query parameter "${key}"; the only supported query parameter is "userId".`,
       );
     }
@@ -199,7 +200,7 @@ describe("App file resources", () => {
     const uri = `automobile:devices/device/apps/com.example.app/files/documents${operation === "read" ? "/welcome.txt" : ""}${userId === undefined ? "" : `?userId=${userId}`}`;
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     expect(calls).toEqual([userId]);
     expect(content.uri).toBe(uri);
   });

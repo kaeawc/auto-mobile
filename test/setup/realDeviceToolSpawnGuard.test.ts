@@ -28,11 +28,11 @@ const allowing = (testFile: string, ...commands: string[]): HostSpawnAllowList =
 function fakeGuard(overrides: Partial<SpawnGuardDependencies> = {}) {
   const calls: { receiver: unknown; args: unknown[] }[] = [];
   const result = { fake: true };
-  function original(this: unknown, first: unknown, ...rest: unknown[]) {
-    calls.push({ receiver: this, args: [first, ...rest] });
+  function original(this: unknown, ...args: unknown[]) {
+    calls.push({ receiver: this, args });
     return result;
   }
-  const target: SpawnTarget = { spawn: original, spawnSync: original };
+  const target = { spawn: original, spawnSync: original } satisfies SpawnTarget;
   const report: Violation[] = [];
   const deps: SpawnGuardDependencies = {
     target,
@@ -385,7 +385,7 @@ test("every launch from a unit test is refused unless its file lists that comman
   }
   // A launch the guard cannot read has no command an entry could name.
   for (const args of [[], [null], [{ cmd: "git" }], [["git", 1]]]) {
-    expect(() => guard.target.spawn(...(args as never[]))).toThrow("(unparsed)");
+    expect(() => guard.target.spawn(...args)).toThrow("(unparsed)");
   }
   expect(guard.calls).toHaveLength(0);
   expect(guard.report.map((violation) => violation.forbidden)).toEqual(Array(6).fill(false));
@@ -512,9 +512,9 @@ function fakeShellGuard(allowList: HostSpawnAllowList = new Map()) {
     },
     { escape: (value: string) => `escaped ${value}` },
   );
-  const target: SpawnTarget = { spawn: () => 0, spawnSync: () => 0, $: shell };
+  const target = { spawn: () => 0, spawnSync: () => 0, $: shell };
   const guard = fakeGuard({ target, loadAllowList: () => allowList });
-  return { ...guard, target, shell, scripts, $: target.$ as unknown as typeof shell };
+  return { ...guard, target, shell, scripts, $: target.$ };
 }
 
 test("Bun's shell template is refused unless the file lists Bun.$", () => {

@@ -13,6 +13,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { LockOwnerGenerationProbe } from "../../utils/fileLock";
 import { defaultLockOwnerGenerationProbe } from "../../utils/lockOwnerGeneration";
+import { ENV } from "../../config/env";
 
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1000;
 export interface IosTunnelStart {
@@ -105,6 +106,53 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`),
     });
   }
+  /** Live view of the tunnel's process bookkeeping (tests, doctor). */
+  get diagnostics(): {
+    readonly processId: number | null;
+    readonly process: ChildProcess | null;
+    readonly devicePort: number | null;
+    readonly localPort: number | null;
+    readonly supervisor: DefaultProcessSupervisor;
+  } {
+    const self = this;
+    return {
+      get processId() {
+        return self.iproxyProcessId;
+      },
+      get process() {
+        return self.iproxyProcess;
+      },
+      get devicePort() {
+        return self.iproxyDevicePort;
+      },
+      get localPort() {
+        return self.iproxyLocalPort;
+      },
+      supervisor: self.iproxySupervisor,
+    };
+  }
+
+  /** Seed tunnel bookkeeping a test would otherwise reach only through a real start. */
+  setStateForTesting(state: {
+    processId?: number | null;
+    process?: ChildProcess | null;
+    devicePort?: number | null;
+    localPort?: number | null;
+  }): void {
+    if (state.processId !== undefined) {
+      this.iproxyProcessId = state.processId;
+    }
+    if (state.process !== undefined) {
+      this.iproxyProcess = state.process;
+    }
+    if (state.devicePort !== undefined) {
+      this.iproxyDevicePort = state.devicePort;
+    }
+    if (state.localPort !== undefined) {
+      this.iproxyLocalPort = state.localPort;
+    }
+  }
+
   get localPort(): number | null {
     return this.iproxyLocalPort;
   }
@@ -407,8 +455,8 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
 
   public getStartTimeoutMs(): number {
     return readEnvPositiveInteger(
-      "AUTOMOBILE_IPROXY_START_TIMEOUT_MS",
-      "AUTO_MOBILE_IPROXY_START_TIMEOUT_MS",
+      ENV.IPROXY_START_TIMEOUT_MS.name,
+      ENV.IPROXY_START_TIMEOUT_MS.legacyName,
       { fallback: DEFAULT_IPROXY_START_TIMEOUT_MS },
       this.options.env,
     );

@@ -41,7 +41,6 @@ describe("AndroidCtrlProxyClient navigation ignores AutoMobile's prototype (#930
   const device: BootedDevice = {
     deviceId: "prototype-navigation-test-device",
     platform: "android",
-    isEmulator: true,
     name: "Prototype navigation test device",
   };
   let navHarness: InMemoryNavManagerHarness;
@@ -58,12 +57,10 @@ describe("AndroidCtrlProxyClient navigation ignores AutoMobile's prototype (#930
     AndroidCtrlProxyClient.resetInstances();
     AndroidCtrlProxyManager.resetInstances();
     timer = new FakeTimer();
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      new FakeAdbExecutor(),
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-    );
+    });
     recordHierarchyNavigation = spyOn(
       navHarness.manager,
       "recordHierarchyNavigation",

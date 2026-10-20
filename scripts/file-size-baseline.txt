@@ -2,4 +2,4 @@
 1788	src/daemon/sessionManager.ts
 1979	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
-2185	src/server/videoRecordingManager.ts
+2185	src/daemon/videoRecordingManager.ts

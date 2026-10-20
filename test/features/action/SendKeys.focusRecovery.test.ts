@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { SendKeys, type SendKeysCommand } from "../../../src/features/action/SendKeys";
 import { TapOnElement, tapFocusFailure } from "../../../src/features/action/TapOnElement";
 import { Keyboard } from "../../../src/features/action/Keyboard";
@@ -346,4 +346,8 @@ describe("sendKeys selector focus recovery", () => {
       close.mockRestore();
     }
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import { describe, it, expect, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, afterEach, spyOn, mock } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -54,7 +54,8 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     );
   }
 
-  arranged("logs a warning and does not throw when eviction rejects on process exit", async () => {
+  it("logs a warning and does not throw when eviction rejects on process exit", async () => {
+    await arrangeHarness();
     const warnSpy = spyOn(logger, "warn");
     const evictError = new Error("removeDevice failed");
     // Force the eviction chain to reject.
@@ -454,4 +455,8 @@ describe("device identity replacement IME quarantine", () => {
       "IME state is unknown",
     );
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

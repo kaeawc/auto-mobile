@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   BrokerExecutionRelease,
   managedExecutionSessionsFrom,
@@ -623,4 +623,8 @@ describe("managed execution release wiring", () => {
       manager.stopCleanupTimer();
     }
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

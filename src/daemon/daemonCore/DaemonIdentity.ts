@@ -5,6 +5,7 @@ import {
 } from "../auxiliarySocketAvailability";
 import type { DaemonCoreServices, DaemonIdentityState } from "./DaemonCoreState";
 import { AuxiliarySocketHeldError } from "../AuxiliarySocketHeldError";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { writeSync } from "node:fs";
 import { republishOwnedIdentity } from "../identityRecovery";
 import { logger } from "../../utils/logger";
@@ -229,8 +230,7 @@ export class DaemonIdentity {
       const warning = degradeAuxiliarySocket(name, error);
       if (!warning) {
         if (error instanceof AuxiliarySocketHeldError) {
-          // Synchronous stderr reaches the launcher capture even if teardown exits immediately.
-          this.reportStartupFailure(error.message);
+          this.reportHeldSocketFailure(error);
         }
         throw error;
       }
@@ -239,6 +239,16 @@ export class DaemonIdentity {
     }
     markAuxiliarySocketAvailable(name);
     this.recordSocketIdentity(getDaemonSocketPathsByName()[name]);
+  }
+
+  private reportHeldSocketFailure(error: AuxiliarySocketHeldError): void {
+    try {
+      // Synchronous stderr reaches the launcher capture even if teardown exits immediately.
+      this.reportStartupFailure(error.message);
+    } catch (reportError) {
+      // Diagnostic output must never mask the original startup error.
+      logger.debug(`Unable to report startup failure: ${errorMessage(reportError)}`, reportError);
+    }
   }
 
   getDaemonFileCleanupOptions(): {

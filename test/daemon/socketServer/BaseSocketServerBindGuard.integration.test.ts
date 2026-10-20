@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server as NetServer, type Socket } from "node:net";
 import {
+  mkdirSync,
   mkdtempSync,
   renameSync,
   rmSync,
@@ -107,44 +108,79 @@ describe("BaseSocketServer bind guard", () => {
     expect(peer.listening).toBe(true);
   });
 
-  (isWindows ? test.skip : test)("names the verified holder without signaling it", async () => {
-    const signals: unknown[] = [];
-    const processes = {
-      isProcessRunning: (pid: number) => pid === 741,
-      readProcessGenerationToken: () => "linux:holder",
-      signal: (...args: unknown[]) => {
-        signals.push(args);
-      },
-    };
-    const owner = new AuxiliarySocketOwner(
-      {
-        read: () =>
-          JSON.stringify({
-            pid: 741,
-            version: "0.0.old",
-            socketName: "BindGuardTest",
-            socketPath: peerSocketPath,
-            ...peerIdentity,
-            processGenerationToken: "linux:holder",
-          }),
-        stat: () => peerIdentity,
+  (isWindows ? test.skip : test)(
+    "names the verified holder and preserves the peer listener",
+    async () => {
+      const processes = {
+        isProcessRunning: (pid: number) => pid === 741,
+        readProcessGenerationToken: () => "linux:holder",
+      };
+      const owner = new AuxiliarySocketOwner(
+        {
+          read: () =>
+            JSON.stringify({
+              pid: 741,
+              version: "0.0.old",
+              socketName: "BindGuardTest",
+              socketPath: peerSocketPath,
+              ...peerIdentity,
+              processGenerationToken: "linux:holder",
+            }),
+          stat: () => peerIdentity,
+          lstat: () => ({ isFile: () => true, size: 100 }),
+          write: () => {
+            throw new Error("conflict must not write");
+          },
+          remove: () => {
+            throw new Error("conflict must not remove");
+          },
+        },
+        processes,
+      );
+      server = new TestServer(peerSocketPath, { isReachable: async () => true }, owner);
+      const start = server.start();
+      await expect(start).rejects.toBeInstanceOf(AuxiliarySocketHeldError);
+      await expect(start).rejects.toThrow("daemon pid 741 (version 0.0.old; verified)");
+      await expect(start).rejects.toThrow("kill 741");
+      expect(peer.listening).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "keeps listening when advisory owner publication throws",
+    async () => {
+      directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));
+      const socketPath = join(directory, "stream.sock");
+      const owner = new AuxiliarySocketOwner({
+        read: () => {
+          throw new Error("ENOENT");
+        },
+        lstat: () => ({ isFile: () => true, size: 0 }),
+        stat: statSync,
+        remove: unlinkSync,
         write: () => {
-          throw new Error("conflict must not write");
+          throw new Error("ENOSPC");
         },
-        remove: () => {
-          throw new Error("conflict must not remove");
-        },
-      },
-      processes,
-    );
-    server = new TestServer(peerSocketPath, { isReachable: async () => true }, owner);
-    const start = server.start();
-    await expect(start).rejects.toBeInstanceOf(AuxiliarySocketHeldError);
-    await expect(start).rejects.toThrow("daemon pid 741 (version 0.0.old; verified)");
-    await expect(start).rejects.toThrow("kill 741");
-    expect(signals).toEqual([]);
-    expect(peer.listening).toBe(true);
-  });
+      });
+      server = new TestServer(socketPath, undefined, owner);
+      await expect(server.start()).resolves.toBeUndefined();
+      expect(server.isListening()).toBe(true);
+      expect(server.hasActiveSocketPath()).toBe(true);
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "keeps listening with a directory at the owner sidecar path",
+    async () => {
+      directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));
+      const socketPath = join(directory, "stream.sock");
+      mkdirSync(`${socketPath}.owner.json`);
+      server = new TestServer(socketPath);
+      await expect(server.start()).resolves.toBeUndefined();
+      expect(server.isListening()).toBe(true);
+      expect(server.hasActiveSocketPath()).toBe(true);
+    },
+  );
 
   (isWindows ? test.skip : test)("reclaims an unreachable path and binds", async () => {
     directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));

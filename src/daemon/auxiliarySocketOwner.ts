@@ -1,7 +1,7 @@
-import { readFileSync, statSync, unlinkSync } from "node:fs";
+import { lstatSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { z } from "zod";
 import { DAEMON_VERSION } from "./constants";
-import { writeJsonFileAtomicSync } from "./daemonFiles";
+import { writePrivateJsonFileAtomicSync } from "./atomicJsonFile";
 import { PsDaemonProcessFinder, type DaemonProcessLivenessChecker } from "./processTable";
 import {
   currentDaemonProcessGenerationToken,
@@ -16,7 +16,11 @@ import { logger } from "../utils/logger";
 
 const ownerSchema = z.object({
   pid: z.number().int().positive(),
-  version: z.string().min(1),
+  version: z
+    .string()
+    .min(1)
+    .max(64)
+    .refine((version) => !/[^0-9A-Za-z.+_-]/.test(version)),
   socketName: z.string(),
   socketPath: z.string(),
   dev: z.number(),
@@ -27,13 +31,15 @@ const ownerSchema = z.object({
 type OwnerRecord = z.infer<typeof ownerSchema>;
 export interface AuxiliarySocketOwnerFiles {
   read(path: string): string;
+  lstat(path: string): { isFile(): boolean; size: number };
   write(path: string, record: OwnerRecord): void;
   remove(path: string): void;
   stat(path: string): { dev: number; ino: number };
 }
 const defaultFiles: AuxiliarySocketOwnerFiles = {
   read: (path) => readFileSync(path, "utf8"),
-  write: writeJsonFileAtomicSync,
+  lstat: lstatSync,
+  write: writePrivateJsonFileAtomicSync,
   remove: unlinkSync,
   stat: statSync,
 };
@@ -93,15 +99,16 @@ export class AuxiliarySocketOwner {
     ) {
       return new AuxiliarySocketHeldError(socketPath, socketName, { holderVerified: false });
     }
+    const inode = this.files.stat(socketPath);
+    if (inode.dev !== record.dev || inode.ino !== record.ino) {
+      return new AuxiliarySocketHeldError(socketPath, socketName, { holderVerified: false });
+    }
     const recorded = recordedProcessGenerationToken(record);
     const current = this.processes.readProcessGenerationToken?.(record.pid);
-    const inode = this.files.stat(socketPath);
     return new AuxiliarySocketHeldError(socketPath, socketName, {
       holderPid: record.pid,
       holderVersion: record.version,
       holderVerified:
-        inode.dev === record.dev &&
-        inode.ino === record.ino &&
         recorded !== undefined &&
         current !== undefined &&
         compareProcessGenerationTokens(recorded, current) === "same",
@@ -110,7 +117,12 @@ export class AuxiliarySocketOwner {
 
   private read(socketPath: string): OwnerRecord | undefined {
     try {
-      const value: unknown = JSON.parse(this.files.read(`${socketPath}.owner.json`));
+      const ownerPath = `${socketPath}.owner.json`;
+      const metadata = this.files.lstat(ownerPath);
+      if (!metadata.isFile() || metadata.size > 4096) {
+        return undefined;
+      }
+      const value: unknown = JSON.parse(this.files.read(ownerPath));
       const record = ownerSchema.safeParse(value);
       return record.success && record.data.socketPath === socketPath ? record.data : undefined;
     } catch (error) {

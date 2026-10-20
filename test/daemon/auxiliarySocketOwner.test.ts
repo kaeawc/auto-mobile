@@ -1,3 +1,15 @@
+import {
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { writePrivateJsonFileAtomicSync } from "../../src/daemon/atomicJsonFile";
 import { describe, expect, test } from "bun:test";
 import {
   AuxiliarySocketOwner,
@@ -18,7 +30,6 @@ function harness() {
   let currentInode = inode;
   let live = true;
   let token: string | undefined = identity.processGenerationToken;
-  const signals: unknown[] = [];
   const files: AuxiliarySocketOwnerFiles = {
     read: (path) => {
       const text = contents.get(path);
@@ -34,19 +45,17 @@ function harness() {
       contents.delete(path);
     },
     stat: () => currentInode,
+    lstat: () => ({ isFile: () => true, size: 100 }),
   };
   const processes = {
     isProcessRunning: (pid: number) => live && pid === identity.pid,
     readProcessGenerationToken: () => token,
-    signal: (...args: unknown[]) => {
-      signals.push(args);
-    },
   };
   const owner = new AuxiliarySocketOwner(files, processes, () => identity);
   return {
     owner,
+    files,
     contents,
-    signals,
     setLive: (value: boolean) => {
       live = value;
     },
@@ -60,6 +69,29 @@ function harness() {
 }
 
 describe("auxiliary socket owner records", () => {
+  // The liveness dependency deliberately has no signal capability.
+  test("owner implementation has no process signal calls", () => {
+    const source = readFileSync(
+      new URL("../../src/daemon/auxiliarySocketOwner.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(/\.kill\s*\(|process\.kill/);
+  });
+
+  test.each([
+    { isFile: () => false, size: 0 },
+    { isFile: () => true, size: 4097 },
+  ])("rejects non-regular or oversized metadata before reading", (metadata) => {
+    const h = harness();
+    let reads = 0;
+    h.files.lstat = () => metadata;
+    h.files.read = () => {
+      reads++;
+      throw new Error("must not read");
+    };
+    expect(h.owner.conflict(socketPath, "Appearance").holder).toEqual({ holderVerified: false });
+    expect(reads).toBe(0);
+  });
   test("publishes by socket path and removes its own record", () => {
     const h = harness();
     h.owner.publish(socketPath, "Appearance", inode);
@@ -83,10 +115,14 @@ describe("auxiliary socket owner records", () => {
     h.setInode({ dev: 1, ino: 3 });
     h.owner.remove(socketPath);
     expect(h.contents.has(sidecarPath)).toBe(true);
-    expect(h.owner.conflict(socketPath, "Appearance").holder.holderVerified).toBe(false);
+    const error = h.owner.conflict(socketPath, "Appearance");
+    expect(error.holder).toEqual({ holderVerified: false });
+    expect(error.message).toContain("unknown holder");
+    expect(error.message).not.toContain("741");
+    expect(error.message).not.toContain(identity.version);
   });
 
-  test("verifies a live OS generation and never invokes the signal seam", () => {
+  test("verifies a live OS generation", () => {
     const h = harness();
     h.contents.set(sidecarPath, JSON.stringify(record));
     const error = h.owner.conflict(socketPath, "Appearance");
@@ -101,7 +137,6 @@ describe("auxiliary socket owner records", () => {
     expect(error.message).toContain(socketPath);
     expect(error.message).toContain("does not stop an incumbent daemon automatically");
     expect(error.message).toContain("kill 741");
-    expect(h.signals).toEqual([]);
   });
 
   test("uses the canonical Darwin UTC record field", () => {
@@ -135,7 +170,6 @@ describe("auxiliary socket owner records", () => {
     expect(error.holder).toEqual({ holderVerified: false });
     expect(error.message).toContain("unknown holder");
     expect(error.message).not.toContain("741");
-    expect(h.signals).toEqual([]);
   });
 
   test.each(["linux:recycled", "darwin-utc:other", undefined])(
@@ -152,7 +186,6 @@ describe("auxiliary socket owner records", () => {
       });
       expect(error.message).toContain("unverified: process generation could not be matched");
       expect(error.message).not.toContain("kill 741");
-      expect(h.signals).toEqual([]);
     },
   );
 
@@ -161,6 +194,9 @@ describe("auxiliary socket owner records", () => {
     "{bad",
     "null",
     JSON.stringify({ ...record, pid: -1 }),
+    ...["bad\nversion", "1\n", "1\r", "\x1b[31m", "v".repeat(65), ""].map((version) =>
+      JSON.stringify({ ...record, version }),
+    ),
     JSON.stringify({ ...record, socketPath: "/different/appearance.sock" }),
   ])("missing, corrupt, invalid or other-path sidecars are unknown: %s", (text) => {
     const h = harness();
@@ -168,7 +204,6 @@ describe("auxiliary socket owner records", () => {
       h.contents.set(sidecarPath, text);
     }
     expect(h.owner.conflict(socketPath, "Appearance").holder).toEqual({ holderVerified: false });
-    expect(h.signals).toEqual([]);
   });
 
   test("different socket directories do not share owner records", () => {
@@ -178,6 +213,71 @@ describe("auxiliary socket owner records", () => {
       holderVerified: false,
     });
     expect(h.contents.has(sidecarPath)).toBe(true);
+  });
+
+  test("the real reader rejects symlinks before following their target", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const directory = mkdtempSync(join(tmpdir(), "aux-owner-read-"));
+    const path = join(directory, "stream.sock");
+    try {
+      symlinkSync("/dev/zero", `${path}.owner.json`);
+      expect(new AuxiliarySocketOwner().conflict(path, "Stream").holder).toEqual({
+        holderVerified: false,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test.each(["symlink", "loose file"])(
+    "exclusive writer refuses a planted temporary %s",
+    (kind) => {
+      if (process.platform === "win32") {
+        return;
+      }
+      const directory = mkdtempSync(join(tmpdir(), "aux-owner-write-"));
+      const path = join(directory, "owner.json");
+      const temporary = `${path}.tmp`;
+      const target = join(directory, "target");
+      try {
+        writeFileSync(target, "untouched");
+        if (kind === "symlink") {
+          symlinkSync(target, temporary);
+        } else {
+          writeFileSync(temporary, "planted", { mode: 0o666 });
+        }
+        expect(() => writePrivateJsonFileAtomicSync(path, record, () => temporary)).toThrow(
+          "EEXIST",
+        );
+        expect(readFileSync(target, "utf8")).toBe("untouched");
+        expect(lstatSync(temporary).isSymbolicLink()).toBe(kind === "symlink");
+        expect(readFileSync(temporary, "utf8")).toBe(kind === "symlink" ? "untouched" : "planted");
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("exclusive writer replaces a sidecar symlink with an owner-only regular file", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const directory = mkdtempSync(join(tmpdir(), "aux-owner-write-"));
+    const path = join(directory, "owner.json");
+    const target = join(directory, "target");
+    try {
+      writeFileSync(target, "untouched", { mode: 0o666 });
+      symlinkSync(target, path);
+      writePrivateJsonFileAtomicSync(path, record);
+      expect(readFileSync(target, "utf8")).toBe("untouched");
+      expect(lstatSync(path).isFile()).toBe(true);
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(record);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("the atomic writer publishes complete JSON before replacing the sidecar", () => {

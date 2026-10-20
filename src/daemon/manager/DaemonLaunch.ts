@@ -68,10 +68,7 @@ export interface DaemonLaunchHost {
 
 /** Daemon Launch lifecycle operations. */
 export class DaemonLaunch {
-  constructor(
-    private readonly host: DaemonLaunchHost,
-    private readonly readStartupLog?: (logPath: string) => Promise<string>,
-  ) {}
+  constructor(private readonly host: DaemonLaunchHost) {}
   /**
    * Run the launcher, retrying once after removing an incomplete package extraction. The
    * launch command is re-resolved through the fallback launcher after a successful cleanup.
@@ -278,8 +275,7 @@ export class DaemonLaunch {
   }
 
   private async formatDaemonStartupFailure(summary: string, logPath: string): Promise<string> {
-    const logExcerpt = await (this.readStartupLog?.(logPath) ??
-      this.readDaemonStartupLogExcerpt(logPath));
+    const logExcerpt = await this.readDaemonStartupLogExcerpt(logPath);
     if (logExcerpt.length === 0) {
       if (logPath === devNull) {
         return `${summary}\nDaemon stderr was relayed to the configured process sink; file capture is disabled.`;

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AuxiliarySocketHeldError } from "../../../src/daemon/AuxiliarySocketHeldError";
 import { DaemonLaunch, type DaemonLaunchHost } from "../../../src/daemon/manager/DaemonLaunch";
 import { DaemonLauncher, type DaemonLaunchRequest } from "../../../src/daemon/DaemonLauncher";
@@ -199,13 +202,17 @@ describe("package-runner launch identity", () => {
       holderVersion: "0.0.old",
       holderVerified: true,
     });
-    const launch = new DaemonLaunch(launchHost(launcher, h), async (logPath) => {
-      expect(logPath).toBe("/fake/launch.log");
-      return refusal.message;
-    });
-    const failure = await launch.createDaemonExitFailure(1, null, "/fake/launch.log");
-    expect(failure.message).toContain("exit code 1");
-    expect(failure.message).toContain(refusal.message);
+    const directory = mkdtempSync(join(tmpdir(), "aux-launch-log-"));
+    const logPath = join(directory, "launch.log");
+    try {
+      writeFileSync(logPath, `${refusal.message}\n`);
+      const launch = new DaemonLaunch(launchHost(launcher, h));
+      const failure = await launch.createDaemonExitFailure(1, null, logPath);
+      expect(failure.message).toContain("exit code 1");
+      expect(failure.message).toContain(refusal.message);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test.each([false, true])(

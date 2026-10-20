@@ -1,3 +1,10 @@
+import {
+  createPidFileTemporaryPath,
+  defaultAtomicPidFileWriteSyncDependencies,
+  writeJsonFileAtomicSync,
+  type AtomicPidFileWriteSyncDependencies,
+} from "./atomicJsonFile";
+export { writeJsonFileAtomicSync, type AtomicPidFileWriteSyncDependencies } from "./atomicJsonFile";
 import path from "node:path";
 import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
@@ -7,7 +14,11 @@ import {
   readProcessGenerationTokenForPid,
 } from "./processGeneration";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
-import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
+import {
+  getSocketPath,
+  resolveAuxSocketDir,
+  type SocketServerConfig,
+} from "./socketServer/SocketServerTypes";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 import { logger, registerLogRetentionNamespaceSource } from "../utils/logger";
@@ -169,20 +180,6 @@ export interface AtomicPidFileWriteDependencies {
   removeTemporaryFile: (temporaryPath: string) => Promise<void>;
 }
 
-export interface AtomicPidFileWriteSyncDependencies {
-  createTemporaryPath: (pidFilePath: string) => string;
-  writeTemporaryFile: (temporaryPath: string, contents: string) => void;
-  replaceFile: (temporaryPath: string, pidFilePath: string) => void;
-  removeTemporaryFile: (temporaryPath: string) => void;
-}
-
-let pidFileTemporaryPathSequence = 0;
-
-function createPidFileTemporaryPath(pidFilePath: string): string {
-  pidFileTemporaryPathSequence += 1;
-  return `${pidFilePath}.${process.pid}.${pidFileTemporaryPathSequence}.tmp`;
-}
-
 const defaultAtomicPidFileWriteDependencies: AtomicPidFileWriteDependencies = {
   createTemporaryPath: createPidFileTemporaryPath,
   writeTemporaryFile: async (temporaryPath, contents, signal) => {
@@ -194,15 +191,6 @@ const defaultAtomicPidFileWriteDependencies: AtomicPidFileWriteDependencies = {
   },
   replaceFile: rename,
   removeTemporaryFile: unlink,
-};
-
-const defaultAtomicPidFileWriteSyncDependencies: AtomicPidFileWriteSyncDependencies = {
-  createTemporaryPath: createPidFileTemporaryPath,
-  writeTemporaryFile: (temporaryPath, contents) => {
-    writeFileSync(temporaryPath, contents, { encoding: "utf-8", mode: 0o600 });
-  },
-  replaceFile: renameSync,
-  removeTemporaryFile: unlinkSync,
 };
 
 /**
@@ -242,31 +230,6 @@ export function writePidFileDataAtomicSync(
   dependencies: AtomicPidFileWriteSyncDependencies = defaultAtomicPidFileWriteSyncDependencies,
 ): void {
   writeJsonFileAtomicSync(pidFilePath, data, dependencies);
-}
-
-/** Publish a JSON sidecar using the same owner-only atomic writer as PID records. */
-export function writeJsonFileAtomicSync(
-  pidFilePath: string,
-  data: unknown,
-  dependencies: AtomicPidFileWriteSyncDependencies = defaultAtomicPidFileWriteSyncDependencies,
-): void {
-  const temporaryPath = dependencies.createTemporaryPath(pidFilePath);
-  try {
-    dependencies.writeTemporaryFile(temporaryPath, JSON.stringify(data, null, 2));
-    dependencies.replaceFile(temporaryPath, pidFilePath);
-  } catch (writeError) {
-    try {
-      dependencies.removeTemporaryFile(temporaryPath);
-    } catch (cleanupError) {
-      if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw new AggregateError(
-          [writeError, cleanupError],
-          `Failed to publish PID file ${pidFilePath} and remove its temporary file`,
-        );
-      }
-    }
-    throw writeError;
-  }
 }
 
 /** Durable companion to a manager's launch-capture log. */

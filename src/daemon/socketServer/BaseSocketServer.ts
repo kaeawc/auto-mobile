@@ -8,6 +8,7 @@ import {
 } from "../daemonSocketReachability";
 import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
 import { AuxiliarySocketOwner } from "../auxiliarySocketOwner";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -93,7 +94,15 @@ export abstract class BaseSocketServer {
         secureFile(this.socketPath)
           .then(() => {
             if (this.socketFileIdentity) {
-              this.socketOwner.publish(this.socketPath, this.serverName, this.socketFileIdentity);
+              try {
+                this.socketOwner.publish(this.socketPath, this.serverName, this.socketFileIdentity);
+              } catch (error) {
+                // Advisory holder metadata must not disable an already-bound socket.
+                logger.warn(
+                  `[${this.serverName}] Unable to publish socket owner: ${errorMessage(error)}`,
+                  error,
+                );
+              }
             }
             this.onServerStarted();
             resolve();

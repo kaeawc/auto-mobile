@@ -469,6 +469,7 @@ test/daemon/socketPaths.test.ts
 test/daemon/socketRegistryCoverage.test.ts
 test/daemon/socketRequestAdmission.test.ts
 test/daemon/socketServer/BaseSocketServerFraming.test.ts
+test/daemon/socketServer/BaseSocketServerImport.test.ts
 test/daemon/socketServer/ConfigSocketServer.test.ts
 test/daemon/socketServer/ControlConnection.test.ts
 test/daemon/socketServer/LineFramer.test.ts

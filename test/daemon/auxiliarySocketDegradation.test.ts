@@ -185,6 +185,27 @@ describe("auxiliary stream degradation", () => {
     expect(getUnavailableAuxiliarySockets()).toEqual([]);
   });
 
+  test("a broken stderr writer preserves the original held-socket startup error", async () => {
+    const error = new AuxiliarySocketHeldError("/fake/config.sock", "appearance", {
+      holderVerified: false,
+    });
+    const pipeError = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+    const identity = identityHarness(undefined, undefined, undefined, () => {
+      throw pipeError;
+    });
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      await expect(
+        identity.startAuxiliarySocket("appearance", async () => {
+          throw error;
+        }),
+      ).rejects.toBe(error);
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining("broken pipe"), pipeError);
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
   test("other stream startup failures remain fatal", async () => {
     const error = new Error("permission denied");
     await expect(

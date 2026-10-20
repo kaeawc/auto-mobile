@@ -48,7 +48,12 @@ extensions.configure<LibraryExtension> {
     // versions, current target API), so their findings change over time and can never be
     // baselined stably. Dependabot owns version freshness.
     disable +=
-      setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable", "OldTargetApi")
+      setOf(
+        "AndroidGradlePluginVersion",
+        "GradleDependency",
+        "NewerVersionAvailable",
+        "OldTargetApi",
+      )
   }
 
   compileOptions {

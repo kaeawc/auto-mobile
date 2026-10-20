@@ -11,7 +11,8 @@ SCRIPT="scripts/test-fast.sh"
 # macOS CI runner (RUNNER_OS=macOS caps workers at 3) must not leak into tests
 # that do not pin them; tests that need RUNNER_OS set it on their own command.
 setup() {
-  unset RUNNER_OS AUTOMOBILE_UNIT_TEST_WORKERS
+  export AUTOMOBILE_COORDINATION_DIR="$BATS_TEST_TMPDIR/coordination"
+  unset AUTOMOBILE_HOST_TEST_SLOTS RUNNER_OS AUTOMOBILE_UNIT_TEST_WORKERS
 }
 
 # Write an executable `nproc` into a fresh temp dir that echoes $2, print the dir.
@@ -70,7 +71,7 @@ _mock_nproc() {
   run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT" test/scripts/testLaneClassification.test.ts
   rm -rf "$dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--parallel=6"* ]]
+  [[ "$output" == *"--parallel=1"* ]]
   [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
 }
 

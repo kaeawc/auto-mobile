@@ -480,7 +480,9 @@ describe("Simctl", function () {
             "",
           );
         }
-        capturedSignal = signal;
+        if (args.includes("bootstatus")) {
+          capturedSignal = signal;
+        }
         // Simulate a long-running child that only settles when aborted, mirroring
         // execFile rejecting with an AbortError once its signal fires.
         return new Promise<ExecResult>((_resolve, reject) => {

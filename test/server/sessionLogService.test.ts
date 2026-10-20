@@ -1,3 +1,5 @@
+import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AppFileFileSystem, AppFileStats } from "../../src/server/appFileService";
@@ -536,6 +538,50 @@ describe("SessionLogService (#7006)", () => {
       }
       expect(simctl.argv[0]!.slice(-2)).toEqual(["--predicate", expect.any(String)]);
       expect(simctl.argv[1]!.slice(-1)).toEqual(["--info"]);
+    });
+
+    test("preserves timedOut classification with the real simctl deadline wrapper", async () => {
+      const timer = new FakeTimer();
+      let childSignal: AbortSignal | undefined;
+      const simctl = new SimCtlClient(
+        simulator,
+        async (_file, _args, _buffer, signal) => {
+          childSignal = signal;
+          return new Promise<ExecResult>(() => {});
+        },
+        { timer },
+      );
+      const service = createSessionLogService({
+        adbFactory: {
+          create: () => {
+            throw new Error("ADB must not be used");
+          },
+        },
+        simctlFactory: () => simctl,
+        fileSystem: new MemoryFileSystem(),
+        timer,
+        unifiedLogTimeoutMs: 120_000,
+      });
+      const pending = service.collect({
+        sessionUuid: "s",
+        device: simulator,
+        request: {
+          appId: "com.example.app",
+          maxBytes: 100,
+          unifiedLog: { lastSeconds: 10, level: "default" },
+        },
+      });
+      await drainUntil(() => childSignal !== undefined, { description: "unified log child" });
+      expect(timer.getPendingTimeouts()).toEqual([120_000, 120_000]);
+      timer.advanceTime(60_000);
+      expect(childSignal?.aborted).toBe(false);
+      await timer.advanceTimeAsync(60_000, () => drainUntilQuiescent(timer));
+      expect((await pending).unifiedLog).toEqual({
+        status: "timedOut",
+        reason: expect.stringContaining("timed out after 120000ms"),
+      });
+      expect(childSignal?.aborted).toBe(true);
+      expect(timer.getPendingTimeouts()).toEqual([]);
     });
 
     test("times out the unified-log window on the injected timer and aborts the child", async () => {

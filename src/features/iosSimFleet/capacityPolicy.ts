@@ -1,8 +1,10 @@
 import {
   estimatePerDeviceBytes,
+  estimateSettledPerDeviceBytes,
   IOS_SIMULATOR_MEMORY_POLICY,
   resolveBootCapacityLimits,
   type CapacityLimits,
+  type InFlightBootMemory,
 } from "../bootAdmission/capacityLimits";
 import type { FleetCostReport, HostResources, SimulatorCost } from "./types";
 import { ENV } from "../../config/env";
@@ -14,12 +16,45 @@ export const IOS_SIM_MAX_BOOTED_ENV = ENV.IOS_SIM_MAX_BOOTED.name;
 
 const HIGH_LOAD_PER_CORE = 1.5;
 
-/** Observed per-simulator memory when we have measurements, else a conservative default. */
-export function estimatePerSimulatorBytes(report?: FleetCostReport): number {
-  const measured = (report?.simulators ?? []).flatMap((sim) =>
-    sim.quality === "measured" && sim.process ? [sim.process.rssBytes] : [],
+/** Settled simulator memory, charging active admissions and external Booting devices conservatively. */
+export function estimatePerSimulatorBytes(
+  report?: FleetCostReport,
+  inFlight: readonly InFlightBootMemory[] = [],
+): number {
+  const simulators = report?.simulators ?? [];
+  const measured = simulators.flatMap((sim) =>
+    sim.quality === "measured" && sim.process
+      ? [{ udid: sim.udid, rssBytes: sim.process.rssBytes }]
+      : [],
   );
-  return estimatePerDeviceBytes(measured, IOS_SIMULATOR_MEMORY_POLICY);
+  // Replacement reservations are anonymous charges; the old simulator's RSS stays settled.
+  const namedBoots = new Set(
+    inFlight.flatMap((boot) => (boot.deviceId && !boot.replacement ? [boot.deviceId] : [])),
+  );
+  for (const sim of simulators) {
+    if (sim.state === "Booting") {
+      namedBoots.add(sim.udid);
+    }
+  }
+  const anonymousBoots = inFlight.filter((boot) => boot.deviceId === undefined || boot.replacement);
+  if (namedBoots.size === 0 && anonymousBoots.length === 0) {
+    return estimatePerDeviceBytes(
+      measured.map((sim) => sim.rssBytes),
+      IOS_SIMULATOR_MEMORY_POLICY,
+    );
+  }
+  // Each RSS row is already a whole simulator tree. Use its row index as a sample-local identity
+  // for the shared process matcher; no PID is available (or needed) in SimulatorProcessCost.
+  const rowIds = new Map(measured.map((sim, index) => [sim.udid, index]));
+  const boots: InFlightBootMemory[] = [
+    ...anonymousBoots.map(({ handedOff }) => ({ handedOff })),
+    ...[...namedBoots].map((udid) => ({ processId: rowIds.get(udid), handedOff: false })),
+  ];
+  return estimateSettledPerDeviceBytes(
+    measured.map((sim, index) => ({ rssBytes: sim.rssBytes, pid: index })),
+    boots,
+    IOS_SIMULATOR_MEMORY_POLICY,
+  );
 }
 
 /**

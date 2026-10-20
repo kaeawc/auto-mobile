@@ -2,7 +2,7 @@ import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { resolveGestureCtrlProxyTimeoutMs } from "../../../src/features/action/gestureTransportTimeout";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
@@ -183,4 +183,8 @@ describe("tapOn long press safety", () => {
     expect(result.error).toContain("press may still be held on the device for up to 1500 ms");
     expect(h.adb.getExecutedCommands()).toEqual(["shell input touchscreen swipe 60 45 60 45 1500"]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

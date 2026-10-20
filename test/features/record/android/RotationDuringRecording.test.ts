@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -169,7 +169,7 @@ async function setupTapPipeline(withClientNotifications = false) {
     client.onInteraction = () => () => {
       notificationCounts.unsubscribed++;
     };
-    const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    clientSpy.mockReturnValue(client);
     restoreClientSpy = () => clientSpy.mockRestore();
   } else {
     a11y = new FakeA11y();
@@ -806,4 +806,12 @@ describe("a superseded geometry refresh is discarded (#10181)", () => {
     await tracker.settle();
     expect(inForce()).not.toContain("display size changed");
   });
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+afterEach(() => {
+  clientSpy.mockRestore();
 });

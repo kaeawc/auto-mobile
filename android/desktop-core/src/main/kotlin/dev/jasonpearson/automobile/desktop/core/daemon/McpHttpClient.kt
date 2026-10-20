@@ -276,16 +276,16 @@ class McpHttpClient(
     }
   }
 
-  override fun setKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-    platform: String,
-    sessionUuid: String?,
-  ): SetKeyValueResult {
+  override fun setKeyValue(input: SetKeyValueRequest): SetKeyValueResult {
+    val deviceId = input.deviceId
+    val appId = input.appId
+    val fileName = input.fileName
+    val key = input.key
+    val value = input.value
+    val type = input.type
+    val platform = input.platform
+    val sessionUuid = input.sessionUuid
+
     val response =
       callTool(
         "setKeyValue",
@@ -308,14 +308,14 @@ class McpHttpClient(
     }
   }
 
-  override fun removeKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    platform: String,
-    sessionUuid: String?,
-  ): RemoveKeyValueResult {
+  override fun removeKeyValue(input: RemoveKeyValueRequest): RemoveKeyValueResult {
+    val deviceId = input.deviceId
+    val appId = input.appId
+    val fileName = input.fileName
+    val key = input.key
+    val platform = input.platform
+    val sessionUuid = input.sessionUuid
+
     val response =
       callTool(
         "removeKeyValue",
@@ -379,25 +379,15 @@ class McpHttpClient(
     }
   }
 
-  override fun inputTap(
-    x: Double,
-    y: Double,
-    platform: String,
-    deviceId: String?,
-    duration: Int?,
-    frameContext: String?,
-  ): InputActionResult = unsupportedInputAction(transportName, "input/tap")
+  override fun inputTap(input: TapInput): InputActionResult =
+    with(input) {
+      unsupportedInputAction(transportName, "input/tap")
+    }
 
-  override fun inputSwipe(
-    startX: Double,
-    startY: Double,
-    endX: Double,
-    endY: Double,
-    platform: String,
-    deviceId: String?,
-    durationMs: Int?,
-    frameContext: String?,
-  ): InputActionResult = unsupportedInputAction(transportName, "input/swipe")
+  override fun inputSwipe(input: SwipeInput): InputActionResult =
+    with(input) {
+      unsupportedInputAction(transportName, "input/swipe")
+    }
 
   override fun inputPressButton(
     button: String,
@@ -406,14 +396,10 @@ class McpHttpClient(
     frameContext: String?,
   ): InputActionResult = unsupportedInputAction(transportName, "input/pressButton")
 
-  override fun inputTypeText(
-    text: String,
-    platform: String,
-    deviceId: String?,
-    submit: Boolean?,
-    append: Boolean,
-    frameContext: String?,
-  ): InputActionResult = unsupportedInputAction(transportName, "input/typeText")
+  override fun inputTypeText(input: TextInput): InputActionResult =
+    with(input) {
+      unsupportedInputAction(transportName, "input/typeText")
+    }
 
   override fun inputKey(
     key: String,

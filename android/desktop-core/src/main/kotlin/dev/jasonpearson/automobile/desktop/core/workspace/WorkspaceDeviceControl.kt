@@ -11,6 +11,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.MONOTONIC_NOW_MS
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
+import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSessionOptions
 import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
@@ -120,8 +121,11 @@ fun rememberWorkspaceDeviceControl(
         platform = { column.platform.wireName() },
         deviceId = column.deviceId,
         tracer = tracer,
-        streamingEnabled = GestureStreamingConfig.enabled,
-        onDeviceHeldElsewhere = { heldElsewhereSink(column.deviceId) },
+        options =
+          VideoInputOptions(
+            streamingEnabled = GestureStreamingConfig.enabled,
+            onDeviceHeldElsewhere = { heldElsewhereSink(column.deviceId) },
+          ),
       )
     }
 
@@ -139,11 +143,13 @@ fun rememberWorkspaceDeviceControl(
   val session =
     remember(scope, column.deviceId) {
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { controlClientProvider.invoke() },
-        platform = { column.platform.wireName() },
-        nowMs = MONOTONIC_NOW_MS,
-        publishError = { message -> tapError = message },
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { controlClientProvider.invoke() },
+          platform = { column.platform.wireName() },
+          nowMs = MONOTONIC_NOW_MS,
+          publishError = { message -> tapError = message },
+        ),
       )
     }
   LaunchedEffect(clientProvider) { session.reset() }

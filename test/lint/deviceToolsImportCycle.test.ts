@@ -8,7 +8,7 @@ import { parseSync } from "oxc-parser";
  * names back from `deviceTools.ts`, which imported their factories. The shared
  * code now lives in `features/deviceLifecycle/deviceLifecycleCore.ts`, a leaf
  * the siblings depend on. This test fails if a RUNTIME import cycle returns
- * among the device tool modules and the files that share names with them.
+ * among the device and interaction tool modules and their collaborators.
  *
  * Type-only imports are erased at runtime and dynamic `import()` is lazy, so
  * neither forms a load-order cycle; only static value imports/re-exports count.
@@ -50,7 +50,14 @@ function nodeFiles(): string[] {
   const tools = readdirSync(SERVER_DIR)
     .filter((name) => /^deviceTools.*\.ts$/.test(name))
     .map((name) => join("src", "server", name));
-  return [...tools, ...EXTRA_NODES].map((p) => join(ROOT, p));
+  const interaction = [
+    "interactionTools.ts",
+    "interactionToolHandlers.ts",
+    ...readdirSync(join(SERVER_DIR, "interactionTools"))
+      .filter((name) => name.endsWith(".ts"))
+      .map((name) => join("interactionTools", name)),
+  ].map((name) => join("src", "server", name));
+  return [...tools, ...interaction, ...EXTRA_NODES].map((p) => join(ROOT, p));
 }
 
 function resolveModule(from: string, specifier: string): string | undefined {
@@ -201,7 +208,7 @@ describe("deviceTools import cycle guard (issue #11827)", () => {
     join(ROOT, edge[1]),
   ];
 
-  test("no new runtime import cycle through the device tool modules", () => {
+  test("no new runtime import cycle through the device or interaction tool modules", () => {
     const remaining = withoutEdges(edges, KNOWN_CYCLE_EDGES.map(abs));
     const cycle = findCycleThrough(nodes, remaining);
     expect(cycle?.map((f) => relative(ROOT, f))).toBeUndefined();

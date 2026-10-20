@@ -29,18 +29,21 @@ class McpStatusTimeoutTest {
     val client =
       McpStdioClient(
         command = "unused",
-        processStarter = {
-          starts++
-          FakeProcess()
-        },
-        responseReader =
-          StdioResponseReader { _, _ ->
-            initializations++
-            JsonRpcResponse(
-              jsonrpc = "2.0",
-              result = buildJsonObject { put("protocolVersion", "2025-11-25") },
-            )
-          },
+        options =
+          McpStdioOptions(
+            processStarter = {
+              starts++
+              FakeProcess()
+            },
+            responseReader =
+              StdioResponseReader { _, _ ->
+                initializations++
+                JsonRpcResponse(
+                  jsonrpc = "2.0",
+                  result = buildJsonObject { put("protocolVersion", "2025-11-25") },
+                )
+              },
+          ),
       )
     try {
       client.ping()
@@ -93,12 +96,15 @@ class McpStatusTimeoutTest {
     val client =
       McpStdioClient(
         command = "unused",
-        processStarter = {
-          starts += 1
-          FakeProcess()
-        },
-        responseReader =
-          StdioResponseReader { _, _ -> throw java.util.concurrent.TimeoutException() },
+        options =
+          McpStdioOptions(
+            processStarter = {
+              starts += 1
+              FakeProcess()
+            },
+            responseReader =
+              StdioResponseReader { _, _ -> throw java.util.concurrent.TimeoutException() },
+          ),
       )
     try {
       fun assertStatusTimeout() {
@@ -254,17 +260,20 @@ class McpStatusTimeoutTest {
     var responses = 0
     return McpStdioClient(
       command = "unused",
-      processStarter = { FakeProcess() },
-      responseReader =
-        StdioResponseReader { _, _ ->
-          JsonRpcResponse(
-            jsonrpc = "2.0",
-            result =
-              (if (responses++ == 0) initialization else result)?.let(
-                DaemonJson::parseToJsonElement,
-              ),
-          )
-        },
+      options =
+        McpStdioOptions(
+          processStarter = { FakeProcess() },
+          responseReader =
+            StdioResponseReader { _, _ ->
+              JsonRpcResponse(
+                jsonrpc = "2.0",
+                result =
+                  (if (responses++ == 0) initialization else result)?.let(
+                    DaemonJson::parseToJsonElement,
+                  ),
+              )
+            },
+        ),
     )
   }
 

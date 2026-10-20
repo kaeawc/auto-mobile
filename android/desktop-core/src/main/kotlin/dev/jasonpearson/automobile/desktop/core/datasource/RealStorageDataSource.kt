@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueRequest
+import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueRequest
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeToolResponse
 import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -390,13 +392,16 @@ class RealStorageDataSource(
       withContext(Dispatchers.IO) {
         val result =
           client.setKeyValue(
-            device,
-            pkg,
-            fileName,
-            key,
-            value,
-            type.protocolName,
-            platform.protocolName,
+            input =
+              SetKeyValueRequest(
+                deviceId = device,
+                appId = pkg,
+                fileName = fileName,
+                key = key,
+                value = value,
+                type = type.protocolName,
+                platform = platform.protocolName,
+              ),
           )
         if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
@@ -421,7 +426,17 @@ class RealStorageDataSource(
     return try {
       val client = provider()
       withContext(Dispatchers.IO) {
-        val result = client.removeKeyValue(device, pkg, fileName, key, platform.protocolName)
+        val result =
+          client.removeKeyValue(
+            input =
+              RemoveKeyValueRequest(
+                deviceId = device,
+                appId = pkg,
+                fileName = fileName,
+                key = key,
+                platform = platform.protocolName,
+              ),
+          )
         if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to remove key value"))
       }

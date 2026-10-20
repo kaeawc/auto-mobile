@@ -33,17 +33,20 @@ class LayoutInspectorDashboardUiTest {
     setContent {
       MaterialTheme {
         LayoutInspectorDashboard(
+          options =
+            LayoutInspectorOptions(
+              connectionGeneration = generation.value,
+              frameDispatcher = UnconfinedTestDispatcher(),
+              beforeHierarchyParse = {
+                if (parseCount.incrementAndGet() == 1) {
+                  firstParseEntered.complete(Unit)
+                  releaseFirstParse.await()
+                }
+              },
+              onHierarchyUnavailable = { acceptedErrors += it },
+              socketAvailable = { true },
+            ),
           observationStream = stream,
-          connectionGeneration = generation.value,
-          frameDispatcher = UnconfinedTestDispatcher(),
-          beforeHierarchyParse = {
-            if (parseCount.incrementAndGet() == 1) {
-              firstParseEntered.complete(Unit)
-              releaseFirstParse.await()
-            }
-          },
-          onHierarchyUnavailable = { acceptedErrors += it },
-          socketAvailable = { true },
         )
       }
     }

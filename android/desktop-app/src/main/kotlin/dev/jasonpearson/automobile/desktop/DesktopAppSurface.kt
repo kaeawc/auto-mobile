@@ -30,6 +30,7 @@ import dev.jasonpearson.automobile.desktop.core.shell.openReleaseNotesInBrowser
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
+import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
@@ -39,6 +40,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.isolatedBehindOverlay
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import kotlinx.coroutines.launch
@@ -195,14 +197,17 @@ internal fun DesktopStreamContent(
       )
     Box {
       DeviceStreamView(
-        column,
-        sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-        enableDeviceControl = controlActive,
-        control = control,
-        // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
-        // auto-adjust) and persists the choice across sessions.
-        settings = settings,
-        streamingEnabled = streamingEnabled,
+        options =
+          DeviceStreamOptions(
+            column = column,
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+            enableDeviceControl = controlActive,
+            control = control,
+            // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
+            // auto-adjust) and persists the choice across sessions.
+            settings = settings,
+            streamingEnabled = streamingEnabled,
+          ),
       )
       DesktopStreamNotice(presentation, column, takeControl)
     }
@@ -403,18 +408,21 @@ internal fun DesktopLaunchSurface(presentation: DesktopAppPresentation, ui: Desk
         // makes the workspace non-empty, which drops the picker for WorkspaceShell.
         pickerOpen || workspaceState is WorkspaceUiState.Empty ->
           DevicePicker(
-            state = pickerState,
-            onAction = pickerViewModel::onAction,
-            onClose = { pickerOpen = false },
-            // Only offer Close when there is an observed workspace to return to.
-            canClose = workspaceState is WorkspaceUiState.Content,
-            bootstrapState = bootstrapState,
-            // Retry shares the workspace status-dot's coalescing recovery (#6082 / #6080), so a
-            // wedged daemon is restarted rather than short-circuited past; a no-op on an
-            // inactive
-            // (non-daemon) transport.
-            onRecoverDaemon = { recoveryLauncher.launch() },
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+            options =
+              DevicePickerOptions(
+                state = pickerState,
+                onAction = pickerViewModel::onAction,
+                onClose = { pickerOpen = false },
+                // Only offer Close when there is an observed workspace to return to.
+                canClose = workspaceState is WorkspaceUiState.Content,
+                bootstrapState = bootstrapState,
+                // Retry shares the workspace status-dot's coalescing recovery (#6082 / #6080), so a
+                // wedged daemon is restarted rather than short-circuited past; a no-op on an
+                // inactive
+                // (non-daemon) transport.
+                onRecoverDaemon = { recoveryLauncher.launch() },
+                sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+              ),
           )
         else -> DesktopWorkspaceContent(presentation, ui)
       }

@@ -41,14 +41,16 @@ internal fun rememberDeviceControlSession(
   val session =
     remember(scope) {
       DeviceControlSession(
-        scope = scope,
-        clientProvider = { inputAllocatingClient(currentProvider) { currentAllocation() } },
-        platform = platform,
-        nowMs = nowMs,
-        publishError = publishError,
-        uiContext = uiContext,
-        ioDispatcher = ioDispatcher,
-        streamingEnabled = streamingEnabled,
+        DeviceControlSessionOptions(
+          scope = scope,
+          clientProvider = { inputAllocatingClient(currentProvider) { currentAllocation() } },
+          platform = platform,
+          nowMs = nowMs,
+          publishError = publishError,
+          uiContext = uiContext,
+          ioDispatcher = ioDispatcher,
+          streamingEnabled = streamingEnabled,
+        ),
       )
     }
   LaunchedEffect(clientProvider) { session.reset() }

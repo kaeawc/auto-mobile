@@ -17,7 +17,7 @@ const SERVER_DIR = join(import.meta.dir, "../../src/server");
 describe("server tool test seams", () => {
   test("does not add process-global factory or dependency hooks", () => {
     const violations: string[] = [];
-    for (const file of readdirSync(SERVER_DIR)
+    for (const file of readdirSync(SERVER_DIR, { recursive: true, encoding: "utf8" })
       .filter((name) => name.endsWith(".ts"))
       .sort()) {
       const source = readFileSync(join(SERVER_DIR, file), "utf8");

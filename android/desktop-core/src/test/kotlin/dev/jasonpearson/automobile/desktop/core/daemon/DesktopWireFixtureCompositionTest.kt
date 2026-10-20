@@ -342,7 +342,18 @@ class DesktopWireFixtureCompositionTest {
     assertTrue(allocation.isCompleted, "allocating $deviceId did not finish")
     val allowed = runBlocking { allocation.await() }
     if (allowed) {
-      val tap = replay.client().inputTap(540.0, 1200.0, "android", deviceId)
+      val tap =
+        replay
+          .client()
+          .inputTap(
+            input =
+              TapInput(
+                x = 540.0,
+                y = 1200.0,
+                platform = "android",
+                deviceId = deviceId,
+              ),
+          )
       assertTrue(tap.success, "tap on $deviceId: ${tap.error}")
     }
     return allowed
@@ -389,16 +400,18 @@ class DesktopWireFixtureCompositionTest {
     @Composable
     private fun host(): DesktopDaemonSessionState =
       rememberDesktopDaemonSession(
-        socketPath = "in-memory",
-        panes = panes,
-        hostVisible = visible.value,
-        bindRetryBackoff = { BIND_ERROR_RETRY_MAX_DELAY_MS },
-        sessionFactory = {
-          val uuid = fixture.sessions.getValue("desktop-${++minted}")
-          DesktopDaemonSession(McpDaemonClient(transport, sessionUuid = uuid))
-        },
-        ioDispatcher = testDispatcher,
-        cleanupDispatcher = testDispatcher,
+        DesktopDaemonSessionOptions(
+          socketPath = "in-memory",
+          panes = panes,
+          hostVisible = visible.value,
+          bindRetryBackoff = { BIND_ERROR_RETRY_MAX_DELAY_MS },
+          sessionFactory = {
+            val uuid = fixture.sessions.getValue("desktop-${++minted}")
+            DesktopDaemonSession(McpDaemonClient(transport, sessionUuid = uuid))
+          },
+          ioDispatcher = testDispatcher,
+          cleanupDispatcher = testDispatcher,
+        ),
       )
   }
 

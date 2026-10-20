@@ -99,7 +99,17 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
   @Test
   fun `ended without a frame offers reconnect`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
-    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+            ),
+        )
+      }
+    }
     waitUntil { source.connectCalls == 1 }
     runOnUiThread { source.endWith(VideoStreamEndReason.SessionEnded) }
     onNodeWithText("Live mirroring stopped: This session ended.").assertIsDisplayed()
@@ -111,7 +121,17 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
   @Test
   fun `ended retained frame offers reconnect in status banner`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
-    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+            ),
+        )
+      }
+    }
     waitUntil { source.connectCalls == 1 }
     source.emitFrame(width = 1, height = 1)
     waitUntil {
@@ -149,11 +169,17 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
         setContent {
           MaterialTheme {
             DeviceStreamView(
-              col(),
-              enableDeviceControl = true,
-              control = control,
-              settings = FakeSettingsProvider(streamQualityPreset = "medium"),
-              sourceFactory = { _, _ -> source },
+              options =
+                DeviceStreamOptions(
+                  column = col(),
+                  enableDeviceControl = true,
+                  control = control,
+                  settings =
+                    FakeSettingsProvider(
+                      FakeSettingsProvider.Values(streamQualityPreset = "medium"),
+                    ),
+                  sourceFactory = { _, _ -> source },
+                ),
             )
           }
         }
@@ -176,7 +202,17 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
   @Test
   fun `connects the source for the pane's device`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
-    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+            ),
+        )
+      }
+    }
     waitUntil { source.connectedDeviceId == "emulator-5554" }
   }
 
@@ -189,9 +225,12 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          sourceFactory = { _, _ -> source },
-          streamingEnabled = focused.value,
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+              streamingEnabled = focused.value,
+            ),
         )
       }
     }
@@ -210,7 +249,14 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
     val source = FakeVideoStreamSource()
     setContent {
       MaterialTheme {
-        DeviceStreamView(col(), sourceFactory = { _, _ -> source }, streamingEnabled = false)
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+              streamingEnabled = false,
+            ),
+        )
       }
     }
     waitForIdle()
@@ -221,7 +267,17 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
   @Test
   fun `draws the newest decoded frame as the live mirror`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
-    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+            ),
+        )
+      }
+    }
     waitUntil { source.connectedDeviceId != null }
     source.emitFrame(width = 1, height = 1)
     waitUntil {
@@ -240,9 +296,12 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          enableDeviceControl = armed.value,
-          sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = armed.value,
+              sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
+            ),
         )
       }
     }
@@ -260,8 +319,21 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
 
   @Test
   fun `shows the refusal reason when the relay is unavailable`() = runComposeUiTest {
-    val source = FakeVideoStreamSource(refuseWith = "Live mirroring was refused")
-    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    val source =
+      FakeVideoStreamSource(
+        FakeVideoStreamSource.Options(refuseWith = "Live mirroring was refused"),
+      )
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+            ),
+        )
+      }
+    }
     onNodeWithText("Live mirroring was refused").assertIsDisplayed()
   }
 
@@ -269,7 +341,17 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
   fun `shows a waiting hint while streaming before the first frame decodes`() = runComposeUiTest {
     // The fake reports Streaming immediately on connect but emits no frame.
     val source = FakeVideoStreamSource()
-    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              sourceFactory = { _, _ -> source },
+            ),
+        )
+      }
+    }
     onNodeWithText("Waiting for the first frame…").assertIsDisplayed()
   }
 
@@ -278,8 +360,10 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
     runComposeUiTest {
       val source =
         FakeVideoStreamSource(
-          screenRecordingRequired = true,
-          screenRecordingApprovalTarget = "Custom Capture Helper",
+          FakeVideoStreamSource.Options(
+            screenRecordingRequired = true,
+            screenRecordingApprovalTarget = "Custom Capture Helper",
+          ),
         )
       var openSettingsCalls = 0
       val launcher = ScreenRecordingSettingsLauncher {
@@ -289,9 +373,12 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
       setContent {
         MaterialTheme {
           DeviceStreamView(
-            iosCol(),
-            sourceFactory = { _, _ -> source },
-            screenRecordingSettingsLauncher = launcher,
+            options =
+              DeviceStreamOptions(
+                column = iosCol(),
+                sourceFactory = { _, _ -> source },
+                screenRecordingSettingsLauncher = launcher,
+              ),
           )
         }
       }
@@ -320,10 +407,13 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
       setContent {
         MaterialTheme {
           DeviceStreamView(
-            col(),
-            enableDeviceControl = true,
-            control = armedControlState(scope),
-            sourceFactory = { _, _ -> source },
+            options =
+              DeviceStreamOptions(
+                column = col(),
+                enableDeviceControl = true,
+                control = armedControlState(scope),
+                sourceFactory = { _, _ -> source },
+              ),
           )
         }
       }
@@ -335,15 +425,21 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
 
   @Test
   fun `an armed pane with live video renders the interactive video surface`() = runComposeUiTest {
-    val source = FakeVideoStreamSource(nowMs = { System.nanoTime() / 1_000_000L })
+    val source =
+      FakeVideoStreamSource(
+        FakeVideoStreamSource.Options(nowMs = { System.nanoTime() / 1_000_000L }),
+      )
     val scope = CoroutineScope(testDispatcher)
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          enableDeviceControl = true,
-          control = armedControlState(scope),
-          sourceFactory = { _, _ -> source },
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = true,
+              control = armedControlState(scope),
+              sourceFactory = { _, _ -> source },
+            ),
         )
       }
     }
@@ -362,18 +458,26 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
       // stay clickable — untagged taps would land on a device whose UI may have moved (#5255
       // review). refuseWith keeps the auto-reconnect from racing the state back to Streaming.
       val source =
-        FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
+        FakeVideoStreamSource(
+          FakeVideoStreamSource.Options(
+            refuseWith = "dropped",
+            nowMs = { System.nanoTime() / 1_000_000L },
+          ),
+        )
       val scope = CoroutineScope(testDispatcher)
       setContent {
         MaterialTheme {
           DeviceStreamView(
-            col(),
-            enableDeviceControl = true,
-            control = armedControlState(scope),
-            sourceFactory = { _, _ -> source },
-            // Immediate expiry: disarm the moment the relay leaves Streaming, so this test pins
-            // the disarm rule itself rather than the transient-tolerance window.
-            armedFrameGraceWait = {},
+            options =
+              DeviceStreamOptions(
+                column = col(),
+                enableDeviceControl = true,
+                control = armedControlState(scope),
+                sourceFactory = { _, _ -> source },
+                // Immediate expiry: disarm the moment the relay leaves Streaming, so this test pins
+                // the disarm rule itself rather than the transient-tolerance window.
+                armedFrameGraceWait = {},
+              ),
           )
         }
       }
@@ -398,16 +502,25 @@ internal class DeviceStreamViewTest : DeviceStreamViewFixture() {
     // newest frame is within the retention window the interactive surface (and its Tap Targets
     // affordance) must stay mounted instead of flickering to the plain mirror and back.
     val source =
-      FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
+      FakeVideoStreamSource(
+        FakeVideoStreamSource.Options(
+          refuseWith = "dropped",
+          nowMs = { System.nanoTime() / 1_000_000L },
+        ),
+      )
     val scope = CoroutineScope(testDispatcher)
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          enableDeviceControl = true,
-          control = armedControlState(scope),
-          sourceFactory = { _, _ -> source },
-          armedFrameGraceWait = { awaitCancellation() }, // grace never expires on its own
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = true,
+              control = armedControlState(scope),
+              sourceFactory = { _, _ -> source },
+              armedFrameGraceWait = { awaitCancellation() },
+              // grace never expires on its own
+            ),
         )
       }
     }
@@ -436,13 +549,21 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          enableDeviceControl = armed.value,
-          control = armedControlState(scope),
-          sourceFactory = { _, _ ->
-            FakeVideoStreamSource(nowMs = { System.nanoTime() / 1_000_000L }).also { sources += it }
-          },
-          armedFrameGraceWait = { CompletableDeferred<Unit>().also { gates += it }.await() },
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = armed.value,
+              control = armedControlState(scope),
+              sourceFactory = { _, _ ->
+                FakeVideoStreamSource(
+                    FakeVideoStreamSource.Options(nowMs = { System.nanoTime() / 1_000_000L }),
+                  )
+                  .also {
+                    sources += it
+                  }
+              },
+              armedFrameGraceWait = { CompletableDeferred<Unit>().also { gates += it }.await() },
+            ),
         )
       }
     }
@@ -503,11 +624,15 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
       setContent {
         MaterialTheme {
           DeviceStreamView(
-            col(),
-            enableDeviceControl = armed.value,
-            control = armedControlState(scope),
-            sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
-            armedFrameGraceWait = {}, // any grace comes from Streaming state, never the window
+            options =
+              DeviceStreamOptions(
+                column = col(),
+                enableDeviceControl = armed.value,
+                control = armedControlState(scope),
+                sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
+                armedFrameGraceWait = {},
+                // any grace comes from Streaming state, never the window
+              ),
           )
         }
       }
@@ -533,7 +658,8 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
       // armed. On iOS the observation stream can hand the pane a snapshot (arming it) while the
       // video relay is still refused; taking the armed branch there rendered a frozen fallback
       // screenshot and hid the approval UI, stranding the user with no way to recover (#5221).
-      val source = FakeVideoStreamSource(screenRecordingRequired = true)
+      val source =
+        FakeVideoStreamSource(FakeVideoStreamSource.Options(screenRecordingRequired = true))
       val scope = CoroutineScope(testDispatcher)
       val control =
         WorkspaceDeviceControlState(
@@ -553,10 +679,13 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
       setContent {
         MaterialTheme {
           DeviceStreamView(
-            iosCol(),
-            enableDeviceControl = true,
-            control = control,
-            sourceFactory = { _, _ -> source },
+            options =
+              DeviceStreamOptions(
+                column = iosCol(),
+                enableDeviceControl = true,
+                control = control,
+                sourceFactory = { _, _ -> source },
+              ),
           )
         }
       }
@@ -567,7 +696,8 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
 
   @Test
   fun `clears a settings launch failure when the pane changes devices`() = runComposeUiTest {
-    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+    val source =
+      FakeVideoStreamSource(FakeVideoStreamSource.Options(screenRecordingRequired = true))
     val column = mutableStateOf(iosCol())
     val launcher = ScreenRecordingSettingsLauncher {
       Result.failure(IllegalStateException("unavailable"))
@@ -575,9 +705,12 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          column.value,
-          sourceFactory = { _, _ -> source },
-          screenRecordingSettingsLauncher = launcher,
+          options =
+            DeviceStreamOptions(
+              column = column.value,
+              sourceFactory = { _, _ -> source },
+              screenRecordingSettingsLauncher = launcher,
+            ),
         )
       }
     }
@@ -600,7 +733,16 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
     val source = FakeVideoStreamSource()
     val show = mutableStateOf(true)
     setContent {
-      MaterialTheme { if (show.value) DeviceStreamView(col(), sourceFactory = { _, _ -> source }) }
+      MaterialTheme {
+        if (show.value)
+          DeviceStreamView(
+            options =
+              DeviceStreamOptions(
+                column = col(),
+                sourceFactory = { _, _ -> source },
+              ),
+          )
+      }
     }
     waitUntil { source.connectedDeviceId == "emulator-5554" }
     runOnUiThread { show.value = false }
@@ -614,10 +756,14 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          enableDeviceControl = true,
-          settings = FakeSettingsProvider(streamQualityPreset = "medium"),
-          sourceFactory = { _, _ -> source },
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = true,
+              settings =
+                FakeSettingsProvider(FakeSettingsProvider.Values(streamQualityPreset = "medium")),
+              sourceFactory = { _, _ -> source },
+            ),
         )
       }
     }
@@ -633,10 +779,14 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          enableDeviceControl = false,
-          settings = FakeSettingsProvider(streamQualityPreset = "medium"),
-          sourceFactory = { _, _ -> source },
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = false,
+              settings =
+                FakeSettingsProvider(FakeSettingsProvider.Values(streamQualityPreset = "medium")),
+              sourceFactory = { _, _ -> source },
+            ),
         )
       }
     }
@@ -648,7 +798,14 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
     val source = FakeVideoStreamSource()
     setContent {
       MaterialTheme {
-        DeviceStreamView(col(), enableDeviceControl = true, sourceFactory = { _, _ -> source })
+        DeviceStreamView(
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = true,
+              sourceFactory = { _, _ -> source },
+            ),
+        )
       }
     }
     onAllNodesWithText("fps", substring = true).assertCountEquals(0)
@@ -660,10 +817,14 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
     setContent {
       MaterialTheme {
         DeviceStreamView(
-          col(),
-          enableDeviceControl = true,
-          settings = FakeSettingsProvider(streamQualityPreset = "medium"),
-          sourceFactory = { _, _ -> source },
+          options =
+            DeviceStreamOptions(
+              column = col(),
+              enableDeviceControl = true,
+              settings =
+                FakeSettingsProvider(FakeSettingsProvider.Values(streamQualityPreset = "medium")),
+              sourceFactory = { _, _ -> source },
+            ),
         )
       }
     }
@@ -677,17 +838,23 @@ internal class DeviceStreamViewRecoveryTest : DeviceStreamViewFixture() {
   @Test
   fun `manual quality selection persists and re-subscribes with the new preset`() =
     runComposeUiTest {
-      val settings = FakeSettingsProvider(streamQualityPreset = "medium")
+      val settings =
+        FakeSettingsProvider(FakeSettingsProvider.Values(streamQualityPreset = "medium"))
       // A distinct fake per preset, so the assertions prove a genuine source teardown + replacement
       // (not the same instance re-used) when the pane re-keys on the new quality.
       val sources = mutableMapOf<VideoStreamQuality, FakeVideoStreamSource>()
       setContent {
         MaterialTheme {
           DeviceStreamView(
-            col(),
-            enableDeviceControl = true,
-            settings = settings,
-            sourceFactory = { _, quality -> sources.getOrPut(quality) { FakeVideoStreamSource() } },
+            options =
+              DeviceStreamOptions(
+                column = col(),
+                enableDeviceControl = true,
+                settings = settings,
+                sourceFactory = { _, quality ->
+                  sources.getOrPut(quality) { FakeVideoStreamSource() }
+                },
+              ),
           )
         }
       }

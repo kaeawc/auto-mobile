@@ -3,7 +3,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +23,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -32,18 +30,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.isCtrlPressed
-import androidx.compose.ui.input.pointer.isMetaPressed
-import androidx.compose.ui.input.pointer.isShiftPressed
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecyclePhase
-import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import dev.jasonpearson.automobile.desktop.core.workspace.disambiguateLabels
 
@@ -53,31 +45,15 @@ private val Accent = Color(0xFF4DABF7)
  * Full-screen device picker. Stateless over [DevicePickerUiState] with hoisted [onAction]; the
  * workspace hosts it and turns the Observe effect into columns.
  */
-@Composable
-fun DevicePicker(
-  state: DevicePickerUiState,
-  onAction: (DevicePickerAction) -> Unit,
-  onClose: () -> Unit,
-  modifier: Modifier = Modifier,
-  // Whether the "Close" affordance is offered. False when the grid is the app's home surface (no
-  // observed workspace to return to); true when opened over an existing workspace ("Devices +").
-  canClose: Boolean = true,
-  // Install/start progress of the shared daemon. The picker's first load can silently install Bun
-  // and start the daemon (up to the daemon-startup budget), so the Loading state narrates that
-  // work instead of sitting on "Loading devices…", and the Error state surfaces the bootstrap
-  // failure with its actionable message.
-  bootstrapState: DaemonBootstrapState = DaemonBootstrapState.Inactive,
-  // Protocol-health-aware daemon recovery, shared with the workspace status-dot "Start daemon"
-  // button. The Error state's Retry runs this so a WEDGED daemon (socket open, but ide/status times
-  // out) is actually restarted — a plain reload would short-circuit on the still-open socket and
-  // re-fail (#6082). Defaults to a no-op so the reload alone still covers a plain down daemon.
-  onRecoverDaemon: () -> Unit = {},
-  sessionUuidProvider: () -> String? = { null },
-  // The per-card device thumbnail. Hoisted (default = the screenshot [DeviceThumbnail]) so a test
-  // can stub it and never open an observation socket while composing the grid. Thumbnails are
-  // stills by design — a per-card live-video subscription would put a standing capture/decode cost
-  // on every booted tile of a potentially huge grid.
-  thumbnail: @Composable (device: PickerDevice, booting: Boolean) -> Unit = { device, booting ->
+data class DevicePickerOptions(
+  val state: DevicePickerUiState,
+  val onAction: (DevicePickerAction) -> Unit,
+  val onClose: () -> Unit,
+  val canClose: Boolean = true,
+  val bootstrapState: DaemonBootstrapState = DaemonBootstrapState.Inactive,
+  val onRecoverDaemon: () -> Unit = {},
+  val sessionUuidProvider: () -> String? = { null },
+  val thumbnail: @Composable (device: PickerDevice, booting: Boolean) -> Unit = { device, booting ->
     // Width-only sizing: the thumbnail derives its own height from the device's aspect ratio
     // (screenshot ratio once captured, a portrait stand-in until then), which the staggered grid
     // below packs masonry-style.
@@ -88,7 +64,22 @@ fun DevicePicker(
       sessionUuidProvider = sessionUuidProvider,
     )
   },
+)
+
+@Composable
+fun DevicePicker(
+  options: DevicePickerOptions,
+  modifier: Modifier = Modifier,
 ) {
+  val state = options.state
+  val onAction = options.onAction
+  val onClose = options.onClose
+  val canClose = options.canClose
+  val bootstrapState = options.bootstrapState
+  val onRecoverDaemon = options.onRecoverDaemon
+
+  val thumbnail = options.thumbnail
+
   Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     when (state) {
       is DevicePickerUiState.Loading -> Centered(loadingMessage(bootstrapState))
@@ -352,143 +343,38 @@ private fun DeviceGrid(
   ) {
     items(devices, key = { it.uiKey }) { device ->
       DeviceCard(
-        device = device,
-        displayName =
-          if (nameCounts.getValue(device.name) == 1) device.name
-          else if (sameNameAndIdCounts.getValue(device.name to device.id) > 1) {
-            "${device.name} (${device.uiKey})"
-          } else {
-            displayNames.getValue(device.uiKey)
-          },
-        selected = device.uiKey in content.selectedIds,
-        booting = device.state == DeviceState.Booting || device.uiKey in content.bootingIds,
-        error = content.bootErrors[device.uiKey],
-        finishingPreviousSession = device.uiKey in content.finishingPreviousSessionIds,
-        thumbnail = thumbnail,
-        onClick = { multiSelect ->
-          when {
-            // A shut-down card boots on click; the boot auto-observes once it completes.
-            device.state == DeviceState.Shutdown ->
-              onAction(DevicePickerAction.BootDevice(device.uiKey))
-            device.state == DeviceState.Booting -> Unit
-            // Cmd/Shift-click builds a multi-device selection to observe together.
-            multiSelect -> onAction(DevicePickerAction.ToggleSelect(device.uiKey))
-            // Plain click observes this device immediately.
-            else -> onAction(DevicePickerAction.ObserveOne(device.uiKey))
-          }
-        },
+        options =
+          DeviceCardOptions(
+            device = device,
+            displayName =
+              if (nameCounts.getValue(device.name) == 1) device.name
+              else if (sameNameAndIdCounts.getValue(device.name to device.id) > 1) {
+                "${device.name} (${device.uiKey})"
+              } else {
+                displayNames.getValue(device.uiKey)
+              },
+            selected = device.uiKey in content.selectedIds,
+            booting = device.state == DeviceState.Booting || device.uiKey in content.bootingIds,
+            error = content.bootErrors[device.uiKey],
+            finishingPreviousSession = device.uiKey in content.finishingPreviousSessionIds,
+            thumbnail = thumbnail,
+            onClick = { multiSelect ->
+              when {
+                // A shut-down card boots on click; the boot auto-observes once it completes.
+                device.state == DeviceState.Shutdown ->
+                  onAction(DevicePickerAction.BootDevice(device.uiKey))
+                device.state == DeviceState.Booting -> Unit
+                // Cmd/Shift-click builds a multi-device selection to observe together.
+                multiSelect -> onAction(DevicePickerAction.ToggleSelect(device.uiKey))
+                // Plain click observes this device immediately.
+                else -> onAction(DevicePickerAction.ObserveOne(device.uiKey))
+              }
+            },
+          ),
       )
     }
   }
 }
-
-@Composable
-private fun DeviceCard(
-  device: PickerDevice,
-  displayName: String,
-  selected: Boolean,
-  booting: Boolean,
-  error: String?,
-  finishingPreviousSession: Boolean,
-  thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
-  onClick: (multiSelect: Boolean) -> Unit,
-) {
-  val booted = device.state == DeviceState.Booted
-  // A shut-down card boots on click (unless a boot is already in flight); a booted card observes.
-  val clickable = booted || (device.state == DeviceState.Shutdown && !booting)
-  val windowInfo = LocalWindowInfo.current
-  val isIos = device.platform == Platform.Ios
-  Column(
-    modifier =
-      Modifier.fillMaxWidth()
-        .border(
-          width = if (selected) 2.dp else 1.dp,
-          color = if (selected) Accent else MaterialTheme.colorScheme.outlineVariant,
-          shape = RoundedCornerShape(6.dp),
-        )
-        .then(
-          if (clickable)
-            Modifier.clickable {
-              // Read the live modifier state at click time (mirrors the repo's Meta/Ctrl handling):
-              // Shift or Cmd/Ctrl means "add to selection" rather than "observe now".
-              val mods = windowInfo.keyboardModifiers
-              onClick(mods.isShiftPressed || mods.isMetaPressed || mods.isCtrlPressed)
-            }
-          else Modifier,
-        )
-        .semantics { contentDescription = cardDescription(displayName, booted, booting, error) }
-        .padding(12.dp),
-  ) {
-    thumbnail(device, booting)
-    Spacer(Modifier.height(8.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Icon(
-        imageVector = PlatformIcons.logo(isIos),
-        contentDescription = null,
-        tint = PlatformIcons.tint(isIos),
-        modifier = Modifier.size(16.dp),
-      )
-      Spacer(Modifier.width(6.dp))
-      if (displayName == device.name) {
-        Text(device.name, style = MaterialTheme.typography.bodyLarge)
-      } else {
-        Tooltip(tooltip = { Text(device.id) }) {
-          Text(displayName, style = MaterialTheme.typography.bodyLarge)
-        }
-      }
-    }
-    Spacer(Modifier.height(4.dp))
-    val meta =
-      listOfNotNull(
-          if (isIos) "iOS" else "Android",
-          device.osLabel,
-          device.architecture,
-          when (device.state) {
-            DeviceState.Booted -> "booted"
-            DeviceState.Booting -> "Booting"
-            DeviceState.Shutdown -> "Shut down"
-          },
-        )
-        .joinToString(" · ")
-    Text(
-      meta,
-      style = MaterialTheme.typography.bodySmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    if (!booted) {
-      Text(
-        bootAffordance(booting, error, finishingPreviousSession),
-        style = MaterialTheme.typography.labelSmall,
-        color = if (error != null) MaterialTheme.colorScheme.error else Accent,
-      )
-    }
-  }
-}
-
-private fun cardDescription(
-  displayName: String,
-  booted: Boolean,
-  booting: Boolean,
-  error: String?,
-): String =
-  when {
-    booted -> "Observe $displayName"
-    booting -> "Booting $displayName"
-    error != null -> "Retry boot $displayName"
-    else -> "Boot $displayName"
-  }
-
-private fun bootAffordance(
-  booting: Boolean,
-  error: String?,
-  finishingPreviousSession: Boolean = false,
-): String =
-  when {
-    booting && finishingPreviousSession -> "Finishing previous session…"
-    booting -> "Booting…"
-    error != null -> "Boot failed · Click to retry"
-    else -> "Click to boot"
-  }
 
 private fun toggle(
   dimension: FilterDimension,

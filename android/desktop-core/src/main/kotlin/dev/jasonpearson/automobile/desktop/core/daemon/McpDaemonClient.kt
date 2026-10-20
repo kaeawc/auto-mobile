@@ -367,14 +367,14 @@ class McpDaemonClient(
     return json.decodeFromJsonElement(serializer<UpdateServiceResult>(), responseResult)
   }
 
-  override fun inputTap(
-    x: Double,
-    y: Double,
-    platform: String,
-    deviceId: String?,
-    duration: Int?,
-    frameContext: String?,
-  ): InputActionResult {
+  override fun inputTap(input: TapInput): InputActionResult {
+    val x = input.x
+    val y = input.y
+    val platform = input.platform
+    val deviceId = input.deviceId
+    val duration = input.duration
+    val frameContext = input.frameContext
+
     return sendInputRequest(
       "input/tap",
       buildJsonObject {
@@ -388,16 +388,16 @@ class McpDaemonClient(
     )
   }
 
-  override fun inputSwipe(
-    startX: Double,
-    startY: Double,
-    endX: Double,
-    endY: Double,
-    platform: String,
-    deviceId: String?,
-    durationMs: Int?,
-    frameContext: String?,
-  ): InputActionResult {
+  override fun inputSwipe(input: SwipeInput): InputActionResult {
+    val startX = input.startX
+    val startY = input.startY
+    val endX = input.endX
+    val endY = input.endY
+    val platform = input.platform
+    val deviceId = input.deviceId
+    val durationMs = input.durationMs
+    val frameContext = input.frameContext
+
     return sendInputRequest(
       "input/swipe",
       buildJsonObject {
@@ -430,14 +430,14 @@ class McpDaemonClient(
     )
   }
 
-  override fun inputTypeText(
-    text: String,
-    platform: String,
-    deviceId: String?,
-    submit: Boolean?,
-    append: Boolean,
-    frameContext: String?,
-  ): InputActionResult {
+  override fun inputTypeText(input: TextInput): InputActionResult {
+    val text = input.text
+    val platform = input.platform
+    val deviceId = input.deviceId
+    val submit = input.submit
+    val append = input.append
+    val frameContext = input.frameContext
+
     val appendSupportError = if (append) inputTypeTextAppendSupportError() else null
     if (appendSupportError != null) {
       return InputActionResult(
@@ -711,16 +711,16 @@ class McpDaemonClient(
     return json.decodeFromJsonElement(serializer<InputActionResult>(), body)
   }
 
-  override fun setKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-    platform: String,
-    sessionUuid: String?,
-  ): SetKeyValueResult {
+  override fun setKeyValue(input: SetKeyValueRequest): SetKeyValueResult {
+    val deviceId = input.deviceId
+    val appId = input.appId
+    val fileName = input.fileName
+    val key = input.key
+    val value = input.value
+    val type = input.type
+    val platform = input.platform
+    val sessionUuid = input.sessionUuid
+
     val response =
       sendRequest(
         "ide/setKeyValue",
@@ -747,14 +747,14 @@ class McpDaemonClient(
     }
   }
 
-  override fun removeKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    platform: String,
-    sessionUuid: String?,
-  ): RemoveKeyValueResult {
+  override fun removeKeyValue(input: RemoveKeyValueRequest): RemoveKeyValueResult {
+    val deviceId = input.deviceId
+    val appId = input.appId
+    val fileName = input.fileName
+    val key = input.key
+    val platform = input.platform
+    val sessionUuid = input.sessionUuid
+
     val response =
       sendRequest(
         "ide/removeKeyValue",

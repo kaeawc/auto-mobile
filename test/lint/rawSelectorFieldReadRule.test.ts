@@ -504,13 +504,16 @@ test("generic wrappers mark only raw-valued properties", () => {
 test("the sanctioned accessor module is out of scope, and its callers read no raw field", () => {
   const code = 'function read(props: Record<string, unknown>) { return props["resource-id"]; }';
   expect(check(code, "src/features/utility/elementProperties.ts")).toEqual([]);
-  expect(check(code, "src/features/systemTray/systemTrayHelpers.ts")).toHaveLength(1);
-  expect(
-    check(
-      "function read(props: Record<string, unknown>) { return rawResourceId(props) + rawText(props); }",
-      "src/features/systemTray/systemTrayHelpers.ts",
-    ),
-  ).toEqual([]);
+  for (const file of ["hierarchy", "matching", "groupExpansion", "dismissal"]) {
+    const filename = `src/features/systemTray/helpers/${file}.ts`;
+    expect(check(code, filename)).toHaveLength(1);
+    expect(
+      check(
+        "function read(props: Record<string, unknown>) { return rawResourceId(props) + rawText(props); }",
+        filename,
+      ),
+    ).toEqual([]);
+  }
 });
 
 test("raw accessor imports are rejected outside the allow-list", () => {
@@ -524,6 +527,13 @@ test("raw accessor imports are rejected outside the allow-list", () => {
     ),
   ).toHaveLength(1);
   expect(check(code, "src/features/systemTray/notificationHints.ts")).toEqual([]);
+  for (const file of ["hierarchy", "matching", "groupExpansion", "dismissal"]) {
+    expect(check(code, `src/features/systemTray/helpers/${file}.ts`)).toEqual([]);
+  }
+  for (const file of ["dependencies", "runtime", "listing"]) {
+    expect(check(code, `src/features/systemTray/helpers/${file}.ts`)).toHaveLength(1);
+  }
+  expect(check(code, "src/features/systemTray/systemTrayHelpers.ts")).toHaveLength(1);
   expect(check(code, "src/features/action/LongPressMetadataDetector.ts")).toEqual([]);
   expect(
     check(

@@ -50,7 +50,10 @@ class VideoInputDispatcherTest {
       platform = { platform },
       deviceId = deviceId,
       tracer = InteractionLatencyTracer(),
-      ioDispatcher = UnconfinedTestDispatcher(scheduler),
+      options =
+        VideoInputOptions(
+          ioDispatcher = UnconfinedTestDispatcher(scheduler),
+        ),
     )
 
   @Test
@@ -94,8 +97,11 @@ class VideoInputDispatcherTest {
         platform = { "android" },
         deviceId = "emulator-5554",
         tracer = InteractionLatencyTracer(),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        onDeviceHeldElsewhere = { reports++ },
+        options =
+          VideoInputOptions(
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            onDeviceHeldElsewhere = { reports++ },
+          ),
       )
 
     dispatcher.tap(inBounds)
@@ -120,8 +126,11 @@ class VideoInputDispatcherTest {
         platform = { "android" },
         deviceId = "emulator-5554",
         tracer = InteractionLatencyTracer(),
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        onDeviceHeldElsewhere = { reports++ },
+        options =
+          VideoInputOptions(
+            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+            onDeviceHeldElsewhere = { reports++ },
+          ),
       )
 
     dispatcher.tap(inBounds)
@@ -145,7 +154,10 @@ class VideoInputDispatcherTest {
         platform = { "android" },
         deviceId = "emulator-5554",
         tracer = InteractionLatencyTracer(),
-        ioDispatcher = StandardTestDispatcher(testScheduler),
+        options =
+          VideoInputOptions(
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+          ),
       )
     val results = (0 until 100).map { d.tap(DevicePoint(x = it, y = it, inBounds = true)) }
     advanceUntilIdle()
@@ -175,7 +187,10 @@ class VideoInputDispatcherTest {
           platform = { "android" },
           deviceId = "emulator-5554",
           tracer = InteractionLatencyTracer(),
-          ioDispatcher = StandardTestDispatcher(testScheduler),
+          options =
+            VideoInputOptions(
+              ioDispatcher = StandardTestDispatcher(testScheduler),
+            ),
         )
       d.tap(DevicePoint(x = 1, y = 1, inBounds = true))
       d.tap(DevicePoint(x = 2, y = 2, inBounds = true))
@@ -352,8 +367,11 @@ class VideoInputDispatcherTest {
       platform = { "android" },
       deviceId = "emulator-5554",
       tracer = InteractionLatencyTracer(),
-      ioDispatcher = UnconfinedTestDispatcher(scheduler),
-      streamingEnabled = true,
+      options =
+        VideoInputOptions(
+          ioDispatcher = UnconfinedTestDispatcher(scheduler),
+          streamingEnabled = true,
+        ),
     )
 
   @Test
@@ -456,9 +474,12 @@ class VideoInputDispatcherTest {
           platform = { "android" },
           deviceId = "emulator-5554",
           tracer = InteractionLatencyTracer(),
-          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-          streamingEnabled = true,
-          onDeviceHeldElsewhere = { reports++ },
+          options =
+            VideoInputOptions(
+              ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+              streamingEnabled = true,
+              onDeviceHeldElsewhere = { reports++ },
+            ),
         )
       val handle =
         assertNotNull(dispatcher.beginGestureStream(testSnapshot(TestSnapshotSpec()), inBounds))

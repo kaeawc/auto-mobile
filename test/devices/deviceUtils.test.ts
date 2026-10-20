@@ -630,10 +630,11 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
-  test("getBootedDevicesDetailed forwards iOS cache bypass and cancellation to simctl", async () => {
+  test("getBootedDevicesDetailed forwards iOS cache bypass to both sources and cancellation to simctl", async () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();
       let request: { signal?: AbortSignal; options?: { bypassCache?: boolean } } | undefined;
+      let physicalOptions: { bypassCache?: boolean } | undefined;
       const fakeSimctl = fakeDeviceManagerSimctl({
         getBootedSimulatorsChecked: async (
           _timeoutMs?: number,
@@ -650,15 +651,22 @@ describe("MultiPlatformDeviceManager", () => {
         createFakeAndroidEmulator({}),
         undefined,
         undefined,
-        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+        {
+          listConnectedDevices: async (options) => {
+            physicalOptions = options;
+            return { devices: [], complete: true };
+          },
+        },
       );
 
       await manager.getBootedDevicesDetailed("ios", {
         signal: controller.signal,
         bypassIosDeviceListCache: true,
+        bypassPhysicalIosDeviceListCache: true,
       });
 
       expect(request).toEqual({ signal: controller.signal, options: { bypassCache: true } });
+      expect(physicalOptions).toEqual({ bypassCache: true });
     });
   });
 

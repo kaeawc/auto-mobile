@@ -48,6 +48,9 @@ describe("re-measure decision", () => {
     expect(decision.second?.metrics).toBe(passing);
     expect(decision.second?.passed).toBe(true);
     expect(decision.second?.checks.every((check) => check.passed)).toBe(true);
+    if (!decision.second) {
+      throw new Error("Expected second measurement");
+    }
     expect(decision.deciding).toBe(decision.second);
   });
 
@@ -68,6 +71,9 @@ describe("re-measure decision", () => {
     expect(decision.second?.passed).toBe(false);
     expect(decision.second?.checks.map((check) => check.actual)).toEqual([24.1, 65, 28]);
     expect(decision.second?.checks.every((check) => !check.passed)).toBe(true);
+    if (!decision.second) {
+      throw new Error("Expected second measurement");
+    }
     expect(decision.deciding).toBe(decision.second);
   });
 

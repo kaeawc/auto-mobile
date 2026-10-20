@@ -1,3 +1,5 @@
+import { defaultExecFileAsync, defaultSimCtlClientFactory } from "./PerformanceMonitorDefaults";
+export { defaultSimCtlClientFactory } from "./PerformanceMonitorDefaults";
 import {
   getDeviceDataStreamServer,
   PerformanceStreamData,
@@ -8,12 +10,8 @@ import {
   LivePerformanceData,
   PerformancePushSocketServer,
 } from "../../daemon/performancePushSocketServer";
-import type {
-  FrameTimePercentiles,
-  MemoryBreakdownMb,
-  StartupTimingSummary,
-} from "../../models/PerfSnapshot";
-import { execFileAsync as sharedExecFileAsync } from "../../utils/HostCommandExecutor";
+import type { FrameTimePercentiles, MemoryBreakdownMb } from "../../models/PerfSnapshot";
+
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 import {
   AdbClientFactory,
@@ -21,13 +19,21 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
-import { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
-import { DefaultSimCtlClientFactory } from "./DefaultSimCtlClientFactory";
+
 import { getPerfWindowBuffer, PerfWindowBuffer } from "./PerfWindowBuffer";
 import type { PerformanceMonitorDependencies } from "./PerformanceMonitorDependencies";
+import {
+  CpuMetricsResult,
+  ExecFileAsyncFn,
+  MonitoredDevice,
+  PerformanceDataPusher,
+  PerformanceTelemetryEmitter,
+  ServerGetter,
+  SimCtlClientFactory,
+} from "./PerformanceMonitorTypes";
 import { RecompositionTracker } from "./RecompositionTracker";
 import { getSdkFrameMetricsStore, SdkFrameMetricsStore } from "./SdkFrameMetricsStore";
 import type { GfxMetrics, RawJankCounters } from "./performanceMetricAnalysis";
@@ -39,100 +45,17 @@ import {
   parseMemoryBreakdown,
   resolveAndroidFrameMetrics,
 } from "./performanceMetricAnalysis";
-
-const defaultExecFileAsync: ExecFileAsyncFn = async (file, args) => {
-  const result = await sharedExecFileAsync(file, args);
-  return { stdout: String(result.stdout), stderr: String(result.stderr) };
-};
-
-/** Minimal interface for performance telemetry emission. */
-export interface PerformanceTelemetryEmitter {
-  setContext(deviceId: string | null, sessionId: string | null): void;
-  recordPerformanceEvent: TelemetryRecorder["recordPerformanceEvent"];
-}
-
-/**
- * Type for the exec function used to run host commands.
- * Injected for testing.
- */
-export type ExecFileAsyncFn = (
-  file: string,
-  args: string[],
-) => Promise<{ stdout: string; stderr: string }>;
-
-/**
- * Factory interface for creating SimCtlClient instances.
- * Enables dependency injection for testing.
- */
-export interface SimCtlClientFactory {
-  create(deviceId: string): SimCtl;
-}
-
-/**
- * Singleton instance of the default factory.
- */
-export const defaultSimCtlClientFactory: SimCtlClientFactory = new DefaultSimCtlClientFactory();
-
-interface PreviousCpuSample {
-  processTicks: number;
-  uptimeSeconds: number;
-}
-
-interface CpuMetricsResult {
-  cpuUsagePercent: number | null;
-  sample: PreviousCpuSample | null;
-}
-
-export interface MonitoredDevice {
-  deviceId: string;
-  packageName: string;
-  /**
-   * Monotonically increasing token bumped on every package switch. Lets an
-   * in-flight sample detect an A→B→A sequence that a package-name comparison
-   * alone would miss (the name is back to A, but it's a different session).
-   */
-  monitoringGeneration: number;
-  platform: "android" | "ios";
-  lastFastTick: number;
-  lastMediumTick: number;
-  lastSlowTick: number;
-  cachedCpu: number | null;
-  cachedMemory: number | null;
-  /** Cached meminfo App Summary breakdown, carried between slow ticks. */
-  cachedMemoryBreakdown: MemoryBreakdownMb | null;
-  /** Cached FPS from last interval with actual frames */
-  cachedFps: number | null;
-  /** Cached frame time from last interval with actual frames */
-  cachedFrameTime: number | null;
-  /** Cached touch latency from last interval with actual frames */
-  cachedTouchLatency: number | null;
-  /** Previous jank counters for computing deltas */
-  prevJankCounters: RawJankCounters | null;
-  /** PID of the app process (cached for iOS since it requires a lookup) */
-  cachedPid: number | null;
-  /** Previous Android process CPU sample for interval-delta calculation */
-  previousCpuSample: PreviousCpuSample | null;
-  /** Whether the cumulative first gfxinfo sample has already been primed */
-  gfxPrimed: boolean;
-  /** Previous per-metric health for detecting threshold crossings */
-  previousMetricHealth: Record<string, string>;
-}
-
-/**
- * Interface for pushing performance data, used for testing.
- */
-export interface PerformanceDataPusher {
-  pushPerformanceData(data: LivePerformanceData): void;
-}
-
-export interface PerformanceSamplingCoordinator {
-  withDeviceSamplingPaused<T>(deviceId: string, operation: () => Promise<T>): Promise<T>;
-}
-
-/**
- * Function type for getting the performance push server.
- */
-export type ServerGetter = () => PerformanceDataPusher | null;
+import { getLastTtiMs, ttiStore } from "./performanceStartupTiming";
+export {
+  type ExecFileAsyncFn,
+  type MonitoredDevice,
+  type PerformanceDataPusher,
+  type PerformanceSamplingCoordinator,
+  type PerformanceTelemetryEmitter,
+  type ServerGetter,
+  type SimCtlClientFactory,
+} from "./PerformanceMonitorTypes";
+export { getLastStartupTimingMs, setLastTtiMs } from "./performanceStartupTiming";
 
 export class PerformanceMonitor {
   static readonly TICK_INTERVAL_MS = 500;
@@ -1100,68 +1023,6 @@ export class PerformanceMonitor {
       return null;
     }
   }
-}
-
-// TTI (Time to Interactive) store - tracks last known TTI per device and package
-// TTI is an event-based metric captured at app launch, not continuous
-const ttiStore = new Map<string, Map<string, { ttiMs: number; timestamp: number }>>();
-
-/** Startup timing is only relevant for recent launches (within 5 minutes). */
-const STARTUP_MAX_AGE_MS = 5 * 60 * 1000;
-
-/**
- * Store the last known TTI for a package.
- * Called by LaunchApp after measuring displayed time.
- */
-export function setLastTtiMs(deviceId: string, packageName: string, ttiMs: number): void {
-  let timings = ttiStore.get(deviceId);
-  if (!timings) {
-    timings = new Map();
-    ttiStore.set(deviceId, timings);
-  }
-  timings.set(packageName, { ttiMs, timestamp: defaultTimer.now() });
-  logger.debug(`[PerformanceMonitor] Stored TTI for ${packageName}: ${ttiMs}ms`);
-}
-
-/**
- * Get the last known TTI for a package.
- * Returns null if no TTI has been recorded or if it's stale (>5 minutes old).
- */
-function getLastTtiMs(deviceId: string, packageName: string): number | null {
-  const timings = ttiStore.get(deviceId);
-  const entry = timings?.get(packageName);
-  if (!entry) {
-    return null;
-  }
-  if (defaultTimer.now() - entry.timestamp > STARTUP_MAX_AGE_MS) {
-    timings?.delete(packageName);
-    return null;
-  }
-  return entry.ttiMs;
-}
-
-/**
- * Startup timing for a package's most recent launch, for the observe
- * `perfSnapshot`. Reads the same in-memory launch cache as {@link getLastTtiMs}
- * (populated by `launchApp` from the ActivityManager "Displayed" time), so it
- * adds no device work. Returns null when no launch is recorded or the last one
- * is stale (>5 minutes).
- */
-export function getLastStartupTimingMs(
-  deviceId: string,
-  packageName: string,
-): StartupTimingSummary | null {
-  const timings = ttiStore.get(deviceId);
-  const entry = timings?.get(packageName);
-  if (!entry) {
-    return null;
-  }
-  const ageMs = defaultTimer.now() - entry.timestamp;
-  if (ageMs > STARTUP_MAX_AGE_MS) {
-    timings?.delete(packageName);
-    return null;
-  }
-  return { displayedMs: entry.ttiMs, ageMs };
 }
 
 // Singleton instance

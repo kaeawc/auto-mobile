@@ -43,7 +43,7 @@ function staticName(node: Expression): string | undefined {
     return node.value;
   }
   return node.type === "TemplateLiteral" && node.expressions.length === 0
-    ? node.quasis[0].value.cooked
+    ? (node.quasis[0].value.cooked ?? undefined)
     : undefined;
 }
 

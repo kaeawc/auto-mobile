@@ -194,7 +194,7 @@ Users:
 describe("AdbClient.listUsers", () => {
   test.each(["shell dumpsys user", "shell pm list users"])(
     "preserves transport refusal from %s instead of reporting no users",
-    async (command) => {
+    async (command: string) => {
       const adb = new FakeAdbExecutor();
       const error = new AdbDeviceTransportUnavailableError("device", new Error("offline"));
       adb.setCommandError(command, error);
@@ -216,7 +216,7 @@ describe("AdbClient.listUsers", () => {
       .replace("    State: RUNNING_UNLOCKED", "")
       .replace("Work profile:30", "Work profile:invalid");
     const commands: string[] = [];
-    const client = new AdbClient(null, async (command) => {
+    const client = new AdbClient(null, async (command: string) => {
       commands.push(command);
       return execResult(output);
     });
@@ -239,7 +239,7 @@ describe("AdbClient.listUsers", () => {
   test.each(cases)("$name", async ({ outcomes, expectedUsers, expectedCommandFragments }) => {
     const commands: string[] = [];
     let outcomeIndex = 0;
-    const client = new AdbClient(null, async (command) => {
+    const client = new AdbClient(null, async (command: string) => {
       commands.push(command);
       const outcome = outcomes[outcomeIndex++];
       if (outcome instanceof Error) {

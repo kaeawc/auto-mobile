@@ -131,6 +131,7 @@ export function relativeModuleSpecifiers(
     if (
       ts.isCallExpression(node) &&
       isRuntimeRequire(node) &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
       node.arguments[0].text.startsWith(".")
     ) {
       specifiers.push(node.arguments[0].text);

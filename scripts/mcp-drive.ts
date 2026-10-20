@@ -396,7 +396,11 @@ async function createSdkClient(serverPath: string, timeoutMs: number): Promise<D
     command: process.execPath,
     args: [serverPath],
     stderr: "inherit",
-    env: { ...process.env },
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    ),
   });
   await client.connect(transport);
   return {

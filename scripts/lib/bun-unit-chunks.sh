@@ -20,6 +20,15 @@
 # manifest holds the chunk total so a consumer can tell a missing chunk from a
 # passing one. Must run from the repository root (bunfig.toml is read from it).
 set -euo pipefail
+# The direct parent is a watchdog/shard subshell which can survive test-ts.
+# Watch the exported lane owner instead; standalone callers watch their parent.
+original_parent_pid="${AUTOMOBILE_TEST_TS_PARENT_PID:-$PPID}"
+parent_is_alive() {
+  if ! kill -0 "$original_parent_pid" 2>/dev/null; then
+    echo 'test-ts: unit chunk caller is gone; stopping' >&2
+    exit 1
+  fi
+}
 root="$1" runner_os="$2" chunk_files="$3" report_dir="$4" shard="$5"
 shift 5
 # shellcheck source=scripts/lib/bun-unit-test.sh
@@ -88,6 +97,7 @@ if [[ -n "$coverage_root" ]]; then trap 'interrupted' TERM; fi
 
 status=0
 for ((chunk = 0; chunk < total; chunk += 1)); do
+  parent_is_alive
   chunk_offset="${chunk_offsets[$chunk]}"
   chunk_size="${chunk_sizes[$chunk]}"
   chunk_slice=("${files[@]:chunk_offset:chunk_size}")

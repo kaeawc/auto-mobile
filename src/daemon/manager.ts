@@ -206,6 +206,7 @@ export class DaemonManager implements DaemonManagerLike {
     launchLogFileSystem: { openSync, closeSync },
     launchWorkingDirectory: resolveStableDaemonWorkingDirectory,
     currentBuildId: () => getCurrentBuildIdentity().buildId,
+    nextLaunchNonce: () => defaultIdGenerator.next(),
   };
 
   /**
@@ -250,6 +251,7 @@ export class DaemonManager implements DaemonManagerLike {
     this.portAvailabilityChecker = resolved.portAvailabilityChecker;
     this.retryExecutor = resolved.retryExecutor;
     this.startupLockOwnerToken = resolved.idGenerator.next();
+    this.seams.nextLaunchNonce = () => resolved.idGenerator.next();
     // Construct with the injected timer so FakeTimer controls peer probes (#6103).
     this.peerSocketReachability =
       resolved.peerSocketReachability ?? new DaemonSocketReachability({ timer: resolved.timer });
@@ -675,12 +677,14 @@ export class DaemonManager implements DaemonManagerLike {
     signal?: AbortSignal,
     shouldContinueWaiting: () => boolean = () => true,
     maxProbeDurationMs?: number,
+    launchedProcess?: { pid: number | undefined; launchNonce?: string },
   ): Promise<boolean> {
     return this.collaborators.daemonReadiness.waitForReady(
       timeout,
       signal,
       shouldContinueWaiting,
       maxProbeDurationMs,
+      launchedProcess,
     );
   }
 
@@ -728,8 +732,14 @@ export class DaemonManager implements DaemonManagerLike {
     pid: number | undefined,
     timeoutMs: number,
     signal: AbortSignal,
+    launchNonce?: string,
   ): Promise<boolean> {
-    return this.collaborators.daemonReadiness.isLaunchedProcessReady(pid, timeoutMs, signal);
+    return this.collaborators.daemonReadiness.isLaunchedProcessReady(
+      pid,
+      timeoutMs,
+      signal,
+      launchNonce,
+    );
   }
 
   waitForStop(
@@ -866,7 +876,8 @@ export class DaemonManager implements DaemonManagerLike {
       releaseLock: (...args) => this.releaseLock(...args),
       createLockHolderStartupFailure: (...args) => this.createLockHolderStartupFailure(...args),
       readSettledStartupLockHolder: (...args) => this.readSettledStartupLockHolder(...args),
-      waitForReady: (...args) => this.waitForReady(...args),
+      waitForReady: (...args: Parameters<DaemonManager["waitForReady"]>) =>
+        this.waitForReady(...args),
       sleepUnlessAborted: (...args) => this.sleepUnlessAborted(...args),
       socketPathObservable: (...args) => this.socketPathObservable(...args),
       verifyDaemonConnection: (...args) => this.verifyDaemonConnection(...args),

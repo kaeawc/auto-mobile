@@ -65,6 +65,11 @@ function numberField(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** Device IDs arriving over a tool response retain only string entries. */
+function deviceIdsField(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+}
+
 /** Rebuild the typed provision failure from a provisionDevice error response. */
 export function provisionErrorFromPayload(
   payload: Record<string, unknown>,
@@ -77,9 +82,8 @@ export function provisionErrorFromPayload(
   const limit = numberField(error.limit);
   const booted = numberField(error.booted);
   const retryAfterMs = numberField(error.retryAfterMs);
-  const externalDevices = Array.isArray(error.externalDevices)
-    ? error.externalDevices.filter((udid): udid is string => typeof udid === "string")
-    : [];
+  const externalDevices = deviceIdsField(error.externalDevices);
+  const heldDevices = deviceIdsField(error.heldDevices);
   return new ProvisionDeviceError(code, message, retryable, {
     ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     ...(limit !== undefined && booted !== undefined
@@ -88,6 +92,7 @@ export function provisionErrorFromPayload(
             limit,
             booted,
             ...(externalDevices.length > 0 ? { externalDevices } : {}),
+            ...(heldDevices.length > 0 ? { heldDevices } : {}),
           },
         }
       : {}),

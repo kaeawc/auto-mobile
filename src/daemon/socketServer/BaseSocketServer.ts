@@ -6,6 +6,7 @@ import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "../daemonSocketReachability";
+import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -124,9 +125,7 @@ export abstract class BaseSocketServer {
     // without another event-loop yield. A successor's rebound path must survive;
     // reuse the close-time identity check instead of adding a per-stream lock.
     if (reachable || !this.isOwnedSocketFile(originalIdentity)) {
-      throw new ActionableError(
-        `[${this.serverName}] Refusing to bind auxiliary socket ${this.socketPath}: another daemon is listening. Stop the daemon that owns it or use \`--daemon restart\` to replace it.`,
-      );
+      throw new AuxiliarySocketBindConflict(this.socketPath, this.serverName);
     }
 
     try {

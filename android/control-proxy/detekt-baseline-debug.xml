@@ -78,17 +78,6 @@
     <ID>CyclomaticComplexMethod:StructuralHasher.kt:StructuralHasher$private fun computeElementHash: Int</ID>
     <ID>CyclomaticComplexMethod:TextInputController.kt:TextInputController$suspend fun performImeAction</ID>
     <ID>CyclomaticComplexMethod:TextInputController.kt:TextInputController$suspend fun performInsertText</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromActiveWindow: ViewHierarchy?</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$internal fun calculateUnionArea: Int</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$internal fun pickPrimaryAppWindowId: Int?</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun buildOcclusionInfo: Map&lt;NodeKey, OcclusionInfo&gt;</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun collectFocusableElements</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun detectNotificationPermissionDialog: Boolean</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
-    <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun meetsFilterCriteria: Boolean</ID>
-    <ID>CyclomaticComplexMethod:WebSocketServer.kt:WebSocketServer$internal suspend fun handleClientMessage</ID>
-    <ID>CyclomaticComplexMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
     <ID>InjectDispatcher:CtrlProxy.kt:CtrlProxy$IO</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$Default</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$IO</ID>
@@ -145,12 +134,6 @@
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performInsertText</ID>
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSelectAll</ID>
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSetText</ID>
-    <ID>LongMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromActiveWindow: ViewHierarchy?</ID>
-    <ID>LongMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
-    <ID>LongMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun buildOcclusionInfo: Map&lt;NodeKey, OcclusionInfo&gt;</ID>
-    <ID>LongMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
-    <ID>LongMethod:WebSocketServer.kt:WebSocketServer$internal suspend fun handleClientMessage</ID>
-    <ID>LongMethod:WebSocketServer.kt:WebSocketServer$private fun tryStart: Boolean</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
     <ID>LongParameterList:CaCertificateController.kt:CaCertificateController</ID>
     <ID>LongParameterList:CaCertificateController.kt:CaCertificateController$private suspend fun broadcastCaCertResult</ID>
@@ -239,12 +222,6 @@
     <ID>LongParameterList:TextInputController.kt:TextInputController</ID>
     <ID>LongParameterList:TextInputController.kt:TextInputController$private suspend fun broadcastInsertTextResult</ID>
     <ID>LongParameterList:TextInputController.kt:TextInputController$suspend fun broadcastImeActionResult</ID>
-    <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromActiveWindow: ViewHierarchy?</ID>
-    <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
-    <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun collectFocusableElements</ID>
-    <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun collectOcclusionNodes: Int</ID>
-    <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
-    <ID>LongParameterList:WebSocketServer.kt:WebSocketServer</ID>
     <ID>NestedBlockDepth:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$override fun pin: PinOutcome</ID>
     <ID>RedundantSuspendModifier:PrototypeTrace.kt:PrototypeTrace$suspend</ID>
     <ID>RedundantSuspendModifier:SavedPrototypeScreenState.kt:suspend</ID>

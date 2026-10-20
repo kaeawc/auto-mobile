@@ -100,10 +100,13 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = this,
-          onClientDisconnected = { client ->
-            if (client.id == 2) reconnected = server.registerClient(3, RecordingTransport())
-          },
-          onClientCountChanged = { count, session -> changes += count to session },
+          options =
+            WebSocketServerOptions(
+              onClientDisconnected = { client ->
+                if (client.id == 2) reconnected = server.registerClient(3, RecordingTransport())
+              },
+              onClientCountChanged = { count, session -> changes += count to session },
+            ),
         )
       val first = server.registerClient(1, RecordingTransport())
       val second = server.registerClient(2, RecordingTransport())
@@ -121,7 +124,12 @@ class WebSocketServerTest {
   fun `display gestures are advertised only on supported Android versions`() {
     for (sdk in listOf(29, 30, 36)) {
       val commands =
-        WebSocketServer(port = 0, scope = testScope, sdkInt = { sdk }).supportedCommands()
+        WebSocketServer(
+            port = 0,
+            scope = testScope,
+            options = WebSocketServerOptions(sdkInt = { sdk }),
+          )
+          .supportedCommands()
       assertEquals(
         "Gesture display capability on API $sdk",
         sdk >= 30,
@@ -158,8 +166,11 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          onPermanentStartFailure = { permanentFailures++ },
-          portAvailable = { available },
+          options =
+            WebSocketServerOptions(
+              onPermanentStartFailure = { permanentFailures++ },
+              portAvailable = { available },
+            ),
         )
 
       server.start()
@@ -183,10 +194,13 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          portAvailable = {
-            probes++
-            false
-          },
+          options =
+            WebSocketServerOptions(
+              portAvailable = {
+                probes++
+                false
+              },
+            ),
         )
 
       server.start()
@@ -204,8 +218,11 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          onPermanentStartFailure = { permanentFailures++ },
-          portAvailable = { false },
+          options =
+            WebSocketServerOptions(
+              onPermanentStartFailure = { permanentFailures++ },
+              portAvailable = { false },
+            ),
         )
 
       server.start()
@@ -231,8 +248,11 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          onPermanentStartFailure = { permanentFailures++ },
-          portAvailable = { available },
+          options =
+            WebSocketServerOptions(
+              onPermanentStartFailure = { permanentFailures++ },
+              portAvailable = { available },
+            ),
         )
 
       server.start()
@@ -255,8 +275,11 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          onPermanentStartFailure = { permanentFailures++ },
-          portAvailable = { false },
+          options =
+            WebSocketServerOptions(
+              onPermanentStartFailure = { permanentFailures++ },
+              portAvailable = { false },
+            ),
         )
 
       server.start()
@@ -278,11 +301,14 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          portAvailable = { available },
-          onRetryLockAcquired = {
-            available = true
-            server.stop()
-          },
+          options =
+            WebSocketServerOptions(
+              portAvailable = { available },
+              onRetryLockAcquired = {
+                available = true
+                server.stop()
+              },
+            ),
         )
 
       server.start()
@@ -337,7 +363,12 @@ class WebSocketServerTest {
   fun `stalled outbound send disconnects exactly at its deadline`() =
     runTest(testScope.testScheduler) {
       val timeoutMs = 100L
-      server = WebSocketServer(port = 0, scope = testScope, sendTimeoutMs = timeoutMs)
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          options = WebSocketServerOptions(sendTimeoutMs = timeoutMs),
+        )
       val stalled = StalledTransport()
       server.registerClient(1, stalled)
       server.broadcast("in-flight")
@@ -360,7 +391,12 @@ class WebSocketServerTest {
   fun `completed outbound sends stay connected beyond the deadline`() =
     runTest(testScope.testScheduler) {
       val timeoutMs = 100L
-      server = WebSocketServer(port = 0, scope = testScope, sendTimeoutMs = timeoutMs)
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          options = WebSocketServerOptions(sendTimeoutMs = timeoutMs),
+        )
       val healthy = RecordingTransport()
       server.registerClient(1, healthy)
       val messages = listOf("first", "second", "third")
@@ -406,7 +442,12 @@ class WebSocketServerTest {
   fun `outbound timeout disconnects only the stalled client`() =
     runTest(testScope.testScheduler) {
       val timeoutMs = 100L
-      server = WebSocketServer(port = 0, scope = testScope, sendTimeoutMs = timeoutMs)
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          options = WebSocketServerOptions(sendTimeoutMs = timeoutMs),
+        )
       val stalled = StalledTransport()
       val healthy = RecordingTransport()
       server.registerClient(1, stalled)
@@ -426,7 +467,12 @@ class WebSocketServerTest {
   fun `frames after outbound timeout complete without advancing time`() =
     runTest(testScope.testScheduler) {
       val timeoutMs = 100L
-      server = WebSocketServer(port = 0, scope = testScope, sendTimeoutMs = timeoutMs)
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          options = WebSocketServerOptions(sendTimeoutMs = timeoutMs),
+        )
       val stalled = StalledTransport()
       val healthy = RecordingTransport()
       val stalledClient = server.registerClient(1, stalled)
@@ -459,7 +505,12 @@ class WebSocketServerTest {
   fun `outbound timeout clears only the stalled clients request owners`() =
     runTest(testScope.testScheduler) {
       val timeoutMs = 100L
-      server = WebSocketServer(port = 0, scope = testScope, sendTimeoutMs = timeoutMs)
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          options = WebSocketServerOptions(sendTimeoutMs = timeoutMs),
+        )
       val owner = server.registerClient(1, StalledTransport())
       val healthyOwner = server.registerClient(2, RecordingTransport())
       server.registerRequestOwner("stalled-request", owner)
@@ -665,14 +716,19 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          messageHandler =
-            object : WebSocketMessageHandler {
-              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-                handled += request
-                return null
-              }
-            },
-          onPrototypeResponse = { responses += it },
+          options =
+            WebSocketServerOptions(
+              messageHandler =
+                object : WebSocketMessageHandler {
+                  override suspend fun handleMessage(
+                    request: WebSocketRequest,
+                  ): WebSocketResponse? {
+                    handled += request
+                    return null
+                  }
+                },
+              onPrototypeResponse = { responses += it },
+            ),
         )
       val transport = RecordingTransport()
       val client = routed.registerClient(1, transport)
@@ -704,11 +760,14 @@ class WebSocketServerTest {
     WebSocketServer(
       port = 0,
       scope = testScope,
-      messageHandler =
-        object : WebSocketMessageHandler {
-          override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? =
-            handle(request)
-        },
+      options =
+        WebSocketServerOptions(
+          messageHandler =
+            object : WebSocketMessageHandler {
+              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? =
+                handle(request)
+            },
+        ),
     )
 
   @Test
@@ -1066,13 +1125,16 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          onCorrelatedRoutingStep = {
-            if (first) {
-              first = false
-              server.registerRequestOwner("reused", nextOwner)
-              server.routeCorrelatedResponse("reused", nextResponse)
-            }
-          },
+          options =
+            WebSocketServerOptions(
+              onCorrelatedRoutingStep = {
+                if (first) {
+                  first = false
+                  server.registerRequestOwner("reused", nextOwner)
+                  server.routeCorrelatedResponse("reused", nextResponse)
+                }
+              },
+            ),
         )
       val firstOwner = server.registerClient(1, firstTransport)
       nextOwner = server.registerClient(2, nextTransport)
@@ -1250,12 +1312,16 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          messageHandler =
-            object : WebSocketMessageHandler {
-              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? =
-                error("An oversized frame must never dispatch")
-            },
-          inboundFrameLimits = InboundFrameLimits(mapOf("put_prototype_asset" to 128L)),
+          options =
+            WebSocketServerOptions(
+              messageHandler =
+                object : WebSocketMessageHandler {
+                  override suspend fun handleMessage(
+                    request: WebSocketRequest,
+                  ): WebSocketResponse? = error("An oversized frame must never dispatch")
+                },
+              inboundFrameLimits = InboundFrameLimits(mapOf("put_prototype_asset" to 128L)),
+            ),
         )
       val transport = RecordingTransport()
       val owner = server.registerClient(1, transport)
@@ -1285,14 +1351,19 @@ class WebSocketServerTest {
         WebSocketServer(
           port = 0,
           scope = testScope,
-          messageHandler =
-            object : WebSocketMessageHandler {
-              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
-                received += request
-                return null
-              }
-            },
-          inboundFrameLimits = InboundFrameLimits(mapOf("put_prototype_asset" to 16L)),
+          options =
+            WebSocketServerOptions(
+              messageHandler =
+                object : WebSocketMessageHandler {
+                  override suspend fun handleMessage(
+                    request: WebSocketRequest,
+                  ): WebSocketResponse? {
+                    received += request
+                    return null
+                  }
+                },
+              inboundFrameLimits = InboundFrameLimits(mapOf("put_prototype_asset" to 16L)),
+            ),
         )
       val owner = server.registerClient(1, RecordingTransport())
       // Above the smallest cap but of an uncapped type, so it decodes as before.

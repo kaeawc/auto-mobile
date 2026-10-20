@@ -18,6 +18,7 @@ import {
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
   DAEMON_SESSION_REQUEST_STATUS_METHOD,
 } from "../../src/daemon/sessionBrokerProxyAcquisition";
+import { SESSION_BROKER_RETRY_AFTER_MS } from "../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { describeUnknownError } from "../../src/utils/describeUnknownError";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 
@@ -302,4 +303,53 @@ describe("session broker abandon command", () => {
     ]);
     expect(client.closeCalls).toBe(1);
   });
+});
+
+describe("session broker refusal CLI forwarding", () => {
+  for (const command of ["release-broker-session", "abandon-session-request"] as const) {
+    test.each([
+      {
+        code: "session_restart_handoff_pending",
+        retryable: true,
+        retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS,
+      },
+      { code: "session_owner_mismatch", retryable: false },
+      { code: "session_broker_unavailable", retryable: false },
+      {
+        code: "session_broker_unavailable",
+        retryable: true,
+        retryAfterMs: SESSION_BROKER_RETRY_AFTER_MS,
+      },
+    ])(`${command} preserves $code retry hints in JSON`, async (fields) => {
+      const client = new FakeBrokerCommandClient(
+        undefined,
+        Object.assign(new Error(`Refused owner ${OWNER_TOKEN}`), fields),
+      );
+      const stdout: string[] = [];
+      const exited = new Error("fake exit");
+      const log = spyOn(console, "log").mockImplementation((line) => stdout.push(String(line)));
+      const exit = spyOn(process, "exit").mockImplementation(() => {
+        throw exited;
+      });
+      try {
+        await expect(
+          runDaemonCommand(
+            command,
+            command === "release-broker-session" ? releaseArgs : abandonArgs,
+            { clientFactory: () => client },
+            SafeDaemonManager,
+          ),
+        ).rejects.toBe(exited);
+        expect(JSON.parse(stdout[0])).toEqual({
+          ok: false,
+          error: "Refused owner [REDACTED]",
+          ...fields,
+        });
+        expect(client.closeCalls).toBe(1);
+      } finally {
+        exit.mockRestore();
+        log.mockRestore();
+      }
+    });
+  }
 });

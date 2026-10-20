@@ -520,6 +520,31 @@ describe("ManagedDevicePort clean-reset ownership", () => {
 });
 
 describe("ManagedDevicePort destruction", () => {
+  test("shutdown signal reaches the journal delete and settles without clearing ownership", async () => {
+    const rig = await destructionRig();
+    const entered = Promise.withResolvers<void>();
+    let nativeSignal: AbortSignal | undefined;
+    rig.deleter.beforeDelete = (target) =>
+      new Promise<void>((_resolve, reject) => {
+        nativeSignal = target.signal;
+        target.signal?.addEventListener("abort", () => reject(target.signal?.reason), {
+          once: true,
+        });
+        entered.resolve();
+      });
+    const port = destroyingPort(rig, async (id) => releaseResult(id));
+    const controller = new AbortController();
+    const reason = new Error("broker shutdown");
+    const pending = port.destroy(rig.resource, controller.signal).catch((error: unknown) => error);
+    await entered.promise;
+    controller.abort(reason);
+    expect(await pending).toBe(reason);
+    expect(nativeSignal?.aborted).toBe(true);
+    expect(rig.inventory.has("UDID-1")).toBe(true);
+    expect(await rig.registry.listOpenBindingJournal(rig.key)).toHaveLength(1);
+    expect(rig.deleter.calls).toHaveLength(1);
+  });
+
   test("drains its current execution before journaled deletion and confirms absence", async () => {
     const rig = await destructionRig();
     const claimed = await rig.registry.claimExecution(

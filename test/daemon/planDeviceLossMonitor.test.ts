@@ -110,16 +110,9 @@ function harness() {
       },
       ...({
         getAllDevices: () => [...devices.values()],
-        genericAvailability: (id) => {
-          const pooled = devices.get(id);
-          return pooled &&
-            (pooled.status === "busy" || pooled.sessionId !== null || reserved || leased)
-            ? "reserved"
-            : "free";
-        },
+        getDevice: (id) => devices.get(id) ?? null,
+        isDeviceLeasedForAndroidStartup: () => leased,
       } satisfies DisconnectMonitorPool),
-      getDevice: (id: string) => devices.get(id) ?? null,
-      isDeviceLeasedForAndroidStartup: () => leased,
       isShutdownReservationHeld: async () => {
         onReservation();
         return reserved;

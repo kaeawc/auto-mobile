@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { deviceHold, genericAvailabilityOf } from "../../src/daemon/deviceHold";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/models/VideoRecordingConfigParsing";
 import type { Session } from "../../src/daemon/sessionManager";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
@@ -14,9 +16,14 @@ function monitor(cadence = { activeIntervalMs: 5_000, idleIntervalMs: 30_000 }) 
   const pool = daemon.getDevicePool();
   pool.getAllDevices = () => [pooled];
   pool.reconcileDiscoveryObservation = async () => {};
-  let claimed = false;
+  pool.getDevice = (id) => (id === pooled.id ? pooled : null);
+  let cleanupInProgress = false;
+  let leased = false;
+  pool.isDeviceLeasedForAndroidStartup = () => leased;
   pool.genericAvailability = () =>
-    claimed || pooled.status === "busy" || pooled.sessionId !== null ? "reserved" : "free";
+    genericAvailabilityOf(
+      deviceHold({ status: pooled.status, sessionId: pooled.sessionId, cleanupInProgress }),
+    );
   let sessions: Session[] = [];
   daemon.getSessionManager().getAllSessions = () => sessions;
   let recordings: VideoRecordingRecord[] = [];
@@ -90,12 +97,26 @@ function monitor(cadence = { activeIntervalMs: 5_000, idleIntervalMs: 30_000 }) 
       present = value;
     },
     claim: () => {
-      claimed = true;
+      pooled.sessionId = "claim-owner";
+    },
+    lease: () => {
+      leased = true;
+    },
+    beginCleanup: () => {
+      cleanupInProgress = true;
+      pooled.status = "busy";
     },
   };
 }
 
 describe("DaemonDisconnect adaptive discovery cadence", () => {
+  let previousPlanActive: boolean;
+  beforeEach(() => {
+    previousPlanActive = serverConfig.isPlanExecutionActive();
+    serverConfig.setPlanExecutionActive(false);
+  });
+  afterEach(() => serverConfig.setPlanExecutionActive(previousPlanActive));
+
   test("an idle pool runs two discovery sweeps over twelve 5-second ticks", async () => {
     const rig = monitor();
     try {
@@ -108,7 +129,7 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
     }
   });
 
-  test.each(["session", "busy", "claimed", "recording"])(
+  test.each(["session", "busy", "claimed", "recording", "leased", "plan", "error"])(
     "%s resumes 5-second discovery on the next tick",
     async (reason) => {
       const rig = monitor();
@@ -127,6 +148,15 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
         if (reason === "recording") {
           rig.record();
         }
+        if (reason === "leased") {
+          rig.lease();
+        }
+        if (reason === "plan") {
+          serverConfig.setPlanExecutionActive(true);
+        }
+        if (reason === "error") {
+          rig.pooled.health = "error";
+        }
         await rig.tick();
         await rig.tick();
         expect(rig.discoveries()).toBe(2);
@@ -136,6 +166,23 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
       }
     },
   );
+
+  test("a cleanup-state device vanishing is swept at the 5-second cadence", async () => {
+    const rig = monitor();
+    try {
+      rig.beginCleanup();
+      expect(rig.daemon.getDevicePool().genericAvailability(rig.pooled.id)).toBe("free");
+      rig.setPresent(false);
+      await rig.tick();
+      expect(rig.discoveries()).toBe(1);
+      expect(rig.daemon.disconnectMisses.get(rig.pooled.id)).toBe(1);
+      await rig.tick();
+      expect(rig.discoveries()).toBe(2);
+      expect(rig.daemon.disconnectMisses.get(rig.pooled.id)).toBe(2);
+    } finally {
+      await rig.daemon.disconnectMonitor?.stop();
+    }
+  });
 
   test("released claims return to idle cadence without changing active miss counting", async () => {
     const rig = monitor();

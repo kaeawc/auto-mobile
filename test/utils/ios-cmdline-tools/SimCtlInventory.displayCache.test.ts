@@ -13,11 +13,13 @@ function resetSimctlInventory(): void {
   SimCtlClient.invalidateDeviceListCache();
 }
 
-function inventory() {
+function inventory(foldable = false) {
   const timer = new FakeTimer();
   const listing: SimulatorList = structuredClone(capturedListing);
   const devices = Object.values(listing.devices).flat();
-  const device = devices.find((device) => device.deviceTypeIdentifier?.endsWith("iPhone-Duo"))!;
+  const device = devices.find((device) =>
+    device.deviceTypeIdentifier?.endsWith(foldable ? ".iPhone-Duo" : ".iPhone-18-Pro"),
+  )!;
   device.state = "Booted";
   const [runtime] = Object.entries(listing.devices).find(([, devices]) =>
     devices.includes(device),
@@ -52,6 +54,9 @@ function inventory() {
     devices,
     tick,
     counts: () => ({ lists, enumerations }),
+    setDisplayOutput: (output: string) => {
+      displayOutput = output;
+    },
     changeDisplay: () => {
       displayOutput = capturedDisplays.replace("{1398, 2034}", "{1400, 2034}");
     },
@@ -61,6 +66,28 @@ function inventory() {
 describe("SimCtlInventory per-boot display cache", () => {
   beforeEach(resetSimctlInventory);
   afterEach(resetSimctlInventory);
+
+  test("an empty display list is retried on the next listing", async () => {
+    const rig = inventory();
+    rig.setDisplayOutput("");
+    const empty = await rig.tick();
+    expect(empty[0].displays).toBeUndefined();
+    rig.setDisplayOutput(capturedDisplays);
+    const listed = await rig.tick();
+    expect(listed[0].displays?.panels).toHaveLength(2);
+    await rig.tick();
+    expect(rig.counts()).toEqual({ lists: 3, enumerations: 2 });
+  });
+
+  test("foldable displays refresh without a reboot when fold state changes", async () => {
+    const rig = inventory(true);
+    const initial = await rig.tick();
+    expect(initial[0].displays?.panels[0]?.sizePx.width).toBe(1398);
+    rig.changeDisplay();
+    const changed = await rig.tick();
+    expect(changed[0].displays?.panels[0]?.sizePx.width).toBe(1400);
+    expect(rig.counts()).toEqual({ lists: 2, enumerations: 2 });
+  });
 
   test("six expired listings enumerate one unchanged boot only once", async () => {
     const rig = inventory();

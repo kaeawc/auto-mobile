@@ -176,7 +176,13 @@ function monitorHarness(
   },
 ) {
   const timer = new FakeTimer();
-  const device = { id: "emulator-5554", platform: "android", incarnation: 1 };
+  const device = {
+    id: "emulator-5554",
+    platform: "android",
+    incarnation: 1,
+    status: "busy" as const,
+    sessionId: "owner",
+  };
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
     deviceDisconnectMonitor: null,
@@ -194,9 +200,9 @@ function monitorHarness(
       getAndroidTransportAliases: (): string[] => [],
       ...({
         getAllDevices: () => [device],
-        genericAvailability: () => "reserved",
+        getDevice: (id) => (id === device.id ? device : null),
+        isDeviceLeasedForAndroidStartup: () => false,
       } satisfies DisconnectMonitorPool),
-      isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},
     },
     sessionManager: {

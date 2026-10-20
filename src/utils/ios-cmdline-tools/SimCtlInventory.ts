@@ -452,8 +452,10 @@ export class SimCtlInventory {
       SimCtlInventory.simulatorDisplays.delete(device.udid);
       return [];
     }
+    // Duo panels can change with fold state without a new boot timestamp.
+    const cacheable = !device.deviceTypeIdentifier?.endsWith(".iPhone-Duo");
     const cached = SimCtlInventory.simulatorDisplays.get(device.udid);
-    if (cached?.displays && cached.lastUsedAt === device.lastUsedAt) {
+    if (cacheable && cached?.displays && cached.lastUsedAt === device.lastUsedAt) {
       return cached.displays;
     }
     const remainingMs =
@@ -461,14 +463,28 @@ export class SimCtlInventory {
     if (remainingMs !== undefined && remainingMs <= 0) {
       return [];
     }
+    return this.enumerateBootedSimulatorDisplays(device, remainingMs, signal, cacheable);
+  }
+
+  private async enumerateBootedSimulatorDisplays(
+    device: AppleDevice,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+    cacheable: boolean,
+  ): Promise<SimulatorDisplay[]> {
     const entry: { lastUsedAt?: string; displays?: SimulatorDisplay[] } = {
       lastUsedAt: device.lastUsedAt,
     };
     SimCtlInventory.simulatorDisplays.set(device.udid, entry);
     try {
-      const displays = await this.context.enumerateDisplays(device.udid, remainingMs, signal);
+      const displays = await this.context.enumerateDisplays(device.udid, timeoutMs, signal);
+      // Empty startup reads must be retried on the next listing.
       // An invalidation or a newer incarnation must not be overwritten by this read.
-      if (SimCtlInventory.simulatorDisplays.get(device.udid) === entry) {
+      if (
+        cacheable &&
+        displays.length > 0 &&
+        SimCtlInventory.simulatorDisplays.get(device.udid) === entry
+      ) {
         entry.displays = displays;
       }
       return displays;

@@ -83,7 +83,13 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
       reconnects++;
     }
   }
-  const device = { id: deviceId, platform: "android", incarnation: 1 };
+  const device = {
+    id: deviceId,
+    platform: "android",
+    incarnation: 1,
+    status: "busy" as const,
+    sessionId: "owner",
+  };
   const cleanedUp: string[] = [];
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
@@ -103,9 +109,9 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
       getAndroidTransportAliases: (): string[] => [],
       ...({
         getAllDevices: () => [device],
-        genericAvailability: () => "reserved",
+        getDevice: (id) => (id === device.id ? device : null),
+        isDeviceLeasedForAndroidStartup: () => false,
       } satisfies DisconnectMonitorPool),
-      isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},
     },
     sessionManager: {

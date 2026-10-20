@@ -5,6 +5,7 @@ import { type Session } from "../sessionManager";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "../deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "../devicePool";
+import { holderOf, isIdle } from "../deviceBinding";
 import { deviceLossCancellationReason } from "../emulatorLossIncident";
 import { executionTracker } from "../executionTracker";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
@@ -67,7 +68,8 @@ export interface DisconnectMonitorCadence {
 /** The pool reads used to decide whether disconnect discovery must stay on its active cadence. */
 export interface DisconnectMonitorPool {
   getAllDevices(): readonly Pick<PooledDevice, "id">[];
-  genericAvailability: DevicePool["genericAvailability"];
+  getDevice(id: string): Pick<PooledDevice, "status" | "sessionId" | "health"> | null;
+  isDeviceLeasedForAndroidStartup: DevicePool["isDeviceLeasedForAndroidStartup"];
 }
 export interface DaemonDisconnectHost extends Pick<
   DaemonRecordingHost,
@@ -280,9 +282,14 @@ export class DaemonDisconnect {
             const pool: DisconnectMonitorPool = this.host.services.devicePool();
             const watching =
               this.host.services.sessionManager().getAllSessions().length > 0 ||
-              pool
-                .getAllDevices()
-                .some((device) => pool.genericAvailability(device.id) !== "free") ||
+              pool.getAllDevices().some(({ id }) => {
+                const device = pool.getDevice(id);
+                return (
+                  (device !== null && (!isIdle(device) || holderOf(device))) ||
+                  pool.isDeviceLeasedForAndroidStartup(id)
+                );
+              }) ||
+              serverConfig.isPlanExecutionActive() ||
               (await listRecordings()).length > 0;
             const now = this.host.services.timer().now();
             if (!watching && now - lastSweepAt < cadence.idleIntervalMs) {

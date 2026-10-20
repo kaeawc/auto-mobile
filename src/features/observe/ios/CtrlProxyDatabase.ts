@@ -1,8 +1,5 @@
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import {
-  sdkCapabilityQueryOptions,
-  type SdkCapabilityQueryOptions,
-} from "./CtrlProxySdkCapabilities";
+import type { SdkCapabilityQueryOptions } from "./CtrlProxySdkCapabilities";
 /**
  * CtrlProxy iOS Database - Delegate for SQLite database inspection operations.
  *
@@ -217,10 +214,11 @@ export class CtrlProxyDatabase {
     operationName: string,
   ): Promise<T> {
     const startTime = this.context.timer.now();
-    const options =
-      typeof timeout === "number"
-        ? sdkCapabilityQueryOptions(this.context.timer, timeout)
-        : timeout;
+    // A bare timeout never attaches ambient cancellation: a dispatched database request
+    // completes even if its caller is cancelled. Callers that gate on SDK capability pass
+    // explicit options carrying the budget and signal they share with the gate.
+    const options: SdkCapabilityQueryOptions =
+      typeof timeout === "number" ? { deadlineMs: startTime + Math.max(0, timeout) } : timeout;
     const timeoutMs =
       options.deadlineMs === undefined ? 5000 : Math.max(0, options.deadlineMs - startTime);
     const requestId = this.context.requestManager.generateId(type);

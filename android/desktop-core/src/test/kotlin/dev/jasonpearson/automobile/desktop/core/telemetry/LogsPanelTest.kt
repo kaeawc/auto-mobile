@@ -586,7 +586,10 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
 
   @Test
   fun `legacy minimum level restores when no full selection was persisted`() = runComposeUiTest {
-    val settings = FakeSettingsProvider(logsMinLevelByDevice = "{\"dev-1\":\"Warn\"}")
+    val settings =
+      FakeSettingsProvider(
+        FakeSettingsProvider.Values(logsMinLevelByDevice = "{\"dev-1\":\"Warn\"}"),
+      )
     setContent {
       MaterialTheme {
         LogsPanel(null, settingsProvider = settings, activeDeviceId = "dev-1")

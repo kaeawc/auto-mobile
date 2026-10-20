@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS
+import dev.jasonpearson.automobile.desktop.core.LiveVideoFrameOptions
 import dev.jasonpearson.automobile.desktop.core.platform.MacScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.rememberLiveVideoFrame
@@ -71,9 +72,11 @@ data class DeviceStreamOptions(
   val sourceFactory: (deviceId: String, quality: VideoStreamQuality) -> VideoStreamSource =
     { deviceId, quality ->
       VideoStreamClient(
-        quality = quality,
-        fps = if (enableDeviceControl) CONTROL_PANE_FPS else MIRROR_PANE_FPS,
-        sessionUuidProvider = sessionUuidProvider,
+        VideoStreamClient.Options(
+          quality = quality,
+          fps = if (enableDeviceControl) CONTROL_PANE_FPS else MIRROR_PANE_FPS,
+          sessionUuidProvider = sessionUuidProvider,
+        ),
       )
     },
   val screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher =
@@ -133,11 +136,13 @@ fun DeviceStreamView(options: DeviceStreamOptions) {
   val heartbeatMs by source.heartbeatMs.collectAsState()
   val liveFrame =
     rememberLiveVideoFrame(
-      source,
-      column.deviceId,
-      autoReconnect = true,
-      streamingEnabled = streamingEnabled,
-      stallReconnectMs = stallReconnectPolicy(column.platform, heartbeatMs),
+      LiveVideoFrameOptions(
+        source,
+        column.deviceId,
+        autoReconnect = true,
+        streamingEnabled = streamingEnabled,
+        stallReconnectMs = stallReconnectPolicy(column.platform, heartbeatMs),
+      ),
     )
   // Retain the newest frame ACROSS source swaps, keyed on the device. rememberLiveVideoFrame
   // retains frames across relay drops WITHIN one source, but arming the pane (fps 10→30), a manual

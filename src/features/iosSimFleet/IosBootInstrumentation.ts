@@ -1,7 +1,7 @@
 import type { IosBootInstrumentation, IosBootRequest } from "../../models/IosBootInstrumentation";
 export type { IosBootInstrumentation, IosBootRequest };
 import type { BootAdmissionResult } from "../bootAdmission/BootAdmissionGate";
-import { logger } from "../../utils/logger";
+import { logger, type Logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { deviceResourceProfileFingerprint } from "../../utils/deviceResourceDrift";
 import type { SimulatorWorkloadProfile } from "../../models/DeviceResourceReconciliation";
@@ -21,6 +21,7 @@ export interface FleetBootInstrumentationOptions {
   timer: Pick<Timer, "now">;
   /** Absent means boots are never refused; durations are still recorded. */
   gate?: SimulatorCapacityGate;
+  logger?: Pick<Logger, "info">;
 }
 
 /**
@@ -67,7 +68,7 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     assertCapacityGranted(result);
     if (result.decision.outcome === "reuse-warm") {
       // Never substitute a different simulator for the one requested; just do not refuse because of it.
-      logger.info(
+      (this.options.logger ?? logger).info(
         `compatible warm simulator ${result.decision.udid} is booted; booting ${request.udid} as requested`,
       );
     }

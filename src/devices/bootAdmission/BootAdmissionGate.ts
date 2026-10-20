@@ -52,6 +52,8 @@ export interface RefusedCapacityDecision {
   message: string;
   /** Counted devices this process did not start (e.g. launched from Android Studio). */
   externalDevices?: string[];
+  /** Counted iOS simulators owned by AutoMobile admissions, sessions or bindings. */
+  heldDevices?: string[];
 }
 
 export interface BootAdmissionResult<D> {
@@ -70,15 +72,25 @@ export function atCapacityDecision(
   bootedCount: number,
   limits: CapacityLimits,
   retryAfterMs: number,
-  describe: { noun: string; envName: string; externalDevices?: readonly string[] },
+  describe: {
+    noun: string;
+    envName: string;
+    externalDevices?: readonly string[];
+    heldDevices?: readonly string[];
+    /** Ownership labels use a retained or empty snapshot after a failed read. */
+    ownershipUnknown?: boolean;
+  },
 ): RefusedCapacityDecision | undefined {
   if (bootedCount < limits.maxBooted) {
     return undefined;
   }
   const external = describe.externalDevices ?? [];
+  const held = describe.heldDevices ?? [];
+  const heldNote =
+    held.length > 0 ? ` ${held.length} of them are held by AutoMobile: ${held.join(", ")}.` : "";
   const externalNote =
     external.length > 0
-      ? ` ${external.length} of them were not started by AutoMobile but still count toward the limit: ${external.join(", ")}.`
+      ? ` ${external.length} of them ${describe.ownershipUnknown ? "have unconfirmed AutoMobile ownership" : describe.heldDevices ? "have no AutoMobile owner" : "were not started by AutoMobile"} but still count toward the limit: ${external.join(", ")}.`
       : "";
   const optOut = external.length > 0 ? ` or disable the gate with ${BOOT_CAPACITY_GATE_ENV}=0` : "";
   return {
@@ -88,7 +100,8 @@ export function atCapacityDecision(
     bootedCount,
     retryAfterMs,
     ...(external.length > 0 ? { externalDevices: [...external] } : {}),
-    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
+    ...(held.length > 0 ? { heldDevices: [...held] } : {}),
+    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote}${heldNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
   };
 }
 
@@ -202,6 +215,7 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
       booted: decision.bootedCount,
       retryAfterMs: decision.retryAfterMs,
       ...(decision.externalDevices ? { externalDevices: decision.externalDevices } : {}),
+      ...(decision.heldDevices ? { heldDevices: decision.heldDevices } : {}),
     },
     `Refused to boot: no ${noun} capacity (code capacity_exhausted, retryable; retry after ${decision.retryAfterMs}ms): ${decision.message}`,
   );

@@ -314,6 +314,49 @@ describe("pen contacts", () => {
     expect(gestures[0].toolType).toBe("stylus");
   });
 
+  test("a single-touch pen keeps the final move sent in its release packet", () => {
+    const lines = [
+      "[  1.0] EV_KEY    BTN_TOOL_PEN         DOWN",
+      "[  1.0] EV_ABS    ABS_X                00000064",
+      "[  1.0] EV_ABS    ABS_Y                00000064",
+      "[  1.0] EV_KEY    BTN_TOUCH            DOWN",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_X                00000384",
+      "[  1.1] EV_ABS    ABS_Y                00000384",
+      "[  1.1] EV_KEY    BTN_TOUCH            UP",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { frames, gestures } = run(lines, { singleTouch: true });
+    expect(frames[1].releasedFinalSamples?.map((slot) => [slot.x, slot.y])).toEqual([[900, 900]]);
+    expect(gestures).toHaveLength(1);
+    expect(gestures[0]).toMatchObject({ type: "swipe", toolType: "stylus" });
+    expect(gestures[0].endX).toBeGreaterThan(800);
+    expect(gestures[0].endY).toBeGreaterThan(800);
+  });
+
+  test("an MT pen keeps the move it makes while lifting into hover", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    00000064",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    00000064",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_MT_DISTANCE      00000004",
+      "[  1.1] EV_ABS    ABS_MT_POSITION_X    00000384",
+      "[  1.1] EV_ABS    ABS_MT_POSITION_Y    00000384",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { gestures } = run(lines);
+    expect(gestures).toHaveLength(1);
+    expect(gestures[0]).toMatchObject({ type: "swipe", toolType: "stylus" });
+    expect(gestures[0].endX).toBeGreaterThan(800);
+  });
+
+  test("a release with no move in its packet keeps the plain frame shape", () => {
+    const { frames } = run(PEN_STROKE, { singleTouch: true });
+    expect(frames.every((frame) => !("releasedFinalSamples" in frame))).toBe(true);
+  });
+
   test("a pen whose tool key predates the recording still ends its contact on tool-up", () => {
     const lines = [
       "[  1.0] EV_ABS    ABS_X                00000438",

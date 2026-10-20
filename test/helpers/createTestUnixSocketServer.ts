@@ -24,14 +24,14 @@ export const unreachableMcpDispatcher = {
 export function createTestUnixSocketServer(
   ...args: ConstructorParameters<typeof UnixSocketServer>
 ): UnixSocketServer {
-  return new UnixSocketServer({
-    socketPath: args[0],
-    daemonState: args[1],
-    timer: args[2],
-    featureFlagService: args[3],
-    handshakeConfig: { mcpDispatcher: unreachableMcpDispatcher, ...args[4] },
-    idGenerator: args[5],
-    bindGuard: { bindLock: fakeBindLock, ...(args[6] ?? {}) },
-    adbClientFactory: args[7],
-  });
+  return new UnixSocketServer(
+    args[0],
+    args[1],
+    args[2],
+    args[3],
+    { mcpDispatcher: unreachableMcpDispatcher, ...args[4] },
+    args[5],
+    { bindLock: fakeBindLock, ...(args[6] ?? {}) },
+    args[7],
+  );
 }

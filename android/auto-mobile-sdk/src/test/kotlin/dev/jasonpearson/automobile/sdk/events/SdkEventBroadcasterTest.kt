@@ -7,7 +7,7 @@ import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
-import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.NoOpEventPersistence
 import dev.jasonpearson.automobile.sdk.persistence.PendingEventBatch
 import dev.jasonpearson.automobile.sdk.persistence.replayEventBatches
 import java.util.concurrent.Executors
@@ -196,7 +196,7 @@ class SdkEventBroadcasterTest {
     assertEquals(2L, counter.snapshot()[DropReason.DELIVERY_FAILED])
   }
 
-  private class RecordingPersistence : EventPersistence {
+  private class RecordingPersistence : NoOpEventPersistence() {
     val persisted = mutableListOf<List<SdkEvent>>()
     val removed = mutableListOf<String>()
 
@@ -213,8 +213,6 @@ class SdkEventBroadcasterTest {
     override fun removeBatch(batchId: String) {
       removed.add(batchId)
     }
-
-    override fun cleanup(maxAgeDays: Int) {}
   }
 
   @Test
@@ -366,7 +364,7 @@ class SdkEventBroadcasterTest {
     val removed = mutableListOf<String>()
     val failures = mutableListOf<String>()
     val persistence =
-      object : EventPersistence {
+      object : NoOpEventPersistence() {
         override fun persist(events: List<SdkEvent>, deliveryId: String?): String? =
           error("No duplicate files")
 
@@ -384,8 +382,6 @@ class SdkEventBroadcasterTest {
           failures.add(batchId)
           return true
         }
-
-        override fun cleanup(maxAgeDays: Int) {}
       }
     val context = BroadcastContext {
       if (it.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)!!.contains("failed")) {

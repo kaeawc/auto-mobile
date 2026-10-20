@@ -1,9 +1,3 @@
-import { UnissuedSessionError } from "./UnissuedSessionError";
-export { UnissuedSessionError } from "./UnissuedSessionError";
-import { SessionRecoveryIdentityLossError } from "./SessionRecoveryIdentityLossError";
-export { SessionRecoveryIdentityLossError } from "./SessionRecoveryIdentityLossError";
-import { SessionActivityPersistenceError } from "./SessionActivityPersistenceError";
-export { SessionActivityPersistenceError } from "./SessionActivityPersistenceError";
 import { RecoveredTerminalReleaseIntents } from "./sessionManager/recoveredTerminalReleaseIntents";
 import { ForcedStuckRelease } from "./sessionManager/forcedStuckRelease";
 import { createLegacyLifecycleView } from "./legacyLifecycleView";
@@ -170,6 +164,7 @@ import {
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
@@ -178,6 +173,7 @@ import {
   SessionReleasedDuringCreationError,
 } from "../models/deviceAcquisitionRefusals";
 import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
+import { DAEMON_SESSION_NOT_ACTIVE_CODE } from "./types";
 import {
   DaemonSessionCreationRejectedError,
   SessionHeldByRecoveryError,
@@ -212,6 +208,14 @@ import { ENV } from "../config/env";
  * `device: "B"` tool argument can be routed to the correct label session.
  */
 export type DeviceLabelMap = Record<string, string>;
+
+/** The daemon could not durably refresh an existing session's liveness. */
+export class SessionActivityPersistenceError extends ActionableError {
+  constructor(sessionId: string, cause: unknown) {
+    super(`Failed to persist liveness activity for session ${sessionId}.`, { cause });
+    this.name = "SessionActivityPersistenceError";
+  }
+}
 
 /**
  * Narrow seam for restoring keep-awake state on session release. Production uses
@@ -976,6 +980,58 @@ export interface SessionRecoveryForeignOwner {
   ownerPid: number | undefined;
 }
 
+/**
+ * The persisted target cannot be recovered without assigning an unrelated
+ * device. SessionManager fences the UUID when this reaches it.
+ */
+export class SessionRecoveryIdentityLossError extends ActionableError {
+  readonly terminalReleaseReason: string;
+  /** Wire code when another live daemon holds the target (`device_owned_by_other_daemon`). */
+  readonly code: string | undefined;
+  readonly deviceId: string | undefined;
+  readonly ownerPid: number | undefined;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly target: SessionRecoveryTarget,
+    readonly reason: SessionRecoveryFailureReason,
+    foreignOwner?: SessionRecoveryForeignOwner,
+  ) {
+    super(
+      `Cannot safely recover session ${sessionUuid}: ${target.platform} device ` +
+        `'${target.stableDeviceId}' ${recoveryFailureDetail(reason, foreignOwner)} ` +
+        `(recovery reason: ${reason}). ` +
+        "The persisted session is terminal; " +
+        "acquire a new device with getAndroid or getApple.",
+    );
+    this.name = "SessionRecoveryIdentityLossError";
+    this.terminalReleaseReason = `identity-recovery-${reason}`;
+    this.code = reason === "owned-by-other-daemon" ? DEVICE_OWNED_BY_OTHER_DAEMON_CODE : undefined;
+    this.deviceId = foreignOwner?.deviceId;
+    this.ownerPid = foreignOwner?.ownerPid;
+  }
+}
+
+function recoveryFailureDetail(
+  reason: SessionRecoveryFailureReason,
+  foreignOwner: SessionRecoveryForeignOwner | undefined,
+): string {
+  switch (reason) {
+    case "target-busy":
+      return "is already in use";
+    case "identity-continuity-lost":
+      return "lost identity continuity";
+    case "owned-by-other-daemon":
+      return (
+        "is claimed by another AutoMobile daemon" +
+        (foreignOwner?.ownerPid === undefined ? "" : ` (PID ${foreignOwner.ownerPid})`) +
+        ` (code ${DEVICE_OWNED_BY_OTHER_DAEMON_CODE})`
+      );
+    case "target-absent":
+      return "is unavailable";
+  }
+}
+
 type SessionRecoveryIdentityLoss = Pick<
   SessionRecoveryIdentityLossError,
   "sessionUuid" | "target" | "reason" | "terminalReleaseReason"
@@ -1173,6 +1229,11 @@ type RehydrationRowOutcome =
   | { kind: "rehydrated" }
   | { kind: "terminalized"; reason: string }
   | { kind: "skipped"; reason: string };
+
+export class UnissuedSessionError extends ActionableError {
+  /** The JSON-RPC `data` the daemon proxy classifies this refusal by, instead of its prose. */
+  readonly data = { code: DAEMON_SESSION_NOT_ACTIVE_CODE };
+}
 
 /**
  * The durable device identity a persisted row can be recovered onto, or undefined when the row

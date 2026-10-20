@@ -499,12 +499,13 @@ posixTest("daemon env applies to just one daemon over the batch env", () => {
   const specs = derivePrivateDaemonBatch(modified);
   expect(specs.map((spec) => spec.env[key])).toEqual(["/private/shared", "/private/second"]);
   expect(privateDaemonBatchRefusal(specs, modified, host)).toBeUndefined();
-  for (const daemonEnv of [
+  const invalidDaemonEnvs: Record<string, Record<string, string>>[] = [
     { "0": { NOTE: "bad" } },
     { "3": { NOTE: "bad" } },
     { "1": { AUTOMOBILE_DATA_DIR: "/private/owned" } },
     { "1": { [key]: "/home/fake/.auto-mobile" } },
-  ]) {
+  ];
+  for (const daemonEnv of invalidDaemonEnvs) {
     expect(refusal({ daemonEnv })).toBeDefined();
   }
 });

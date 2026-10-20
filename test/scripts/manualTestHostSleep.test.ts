@@ -43,7 +43,14 @@ test("detector is unavailable when monotonic time includes sleep or is absent", 
   timer.simulateHostSleep(10000);
   expect(includesSleep.available).toBe(false);
   expect(includesSleep.sample()).toBeUndefined();
-  const noMonotonic = createSleepGapDetector({ now: () => 0 });
+  const noMonotonic = createSleepGapDetector({
+    now: () => 0,
+    sleep: timer.sleep.bind(timer),
+    setTimeout: timer.setTimeout.bind(timer),
+    clearTimeout: timer.clearTimeout.bind(timer),
+    setInterval: timer.setInterval.bind(timer),
+    clearInterval: timer.clearInterval.bind(timer),
+  });
   expect(noMonotonic.available).toBe(false);
   expect(noMonotonic.sample()).toBeUndefined();
 });
@@ -106,7 +113,7 @@ test("Wake Requests does not end the fixture sleep interval", () => {
         },
       ],
       intervals,
-    )[0]?.invalid,
+    ).map((row) => ("invalid" in row ? row.invalid : undefined))[0],
   ).toBe("host-slept");
 });
 
@@ -131,7 +138,12 @@ test("rows overlapping a sleep interval are copied and marked with exclusive bou
     { id: "invalid-time", startedAt: "bad", endedAt: "bad" },
   ];
   const marked = markRowsHostSlept(rows, [{ startMs: 10000, endMs: 20000, source: "clock" }]);
-  expect(marked.map((row) => row.invalid)).toEqual(["host-slept", undefined, undefined, undefined]);
+  expect(marked.map((row) => ("invalid" in row ? row.invalid : undefined))).toEqual([
+    "host-slept",
+    undefined,
+    undefined,
+    undefined,
+  ]);
   expect(marked[0]).not.toBe(rows[0]);
   expect(summarizeHostSleepRows(marked)).toEqual([
     "host-slept: 1 evidence row(s) invalid",
@@ -146,8 +158,8 @@ test("a sleep ending exactly when a row starts does not mark it", () => {
     { id: "point-inside", startedAt: "1970-01-01T00:00:15Z", endedAt: "1970-01-01T00:00:15Z" },
   ];
   expect(
-    markRowsHostSlept(rows, [{ startMs: 10000, endMs: 20000, source: "clock" }]).map(
-      (row) => row.invalid,
+    markRowsHostSlept(rows, [{ startMs: 10000, endMs: 20000, source: "clock" }]).map((row) =>
+      "invalid" in row ? row.invalid : undefined,
     ),
   ).toEqual([undefined, "host-slept"]);
 });

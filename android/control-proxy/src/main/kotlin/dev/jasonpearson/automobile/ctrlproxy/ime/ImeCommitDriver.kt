@@ -82,11 +82,10 @@ class ImeCommitDriver(
   private var terminalDecisionTraced = false
 
   private fun record(event: String, vararg fields: Pair<String, Any?>) {
-    if (
+    val isTerminalDecision =
       event == "decision" &&
         fields.any { it.first == "kind" && (it.second == "fail" || it.second == "succeed") }
-    )
-      terminalDecisionTraced = true
+    if (isTerminalDecision) terminalDecisionTraced = true
     runCatching { trace.record(event, fields) }
   }
 
@@ -112,15 +111,12 @@ class ImeCommitDriver(
     completed = true
     // Editor writes are oneway; a failed request may have already issued some of them.
     // Keep the result partial when the round-trip cannot confirm quiescence.
-    val outcome =
-      if (
-        !result.success &&
-          committedUnits > 0 &&
-          sink.nowMs() < hardDeadlineMs &&
-          !sink.syncEditorState()
-      )
-        result.copy(partialApplication = true)
-      else result
+    val hasUnconfirmedPartialWrite =
+      !result.success &&
+        committedUnits > 0 &&
+        sink.nowMs() < hardDeadlineMs &&
+        !sink.syncEditorState()
+    val outcome = if (hasUnconfirmedPartialWrite) result.copy(partialApplication = true) else result
     val delta =
       if (!reportInsertedText) null
       else outcome.insertedText ?: if (readDelta) insertedText?.invoke() else null
@@ -260,13 +256,12 @@ class ImeCommitDriver(
     }
 
     fun readInsertedText(): String? {
-      if (
+      val cannotReadInsertedText =
         !reportInsertedText ||
           baseline == null ||
           sink.editorIdentity() != identity ||
           sink.nowMs() >= hardDeadlineMs
-      )
-        return null
+      if (cannotReadInsertedText) return null
       return editorDelta(sink.readEditorTextBeforeCursor(EDITOR_READ_CAP))
     }
 
@@ -347,32 +342,9 @@ class ImeCommitDriver(
       generation = sink.connectionGeneration()
       val delta = editorDelta(now)
       val confirmed = delta?.let { confirmedUnits(it, expected) }
-      record(
-        "readBack",
-        "baselineLength" to if (secureInput) null else baseline?.length,
-        "nowLength" to if (secureInput) null else now?.length,
-        "nowNull" to if (now == null) true else null,
-        "deltaLength" to if (secureInput) null else delta?.length,
-        "dispatchedCount" to dispatched.size,
-        "confirmed" to (confirmed ?: "none"),
-        "startedByRestart" to startedByRestart,
-        "postDispatch" to postDispatch,
-        "lastResumeConfirmed" to lastResumeConfirmed,
-        "secure" to if (secureInput) true else null,
-      )
-      record(
-        "decision",
-        "kind" to
-          when (decision) {
-            Reconciliation.Continue -> "continue"
-            is Reconciliation.Consumed -> "consumed"
-            is Reconciliation.DropRejected -> "dropRejected"
-            is Reconciliation.Resume -> "resume"
-            is Reconciliation.Fail -> "fail"
-            is Reconciliation.Succeed -> "succeed"
-          },
-        "confirmed" to confirmed,
-        "reason" to if (decision is Reconciliation.Fail) failureCode(decision.error) else null,
+      traceReconciliation(
+        ReconciliationTrace(now, delta, confirmed, startedByRestart, lastResumeConfirmed),
+        decision,
       )
       when (decision) {
         Reconciliation.Continue -> next()
@@ -390,6 +362,32 @@ class ImeCommitDriver(
           complete(failure(decision.error).copy(insertedText = decision.delta))
         is Reconciliation.Succeed -> succeed(decision.delta, decisionTraced = true)
       }
+    }
+
+    private fun traceReconciliation(
+      details: ReconciliationTrace,
+      decision: Reconciliation,
+    ) {
+      val (now, delta, confirmed, startedByRestart, lastResumeConfirmed) = details
+      record(
+        "readBack",
+        "baselineLength" to if (secureInput) null else baseline?.length,
+        "nowLength" to if (secureInput) null else now?.length,
+        "nowNull" to if (now == null) true else null,
+        "deltaLength" to if (secureInput) null else delta?.length,
+        "dispatchedCount" to dispatched.size,
+        "confirmed" to (confirmed ?: "none"),
+        "startedByRestart" to startedByRestart,
+        "postDispatch" to postDispatch,
+        "lastResumeConfirmed" to lastResumeConfirmed,
+        "secure" to if (secureInput) true else null,
+      )
+      record(
+        "decision",
+        "kind" to reconciliationKind(decision),
+        "confirmed" to confirmed,
+        "reason" to if (decision is Reconciliation.Fail) failureCode(decision.error) else null,
+      )
     }
 
     private fun reconcileMissingUnit(confirmed: Int, now: String?, next: () -> Unit) {
@@ -550,42 +548,57 @@ class ImeCommitDriver(
       }
     }
 
+    private fun pauseAfterUnit(
+      unit: String,
+      hasMore: Boolean,
+      moreInSegment: Boolean,
+      next: () -> Unit,
+    ): Boolean {
+      when {
+        unit == " " && hasMore && MENTION_BEFORE_SPACE.containsMatchIn(currentLine) -> {
+          waitForEditor(SETTLE_AFTER_MENTION_MS, next)
+          return true
+        }
+        hasMore && LINE_START_SHORTCUT.matches(currentLine) -> {
+          awaitLineStartConversion(currentLine.toString(), 0, next)
+          return true
+        }
+        moreInSegment && !isWordUnit(unit) -> {
+          waitForEditor(REALISTIC_TYPING_PAUSE_MS, next)
+          return true
+        }
+      }
+      return false
+    }
+
+    private fun dispatchUnit(unit: String): Boolean {
+      // A false return can follow an applied prefix: count conservatively before dispatch.
+      committedUnits++
+      record(
+        "unitDispatched",
+        "index" to dispatchedPosition,
+        "kind" to if (secureInput) null else unitKind(unit),
+        "length" to if (secureInput) null else unit.length,
+        "secure" to if (secureInput) true else null,
+      )
+      dispatched.add(ExpectedUnit(unit, dispatchedPosition++))
+      if (!sink.commitChar(unit)) {
+        complete(failure("Input connection lost during commit"))
+        return false
+      }
+      return true
+    }
+
     private fun commitUnits(segmentIndex: Int, units: List<String>, start: Int) {
       // Word runs stay synchronous without consuming one stack frame per grapheme.
       for (unitIndex in start until units.size) {
         if (!checkpoint { commitUnits(segmentIndex, units, unitIndex) }) return
         val unit = units[unitIndex]
-        // A false return can follow an applied prefix: count conservatively before dispatch.
-        committedUnits++
-        record(
-          "unitDispatched",
-          "index" to dispatchedPosition,
-          "kind" to if (secureInput) null else unitKind(unit),
-          "length" to if (secureInput) null else unit.length,
-          "secure" to if (secureInput) true else null,
-        )
-        dispatched.add(ExpectedUnit(unit, dispatchedPosition++))
-        if (!sink.commitChar(unit)) {
-          complete(failure("Input connection lost during commit"))
-          return
-        }
+        if (!dispatchUnit(unit)) return
         if (unit == "\n") currentLine.setLength(0) else currentLine.append(unit)
         val hasMore = unitIndex < units.lastIndex || segmentIndex < segments.lastIndex
         val next = { commitUnits(segmentIndex, units, unitIndex + 1) }
-        when {
-          unit == " " && hasMore && MENTION_BEFORE_SPACE.containsMatchIn(currentLine) -> {
-            waitForEditor(SETTLE_AFTER_MENTION_MS, next)
-            return
-          }
-          hasMore && LINE_START_SHORTCUT.matches(currentLine) -> {
-            awaitLineStartConversion(currentLine.toString(), 0, next)
-            return
-          }
-          unitIndex < units.lastIndex && !isWordUnit(unit) -> {
-            waitForEditor(REALISTIC_TYPING_PAUSE_MS, next)
-            return
-          }
-        }
+        if (pauseAfterUnit(unit, hasMore, unitIndex < units.lastIndex, next)) return
       }
       if (canContinue()) finishSegment(segmentIndex)
     }
@@ -695,6 +708,21 @@ class ImeCommitDriver(
     data class Succeed(val delta: String?) : Reconciliation
   }
 
+  private data class ReconciliationTrace(
+    val now: String?,
+    val delta: String?,
+    val confirmed: Int?,
+    val startedByRestart: Boolean,
+    val lastResumeConfirmed: Int,
+  )
+
+  private data class ReconciliationPrefix(
+    val confirmed: Int,
+    val dispatched: List<String>,
+    val startedByRestart: Boolean,
+    val lastResumeConfirmed: Int,
+  )
+
   private data class ExpectedUnit(val text: String, val requestPosition: Int)
 
   private data class Segment(val text: String, val trailingSpan: String?)
@@ -731,6 +759,16 @@ class ImeCommitDriver(
     private const val NONE_APPLIED_ERROR =
       "Editor restarted its input connection during IME commit; none of the dispatched text is in the editor"
 
+    private fun reconciliationKind(decision: Reconciliation): String =
+      when (decision) {
+        Reconciliation.Continue -> "continue"
+        is Reconciliation.Consumed -> "consumed"
+        is Reconciliation.DropRejected -> "dropRejected"
+        is Reconciliation.Resume -> "resume"
+        is Reconciliation.Fail -> "fail"
+        is Reconciliation.Succeed -> "succeed"
+      }
+
     private fun failureCode(error: String?): String =
       when (error) {
         NONE_APPLIED_ERROR -> "noneApplied"
@@ -750,12 +788,11 @@ class ImeCommitDriver(
         else -> "other"
       }
 
-    private fun editorDelta(baseline: String?, now: String?): String? =
-      if (
+    private fun editorDelta(baseline: String?, now: String?): String? {
+      val hasAppendedText =
         baseline != null && now != null && now.length < EDITOR_READ_CAP && now.startsWith(baseline)
-      )
-        now.removePrefix(baseline)
-      else null
+      return if (hasAppendedText) now.removePrefix(baseline) else null
+    }
 
     private fun confirmedUnits(applied: String, dispatched: List<String>): Int? {
       var length = 0
@@ -783,19 +820,31 @@ class ImeCommitDriver(
         confirmed == dispatched.size ->
           if (postDispatch) Reconciliation.Succeed(delta) else Reconciliation.Continue
         confirmed != null && confirmed > 0 ->
-          when {
-            confirmed == dispatched.size - 1 && dispatched[confirmed] == "\n" && startedByRestart ->
-              if (postDispatch) Reconciliation.Succeed(delta)
-              else Reconciliation.Consumed(confirmed)
-            confirmed > lastResumeConfirmed -> Reconciliation.Resume(confirmed)
-            postDispatch -> Reconciliation.Succeed(delta)
-            else -> Reconciliation.DropRejected(confirmed)
-          }
+          reconcilePrefix(
+            ReconciliationPrefix(confirmed, dispatched, startedByRestart, lastResumeConfirmed),
+            postDispatch,
+            delta,
+          )
         postDispatch -> Reconciliation.Succeed(delta)
         confirmed == 0 && startedByRestart -> Reconciliation.Consumed(0)
         confirmed == 0 -> Reconciliation.Fail(NONE_APPLIED_ERROR, delta)
         startedByRestart -> Reconciliation.Continue
         else -> Reconciliation.Fail(DISCONNECTED_ERROR, delta)
+      }
+    }
+
+    private fun reconcilePrefix(
+      prefix: ReconciliationPrefix,
+      postDispatch: Boolean,
+      delta: String?,
+    ): Reconciliation {
+      val (confirmed, dispatched, startedByRestart, lastResumeConfirmed) = prefix
+      return when {
+        confirmed == dispatched.size - 1 && dispatched[confirmed] == "\n" && startedByRestart ->
+          if (postDispatch) Reconciliation.Succeed(delta) else Reconciliation.Consumed(confirmed)
+        confirmed > lastResumeConfirmed -> Reconciliation.Resume(confirmed)
+        postDispatch -> Reconciliation.Succeed(delta)
+        else -> Reconciliation.DropRejected(confirmed)
       }
     }
 

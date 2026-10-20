@@ -214,6 +214,16 @@ class KeystoreStateHandlerTest {
   }
 
   @Test
+  fun `plain runtime exception from the lock probe is unknown and does not block metadata`() {
+    enable()
+    // KeyguardManager binder calls rethrow plain RuntimeException (rethrowFromSystemServer).
+    probe.failure = RuntimeException("binder died")
+    val json = handler.handle("metadata", "fixture", "aes")
+    assertEquals("unknown", json.getString("deviceLocked"))
+    assertEquals("ok", json.getString("outcome"))
+  }
+
+  @Test
   fun `all unknown and mutation calls are unsupported without backend calls`() {
     listOf("delete", "reset", "set", "unknown").forEach {
       assertEquals("disabled", handler.handle(it).getString("outcome"))

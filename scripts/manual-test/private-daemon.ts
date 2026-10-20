@@ -1056,7 +1056,7 @@ export async function createPrivateDaemonDeps(): Promise<PrivateDaemonCliDeps> {
           if (settled) {
             return;
           }
-          const result = response.push(chunk);
+          const result = response.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
           if (result !== undefined) {
             finish(result);
           }

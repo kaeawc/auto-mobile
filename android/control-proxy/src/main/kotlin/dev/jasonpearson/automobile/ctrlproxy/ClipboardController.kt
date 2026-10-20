@@ -68,7 +68,22 @@ internal class ClipboardController(
       broadcastClipboardResult(requestId, action, success, resultText, error, totalTime)
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing clipboard operation", e)
+      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+    } catch (e: IllegalArgumentException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing clipboard operation", e)
+      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+    } catch (e: IllegalStateException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing clipboard operation", e)
+      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+    } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing clipboard operation", e)
@@ -87,7 +102,13 @@ internal class ClipboardController(
         Triple(true, null, null)
       } catch (e: CancellationException) {
         throw e
-      } catch (e: Exception) {
+      } catch (e: SecurityException) {
+        Log.e(TAG, "Clipboard copy failed", e)
+        Triple(false, null, "Copy failed: ${e.message}")
+      } catch (e: IllegalStateException) {
+        Log.e(TAG, "Clipboard copy failed", e)
+        Triple(false, null, "Copy failed: ${e.message}")
+      } catch (e: IllegalArgumentException) {
         Log.e(TAG, "Clipboard copy failed", e)
         Triple(false, null, "Copy failed: ${e.message}")
       }
@@ -112,7 +133,10 @@ internal class ClipboardController(
       }
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Clipboard get failed", e)
+      Triple(false, null, "Get failed: ${e.message}")
+    } catch (e: IllegalStateException) {
       Log.e(TAG, "Clipboard get failed", e)
       Triple(false, null, "Get failed: ${e.message}")
     }
@@ -132,7 +156,13 @@ internal class ClipboardController(
       Triple(true, null, null)
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Clipboard clear failed", e)
+      Triple(false, null, "Clear failed: ${e.message}")
+    } catch (e: IllegalStateException) {
+      Log.e(TAG, "Clipboard clear failed", e)
+      Triple(false, null, "Clear failed: ${e.message}")
+    } catch (e: IllegalArgumentException) {
       Log.e(TAG, "Clipboard clear failed", e)
       Triple(false, null, "Clear failed: ${e.message}")
     }
@@ -170,7 +200,13 @@ internal class ClipboardController(
       }
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalStateException) {
+      Log.e(TAG, "Clipboard paste failed", e)
+      Triple(false, null, "Paste failed: ${e.message}")
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Clipboard paste failed", e)
+      Triple(false, null, "Paste failed: ${e.message}")
+    } catch (e: SecurityException) {
       Log.e(TAG, "Clipboard paste failed", e)
       Triple(false, null, "Paste failed: ${e.message}")
     }

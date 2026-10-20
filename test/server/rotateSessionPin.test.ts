@@ -55,11 +55,13 @@ describe("rotate in a session pinned to a non-default display", () => {
     observeScreen.setObserveResult(
       () =>
         ({
-          timestamp: 0,
+          updatedAt: 0,
+          observationId: "rotate-test",
+          display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
           screenSize: { width: 1080, height: 2400 },
           systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-          viewHierarchy: { node: {} },
-        }) as ObserveResult,
+          viewHierarchy: { hierarchy: { node: {} } },
+        }) satisfies ObserveResult,
     );
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);

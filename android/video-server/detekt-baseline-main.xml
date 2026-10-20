@@ -2,18 +2,9 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:VideoServer.kt:VideoServer$private fun run</ID>
-    <ID>CyclomaticComplexMethod:VideoStreamWriter.kt:VideoStreamWriter$internal fun acceptClients</ID>
-    <ID>LongMethod:AudioCapture.kt:AudioCapture$fun start</ID>
-    <ID>LongMethod:VideoServer.kt:VideoServer$private fun run</ID>
-    <ID>LongMethod:VideoStreamWriter.kt:VideoStreamWriter$internal fun acceptClients</ID>
     <ID>LongParameterList:DisplayControl.kt:DisplayControl$fun createVirtualDisplay: VirtualDisplay</ID>
-    <ID>LongParameterList:VideoServer.kt:VideoServer$private fun run</ID>
     <ID>LongParameterList:VideoSessionLease.kt:VideoSessionLease</ID>
     <ID>LongParameterList:VideoStreamWriter.kt:VideoStreamWriter</ID>
-    <ID>NestedBlockDepth:VideoServer.kt:VideoServer$private fun run</ID>
-    <ID>PrintStackTrace:VideoServer.kt:VideoServer$e</ID>
-    <ID>SwallowedException:VideoServer.kt:VideoServer$e: IllegalArgumentException</ID>
     <ID>TooGenericExceptionCaught:AudioCapture.kt:AudioCapture$e: RuntimeException</ID>
     <ID>TooGenericExceptionCaught:DisplayControl.kt:DisplayControl$error: Exception</ID>
     <ID>TooGenericExceptionCaught:RotationMonitor.kt:RotationMonitor$error: Exception</ID>
@@ -21,10 +12,5 @@
     <ID>TooGenericExceptionCaught:VideoServer.kt:VideoServer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:VideoServer.kt:VideoServer$error: Exception</ID>
     <ID>TooGenericExceptionCaught:VideoSessionLease.kt:VideoSessionLease$error: Exception</ID>
-    <ID>TooManyFunctions:VideoServer.kt:VideoServer</ID>
-    <ID>TooManyFunctions:VideoStreamWriter.kt:VideoStreamWriter</ID>
-    <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$audioCapture!!</ID>
-    <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$streamWriter!!</ID>
-    <ID>UnsafeCallOnNullableType:VideoStreamWriter.kt:VideoStreamWriter$outputStream!!</ID>
   </CurrentIssues>
 </SmellBaseline>

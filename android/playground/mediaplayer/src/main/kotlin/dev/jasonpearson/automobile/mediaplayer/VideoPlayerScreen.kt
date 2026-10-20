@@ -66,6 +66,7 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentBut
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
+import java.util.Locale
 
 sealed class VideoResource {
   data class UriVideo(val uri: Uri) : VideoResource()
@@ -202,11 +203,57 @@ private fun VideoPlayerContent(
   viewModel: MediaPlayerViewModel,
 ) {
   val context = LocalContext.current
-  val activity = LocalActivity.current
   val player by viewModel.playerState.collectAsState()
   val playbackError by viewModel.playbackError.collectAsState()
   val shouldShowControls by viewModel.shouldShowControls.collectAsState()
 
+  VideoPlayerEffects(videoData, viewModel)
+
+  Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    // Video content or thumbnail
+    if (playbackError == null && videoData.videoResource !is VideoResource.PlaceholderVideo) {
+      ExoPlayerView(
+        player = player,
+        showControls = shouldShowControls,
+        onControlsVisibilityChanged = { show ->
+          if (show) viewModel.showControls() else viewModel.hideControls()
+        },
+        modifier = Modifier.fillMaxSize(),
+      )
+    } else if (playbackError == null) {
+      // Show thumbnail for videos without URLs
+      AsyncImage(
+        model = videoData.thumbnailUrl,
+        contentDescription = videoData.title,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Crop,
+      )
+    } else {
+      // Show error if playback failed
+      playbackError?.let { error ->
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+          ErrorMessage(
+            error = error,
+            onRetry = {
+              viewModel.clearError()
+              viewModel.initializePlayer(context, videoData.videoResource)
+            },
+          )
+        }
+      }
+    }
+
+    // Top bar with back button and title - Show only when controls are visible
+    if (shouldShowControls) {
+      VideoPlayerTitle(videoData.title, onNavigateBack)
+    }
+  }
+}
+
+@Composable
+private fun VideoPlayerEffects(videoData: VideoData, viewModel: MediaPlayerViewModel) {
+  val context = LocalContext.current
+  val activity = LocalActivity.current
   // Enable immersive mode
   LaunchedEffect(Unit) {
     activity?.let { act ->
@@ -250,71 +297,36 @@ private fun VideoPlayerContent(
       }
     }
   }
+}
 
-  Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-    // Video content or thumbnail
-    if (playbackError == null && videoData.videoResource !is VideoResource.PlaceholderVideo) {
-      ExoPlayerView(
-        player = player,
-        showControls = shouldShowControls,
-        onControlsVisibilityChanged = { show ->
-          if (show) viewModel.showControls() else viewModel.hideControls()
-        },
-        modifier = Modifier.fillMaxSize(),
+@Composable
+private fun VideoPlayerTitle(title: String, onNavigateBack: () -> Unit) {
+  Row(
+    modifier =
+      Modifier.fillMaxWidth()
+        .padding(16.dp)
+        .padding(top = 24.dp), // Additional top padding for status bar area
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    AutoMobileIconButton(
+      onClick = onNavigateBack,
+      modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
+    ) {
+      Icon(
+        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+        contentDescription = "Back",
+        tint = Color.White,
       )
-    } else if (playbackError == null) {
-      // Show thumbnail for videos without URLs
-      AsyncImage(
-        model = videoData.thumbnailUrl,
-        contentDescription = videoData.title,
-        modifier = Modifier.fillMaxSize(),
-        contentScale = ContentScale.Crop,
-      )
-    } else {
-      // Show error if playback failed
-      playbackError?.let { error ->
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-          ErrorMessage(
-            error = error,
-            onRetry = {
-              viewModel.clearError()
-              viewModel.initializePlayer(context, videoData.videoResource)
-            },
-          )
-        }
-      }
     }
 
-    // Top bar with back button and title - Show only when controls are visible
-    if (shouldShowControls) {
-      Row(
-        modifier =
-          Modifier.fillMaxWidth()
-            .padding(16.dp)
-            .padding(top = 24.dp), // Additional top padding for status bar area
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        AutoMobileIconButton(
-          onClick = onNavigateBack,
-          modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
-        ) {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
-            tint = Color.White,
-          )
-        }
+    Spacer(modifier = Modifier.width(16.dp))
 
-        Spacer(modifier = Modifier.width(16.dp))
-
-        Text(
-          text = videoData.title,
-          color = Color.White,
-          fontSize = 18.sp,
-          fontWeight = FontWeight.Bold,
-        )
-      }
-    }
+    Text(
+      text = title,
+      color = Color.White,
+      fontSize = 18.sp,
+      fontWeight = FontWeight.Bold,
+    )
   }
 }
 
@@ -407,7 +419,7 @@ private fun formatTime(timeMs: Long): String {
   val seconds = (timeMs / 1000).toInt()
   val minutes = seconds / 60
   val remainingSeconds = seconds % 60
-  return "%02d:%02d".format(minutes, remainingSeconds)
+  return "%02d:%02d".format(Locale.ROOT, minutes, remainingSeconds)
 }
 
 private fun parseDuration(duration: String): Float {

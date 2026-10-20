@@ -5,9 +5,9 @@ ONLY_TOUCHED_FILES=${ONLY_TOUCHED_FILES:-false}
 ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 
 # Shared git file-selection + install-when-missing helpers (issue #2823).
-# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+# shellcheck source=scripts/lib/file-selection.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
-# shellcheck source=scripts/swiftformat/swiftformat_version.sh disable=SC1091
+# shellcheck source=scripts/swiftformat/swiftformat_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/swiftformat_version.sh"
 
 # The installer runs in a child process, so make its manual-install location

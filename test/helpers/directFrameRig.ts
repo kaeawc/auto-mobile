@@ -1,3 +1,4 @@
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
 import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
 import { FakeSocket as SharedFakeSocket } from "../fakes/FakeNetServer";
@@ -99,19 +100,22 @@ export function createDirectFrameRig(
       deviceCalls.push(`${device.deviceId}:${what}`);
       client.onDeviceCall?.(device.deviceId, what);
     };
-    return {
+    const overrides = {
       getScreenScaleMetadata: () => null,
       requestGestureStart: async (request: GestureStartRequest) => {
         called("start");
-        return (await client.requestGestureStart?.(request)) ?? { success: true };
+        return {
+          totalTimeMs: 0,
+          ...((await client.requestGestureStart?.(request)) ?? { success: true }),
+        };
       },
       requestGestureMove: async () => {
         called("move");
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
       requestGestureEnd: async (_id: string, _x: number, _y: number, cancel?: boolean) => {
         called(cancel === true ? "cancel" : "end");
-        return (await client.requestGestureEnd?.()) ?? { success: true };
+        return { totalTimeMs: 0, ...((await client.requestGestureEnd?.()) ?? { success: true }) };
       },
       setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
         if (typeof args[5] === "object") {
@@ -136,6 +140,15 @@ export function createDirectFrameRig(
         await client.clearPreferenceStore?.(...args);
       },
     };
+    const proxy = new FakeCtrlProxy();
+    proxy.getScreenScaleMetadata = overrides.getScreenScaleMetadata;
+    proxy.requestGestureStart = overrides.requestGestureStart;
+    proxy.requestGestureMove = overrides.requestGestureMove;
+    proxy.requestGestureEnd = overrides.requestGestureEnd;
+    proxy.setPreference = overrides.setPreference;
+    proxy.removePreference = overrides.removePreference;
+    proxy.clearPreferenceStore = overrides.clearPreferenceStore;
+    return proxy;
   });
 
   const updateServiceSpy = client.updateService

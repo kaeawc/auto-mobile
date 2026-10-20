@@ -258,6 +258,10 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     this.runTrackedKeyedDeviceInput = async (_toolName, _device, operation) => operation(signal);
   }
 
+  get pendingRequests() {
+    return this.pendingSocketRequests;
+  }
+
   get pendingRequestCount(): number {
     return this.pendingSocketRequests.size;
   }

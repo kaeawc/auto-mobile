@@ -8,8 +8,112 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class DesktopDaemonLifecycleTest {
+internal abstract class DesktopDaemonLifecycleFixture {
 
+  protected class FakeDaemonHealthProbe(private val health: DaemonHealth) : DaemonHealthProbe {
+    var checks = 0
+
+    override fun check(): DaemonHealth {
+      checks++
+      return health
+    }
+  }
+
+  protected class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {
+    private var reads = 0
+
+    override fun isReady(): Boolean {
+      val index = reads.coerceAtMost(states.lastIndex)
+      reads++
+      return states[index]
+    }
+  }
+
+  protected class FakeDaemonPidFileReader(
+    private val versions: List<String?> = emptyList(),
+    private val launchArguments: List<String> = emptyList(),
+    private val results: List<DaemonPidReadResult>? = null,
+  ) : DaemonPidFileReader {
+    private var reads = 0
+
+    override fun read(): DaemonPidReadResult {
+      val suppliedResults = results
+      if (suppliedResults != null) {
+        val index = reads.coerceAtMost(suppliedResults.lastIndex)
+        reads++
+        return suppliedResults[index]
+      }
+      val index = reads.coerceAtMost(versions.lastIndex)
+      reads++
+      return versions[index]?.let {
+        DaemonPidReadResult.Present(DaemonPidState(it, launchArguments))
+      } ?: DaemonPidReadResult.Absent
+    }
+  }
+
+  protected class FakeDaemonCommandExecutor(
+    private val exitCode: Int = 0,
+    private val output: String = "started",
+    private val timedOut: Boolean = false,
+  ) : DaemonCommandExecutor {
+    val commands = mutableListOf<List<String>>()
+
+    override fun execute(command: List<String>): DaemonCommandResult {
+      commands += command
+      return DaemonCommandResult(exitCode = exitCode, output = output, timedOut = timedOut)
+    }
+  }
+
+  protected class ThrowingDaemonCommandExecutor(private val message: String) :
+    DaemonCommandExecutor {
+    override fun execute(command: List<String>): DaemonCommandResult =
+      throw java.io.IOException(message)
+  }
+
+  protected class FakeDaemonPackageRunnerResolver(private val runners: List<String?>) :
+    DaemonPackageRunnerResolver {
+    constructor(runner: String?) : this(listOf(runner))
+
+    private var resolutions = 0
+
+    override fun resolve(osName: String): String? {
+      val runner = runners[resolutions.coerceAtMost(runners.lastIndex)]
+      resolutions++
+      return runner
+    }
+  }
+
+  protected class FakeDesktopBunInstaller(
+    private val exitCode: Int = 0,
+    private val output: String = "installed",
+  ) : DesktopBunInstaller {
+    var installCalls = 0
+
+    override fun install(osName: String): DaemonCommandResult {
+      installCalls++
+      return DaemonCommandResult(exitCode = exitCode, output = output)
+    }
+  }
+
+  protected class FakeBunInstallerScriptDownloader : BunInstallerScriptDownloader {
+    val urls = mutableListOf<String>()
+
+    override fun download(url: String, target: java.io.File) {
+      urls += url
+      target.writeText("#!/usr/bin/env bash\n")
+    }
+  }
+
+  protected class FakeDaemonRetryTimer : DaemonRetryTimer {
+    val delays = mutableListOf<Long>()
+
+    override fun sleep(milliseconds: Long) {
+      delays += milliseconds
+    }
+  }
+}
+
+internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
   @Test
   fun `reuses a daemon with the desktop release version`() {
     val commands = FakeDaemonCommandExecutor()
@@ -427,7 +531,9 @@ class DesktopDaemonLifecycleTest {
 
     assertEquals(customBunx, resolver.resolve("Mac OS X"))
   }
+}
 
+internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
   @Test
   fun `discovers a linuxbrew bun install when PATH omits it`() {
     val linuxbrewBunx = "/home/linuxbrew/.linuxbrew/bin/bunx"
@@ -842,7 +948,9 @@ class DesktopDaemonLifecycleTest {
 
     assertEquals(DaemonHealth.HEALTHY, healthProbeFor(client).check())
   }
+}
 
+internal class DesktopDaemonHealthProbeTest : DesktopDaemonLifecycleFixture() {
   @Test
   fun `health probe maps an ide status failure to unhealthy`() {
     // getDaemonStatus is the same bounded ide/status call that drives the Red status dot: when it
@@ -853,106 +961,5 @@ class DesktopDaemonLifecycleTest {
       }
 
     assertEquals(DaemonHealth.UNHEALTHY, healthProbeFor(client).check())
-  }
-
-  private class FakeDaemonHealthProbe(private val health: DaemonHealth) : DaemonHealthProbe {
-    var checks = 0
-
-    override fun check(): DaemonHealth {
-      checks++
-      return health
-    }
-  }
-
-  private class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {
-    private var reads = 0
-
-    override fun isReady(): Boolean {
-      val index = reads.coerceAtMost(states.lastIndex)
-      reads++
-      return states[index]
-    }
-  }
-
-  private class FakeDaemonPidFileReader(
-    private val versions: List<String?> = emptyList(),
-    private val launchArguments: List<String> = emptyList(),
-    private val results: List<DaemonPidReadResult>? = null,
-  ) : DaemonPidFileReader {
-    private var reads = 0
-
-    override fun read(): DaemonPidReadResult {
-      val suppliedResults = results
-      if (suppliedResults != null) {
-        val index = reads.coerceAtMost(suppliedResults.lastIndex)
-        reads++
-        return suppliedResults[index]
-      }
-      val index = reads.coerceAtMost(versions.lastIndex)
-      reads++
-      return versions[index]?.let {
-        DaemonPidReadResult.Present(DaemonPidState(it, launchArguments))
-      } ?: DaemonPidReadResult.Absent
-    }
-  }
-
-  private class FakeDaemonCommandExecutor(
-    private val exitCode: Int = 0,
-    private val output: String = "started",
-    private val timedOut: Boolean = false,
-  ) : DaemonCommandExecutor {
-    val commands = mutableListOf<List<String>>()
-
-    override fun execute(command: List<String>): DaemonCommandResult {
-      commands += command
-      return DaemonCommandResult(exitCode = exitCode, output = output, timedOut = timedOut)
-    }
-  }
-
-  private class ThrowingDaemonCommandExecutor(private val message: String) : DaemonCommandExecutor {
-    override fun execute(command: List<String>): DaemonCommandResult =
-      throw java.io.IOException(message)
-  }
-
-  private class FakeDaemonPackageRunnerResolver(private val runners: List<String?>) :
-    DaemonPackageRunnerResolver {
-    constructor(runner: String?) : this(listOf(runner))
-
-    private var resolutions = 0
-
-    override fun resolve(osName: String): String? {
-      val runner = runners[resolutions.coerceAtMost(runners.lastIndex)]
-      resolutions++
-      return runner
-    }
-  }
-
-  private class FakeDesktopBunInstaller(
-    private val exitCode: Int = 0,
-    private val output: String = "installed",
-  ) : DesktopBunInstaller {
-    var installCalls = 0
-
-    override fun install(osName: String): DaemonCommandResult {
-      installCalls++
-      return DaemonCommandResult(exitCode = exitCode, output = output)
-    }
-  }
-
-  private class FakeBunInstallerScriptDownloader : BunInstallerScriptDownloader {
-    val urls = mutableListOf<String>()
-
-    override fun download(url: String, target: java.io.File) {
-      urls += url
-      target.writeText("#!/usr/bin/env bash\n")
-    }
-  }
-
-  private class FakeDaemonRetryTimer : DaemonRetryTimer {
-    val delays = mutableListOf<Long>()
-
-    override fun sleep(milliseconds: Long) {
-      delays += milliseconds
-    }
   }
 }

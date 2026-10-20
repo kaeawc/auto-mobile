@@ -1035,36 +1035,7 @@ object BroadcastGuardScanner {
       val bodyClose = KotlinSourceScan.matchBrace(code, bodyOpen)
       val body = code.substring(bodyOpen, bodyClose)
 
-      // The correlated-error-on-throw guarantee is provided by `resultBroadcaster.guard { … }` (the
-      // direct path) or by delegating the broadcast into `asyncActionRunner.launch { … }` (which is
-      // itself swallow-checked below). Collect the spans of both.
-      val guardedSpans = blockSpans(body, GUARD_CALL) + blockSpans(body, LAUNCH)
-      val broadcastCalls = BROADCAST_CALL.findAll(body).map { it.range.first }.toList()
-      when {
-        guardedSpans.isEmpty() && broadcastCalls.isNotEmpty() ->
-          // Broadcasts a result but wraps none of it — the exact "forgot the guard" regression.
-          violations.add(
-            Violation(
-              Kind.MISSING_GUARD,
-              name,
-              KotlinSourceScan.lineOf(source, bodyOpen + broadcastCalls.first()),
-            ),
-          )
-        else ->
-          // Guard/launch present: every result broadcast must sit *inside* one of those spans. A
-          // broadcast outside them is unguarded even though the guard call textually exists.
-          for (offset in broadcastCalls) {
-            if (guardedSpans.none { offset >= it.first && offset < it.second }) {
-              violations.add(
-                Violation(
-                  Kind.MISSING_GUARD,
-                  name,
-                  KotlinSourceScan.lineOf(source, bodyOpen + offset),
-                ),
-              )
-            }
-          }
-      }
+      violations.addAll(unguardedBroadcasts(source, body, bodyOpen, name))
       for (offset in swallowingCatchOffsets(body)) {
         violations.add(
           Violation(
@@ -1076,6 +1047,16 @@ object BroadcastGuardScanner {
       }
     }
 
+    val launchBlocks = scanGuardedLaunches(source, code, violations)
+    val rawLaunchBlocks = scanRawLaunches(source, code, violations)
+    return ScanResult(guardedHelpers, launchBlocks, rawLaunchBlocks, violations)
+  }
+
+  private fun scanGuardedLaunches(
+    source: String,
+    code: String,
+    violations: MutableList<Violation>,
+  ): Int {
     var launchBlocks = 0
     for (m in LAUNCH.findAll(code)) {
       launchBlocks++
@@ -1094,6 +1075,14 @@ object BroadcastGuardScanner {
       }
     }
 
+    return launchBlocks
+  }
+
+  private fun scanRawLaunches(
+    source: String,
+    code: String,
+    violations: MutableList<Violation>,
+  ): Int {
     var rawLaunchBlocks = 0
     for (m in SERVICE_SCOPE_LAUNCH.findAll(code)) {
       val call = parseLaunchCall(code, m.range.last + 1) ?: continue
@@ -1116,7 +1105,47 @@ object BroadcastGuardScanner {
       }
     }
 
-    return ScanResult(guardedHelpers, launchBlocks, rawLaunchBlocks, violations)
+    return rawLaunchBlocks
+  }
+
+  private fun unguardedBroadcasts(
+    source: String,
+    body: String,
+    bodyOpen: Int,
+    name: String,
+  ): List<Violation> {
+    val violations = mutableListOf<Violation>()
+    // The correlated-error-on-throw guarantee is provided by `resultBroadcaster.guard { … }` (the
+    // direct path) or by delegating the broadcast into `asyncActionRunner.launch { … }` (which is
+    // itself swallow-checked below). Collect the spans of both.
+    val guardedSpans = blockSpans(body, GUARD_CALL) + blockSpans(body, LAUNCH)
+    val broadcastCalls = BROADCAST_CALL.findAll(body).map { it.range.first }.toList()
+    when {
+      guardedSpans.isEmpty() && broadcastCalls.isNotEmpty() ->
+        // Broadcasts a result but wraps none of it — the exact "forgot the guard" regression.
+        violations.add(
+          Violation(
+            Kind.MISSING_GUARD,
+            name,
+            KotlinSourceScan.lineOf(source, bodyOpen + broadcastCalls.first()),
+          ),
+        )
+      else ->
+        // Guard/launch present: every result broadcast must sit *inside* one of those spans. A
+        // broadcast outside them is unguarded even though the guard call textually exists.
+        for (offset in broadcastCalls) {
+          if (guardedSpans.none { offset >= it.first && offset < it.second }) {
+            violations.add(
+              Violation(
+                Kind.MISSING_GUARD,
+                name,
+                KotlinSourceScan.lineOf(source, bodyOpen + offset),
+              ),
+            )
+          }
+        }
+    }
+    return violations
   }
 
   private fun requestIdTokens(enclosingPrefix: String): Set<String> = buildSet {

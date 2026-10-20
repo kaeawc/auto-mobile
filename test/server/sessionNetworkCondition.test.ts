@@ -26,7 +26,11 @@ describe("runSessionNetworkMutation", () => {
       keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
       biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
       restorers: {
-        networkCondition: () => ({ restore: async (profile) => restored.push(profile) }),
+        networkCondition: () => ({
+          restore: async (profile) => {
+            restored.push(profile);
+          },
+        }),
       },
     });
 
@@ -35,12 +39,12 @@ describe("runSessionNetworkMutation", () => {
       readonly started = Promise.withResolvers<void>();
       readonly finished = Promise.withResolvers<void>();
 
-      override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+      override async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
         if (record.deviceId === "emulator-5556") {
           this.started.resolve();
           await this.finished.promise;
         }
-        await super.upsertActiveSession(record);
+        return await super.upsertActiveSession(record);
       }
     }
 

@@ -129,8 +129,8 @@ class DaemonForwardedFlagsTest {
     val environment =
       FakeEnvironment(variables = DAEMON_FORWARDED_FLAGS.associate { it.envVar to "yes" })
     val expectedFlags = DAEMON_FORWARDED_FLAGS.map { it.cliFlag }
-    val start = DaemonSocketPaths.buildDaemonStartCommand(environment)
-    val restart = DaemonSocketPaths.buildDaemonRestartCommand(environment)
+    val start = DaemonLaunchCommands.buildDaemonStartCommand(environment)
+    val restart = DaemonLaunchCommands.buildDaemonRestartCommand(environment)
 
     assertEquals(expectedFlags, start.takeLast(expectedFlags.size))
     assertTrue(start.contains("start"))

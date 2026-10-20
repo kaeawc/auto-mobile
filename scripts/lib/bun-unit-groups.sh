@@ -18,7 +18,7 @@
 set -euo pipefail
 root="$1" runner_os="$2" report_dir="$3" shard="$4"
 shift 4
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$root/scripts/lib/bun-unit-test.sh"
 configure_bun_unit_test "$root" "$runner_os"
 

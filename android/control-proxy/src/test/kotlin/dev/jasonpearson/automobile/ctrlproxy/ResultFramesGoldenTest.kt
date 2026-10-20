@@ -43,19 +43,23 @@ class ResultFramesGoldenTest {
       },
     )
 
+  private data class GestureTiming(
+    val totalTimeMs: Long,
+    val gestureTimeMs: Long?,
+    val perfTiming: JsonElement?,
+  )
+
   private fun legacyGesture(
     type: String,
     requestId: String?,
     success: Boolean,
     error: String?,
-    totalTimeMs: Long,
-    gestureTimeMs: Long?,
-    perfTiming: JsonElement?,
+    timing: GestureTiming,
   ) =
-    legacyFrame(type, requestId, perfTiming) {
+    legacyFrame(type, requestId, timing.perfTiming) {
       put("success", success)
-      put("totalTimeMs", totalTimeMs)
-      if (gestureTimeMs != null) put("gestureTimeMs", gestureTimeMs)
+      put("totalTimeMs", timing.totalTimeMs)
+      if (timing.gestureTimeMs != null) put("gestureTimeMs", timing.gestureTimeMs)
       if (error != null) put("error", error)
     }
 
@@ -84,7 +88,13 @@ class ResultFramesGoldenTest {
       perfs) {
       assertEquals(
         "$type id=$id err=$err g=$g perf=$p",
-        legacyGesture(type, id, err == null, err, 10L, g, p),
+        legacyGesture(
+          type,
+          id,
+          err == null,
+          err,
+          timing = GestureTiming(totalTimeMs = 10L, gestureTimeMs = g, perfTiming = p),
+        ),
         masked(build(id, err == null, err, 10L, g, p)),
       )
     }
@@ -199,16 +209,20 @@ class ResultFramesGoldenTest {
       for (trace in traces) for (consumed in listOf(false, true)) {
         assertCommitFrame(context, edit, trace, consumed)
       }
-      assertEquals(
-        legacyFrame("cancel_ime_commit_result", id, p) {
-          put("success", true)
-          put("targetRequestId", "target")
-          put("partialApplication", partial)
-          if (units > 0) put("committedUnits", units)
-        },
-        masked(cancelImeCommitResultFrame(id, "target", partial, units, p)),
-      )
+      assertCancelFrame(id, p, partial, units)
     }
+  }
+
+  private fun assertCancelFrame(id: String?, p: JsonElement?, partial: Boolean, units: Int) {
+    assertEquals(
+      legacyFrame("cancel_ime_commit_result", id, p) {
+        put("success", true)
+        put("targetRequestId", "target")
+        put("partialApplication", partial)
+        if (units > 0) put("committedUnits", units)
+      },
+      masked(cancelImeCommitResultFrame(id, "target", partial, units, p)),
+    )
   }
 
   private fun assertCommitFrame(
@@ -298,29 +312,33 @@ class ResultFramesGoldenTest {
     val fingerprints = listOf(null, PanelFingerprint(1080, 2400))
     for (panel in listOf(null, "p")) for (fp in fingerprints) for (n in listOf<Int?>(null, 3)) {
       val t = DisplayTransition("rotation", 1, panel, n, n?.plus(1), n, n?.plus(2), n?.plus(3), fp)
-      assertEquals(
-        legacyFrame("display_transition", null) {
-          put("change", t.change)
-          put("displayId", t.displayId)
-          if (t.panelUniqueId != null) put("panelUniqueId", t.panelUniqueId)
-          t.panelFingerprint?.let { f ->
-            put(
-              "panelFingerprint",
-              buildJsonObject {
-                put("width", f.width)
-                put("height", f.height)
-              },
-            )
-          }
-          if (t.width != null) put("width", t.width)
-          if (t.height != null) put("height", t.height)
-          if (t.state != null) put("state", t.state)
-          if (t.rotation != null) put("rotation", t.rotation)
-          if (t.deviceState != null) put("deviceState", t.deviceState)
-        },
-        masked(displayTransitionFrame(t)),
-      )
+      assertDisplayTransitionFrame(t)
     }
+  }
+
+  private fun assertDisplayTransitionFrame(t: DisplayTransition) {
+    assertEquals(
+      legacyFrame("display_transition", null) {
+        put("change", t.change)
+        put("displayId", t.displayId)
+        if (t.panelUniqueId != null) put("panelUniqueId", t.panelUniqueId)
+        t.panelFingerprint?.let { f ->
+          put(
+            "panelFingerprint",
+            buildJsonObject {
+              put("width", f.width)
+              put("height", f.height)
+            },
+          )
+        }
+        if (t.width != null) put("width", t.width)
+        if (t.height != null) put("height", t.height)
+        if (t.state != null) put("state", t.state)
+        if (t.rotation != null) put("rotation", t.rotation)
+        if (t.deviceState != null) put("deviceState", t.deviceState)
+      },
+      masked(displayTransitionFrame(t)),
+    )
   }
 
   @Test

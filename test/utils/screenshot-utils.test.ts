@@ -101,7 +101,7 @@ describe("ScreenshotUtils", function () {
 
       try {
         await ScreenshotUtils.getImageDimensions(invalidBuffer);
-        expect.fail("Should have thrown an error");
+        throw new Error("Should have thrown an error");
       } catch (error) {
         expect(error instanceof Error).toBe(true);
         expect((error as Error).message).toContain("Failed to get image dimensions");

@@ -169,7 +169,7 @@ describe("AndroidUserTargetResolver.resolve", () => {
     "installedOnly preserves $name without package listings",
     async ({ request, users, foreground, expected }) => {
       const adb = new FakeAdbExecutor();
-      adb.setUsers(users);
+      adb.setUsers([...users]);
       adb.setForegroundApp(foreground);
       const usersSpy = spyOn(adb, "listUsers");
       const foregroundSpy = spyOn(adb, "getForegroundApp");
@@ -213,7 +213,7 @@ describe("AndroidUserTargetResolver.resolve", () => {
   test.each(cases)("$name", async ({ request, users, foreground, expected }) => {
     const adb = new FakeAdbExecutor();
     if (users) {
-      adb.setUsers(users);
+      adb.setUsers([...users]);
     }
     if (foreground !== undefined) {
       adb.setForegroundApp(foreground);

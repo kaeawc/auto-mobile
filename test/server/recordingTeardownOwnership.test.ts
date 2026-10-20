@@ -62,14 +62,20 @@ class FakeSessionManager implements CleanupManager {
     });
   }
   releaseA(deviceId = device.deviceId): void {
-    this.release("session-a", deviceId, "idle-timeout", {
-      sessionId: "session-a",
+    this.release(
+      "session-a",
       deviceId,
-      releaseReason: "idle-timeout",
-      releasedAtMs: 0,
-      terminal: false,
-      heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
-    });
+      "idle-timeout",
+      {
+        sessionId: "session-a",
+        deviceId,
+        releaseReason: "idle-timeout",
+        releasedAtMs: 0,
+        terminal: false,
+        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+      },
+      {},
+    );
   }
 }
 
@@ -163,6 +169,7 @@ describe("recording teardown ownership", () => {
           expect(deadline).toBe(5_000);
           expect(manager.registrations.at(-1)?.settled).toBe(false);
           retry = work;
+          return () => {};
         },
       },
       deps,

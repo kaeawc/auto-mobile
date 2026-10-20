@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolStructured } from "../helpers/toolResponse";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -40,7 +41,7 @@ describe("request actions through the registered prototype tool (#12523, #12530)
   let restore: () => void;
   let unsubscribe: () => void;
 
-  beforeEach(() => {
+  function setup(): void {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
@@ -53,6 +54,18 @@ describe("request actions through the registered prototype tool (#12523, #12530)
       clock: timer,
       timer,
     });
+  }
+  beforeEach(setup);
+  beforeAll(async () => {
+    // Warm the registered show/dismiss schema path before measuring the request scenarios.
+    setup();
+    try {
+      await call({ action: "show", spec: fixture });
+      await call({ action: "dismiss", id: fixture.id });
+    } finally {
+      unsubscribe();
+      restore();
+    }
   });
   afterEach(() => {
     unsubscribe();
@@ -61,7 +74,7 @@ describe("request actions through the registered prototype tool (#12523, #12530)
 
   async function call(input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const reverses = () =>
     adb.getExecutedCommands().filter((command) => command.startsWith("reverse"));

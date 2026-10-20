@@ -346,7 +346,6 @@ describe("device loss MCP outcome", () => {
         name: "observe",
         arguments: { platform: "android" },
       },
-      undefined,
       { timeout: MCP_TEST_REQUEST_TIMEOUT_MS },
     );
     await Promise.race([observeStarted.promise, resultPromise.then(() => observeStarted.promise)]);

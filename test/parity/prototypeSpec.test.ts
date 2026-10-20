@@ -180,8 +180,8 @@ test("JSON keys are preserved in state and opaque emit payloads", () => {
     throw new Error(JSON.stringify(result.error));
   }
   const source = JSON.parse(input.json) as { state: unknown; root: { onTap: unknown } };
-  expect(result.data.state).toEqual(source.state);
-  expect(result.data.root.onTap).toEqual(source.root.onTap);
+  expect(source.state).toEqual(result.data.state);
+  expect(source.root.onTap).toEqual(result.data.root.onTap);
 });
 test("undefined object properties are rejected before JSON serialization can drop them", () => {
   const result = validatePrototypeSpec({

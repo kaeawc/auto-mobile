@@ -54,8 +54,11 @@ class ViewHierarchyExtractorTest {
               1,
               1,
               root,
-              type = AccessibilityWindowInfo.TYPE_SYSTEM,
-              title = PROTOTYPE_WINDOW_TITLE,
+              state =
+                WindowState(
+                  type = AccessibilityWindowInfo.TYPE_SYSTEM,
+                  title = PROTOTYPE_WINDOW_TITLE,
+                ),
             ),
           ),
           null,
@@ -83,8 +86,11 @@ class ViewHierarchyExtractorTest {
             2,
             1,
             fakeNode("dev.jasonpearson.automobile.ctrlproxy"),
-            type = AccessibilityWindowInfo.TYPE_SYSTEM,
-            title = PROTOTYPE_WINDOW_TITLE,
+            state =
+              WindowState(
+                type = AccessibilityWindowInfo.TYPE_SYSTEM,
+                title = PROTOTYPE_WINDOW_TITLE,
+              ),
           ),
         ),
         null,
@@ -117,19 +123,24 @@ class ViewHierarchyExtractorTest {
               1,
               1,
               fakeNode(pkg, text = "Window"),
-              type = AccessibilityWindowInfo.TYPE_SYSTEM,
-              title = title,
+              state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM, title = title),
             ),
           ),
           null,
-          disableAllFiltering = true,
-          displayId = 2,
+          options =
+            HierarchyExtractionOptions(
+              disableAllFiltering = true,
+              displayId = 2,
+            ),
         )
       assertEquals(2 to expected, calls.last())
       assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, frame.prototypeHiddenReason)
     }
     val single =
-      extractor.extractFromActiveWindow(fakeNode("app.example", text = "Root"), displayId = 3)
+      extractor.extractFromActiveWindow(
+        fakeNode("app.example", text = "Root"),
+        options = HierarchyExtractionOptions(displayId = 3),
+      )
     assertEquals(3 to null, calls.last())
     assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, single?.prototypeHiddenReason)
   }
@@ -160,21 +171,16 @@ class ViewHierarchyExtractorTest {
             fakeNode(
               packageName = own,
               text = title,
-              bounds = Rect(0, index * 300, 1080, index * 300 + 200),
+              state = NodeState(bounds = Rect(0, index * 300, 1080, index * 300 + 200)),
             ),
-            type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
-            bounds = Rect(0, index * 300, 1080, index * 300 + 200),
-            title = title,
+            state =
+              WindowState(
+                type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+                bounds = Rect(0, index * 300, 1080, index * 300 + 200),
+                title = title,
+              ),
           )
-        } +
-          fakeWindow(
-            6,
-            6,
-            fakeNode(packageName = "other", text = "foreign", bounds = Rect(0, 1800, 1080, 2000)),
-            type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
-            bounds = Rect(0, 1800, 1080, 2000),
-            title = "AutoMobile Prototype:full",
-          ),
+        } + foreignMetadataOverlay(),
         null,
       )
     for ((index, title) in titles.withIndex()) {
@@ -189,10 +195,32 @@ class ViewHierarchyExtractorTest {
     assertNull(foreign.prototypeId)
   }
 
+  private fun foreignMetadataOverlay(): AccessibilityWindowInfo =
+    fakeWindow(
+      6,
+      6,
+      fakeNode(
+        packageName = "other",
+        text = "foreign",
+        state = NodeState(bounds = Rect(0, 1800, 1080, 2000)),
+      ),
+      state =
+        WindowState(
+          type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+          bounds = Rect(0, 1800, 1080, 2000),
+          title = "AutoMobile Prototype:full",
+        ),
+    )
+
   @Test
   fun `window extraction selects only the requested display roots`() {
     val inner =
-      fakeWindow(201, 0, fakeNode(packageName = "app.inner", text = "Inner"), focused = true)
+      fakeWindow(
+        201,
+        0,
+        fakeNode(packageName = "app.inner", text = "Inner"),
+        state = WindowState(focused = true),
+      )
     val cover = fakeWindow(202, 0, fakeNode(packageName = "app.cover", text = "Cover"))
     val all =
       SparseArray<List<AccessibilityWindowInfo>>().apply {
@@ -207,9 +235,12 @@ class ViewHierarchyExtractorTest {
       extractor.extractFromAllWindows(
         selected,
         null,
-        disableAllFiltering = true,
-        displayId = 2,
-        panelUniqueId = "panel-cover",
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            displayId = 2,
+            panelUniqueId = "panel-cover",
+          ),
       )
     val serialized = json.encodeToString(ViewHierarchy.serializer(), hierarchy)
     assertTrue(serialized.contains("Cover"))
@@ -226,12 +257,16 @@ class ViewHierarchyExtractorTest {
         2,
         1,
         fakeNode(packageName = "dev.jasonpearson.automobile.ctrlproxy", text = "Overlay"),
-        type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
-        focused = true,
+        state =
+          WindowState(type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY, focused = true),
       )
 
     val hierarchy =
-      extractor.extractFromAllWindows(listOf(app, overlay), null, disableAllFiltering = true)
+      extractor.extractFromAllWindows(
+        listOf(app, overlay),
+        null,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
 
     assertEquals(
       mapOf(1 to "app.main", 2 to "dev.jasonpearson.automobile.ctrlproxy"),
@@ -266,8 +301,15 @@ class ViewHierarchyExtractorTest {
 
   @Test
   fun `active default display wins over focused virtual display`() {
-    val phone = fakeWindow(1, 0, fakeNode(packageName = "phone", text = "Phone"), active = true)
-    val virtual = fakeWindow(2, 0, fakeNode(packageName = "virtual"), focused = true)
+    val phone =
+      fakeWindow(
+        1,
+        0,
+        fakeNode(packageName = "phone", text = "Phone"),
+        state = WindowState(active = true),
+      )
+    val virtual =
+      fakeWindow(2, 0, fakeNode(packageName = "virtual"), state = WindowState(focused = true))
     val all =
       SparseArray<List<AccessibilityWindowInfo>>().apply {
         put(0, listOf(phone))
@@ -279,27 +321,28 @@ class ViewHierarchyExtractorTest {
 
   @Test
   fun `phone window selection includes IME from either display bucket`() {
-    val phone = fakeWindow(1, 0, fakeNode(packageName = "phone"), focused = true)
+    val phone =
+      fakeWindow(1, 0, fakeNode(packageName = "phone"), state = WindowState(focused = true))
     val localIme =
       fakeWindow(
         2,
         1,
         fakeNode(packageName = "ime"),
-        type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+        state = WindowState(type = AccessibilityWindowInfo.TYPE_INPUT_METHOD),
       )
     val shiftedIme =
       fakeWindow(
         3,
         1,
         fakeNode(packageName = "ime"),
-        type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+        state = WindowState(type = AccessibilityWindowInfo.TYPE_INPUT_METHOD),
       )
     val systemUi =
       fakeWindow(
         4,
         2,
         fakeNode(packageName = "com.android.systemui"),
-        type = AccessibilityWindowInfo.TYPE_SYSTEM,
+        state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM),
       )
     val all =
       SparseArray<List<AccessibilityWindowInfo>>().apply {
@@ -328,7 +371,11 @@ class ViewHierarchyExtractorTest {
         .getMethod("setSealed", Boolean::class.javaPrimitiveType)
         .invoke(node, true)
 
-      val result = extractor.extractFromActiveWindow(node, disableAllFiltering = true)
+      val result =
+        extractor.extractFromActiveWindow(
+          node,
+          options = HierarchyExtractionOptions(disableAllFiltering = true),
+        )
       assertNull(result!!.error)
       val rawNode = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
       assertEquals(
@@ -482,11 +529,14 @@ class ViewHierarchyExtractorTest {
     val parent =
       fakeNode(
         packageName = "example.app",
-        bounds = Rect(0, 0, 0, 0),
-        children = listOf(child),
+        state = NodeState(bounds = Rect(0, 0, 0, 0), children = listOf(child)),
       )
 
-    val result = extractor.extractFromActiveWindow(parent, disableAllFiltering = true)
+    val result =
+      extractor.extractFromActiveWindow(
+        parent,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
 
     assertNotNull(result!!.hierarchy)
     assertTrue(result.hierarchy!!.node.toString().contains("Visible child"))
@@ -495,15 +545,18 @@ class ViewHierarchyExtractorTest {
 
   @Test
   fun `extractFromActiveWindow prunes zero-area subtree without visible descendants`() {
-    val child = fakeNode(packageName = "example.app", bounds = Rect(0, 0, 0, 0))
+    val child = fakeNode(packageName = "example.app", state = NodeState(bounds = Rect(0, 0, 0, 0)))
     val parent =
       fakeNode(
         packageName = "example.app",
-        bounds = Rect(0, 0, 0, 0),
-        children = listOf(child),
+        state = NodeState(bounds = Rect(0, 0, 0, 0), children = listOf(child)),
       )
 
-    val result = extractor.extractFromActiveWindow(parent, disableAllFiltering = true)
+    val result =
+      extractor.extractFromActiveWindow(
+        parent,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
 
     assertNull(result!!.hierarchy)
     parent.recycle()
@@ -513,26 +566,31 @@ class ViewHierarchyExtractorTest {
   fun `offscreen filtering requires valid dimensions and ignores visibility flag`() {
     for (dimensions in listOf(ScreenDimensions(100, 200), null, ScreenDimensions(0, 200))) {
       val offscreen =
-        fakeNode("example.app", text = "Offscreen row", bounds = Rect(10, 201, 40, 240))
+        fakeNode(
+          "example.app",
+          text = "Offscreen row",
+          state = NodeState(bounds = Rect(10, 201, 40, 240)),
+        )
       val visible =
         fakeNode(
           "example.app",
           text = "Visible row",
-          bounds = Rect(10, 20, 40, 60),
-          visibleToUser = false,
+          state = NodeState(bounds = Rect(10, 20, 40, 60), visibleToUser = false),
         )
       val root =
         fakeNode(
           "example.app",
-          bounds = Rect(0, 0, 100, 200),
-          children = listOf(offscreen, visible),
+          state = NodeState(bounds = Rect(0, 0, 100, 200), children = listOf(offscreen, visible)),
         )
       try {
         val result =
           extractor.extractFromActiveWindow(
             root,
-            screenDimensions = dimensions,
-            disableAllFiltering = true,
+            options =
+              HierarchyExtractionOptions(
+                screenDimensions = dimensions,
+                disableAllFiltering = true,
+              ),
           )
         val hierarchy = result!!.hierarchy!!.node.toString()
         assertTrue(hierarchy.contains("Visible row"))
@@ -1197,7 +1255,7 @@ class ViewHierarchyExtractorTest {
           3,
           overlay,
           windowType = "system",
-          windowBounds = bounds(0, 1291, 295, 1543),
+          details = WindowDetails(windowBounds = bounds(0, 1291, 295, 1543)),
         ),
       )
     val info = extractor.buildOcclusionInfoForTest(entries)
@@ -1229,26 +1287,38 @@ class ViewHierarchyExtractorTest {
       fakeNode(
         packageName = "example.app",
         text = "App",
-        bounds = Rect(0, 0, 1080, 2400),
-        children =
-          listOf(fakeNode("example.app", text = "Discover", bounds = Rect(43, 314, 319, 398))),
+        state =
+          NodeState(
+            bounds = Rect(0, 0, 1080, 2400),
+            children =
+              listOf(
+                fakeNode(
+                  "example.app",
+                  text = "Discover",
+                  state = NodeState(bounds = Rect(43, 314, 319, 398)),
+                ),
+              ),
+          ),
       )
     val overlay =
       fakeNode(
         packageName = "com.android.systemui",
         text = "Clipboard",
-        bounds = Rect(0, 0, 1080, 2400),
+        state = NodeState(bounds = Rect(0, 0, 1080, 2400)),
       )
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(420, 0, app, focused = true),
+          fakeWindow(420, 0, app, state = WindowState(focused = true)),
           fakeWindow(
             423,
             3,
             overlay,
-            type = AccessibilityWindowInfo.TYPE_SYSTEM,
-            bounds = Rect(0, 1291, 295, 1543),
+            state =
+              WindowState(
+                type = AccessibilityWindowInfo.TYPE_SYSTEM,
+                bounds = Rect(0, 1291, 295, 1543),
+              ),
           ),
         ),
         null,
@@ -1272,29 +1342,43 @@ class ViewHierarchyExtractorTest {
       fakeNode(
         packageName = "example.app",
         text = "App",
-        bounds = Rect(0, 0, 1080, 2400),
-        children =
-          listOf(
-            fakeNode("example.app", text = "Visible row", bounds = Rect(0, 200, 1080, 400)),
-            fakeNode("example.app", text = "Covered row", bounds = Rect(100, 1000, 980, 1200)),
+        state =
+          NodeState(
+            bounds = Rect(0, 0, 1080, 2400),
+            children =
+              listOf(
+                fakeNode(
+                  "example.app",
+                  text = "Visible row",
+                  state = NodeState(bounds = Rect(0, 200, 1080, 400)),
+                ),
+                fakeNode(
+                  "example.app",
+                  text = "Covered row",
+                  state = NodeState(bounds = Rect(100, 1000, 980, 1200)),
+                ),
+              ),
           ),
       )
     val overlay =
       fakeNode(
         packageName = overlayPackage,
         text = "Overlay card",
-        bounds = Rect(0, 900, 1080, 1400),
+        state = NodeState(bounds = Rect(0, 900, 1080, 1400)),
       )
     return extractor.extractFromAllWindows(
       listOf(
-        fakeWindow(1, 0, app, focused = true, active = true),
+        fakeWindow(1, 0, app, state = WindowState(focused = true, active = true)),
         fakeWindow(
           2,
           5,
           overlay,
-          type = overlayType,
-          bounds = Rect(0, 900, 1080, 1400),
-          title = overlayTitle,
+          state =
+            WindowState(
+              type = overlayType,
+              bounds = Rect(0, 900, 1080, 1400),
+              title = overlayTitle,
+            ),
         ),
       ),
       null,
@@ -1412,7 +1496,7 @@ class ViewHierarchyExtractorTest {
             423,
             3,
             clipboardOverlayHierarchy(),
-            windowBounds = bounds(0, 0, 1080, 2400),
+            details = WindowDetails(windowBounds = bounds(0, 0, 1080, 2400)),
           ),
         ),
       )
@@ -1436,7 +1520,7 @@ class ViewHierarchyExtractorTest {
               423,
               3,
               clipboardOverlayHierarchy(),
-              windowBounds = windowBounds,
+              details = WindowDetails(windowBounds = windowBounds),
             ),
           ),
         )
@@ -1473,7 +1557,12 @@ class ViewHierarchyExtractorTest {
       extractor.buildOcclusionInfoForTest(
         listOf(
           extractor.createWindowEntry(420, 0, app),
-          extractor.createWindowEntry(423, 3, target, windowBounds = bounds(0, 1291, 295, 1543)),
+          extractor.createWindowEntry(
+            423,
+            3,
+            target,
+            details = WindowDetails(windowBounds = bounds(0, 1291, 295, 1543)),
+          ),
         ),
       )
     val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
@@ -1488,14 +1577,28 @@ class ViewHierarchyExtractorTest {
       fakeNode(
         packageName = "com.android.systemui",
         text = "Notifications",
-        children =
-          listOf(
-            fakeNode("com.android.systemui", text = "Grouped notification", visibleToUser = false),
+        state =
+          NodeState(
+            children =
+              listOf(
+                fakeNode(
+                  "com.android.systemui",
+                  text = "Grouped notification",
+                  state = NodeState(visibleToUser = false),
+                ),
+              ),
           ),
       )
     val result =
       extractor.extractFromAllWindows(
-        listOf(fakeWindow(1, 1, group, type = AccessibilityWindowInfo.TYPE_SYSTEM, focused = true)),
+        listOf(
+          fakeWindow(
+            1,
+            1,
+            group,
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM, focused = true),
+          ),
+        ),
         null,
       )
 
@@ -1525,7 +1628,7 @@ class ViewHierarchyExtractorTest {
             423,
             3,
             clipboardOverlayHierarchy(),
-            windowBounds = bounds(0, 1291, 295, 1543),
+            details = WindowDetails(windowBounds = bounds(0, 1291, 295, 1543)),
           ),
         ),
       )
@@ -1756,10 +1859,7 @@ class ViewHierarchyExtractorTest {
         bounds = bounds(0, 0, 1080, 100),
         children =
           (0 until 100).map { index ->
-            elementWithBounds(
-              resourceId = "$id-$index",
-              bounds = bounds(0, 0, 1080, 100),
-            )
+            elementWithBounds(resourceId = "$id-$index", bounds = bounds(0, 0, 1080, 100))
           },
       )
 
@@ -1839,10 +1939,7 @@ class ViewHierarchyExtractorTest {
         children = listOf(target),
       )
     val occluder =
-      elementWithBounds(
-        viewId = "stable-unlabeled-occluder",
-        bounds = bounds(0, 0, 50, 50),
-      )
+      elementWithBounds(viewId = "stable-unlabeled-occluder", bounds = bounds(0, 0, 50, 50))
 
     val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
     val overlayEntry =
@@ -1875,12 +1972,16 @@ class ViewHierarchyExtractorTest {
         children = listOf(target),
       )
     val labelledChild =
-      elementWithBounds(text = "Demos", viewId = "stable-demos", bounds = bounds(0, 0, 50, 50))
+      elementWithBounds(
+        viewId = "stable-demos",
+        bounds = bounds(0, 0, 50, 50),
+        content = ElementContent(text = "Demos"),
+      )
     val labelledWrapper =
       elementWithBounds(
-        contentDesc = "Demos",
         bounds = bounds(0, 0, 50, 50),
         children = listOf(labelledChild),
+        content = ElementContent(contentDesc = "Demos"),
       )
 
     val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
@@ -1924,7 +2025,10 @@ class ViewHierarchyExtractorTest {
         children = listOf(target),
       )
     val statusBarRoot =
-      elementWithBounds(className = "android.view.ViewGroup", bounds = bounds(0, 0, 100, 50))
+      elementWithBounds(
+        bounds = bounds(0, 0, 100, 50),
+        content = ElementContent(className = "android.view.ViewGroup"),
+      )
 
     val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
     val overlayEntry =
@@ -1968,9 +2072,9 @@ class ViewHierarchyExtractorTest {
       )
     val labelledWrapper =
       elementWithBounds(
-        contentDesc = "Demos",
         viewId = "stable-demos-wrapper",
         bounds = bounds(0, 0, 50, 50),
+        content = ElementContent(contentDesc = "Demos"),
       )
 
     val appEntry = extractor.createWindowEntry(windowId = 1, windowLayer = 0, hierarchy = appRoot)
@@ -2222,41 +2326,26 @@ class ViewHierarchyExtractorTest {
     val appRoot =
       fakeNode(
         packageName = "com.google.android.contacts",
-        bounds = Rect(0, 0, 1080, 2400),
-        children = listOf(fakeNode(packageName = "com.google.android.contacts", text = "Contacts")),
-      )
-    val dialogRoot =
-      fakeNode(
-        packageName = "com.google.android.permissioncontroller",
-        bounds = Rect(28, 682, 1052, 1654),
-        children =
-          listOf(
-            fakeNode(
-              packageName = "com.google.android.permissioncontroller",
-              text = "Allow Contacts to send you notifications?",
-              bounds = Rect(100, 700, 1000, 800),
-            ),
-            fakeNode(
-              packageName = "com.google.android.permissioncontroller",
-              text = "Allow",
-              resourceId = "com.android.permissioncontroller:id/permission_allow_button",
-              bounds = Rect(100, 1500, 500, 1600),
-            ),
-            fakeNode(
-              packageName = "com.google.android.permissioncontroller",
-              text = "Don't allow",
-              resourceId = "com.android.permissioncontroller:id/permission_deny_button",
-              bounds = Rect(600, 1500, 1000, 1600),
-            ),
+        state =
+          NodeState(
+            bounds = Rect(0, 0, 1080, 2400),
+            children =
+              listOf(fakeNode(packageName = "com.google.android.contacts", text = "Contacts")),
           ),
       )
+    val dialogRoot = notificationPermissionDialogRoot()
     val windows =
       listOf(
-        fakeWindow(id = 318, layer = 0, root = appRoot, focused = true),
-        fakeWindow(id = 322, layer = 1, root = dialogRoot, active = true),
+        fakeWindow(id = 318, layer = 0, root = appRoot, state = WindowState(focused = true)),
+        fakeWindow(id = 322, layer = 1, root = dialogRoot, state = WindowState(active = true)),
       )
 
-    val result = extractor.extractFromAllWindows(windows, appRoot, occlusionEnabled = false)
+    val result =
+      extractor.extractFromAllWindows(
+        windows,
+        appRoot,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
 
     assertEquals(true, result.notificationPermissionDetected)
     assertEquals("com.google.android.contacts", result.packageName)
@@ -2269,13 +2358,51 @@ class ViewHierarchyExtractorTest {
     // in split-screen) must not flag this app's observation as a permission dialog.
     val bystander =
       listOf(
-        fakeWindow(id = 318, layer = 0, root = appRoot, focused = true, active = true),
+        fakeWindow(
+          id = 318,
+          layer = 0,
+          root = appRoot,
+          state = WindowState(focused = true, active = true),
+        ),
         fakeWindow(id = 322, layer = 1, root = dialogRoot),
       )
     val bystanderResult =
-      extractor.extractFromAllWindows(bystander, appRoot, occlusionEnabled = false)
+      extractor.extractFromAllWindows(
+        bystander,
+        appRoot,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
     assertEquals(false, bystanderResult.notificationPermissionDetected)
   }
+
+  private fun notificationPermissionDialogRoot(): android.view.accessibility.AccessibilityNodeInfo =
+    fakeNode(
+      packageName = "com.google.android.permissioncontroller",
+      state =
+        NodeState(
+          bounds = Rect(28, 682, 1052, 1654),
+          children =
+            listOf(
+              fakeNode(
+                packageName = "com.google.android.permissioncontroller",
+                text = "Allow Contacts to send you notifications?",
+                state = NodeState(bounds = Rect(100, 700, 1000, 800)),
+              ),
+              fakeNode(
+                packageName = "com.google.android.permissioncontroller",
+                text = "Allow",
+                resourceId = "com.android.permissioncontroller:id/permission_allow_button",
+                state = NodeState(bounds = Rect(100, 1500, 500, 1600)),
+              ),
+              fakeNode(
+                packageName = "com.google.android.permissioncontroller",
+                text = "Don't allow",
+                resourceId = "com.android.permissioncontroller:id/permission_deny_button",
+                state = NodeState(bounds = Rect(600, 1500, 1000, 1600)),
+              ),
+            ),
+        ),
+    )
 
   @Test
   fun `extractFromAllWindows does not flag an unrelated app's active dialog in a split-screen pane`() {
@@ -2287,26 +2414,33 @@ class ViewHierarchyExtractorTest {
     val appARoot =
       fakeNode(
         packageName = "com.google.android.contacts",
-        bounds = Rect(0, 0, 1080, 1200),
-        children = listOf(fakeNode(packageName = "com.google.android.contacts", text = "Contacts")),
+        state =
+          NodeState(
+            bounds = Rect(0, 0, 1080, 1200),
+            children =
+              listOf(fakeNode(packageName = "com.google.android.contacts", text = "Contacts")),
+          ),
       )
     val foreignDialogRoot =
       fakeNode(
         packageName = "com.google.android.permissioncontroller",
-        bounds = Rect(28, 1300, 1052, 2300),
-        children =
-          listOf(
-            fakeNode(
-              packageName = "com.google.android.permissioncontroller",
-              text = "Allow Maps to send you notifications?",
-              bounds = Rect(100, 1350, 1000, 1450),
-            ),
-            fakeNode(
-              packageName = "com.google.android.permissioncontroller",
-              text = "Allow",
-              resourceId = "com.android.permissioncontroller:id/permission_allow_button",
-              bounds = Rect(100, 2100, 500, 2200),
-            ),
+        state =
+          NodeState(
+            bounds = Rect(28, 1300, 1052, 2300),
+            children =
+              listOf(
+                fakeNode(
+                  packageName = "com.google.android.permissioncontroller",
+                  text = "Allow Maps to send you notifications?",
+                  state = NodeState(bounds = Rect(100, 1350, 1000, 1450)),
+                ),
+                fakeNode(
+                  packageName = "com.google.android.permissioncontroller",
+                  text = "Allow",
+                  resourceId = "com.android.permissioncontroller:id/permission_allow_button",
+                  state = NodeState(bounds = Rect(100, 2100, 500, 2200)),
+                ),
+              ),
           ),
       )
     val windows =
@@ -2315,19 +2449,22 @@ class ViewHierarchyExtractorTest {
           id = 318,
           layer = 0,
           root = appARoot,
-          focused = true,
-          bounds = Rect(0, 0, 1080, 1200),
+          state = WindowState(focused = true, bounds = Rect(0, 0, 1080, 1200)),
         ),
         fakeWindow(
           id = 322,
           layer = 0,
           root = foreignDialogRoot,
-          active = true,
-          bounds = Rect(0, 1200, 1080, 2400),
+          state = WindowState(active = true, bounds = Rect(0, 1200, 1080, 2400)),
         ),
       )
 
-    val result = extractor.extractFromAllWindows(windows, appARoot, occlusionEnabled = false)
+    val result =
+      extractor.extractFromAllWindows(
+        windows,
+        appARoot,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
 
     assertEquals(false, result.notificationPermissionDetected)
     assertEquals("com.google.android.contacts", result.packageName)
@@ -2341,15 +2478,18 @@ class ViewHierarchyExtractorTest {
     val statusBarRoot =
       fakeNode(
         packageName = "com.android.systemui",
-        bounds = Rect(0, 0, 1080, 63),
-        children =
-          listOf(
-            fakeNode(
-              packageName = "com.android.systemui",
-              text = "8:33",
-              resourceId = "com.android.systemui:id/clock",
-              bounds = Rect(21, 0, 107, 63),
-            ),
+        state =
+          NodeState(
+            bounds = Rect(0, 0, 1080, 63),
+            children =
+              listOf(
+                fakeNode(
+                  packageName = "com.android.systemui",
+                  text = "8:33",
+                  resourceId = "com.android.systemui:id/clock",
+                  state = NodeState(bounds = Rect(21, 0, 107, 63)),
+                ),
+              ),
           ),
       )
     val windows =
@@ -2358,12 +2498,22 @@ class ViewHierarchyExtractorTest {
           id = 219,
           layer = 1,
           root = statusBarRoot,
-          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM),
         ),
-        fakeWindow(id = 256, layer = 0, root = null, focused = true, active = true),
+        fakeWindow(
+          id = 256,
+          layer = 0,
+          root = null,
+          state = WindowState(focused = true, active = true),
+        ),
       )
 
-    val result = extractor.extractFromAllWindows(windows, null, occlusionEnabled = false)
+    val result =
+      extractor.extractFromAllWindows(
+        windows,
+        null,
+        options = HierarchyExtractionOptions(occlusionEnabled = false),
+      )
 
     assertEquals(true, result.ctrlProxyIncomplete)
     // All three causes hold; active-window withholding takes precedence.
@@ -2380,11 +2530,19 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, app, focused = true),
-          fakeWindow(2, 1, null, type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
+          fakeWindow(1, 0, app, state = WindowState(focused = true)),
+          fakeWindow(
+            2,
+            1,
+            null,
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
+          ),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals(true, result.ctrlProxyIncomplete)
     assertEquals("active_window_null_root", result.ctrlProxyIncompleteReason)
@@ -2396,11 +2554,19 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 1, bar, type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
-          fakeWindow(2, 0, null, focused = true),
+          fakeWindow(
+            1,
+            1,
+            bar,
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
+          ),
+          fakeWindow(2, 0, null, state = WindowState(focused = true)),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals(true, result.ctrlProxyIncomplete)
     assertEquals("app_window_null_root", result.ctrlProxyIncompleteReason)
@@ -2416,12 +2582,15 @@ class ViewHierarchyExtractorTest {
             1,
             0,
             overlay,
-            type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
-            active = true,
+            state =
+              WindowState(type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY, active = true),
           ),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals("example.overlay", result.packageName)
     assertEquals(true, result.ctrlProxyIncomplete)
@@ -2433,9 +2602,12 @@ class ViewHierarchyExtractorTest {
     val app = fakeNode(packageName = "example.app", text = "Readable")
     val result =
       extractor.extractFromAllWindows(
-        listOf(fakeWindow(1, 0, app, focused = true, active = true)),
+        listOf(fakeWindow(1, 0, app, state = WindowState(focused = true, active = true))),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertNotNull(result.hierarchy)
     assertNull(result.ctrlProxyIncomplete)
@@ -2452,13 +2624,19 @@ class ViewHierarchyExtractorTest {
             1,
             0,
             shade,
-            type = AccessibilityWindowInfo.TYPE_SYSTEM,
-            focused = true,
-            active = true,
+            state =
+              WindowState(
+                type = AccessibilityWindowInfo.TYPE_SYSTEM,
+                focused = true,
+                active = true,
+              ),
           ),
         ),
         null,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            occlusionEnabled = false,
+          ),
       )
     assertEquals("com.android.systemui", result.packageName)
     assertNotNull(result.hierarchy)
@@ -2473,22 +2651,26 @@ class ViewHierarchyExtractorTest {
       fakeNode(
         packageName = "example.keyboard",
         text = "Keyboard",
-        children = listOf(fakeNode(packageName = "example.keyboard", text = "Q")),
+        state =
+          NodeState(children = listOf(fakeNode(packageName = "example.keyboard", text = "Q"))),
       )
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(id = 1, layer = 0, root = appRoot, focused = true),
+          fakeWindow(id = 1, layer = 0, root = appRoot, state = WindowState(focused = true)),
           fakeWindow(
             id = 2,
             layer = 1,
             root = imeRoot,
-            type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_INPUT_METHOD),
           ),
         ),
         appRoot,
-        disableAllFiltering = true,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            occlusionEnabled = false,
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     val app = roots[0] as kotlinx.serialization.json.JsonObject
@@ -2509,11 +2691,19 @@ class ViewHierarchyExtractorTest {
       extractor.extractFromAllWindows(
         listOf(
           fakeWindow(id = 23, layer = 7, root = overlay),
-          fakeWindow(id = 24, layer = 2, root = app, focused = true, active = true),
+          fakeWindow(
+            id = 24,
+            layer = 2,
+            root = app,
+            state = WindowState(focused = true, active = true),
+          ),
         ),
         app,
-        disableAllFiltering = true,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            occlusionEnabled = false,
+          ),
       )
     val encoded =
       json.encodeToJsonElement(ViewHierarchy.serializer(), result)
@@ -2541,7 +2731,12 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `fallback root retains matching window metadata`() {
     val app = fakeNode(packageName = "example.app", text = "Fallback")
-    val result = extractor.extractFromAllWindows(emptyList(), app, disableAllFiltering = true)
+    val result =
+      extractor.extractFromAllWindows(
+        emptyList(),
+        app,
+        options = HierarchyExtractionOptions(disableAllFiltering = true),
+      )
     val root = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
     val encoded =
       json.encodeToJsonElement(ViewHierarchy.serializer(), result)
@@ -2558,15 +2753,18 @@ class ViewHierarchyExtractorTest {
     val activeRoot = fakeNode(packageName = "example.app", text = "Active content")
     val windows =
       listOf(
-        fakeWindow(id = 41, layer = 0, root = null, focused = true),
-        fakeWindow(id = 42, layer = 2, root = activeRoot, active = true),
+        fakeWindow(id = 41, layer = 0, root = null, state = WindowState(focused = true)),
+        fakeWindow(id = 42, layer = 2, root = activeRoot, state = WindowState(active = true)),
       )
     val result =
       extractor.extractFromAllWindows(
         windows,
         activeRoot,
-        disableAllFiltering = true,
-        occlusionEnabled = false,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            occlusionEnabled = false,
+          ),
       )
     val encoded =
       json.encodeToJsonElement(ViewHierarchy.serializer(), result)
@@ -2583,12 +2781,20 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, app, focused = true),
-          fakeWindow(2, 1, ime, type = AccessibilityWindowInfo.TYPE_INPUT_METHOD),
+          fakeWindow(1, 0, app, state = WindowState(focused = true)),
+          fakeWindow(
+            2,
+            1,
+            ime,
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_INPUT_METHOD),
+          ),
         ),
         null,
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     val imeOutput = roots[1] as kotlinx.serialization.json.JsonObject
@@ -2606,12 +2812,25 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 1, budgetTree("System", 40), type = AccessibilityWindowInfo.TYPE_SYSTEM),
-          fakeWindow(2, 2, budgetTree("Overlay", 40), type = AccessibilityWindowInfo.TYPE_SYSTEM),
+          fakeWindow(
+            1,
+            1,
+            budgetTree("System", 40),
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM),
+          ),
+          fakeWindow(
+            2,
+            2,
+            budgetTree("Overlay", 40),
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM),
+          ),
         ),
         budgetTree("Fallback", 2),
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     assertEquals("example.app", result.packageName)
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
@@ -2634,20 +2853,31 @@ class ViewHierarchyExtractorTest {
     val discarded =
       fakeNode(
         packageName = "example.app",
-        bounds = Rect(0, 0, 0, 0),
-        children =
-          (1..40).map {
-            fakeNode(packageName = "example.app", bounds = Rect(0, 0, 0, 0))
-          },
+        state =
+          NodeState(
+            bounds = Rect(0, 0, 0, 0),
+            children =
+              (1..40).map {
+                fakeNode(packageName = "example.app", state = NodeState(bounds = Rect(0, 0, 0, 0)))
+              },
+          ),
       )
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(7, 0, discarded, type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
+          fakeWindow(
+            7,
+            0,
+            discarded,
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
+          ),
         ),
         budgetTree("Fallback", 2),
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     assertEquals(3, countWireNodes(result.hierarchy!!.node!!))
     assertEquals(7, result.windows!!.single().id)
@@ -2660,13 +2890,16 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, budgetTree("First", 40), focused = true),
+          fakeWindow(1, 0, budgetTree("First", 40), state = WindowState(focused = true)),
           fakeWindow(2, 1, null),
           fakeWindow(3, 2, budgetTree("Last", 5)),
         ),
         null,
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxNodes = 20),
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     assertEquals(6, countWireNodes(roots[1]))
@@ -2679,16 +2912,19 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, budgetTree("App", 2), focused = true),
+          fakeWindow(1, 0, budgetTree("App", 2), state = WindowState(focused = true)),
           fakeWindow(
             2,
             1,
             budgetTree("Keyboard", 2),
-            type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_INPUT_METHOD),
           ),
         ),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     val verbose = Json { encodeDefaults = true }
     val encoded =
@@ -2710,30 +2946,32 @@ class ViewHierarchyExtractorTest {
             packageName = "example.app",
             text = "Root",
             resourceId = "root",
-            enabled = true,
-            children =
-              listOf(
-                fakeNode(
-                  packageName = "example.app",
-                  text = "One",
-                  resourceId = "one",
-                  enabled = true,
-                ),
-                fakeNode(
-                  packageName = "example.app",
-                  text = "Two",
-                  resourceId = "two",
-                  enabled = true,
-                ),
+            state =
+              NodeState(
+                enabled = true,
+                children =
+                  listOf(
+                    fakeNode("example.app", "One", "one", NodeState(enabled = true)),
+                    fakeNode(
+                      packageName = "example.app",
+                      text = "Two",
+                      resourceId = "two",
+                      state = NodeState(enabled = true),
+                    ),
+                  ),
               ),
           )
         val result =
           extractor.extractFromAllWindows(
-            listOf(fakeWindow(1, 0, root, focused = true)),
+            listOf(fakeWindow(1, 0, root, state = WindowState(focused = true))),
             if (provideFallback) root else null,
-            disableAllFiltering = true,
-            snapshotOptions =
-              if (limited) HierarchySnapshotOptions(maxNodes = 2) else HierarchySnapshotOptions(),
+            options =
+              HierarchyExtractionOptions(
+                disableAllFiltering = true,
+                snapshotOptions =
+                  if (limited) HierarchySnapshotOptions(maxNodes = 2)
+                  else HierarchySnapshotOptions(),
+              ),
           )
         val children = if (limited) childOne else "[$childOne,$childTwo]"
         val reasons = if (limited) ",\"truncationReasons\":[\"max_nodes\"]" else ""
@@ -2762,11 +3000,14 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, budgetTree("App", 300), focused = true),
+          fakeWindow(1, 0, budgetTree("App", 300), state = WindowState(focused = true)),
           fakeWindow(2, 1, budgetTree("Small", 0)),
         ),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
     val children =
@@ -2783,9 +3024,12 @@ class ViewHierarchyExtractorTest {
   fun `exactly 256 children remains complete and omits truncation metadata`() {
     val result =
       extractor.extractFromAllWindows(
-        listOf(fakeWindow(1, 0, budgetTree("App", 256), focused = true)),
+        listOf(fakeWindow(1, 0, budgetTree("App", 256), state = WindowState(focused = true))),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     assertEquals(257, countWireNodes(result.hierarchy!!.node!!))
     assertNull(result.windows!!.single().truncationReasons)
@@ -2802,13 +3046,16 @@ class ViewHierarchyExtractorTest {
       fakeNode(
         packageName = "example.app",
         text = "Root",
-        children = listOf(budgetTree("First", 300), budgetTree("Second", 300)),
+        state = NodeState(children = listOf(budgetTree("First", 300), budgetTree("Second", 300))),
       )
     val result =
       extractor.extractFromAllWindows(
-        listOf(fakeWindow(1, 0, root, focused = true)),
+        listOf(fakeWindow(1, 0, root, state = WindowState(focused = true))),
         null,
-        disableAllFiltering = true,
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+          ),
       )
     assertEquals(515, countWireNodes(result.hierarchy!!.node!!))
     assertEquals(listOf("max_children"), result.windows!!.single().truncationReasons)
@@ -2820,12 +3067,15 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, budgetTree("App", 2), focused = true),
+          fakeWindow(1, 0, budgetTree("App", 2), state = WindowState(focused = true)),
           fakeWindow(2, 1, budgetTree("Small", 0)),
         ),
         null,
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(maxDepth = 0),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(maxDepth = 0),
+          ),
       )
     assertEquals(listOf("max_depth"), result.windows!!.first { it.id == 1 }.truncationReasons)
     assertNull(result.windows.first { it.id == 2 }.truncationReasons)
@@ -2837,11 +3087,19 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, budgetTree("System", 0), type = AccessibilityWindowInfo.TYPE_SYSTEM),
+          fakeWindow(
+            1,
+            0,
+            budgetTree("System", 0),
+            state = WindowState(type = AccessibilityWindowInfo.TYPE_SYSTEM),
+          ),
         ),
         budgetTree("Fallback", 0),
-        disableAllFiltering = true,
-        snapshotOptions = HierarchySnapshotOptions(isCancelled = { true }),
+        options =
+          HierarchyExtractionOptions(
+            disableAllFiltering = true,
+            snapshotOptions = HierarchySnapshotOptions(isCancelled = { true }),
+          ),
       )
     assertNull(result.hierarchy)
     assertEquals(listOf("cancelled"), result.truncationReasons)
@@ -2853,7 +3111,11 @@ class ViewHierarchyExtractorTest {
     fakeNode(
       packageName = "example.app",
       text = label,
-      children = (1..children).map { fakeNode(packageName = "example.app", text = "$label-$it") },
+      state =
+        NodeState(
+          children =
+            (1..children).map { fakeNode(packageName = "example.app", text = "$label-$it") },
+        ),
     )
 
   private fun countWireNodes(element: kotlinx.serialization.json.JsonElement): Int =
@@ -2864,25 +3126,29 @@ class ViewHierarchyExtractorTest {
       else -> 0
     }
 
+  private data class NodeState(
+    val bounds: Rect = Rect(0, 100, 1080, 200),
+    val children: List<android.view.accessibility.AccessibilityNodeInfo> = emptyList(),
+    val enabled: Boolean? = null,
+    val visibleToUser: Boolean = true,
+  )
+
   private fun fakeNode(
     packageName: String,
     text: String? = null,
     resourceId: String? = null,
-    bounds: Rect = Rect(0, 100, 1080, 200),
-    children: List<android.view.accessibility.AccessibilityNodeInfo> = emptyList(),
-    enabled: Boolean? = null,
-    visibleToUser: Boolean = true,
+    state: NodeState = NodeState(),
   ): android.view.accessibility.AccessibilityNodeInfo {
     val node = android.view.accessibility.AccessibilityNodeInfo.obtain()
     node.packageName = packageName
     node.className = "android.widget.TextView"
     node.text = text
     node.viewIdResourceName = resourceId
-    node.setBoundsInScreen(bounds)
-    node.isVisibleToUser = visibleToUser
-    enabled?.let { node.isEnabled = it }
+    node.setBoundsInScreen(state.bounds)
+    node.isVisibleToUser = state.visibleToUser
+    state.enabled?.let { node.isEnabled = it }
     val shadow = org.robolectric.Shadows.shadowOf(node)
-    for (child in children) {
+    for (child in state.children) {
       shadow.addChild(child)
     }
     // The extractor calls findFocus on each window root, which the framework only allows on a
@@ -2895,27 +3161,32 @@ class ViewHierarchyExtractorTest {
     return node
   }
 
+  private data class WindowState(
+    val type: Int = AccessibilityWindowInfo.TYPE_APPLICATION,
+    val focused: Boolean = false,
+    val active: Boolean = false,
+    val bounds: Rect? = null,
+    val title: CharSequence? = null,
+  )
+
   private fun fakeWindow(
     id: Int,
     layer: Int,
     root: android.view.accessibility.AccessibilityNodeInfo?,
-    type: Int = AccessibilityWindowInfo.TYPE_APPLICATION,
-    focused: Boolean = false,
-    active: Boolean = false,
-    bounds: Rect? = null,
-    title: CharSequence? = null,
+    state: WindowState = WindowState(),
   ): AccessibilityWindowInfo {
     val window = AccessibilityWindowInfo.obtain()
     val shadow = org.robolectric.Shadows.shadowOf(window)
-    title?.let { shadow.setTitle(it) }
+    state.title?.let { shadow.setTitle(it) }
     shadow.setId(id)
     shadow.setLayer(layer)
-    shadow.setType(type)
+    shadow.setType(state.type)
     shadow.setRoot(root)
-    shadow.setFocused(focused)
-    shadow.setActive(active)
+    shadow.setFocused(state.focused)
+    shadow.setActive(state.active)
     shadow.setBoundsInScreen(
-      bounds ?: Rect(0, 0, 1080, if (type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400),
+      state.bounds
+        ?: Rect(0, 0, 1080, if (state.type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400),
     )
     return window
   }
@@ -3017,10 +3288,7 @@ class ViewHierarchyExtractorTest {
       )
     // IME root reports the full transparent wrapper bounds, not the actual keyboard rect.
     val imeWrapper =
-      elementWithBounds(
-        resourceId = "ime-wrapper",
-        bounds = bounds(0, 172, 1080, 2410),
-      )
+      elementWithBounds(resourceId = "ime-wrapper", bounds = bounds(0, 172, 1080, 2410))
 
     val appEntry =
       extractor.createWindowEntry(
@@ -3028,8 +3296,7 @@ class ViewHierarchyExtractorTest {
         windowLayer = 0,
         hierarchy = appRoot,
         windowType = "application",
-        isActive = true,
-        isFocused = true,
+        details = WindowDetails(isActive = true, isFocused = true),
       )
     val imeEntry =
       extractor.createWindowEntry(
@@ -3037,8 +3304,7 @@ class ViewHierarchyExtractorTest {
         windowLayer = 5,
         hierarchy = imeWrapper,
         windowType = "input_method",
-        isActive = false,
-        isFocused = false,
+        details = WindowDetails(isActive = false, isFocused = false),
       )
     val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, imeEntry))
     val filtered =
@@ -3084,8 +3350,7 @@ class ViewHierarchyExtractorTest {
         windowLayer = 0,
         hierarchy = appRoot,
         windowType = "application",
-        isActive = true,
-        isFocused = true,
+        details = WindowDetails(isActive = true, isFocused = true),
       )
     val imeEntry =
       extractor.createWindowEntry(
@@ -3093,8 +3358,7 @@ class ViewHierarchyExtractorTest {
         windowLayer = 1,
         hierarchy = keyboardRoot,
         windowType = "input_method",
-        isActive = false,
-        isFocused = false,
+        details = WindowDetails(isActive = false, isFocused = false),
       )
     val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, imeEntry))
     val filtered =
@@ -3136,16 +3400,14 @@ class ViewHierarchyExtractorTest {
         windowId = 46,
         windowLayer = 0,
         hierarchy = appRoot,
-        isActive = true,
-        isFocused = true,
+        details = WindowDetails(isActive = true, isFocused = true),
       )
     val imeEntry =
       extractor.createWindowEntry(
         windowId = 31,
         windowLayer = 1,
         hierarchy = keyboardRoot,
-        isActive = false,
-        isFocused = false,
+        details = WindowDetails(isActive = false, isFocused = false),
       )
     val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, imeEntry))
     val filtered =
@@ -3481,21 +3743,18 @@ class ViewHierarchyExtractorTest {
   @Test
   fun `detectContentHiddenRegions finds large empty non-interactive Compose descendant with sparse child coverage`() {
     val visibleToolbar =
-      elementWithBounds(
-        resourceId = "com.slack:id/top_bar",
-        bounds = bounds(0, 290, 1440, 458),
-      )
+      elementWithBounds(resourceId = "com.slack:id/top_bar", bounds = bounds(0, 290, 1440, 458))
     val hiddenBoundary =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 2752),
-        actions = listOf("accessibility_focus"),
         children = listOf(visibleToolbar),
+        content = ElementContent(actions = listOf("accessibility_focus")),
       )
     val composeRoot =
       elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
         bounds = bounds(0, 0, 1440, 3000),
         children = listOf(hiddenBoundary),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
       )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
@@ -3511,19 +3770,19 @@ class ViewHierarchyExtractorTest {
     val textChild =
       elementWithBounds(
         bounds = bounds(32, 500, 400, 560),
-        text = "general",
+        content = ElementContent(text = "general"),
       )
     val contentRegion =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 2752),
-        actions = listOf("accessibility_focus"),
         children = listOf(textChild),
+        content = ElementContent(actions = listOf("accessibility_focus")),
       )
     val composeRoot =
       elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
         bounds = bounds(0, 0, 1440, 3000),
         children = listOf(contentRegion),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
       )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
@@ -3537,19 +3796,19 @@ class ViewHierarchyExtractorTest {
     val iconButton =
       elementWithBounds(
         bounds = bounds(32, 500, 112, 580),
-        contentDesc = "Open navigation drawer",
+        content = ElementContent(contentDesc = "Open navigation drawer"),
       )
     val contentRegion =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 2752),
-        actions = listOf("accessibility_focus"),
         children = listOf(iconButton),
+        content = ElementContent(actions = listOf("accessibility_focus")),
       )
     val composeRoot =
       elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
         bounds = bounds(0, 0, 1440, 3000),
         children = listOf(contentRegion),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
       )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
@@ -3563,19 +3822,19 @@ class ViewHierarchyExtractorTest {
     val visibleContent =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 1200),
-        text = "Visible conversation content",
+        content = ElementContent(text = "Visible conversation content"),
       )
     val contentRegion =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 2752),
-        actions = listOf("accessibility_focus"),
         children = listOf(visibleContent),
+        content = ElementContent(actions = listOf("accessibility_focus")),
       )
     val composeRoot =
       elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
         bounds = bounds(0, 0, 1440, 3000),
         children = listOf(contentRegion),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
       )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
@@ -3588,14 +3847,14 @@ class ViewHierarchyExtractorTest {
     val contentRegion =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 2752),
-        text = "Conversation list",
-        actions = listOf("accessibility_focus"),
+        content =
+          ElementContent(text = "Conversation list", actions = listOf("accessibility_focus")),
       )
     val composeRoot =
       elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
         bounds = bounds(0, 0, 1440, 3000),
         children = listOf(contentRegion),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
       )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
@@ -3608,14 +3867,17 @@ class ViewHierarchyExtractorTest {
     val contentRegion =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 2752),
-        contentDesc = "Conversation list",
-        actions = listOf("accessibility_focus"),
+        content =
+          ElementContent(
+            contentDesc = "Conversation list",
+            actions = listOf("accessibility_focus"),
+          ),
       )
     val composeRoot =
       elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
         bounds = bounds(0, 0, 1440, 3000),
         children = listOf(contentRegion),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
       )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
@@ -3628,13 +3890,13 @@ class ViewHierarchyExtractorTest {
     val interactiveRegion =
       elementWithBounds(
         bounds = bounds(0, 368, 1440, 2752),
-        actions = listOf("click"),
+        content = ElementContent(actions = listOf("click")),
       )
     val composeRoot =
       elementWithBounds(
-        className = "androidx.compose.ui.platform.ComposeView",
         bounds = bounds(0, 0, 1440, 3000),
         children = listOf(interactiveRegion),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
       )
 
     val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
@@ -3703,24 +3965,28 @@ class ViewHierarchyExtractorTest {
     assertEquals("leaf", optimized.single().children.single().text)
   }
 
+  private data class ElementContent(
+    val className: String? = null,
+    val text: String? = null,
+    val contentDesc: String? = null,
+    val actions: List<String>? = null,
+  )
+
   private fun elementWithBounds(
     resourceId: String? = null,
     viewId: String? = resourceId,
     bounds: ElementBounds? = null,
-    className: String? = null,
-    text: String? = null,
-    contentDesc: String? = null,
-    actions: List<String>? = null,
     children: List<UIElementInfo> = emptyList(),
+    content: ElementContent = ElementContent(),
   ): UIElementInfo {
     return UIElementInfo(
       resourceId = resourceId,
       viewId = viewId,
       bounds = bounds,
-      className = className,
-      text = text,
-      contentDesc = contentDesc,
-      actions = actions,
+      className = content.className,
+      text = content.text,
+      contentDesc = content.contentDesc,
+      actions = content.actions,
       children = children,
     )
   }
@@ -3801,12 +4067,12 @@ class ViewHierarchyExtractorTest {
     val hiddenBoundary =
       elementWithBounds(
         bounds = boundaryBounds,
-        actions = listOf("accessibility_focus"),
+        content = ElementContent(actions = listOf("accessibility_focus")),
       )
     return elementWithBounds(
-      className = "androidx.compose.ui.platform.ComposeView",
       bounds = bounds(0, 0, 1440, 3000),
       children = listOf(hiddenBoundary),
+      content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
     )
   }
 
@@ -3826,16 +4092,20 @@ class ViewHierarchyExtractorTest {
     return null
   }
 
+  private data class WindowDetails(
+    val packageName: String? = null,
+    val isActive: Boolean = true,
+    val isFocused: Boolean = true,
+    val windowBounds: ElementBounds? = null,
+    val isOwnPrototype: Boolean = false,
+  )
+
   private fun ViewHierarchyExtractor.createWindowEntry(
     windowId: Int,
     windowLayer: Int,
     hierarchy: UIElementInfo,
     windowType: String = "application",
-    packageName: String? = null,
-    isActive: Boolean = true,
-    isFocused: Boolean = true,
-    windowBounds: ElementBounds? = null,
-    isOwnPrototype: Boolean = false,
+    details: WindowDetails = WindowDetails(),
   ): Any {
     val windowEntryClass = this.javaClass.declaredClasses.first { it.simpleName == "WindowEntry" }
     val constructor =
@@ -3855,12 +4125,12 @@ class ViewHierarchyExtractorTest {
       windowId,
       windowType,
       windowLayer,
-      packageName,
-      isActive,
-      isFocused,
+      details.packageName,
+      details.isActive,
+      details.isFocused,
       hierarchy,
-      windowBounds,
-      isOwnPrototype,
+      details.windowBounds,
+      details.isOwnPrototype,
     )
   }
 

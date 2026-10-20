@@ -4395,21 +4395,23 @@ describe("AndroidCtrlProxyClient", function () {
       const result =
         accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
-      expect(result.hierarchy.text).toBe("6:43 AM");
-      expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
-      expect(result.hierarchy.class).toBe("android.widget.TextClock");
-      expect(result.hierarchy.className).toBe("android.widget.TextClock");
+      expect(result.hierarchy).toHaveProperty("text", "6:43 AM");
+      expect(result.hierarchy).toHaveProperty("content-desc", "6:43 AM");
+      expect(result.hierarchy).toHaveProperty("class", "android.widget.TextClock");
+      expect(result.hierarchy).toHaveProperty("className", "android.widget.TextClock");
       expect(result.hierarchy.bounds).toEqual({
         left: 175,
         top: 687,
         right: 692,
         bottom: 973,
       });
-      expect(result.hierarchy.clickable).toBeUndefined();
-      expect(result.hierarchy.enabled).toBe("true");
-      expect(result.hierarchy.occlusionState).toBe("partial");
-      expect(result.hierarchy.occludedBy).toBe("Debug menu");
-      expect(result.hierarchy.occludedByViewId).toBe("stable-debug-menu");
+      expect(
+        "clickable" in result.hierarchy ? result.hierarchy.clickable : undefined,
+      ).toBeUndefined();
+      expect(result.hierarchy).toHaveProperty("enabled", "true");
+      expect(result.hierarchy).toHaveProperty("occlusionState", "partial");
+      expect(result.hierarchy).toHaveProperty("occludedBy", "Debug menu");
+      expect(result.hierarchy).toHaveProperty("occludedByViewId", "stable-debug-menu");
       expect(result.intentChooserDetected).toBe(true);
       expect(result.notificationPermissionDetected).toBe(true);
       expect(result.contentHiddenRegions).toEqual([
@@ -4427,7 +4429,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
       expect(result.hierarchy.node.class).toBe("android.widget.TextView");
-      expect(result.hierarchy.node.className).toBe("android.widget.TextView");
+      expect(result.hierarchy.node).toHaveProperty("className", "android.widget.TextView");
       expect(result.hierarchy.node.bounds).toEqual({
         left: 0,
         top: 0,
@@ -4630,7 +4632,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(beforeId).toStartWith(STABLE_VIEW_ID_PREFIX);
       expect(afterId).toBe(beforeId);
       // Resource-id-backed view-ids pass through untouched.
-      expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");
+      expect(before.hierarchy).toHaveProperty("view-id", "com.test.app:id/root");
     });
 
     test("rewrites accessibility-focused mirror occlusion links against the emitted hierarchy ids", function () {

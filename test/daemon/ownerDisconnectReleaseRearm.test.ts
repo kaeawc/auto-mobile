@@ -191,7 +191,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
 
     expect(releaseReasons).toEqual([]);
     expect(ownerSession().assignedDevice).toBe(DEVICE.deviceId);
-    expect(devicePool["ownerDisconnectRelease"].isPending(OWNER_SESSION)).toBe(false);
+    expect(devicePool.testHooks.ownerDisconnectRelease.isPending(OWNER_SESSION)).toBe(false);
   });
 
   arranged("a call that never settles keeps the session only up to the veto ceiling", async () => {

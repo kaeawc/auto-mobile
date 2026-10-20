@@ -53,8 +53,8 @@ function config(outputPath: string): VideoCaptureConfig {
       platform: "ios",
       deviceId: "test-device",
       deviceType: "simulator",
-      booted: true,
-    } as BootedDevice,
+      name: "test-device",
+    } satisfies BootedDevice,
   };
 }
 

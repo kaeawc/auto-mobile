@@ -120,6 +120,7 @@ class McpHttpClientStatelessTest {
       McpHttpClient(
         dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
           endpoint = "http://localhost/mcp",
+          tokenProvider = DaemonHttpTokenProvider { null },
           requestSender = HttpRequestSender { request -> handle(request) },
         ),
       )

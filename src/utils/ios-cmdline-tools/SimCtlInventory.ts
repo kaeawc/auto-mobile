@@ -386,46 +386,51 @@ export class SimCtlInventory {
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
     this.retireStoppedSimulatorDisplays(simulatorList);
-    const devices: DeviceInfo[] = [];
-    for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-      for (const device of runtimeDevices) {
-        logger.debug(`Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`);
-        const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
-        const profile = device.deviceTypeIdentifier
-          ? await this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
-          : null;
-        const displays = await this.displaysForBootedSimulator(device, deadlineMs, signal);
-        const deviceDisplays = simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
-        devices.push({
-          name: device.name,
-          platform: "ios",
-          deviceId: device.udid,
-          isRunning: device.state === "Booted",
-          state: device.state,
-          isAvailable: device.isAvailable,
-          availabilityError: device.availabilityError,
-          iosVersion,
-          osVersion: iosVersion,
-          formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
-          deviceType: device.deviceTypeIdentifier,
-          runtimeId,
-          runtime: runtimeId,
-          model: simulatorModel(device.model, profile),
-          // Simulator processes execute on the host architecture; this does not
-          // require another simctl invocation.
-          architecture: this.context.hostArchitecture,
-          screenWidth: profile?.pixelWidth ?? undefined,
-          screenHeight: profile?.pixelHeight ?? undefined,
-          screenDensity: profile?.dpi ?? undefined,
-          ...(deviceDisplays ? { displays: deviceDisplays } : {}),
-          capabilityInventory: iosSimulatorCapabilityInventory({
+    const devices = await Promise.all(
+      Object.entries(simulatorList.devices).flatMap(([runtimeId, runtimeDevices]) =>
+        runtimeDevices.map(async (device): Promise<DeviceInfo> => {
+          logger.debug(
+            `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
+          );
+          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
+          const [profile, displays] = await Promise.all([
+            device.deviceTypeIdentifier
+              ? this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
+              : Promise.resolve(null),
+            this.displaysForBootedSimulator(device, deadlineMs, signal),
+          ]);
+          const deviceDisplays = simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
+          return {
+            name: device.name,
+            platform: "ios",
+            deviceId: device.udid,
+            isRunning: device.state === "Booted",
+            state: device.state,
             isAvailable: device.isAvailable,
             availabilityError: device.availabilityError,
+            iosVersion,
+            osVersion: iosVersion,
+            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
+            deviceType: device.deviceTypeIdentifier,
+            runtimeId,
             runtime: runtimeId,
-          }),
-        } as DeviceInfo);
-      }
-    }
+            model: simulatorModel(device.model, profile),
+            // Simulator processes execute on the host architecture; this does not
+            // require another simctl invocation.
+            architecture: this.context.hostArchitecture,
+            screenWidth: profile?.pixelWidth ?? undefined,
+            screenHeight: profile?.pixelHeight ?? undefined,
+            screenDensity: profile?.dpi ?? undefined,
+            ...(deviceDisplays ? { displays: deviceDisplays } : {}),
+            capabilityInventory: iosSimulatorCapabilityInventory({
+              isAvailable: device.isAvailable,
+              availabilityError: device.availabilityError,
+              runtime: runtimeId,
+            }),
+          } as DeviceInfo;
+        }),
+      ),
+    );
     devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
     return devices;
   }
@@ -726,6 +731,8 @@ export class SimCtlInventory {
       SimCtlInventory.simulatorDisplays.clear();
     }
     const deadlineMs = timeoutMs === undefined ? undefined : this.context.timer.now() + timeoutMs;
+    // Start optional static metadata alongside the raw list, without making it a readiness gate.
+    void this.context.deviceTypeProfiles.prepare?.();
     const simulatorList = await this.context.listSimulators(timeoutMs, signal);
     return this.mapSimulatorListToDeviceInfos(simulatorList, deadlineMs, signal);
   }

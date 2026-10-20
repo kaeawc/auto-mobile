@@ -37,6 +37,12 @@ class PrototypeHttpClients(val host: PrototypeHttpClient, val device: PrototypeH
     const val VIA_HOST = "host"
     const val VIA_DEVICE = "device"
 
+    /** Embedded apps own network policy; absent a host handler, both routes use the same client. */
+    fun forEmbedded(
+      device: PrototypeHttpClient,
+      hostHandler: PrototypeHttpClient? = null,
+    ): PrototypeHttpClients = PrototypeHttpClients(host = hostHandler ?: device, device = device)
+
     /** Why a saved prototype cannot send `via: "host"`: it runs without a host connection. */
     const val SAVED_HOST_UNAVAILABLE_MESSAGE =
       "Requests via \"host\" are not available in saved prototypes, which run without a host " +

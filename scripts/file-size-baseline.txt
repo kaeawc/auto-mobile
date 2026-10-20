@@ -1,12 +1,8 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
-1027	src/ctrlProxy/CtrlProxyManager.ts
 1288	src/daemon/daemon.ts
 1728	src/daemon/daemonRequestHandlers.ts
 1013	src/daemon/devicePool.ts
-1222	src/daemon/sessionBroker/provisioning/reconciler.ts
-1048	src/daemon/sessionDeviceStateRestore.ts
 5519	src/daemon/sessionManager.ts
-1180	src/daemon/videoStreamSocketServer.ts
 1596	src/doctor/checks/ios.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1502	src/features/video/FfmpegVideoProcessingBackend.ts

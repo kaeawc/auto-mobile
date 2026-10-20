@@ -1,4 +1,6 @@
 import type { BootedDevice, DeviceLockState } from "../models";
+import type { HostChildProcess } from "../utils/HostCommandExecutor";
+import type { CtrlProxyHealthCheckResult } from "./ios/IosCtrlProxyHealthClient";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
 import type { Timer } from "../utils/SystemTimer";
@@ -38,6 +40,12 @@ export interface ReadinessAndroidManager {
 }
 
 export interface ReadinessIosManager {
+  /** Fresh liveness evidence; a timeout alone does not prove the runner is dead. */
+  checkRunningWithReason?(): Promise<CtrlProxyHealthCheckResult>;
+  /** Only an observed child exit proves death; an absent tracked child is inconclusive. */
+  runnerSnapshot?(): {
+    xcTestProcess: Pick<HostChildProcess, "exitCode" | "signalCode"> | null;
+  };
   isInstalled(): Promise<boolean>;
   resetSetupState(): void;
   forceRestart(options?: {
@@ -128,6 +136,7 @@ export interface AndroidFrameworkReadinessResult {
 
 export interface RunnerReadinessDependencies {
   timer: Timer;
+  iosPostSetupRestartMinFailedProbes?: number;
   getAndroidFrameworkReadiness?(
     device: BootedDevice,
     signal: AbortSignal,

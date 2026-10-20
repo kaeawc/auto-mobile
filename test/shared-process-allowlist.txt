@@ -1943,6 +1943,8 @@ test/utils/ios-cmdline-tools/SimCtlClient.unboundDevice.test.ts
 test/utils/ios-cmdline-tools/SimulatorAppPresenter.test.ts
 test/utils/ios-cmdline-tools/SimulatorDeviceTypeProfiles.test.ts
 test/utils/ios-cmdline-tools/SimulatorDisplays.test.ts
+test/utils/ios-cmdline-tools/SimulatorProfileDiscovery.test.ts
+test/utils/ios-cmdline-tools/SimulatorProfileStore.test.ts
 test/utils/ios-cmdline-tools/SimulatorTccSqliteClient.test.ts
 test/utils/ios-cmdline-tools/XcodebuildClient.test.ts
 test/utils/ios-cmdline-tools/XctestrunPlist.test.ts

@@ -4,7 +4,7 @@ import {
   probeDurationMs,
   type RecordingCodecProbe,
 } from "../features/video/recordingCodec";
-import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
+import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
 import type { StartupOrphanCaptures } from "./recordingTeardownRedrive";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";

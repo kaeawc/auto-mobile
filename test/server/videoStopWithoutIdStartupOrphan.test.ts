@@ -6,7 +6,7 @@ import type {
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
 import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { FakeHostRecorderProcessControl } from "../fakes/FakeHostRecorderProcessControl";
-import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
+import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
 import * as videoManager from "../../src/server/videoRecordingManager";
 import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
 import { SessionManager } from "../../src/daemon/sessionManager";

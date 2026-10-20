@@ -11,7 +11,7 @@ import {
 } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   InputDeviceOwnedError,

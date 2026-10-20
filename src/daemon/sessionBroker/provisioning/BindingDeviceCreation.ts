@@ -627,6 +627,7 @@ export class BindingDeviceCreation {
       evidence.deletedStableId = oldId;
       deletedEntry = deletion.entry;
       emptied = deletion.assignment;
+      reservation?.markReplacedDeviceGone();
     } finally {
       this.deps.journal.inFlight.delete(opened.entry.id);
     }
@@ -707,14 +708,15 @@ export class BindingDeviceCreation {
     if (!this.deps.capacity) {
       return undefined;
     }
-    const replacingDeviceId =
-      assignment.platform === request.platform && holdsBootBinding(device)
-        ? (device.deviceId ??
-          (await this.deps.inventory.runtimeDeviceId?.(device, { signal: request.signal })))
-        : undefined;
+    const freesSlot = assignment.platform === request.platform && holdsBootBinding(device);
     this.host.checkBudget(request);
     const check = await this.deps.capacity.reserve(request.platform, {
-      replacingDeviceId,
+      replacingDeviceId: freesSlot ? device.deviceId : undefined,
+      resolveReplacingDeviceId:
+        freesSlot && !device.deviceId
+          ? (options) =>
+              this.deps.inventory.runtimeDeviceId?.(device, options) ?? Promise.resolve(undefined)
+          : undefined,
       timeoutMs: Math.max(1, request.deadlineMs - this.deps.timer.now()),
       signal: request.signal,
     });

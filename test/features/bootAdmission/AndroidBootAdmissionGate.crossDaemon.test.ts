@@ -404,3 +404,74 @@ test("releasing an unused replacement reservation removes its peer publication o
   (await gates[1].admit(request)).release();
   await expect(reservation.run(async () => gates[0].admit(request))).rejects.toThrow("released");
 });
+
+test("serial reuse after verified deletion preserves replacement admission locally and for peers", async () => {
+  const { source, gates, host } = setup("2");
+  source.emulatorSerials = ["emulator-5554"];
+  const bootB = await gates[1].admit(request);
+  const replacement = await gates[0].reserveBoot({
+    replacingDeviceId: "emulator-5554",
+    timeoutMs: 60_000,
+  });
+  source.emulatorSerials = [];
+  // Optional invocation lets the old-source regression run reach the incorrect capacity count.
+  replacement.markReplacedDeviceGone?.();
+  replacement.markReplacedDeviceGone?.();
+  bootB.handOff("emulator-5554");
+  source.emulatorSerials = ["emulator-5554"];
+  bootB.release();
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+    exhausted(await rejected(gate.admit(request)), 2);
+  }
+  expect([...host.records.values()][0].deviceId).toBeUndefined();
+  const admission = await replacement.run(() => gates[0].admit(request));
+  admission.handOff(undefined);
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  }
+  admission.release();
+});
+
+test("provisioning failure cannot release the boot's consumed peer admission", async () => {
+  const { source, gates, host, timer } = setup("1");
+  source.emulatorSerials = ["OLD"];
+  const replacement = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 1000 });
+  source.emulatorSerials = [];
+  let release = () => {};
+  await expect(
+    replacement.run(async () => {
+      const boot = await gates[0].admit(request);
+      boot.handOff("emulator-5554");
+      release = boot.release;
+      throw new Error("provision failed after spawn");
+    }),
+  ).rejects.toThrow("provision failed after spawn");
+  replacement.release();
+  expect(host.records.size).toBe(1);
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 1 });
+    exhausted(await rejected(gate.admit(request)));
+  }
+  timer.advanceTime(1000);
+  for (const gate of gates) {
+    expect((await gate.describeCapacity()).inFlight).toBe(0);
+  }
+  release();
+  expect(host.records.size).toBe(0);
+});
+
+test("failure to clear the deleted identity fails closed before replacement provisioning", async () => {
+  const { source, gates, registries } = setup("1");
+  source.emulatorSerials = ["OLD"];
+  const replacement = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 1000 });
+  source.emulatorSerials = [];
+  registries[0].failWrites = true;
+  expect(() => replacement.markReplacedDeviceGone()).toThrow(
+    AndroidBootedDeviceDiscoveryIncompleteError,
+  );
+  expect((await gates[0].describeCapacity()).inFlight).toBe(1);
+  registries[0].failWrites = false;
+  replacement.markReplacedDeviceGone();
+  replacement.release();
+});

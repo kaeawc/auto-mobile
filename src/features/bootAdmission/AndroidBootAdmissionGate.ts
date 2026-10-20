@@ -119,16 +119,20 @@ export class AndroidBootAdmissionGate
       { ...options, avdName: "binding replacement" },
       options.replacingDeviceId,
     );
-    return this.reservations.hold(() => {
-      reserved.bind();
-      return reserved.admission;
-    }, reserved.admission.release);
+    return this.reservations.hold(
+      () => {
+        reserved.bind();
+        return reserved.admission;
+      },
+      reserved.admission.release,
+      reserved.markReplacedDeviceGone,
+    );
   }
 
   private async admitNew(
     request: AndroidBootAdmissionRequest,
     replacingDeviceId?: string,
-  ): Promise<{ admission: BootAdmission; bind: () => void }> {
+  ): Promise<{ admission: BootAdmission; bind: () => void; markReplacedDeviceGone: () => void }> {
     const deadlineMs = this.timer.now() + request.timeoutMs;
     let admitted: LedgerAdmission | undefined;
     let published: PublishedBootAdmission | undefined;
@@ -232,7 +236,16 @@ export class AndroidBootAdmissionGate
     };
     return {
       admission,
-      // Peers keep the old slot's identity until handOff supplies the new runtime serial.
+      markReplacedDeviceGone: () => {
+        ledgerAdmission.bind();
+        // This write must succeed before provisioning: retaining the old serial could hide the
+        // reservation from peers once an unrelated emulator reuses that serial.
+        try {
+          published?.clearDeviceId();
+        } catch (error) {
+          throw this.registryFailure(error);
+        }
+      },
       bind: () => ledgerAdmission.bind(),
     };
   }
@@ -372,22 +385,19 @@ export class AndroidBootAdmissionGate
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
     this.forgetExitedSerials(sample);
     const { limits, effective: bootedCount } = this.count(sample, window, peers);
+    const credit =
+      replacingDeviceId !== undefined && sample.emulatorSerials.includes(replacingDeviceId) ? 1 : 0;
+    if (bootedCount - credit < limits.maxBooted) {
+      return { outcome: "allow", limits, bootedCount };
+    }
     return (
-      atCapacityDecision(
-        bootedCount -
-          (replacingDeviceId !== undefined && sample.emulatorSerials.includes(replacingDeviceId)
-            ? 1
-            : 0),
-        limits,
-        this.retryAfterMs,
-        {
-          noun: "emulator",
-          envName: ANDROID_MAX_BOOTED_ENV,
-          externalDevices: sample.emulatorSerials.filter(
-            (serial) => !this.startedSerials.has(serial),
-          ),
-        },
-      ) ?? { outcome: "allow", limits, bootedCount }
+      atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
+        noun: "emulator",
+        envName: ANDROID_MAX_BOOTED_ENV,
+        externalDevices: sample.emulatorSerials.filter(
+          (serial) => !this.startedSerials.has(serial),
+        ),
+      }) ?? { outcome: "allow", limits, bootedCount }
     );
   }
 

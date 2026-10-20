@@ -19,6 +19,7 @@ import { FakeFleetHostSource } from "../../../fakes/FakeFleetHostSource";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { drainMicrotasks, drainUntil } from "../../../helpers/fakeTimerStepping";
 import {
   FakeClaims,
   FakeDeleter,
@@ -257,8 +258,98 @@ for (const platform of ["ios", "android"] as const) {
       expect(result.outcome).toBe("failed");
       if (result.outcome === "failed") {
         expect(result.failure.code).toBe("capacity_exhausted");
+        if (platform === "android") {
+          expect(result.failure.capacity?.booted).toBe(3);
+          expect(result.failure.message).toContain("3");
+        }
       }
       expect(h.deleter.calls).toHaveLength(0);
     });
   });
 }
+
+test("Android serial reuse cannot hide the replacement's held slot before consumption", async () => {
+  const h = await setup("android");
+  if (!(h.gate instanceof AndroidBootAdmissionGate)) {
+    throw new Error("expected Android gate");
+  }
+  h.setBooted(["emulator-5554"]);
+  const bootB = await h.gate.admit({ avdName: "B", timeoutMs: 60_000 });
+  h.deleter.afterDelete = async () => {
+    // B was admitted before reservation; deleting OLD frees its lowest console port for B.
+    h.setBooted(["emulator-5554"]);
+    bootB.handOff("emulator-5554");
+    bootB.release();
+  };
+  h.provisioner.beforeCreate = async () => {
+    expect(await h.gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+    await h.boot("REPLACEMENT");
+  };
+  expect((await h.reconciler.reconcile(h.request)).outcome).toBe("ready");
+});
+
+test("Android provision failure after consumption retains an unlisted handed-off boot", async () => {
+  const h = await setup("android");
+  if (!(h.gate instanceof AndroidBootAdmissionGate)) {
+    throw new Error("expected Android gate");
+  }
+  const gate = h.gate;
+  let release = () => {};
+  h.deleter.afterDelete = async () => h.setBooted(["OTHER"]);
+  h.provisioner.beforeCreate = async () => {
+    const admission = await gate.admit({ avdName: "REPLACEMENT", timeoutMs: 60_000 });
+    admission.handOff("emulator-5556");
+    release = admission.release;
+    throw new Error("readiness failed after spawn");
+  };
+  expect((await h.reconciler.reconcile(h.request)).outcome).toBe("failed");
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  await expect(gate.admit({ avdName: "C", timeoutMs: 60_000 })).rejects.toBeInstanceOf(
+    BootCapacityExhaustedError,
+  );
+  h.timer.advanceTime(60_000);
+  expect((await gate.describeCapacity()).inFlight).toBe(0);
+  release();
+});
+
+test("Android runtime lookup is bounded before deletion and ignores a late serial", async () => {
+  const h = await setup("android");
+  h.old.deviceId = undefined;
+  let lookupStarted = false;
+  let lookupSignal: AbortSignal | undefined;
+  let resolve: (serial: string) => void = () => {};
+  h.inventory.runtimeDeviceId = async (_device, options) => {
+    lookupStarted = true;
+    lookupSignal = options.signal;
+    return await new Promise<string>((done) => {
+      resolve = done;
+    });
+  };
+  let result: Awaited<ReturnType<typeof h.reconciler.reconcile>> | undefined;
+  const pending = h.reconciler.reconcile(h.request).then((value) => {
+    result = value;
+    return value;
+  });
+  await drainUntil(() => lookupStarted, { description: "runtime lookup" });
+  h.timer.advanceTime(5_000);
+  await drainMicrotasks(200);
+  expect(result).toMatchObject({ outcome: "failed", failure: { code: "discovery_incomplete" } });
+  expect(lookupSignal?.aborted).toBe(true);
+  expect(h.deleter.calls).toHaveLength(0);
+  resolve("emulator-5554");
+  await pending;
+  await drainMicrotasks(200);
+  expect((await h.gate.describeCapacity()).inFlight).toBe(0);
+  expect(h.deleter.calls).toHaveLength(0);
+});
+
+test("unmatched Android runtime lookup grants no replacement credit", async () => {
+  const h = await setup("android");
+  h.old.deviceId = undefined;
+  h.inventory.runtimeDeviceId = async () => undefined;
+  expect(await h.reconciler.reconcile(h.request)).toMatchObject({
+    outcome: "failed",
+    failure: { code: "capacity_exhausted", capacity: { booted: 2 } },
+  });
+  expect(h.deleter.calls).toHaveLength(0);
+});

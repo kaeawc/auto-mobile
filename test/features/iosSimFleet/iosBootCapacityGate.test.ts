@@ -173,6 +173,7 @@ test("replacement reserves one slot before deletion and binds without another fl
   const reservation = await gate.reserveBoot({ replacingDeviceId: A, timeoutMs: 60_000 });
   expect(await gate.describeCapacity()).toMatchObject({ booted: 2, inFlight: 0 });
   source.immediate = [sim(B, "Booted")];
+  reservation.markReplacedDeviceGone();
   expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
   expect((await gate.admitBoot(undefined, { bootUdid: "COMPETITOR" })).decision.outcome).toBe(
     "refuse",

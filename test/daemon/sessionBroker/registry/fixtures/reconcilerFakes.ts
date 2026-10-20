@@ -1,5 +1,7 @@
-import type { BindingBootReservation } from "../../../../../src/daemon/sessionBroker/provisioning/reconcilerContracts";
-import type { BootReservationOptions } from "../../../../../src/devices/bootAdmission/BootSlotReservation";
+import type {
+  BindingBootReservation,
+  BindingBootReservationOptions,
+} from "../../../../../src/daemon/sessionBroker/provisioning/reconcilerContracts";
 import {
   deviceStableId,
   type BindingBootCapacity,
@@ -192,19 +194,25 @@ export class FakeCapacity implements BindingBootCapacity {
   checks = 0;
   async reserve(
     _platform: BindingPlatform,
-    options: BootReservationOptions,
+    options: BindingBootReservationOptions,
   ): Promise<BindingBootReservation> {
+    const replacingDeviceId = options.resolveReplacingDeviceId
+      ? await options.resolveReplacingDeviceId({ signal: options.signal })
+      : options.replacingDeviceId;
     const result = await this.check();
     if (
       result.kind === "unknown" ||
-      (result.kind === "exhausted" &&
-        result.booted - (options.replacingDeviceId ? 1 : 0) >= result.limit)
+      (result.kind === "exhausted" && result.booted - (replacingDeviceId ? 1 : 0) >= result.limit)
     ) {
       return result;
     }
     return {
       kind: "available",
-      reservation: { run: (operation) => operation(), release: () => {} },
+      reservation: {
+        run: (operation) => operation(),
+        release: () => {},
+        markReplacedDeviceGone: () => {},
+      },
     };
   }
   async check(): Promise<BindingCapacityCheck> {

@@ -311,6 +311,15 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     this.write(record);
     let removed = false;
     return {
+      clearDeviceId: () => {
+        if (removed) {
+          return;
+        }
+        const next = { ...record };
+        delete next.deviceId;
+        this.write(next);
+        record = next;
+      },
       update: (update) => {
         if (removed) {
           return;

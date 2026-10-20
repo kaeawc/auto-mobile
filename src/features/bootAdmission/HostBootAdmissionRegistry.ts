@@ -16,6 +16,8 @@ export interface HostBootAdmissionRecord {
 }
 
 export interface PublishedBootAdmission {
+  /** Forget a deleted replacement target. No-op after remove(). */
+  clearDeviceId(): void;
   /** Later hand-off data. No-op after remove(). */
   update(
     fields: Pick<

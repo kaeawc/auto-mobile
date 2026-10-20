@@ -87,6 +87,16 @@ export class FakeHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     this.host.records.set(id, { id, ownerPid: this.pid, ...fields });
     let removed = false;
     return {
+      clearDeviceId: () => {
+        if (removed) {
+          return;
+        }
+        this.checkWrite();
+        const record = this.host.records.get(id);
+        if (record) {
+          delete record.deviceId;
+        }
+      },
       update: (update) => {
         if (removed) {
           return;

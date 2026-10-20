@@ -4,6 +4,8 @@ import { ActionableError } from "../../models/ActionableError";
 /** A slot held before destructive replacement; consumption transfers it to the boot lifecycle. */
 export interface BootSlotReservation {
   run<T>(operation: () => Promise<T>): Promise<T>;
+  /** After verified deletion, forget the old identity so serial reuse cannot hide this slot. */
+  markReplacedDeviceGone(): void;
   /** Idempotent. Releases an unconsumed slot; the boot owns a consumed slot. */
   release(): void;
 }
@@ -40,7 +42,11 @@ export class BootReservationScope<T> {
     return pending.consume(deviceId);
   }
 
-  hold(consume: (deviceId?: string) => T, release: () => void): BootSlotReservation {
+  hold(
+    consume: (deviceId?: string) => T,
+    release: () => void,
+    markReplacedDeviceGone: () => void = () => {},
+  ): BootSlotReservation {
     const pending: PendingBoot<T> = { active: true, consume };
     return {
       run: async (operation) => {
@@ -53,10 +59,15 @@ export class BootReservationScope<T> {
           succeeded = true;
           return result;
         } finally {
-          if (!succeeded) {
+          if (!succeeded && pending.active) {
             pending.active = false;
             release();
           }
+        }
+      },
+      markReplacedDeviceGone: () => {
+        if (pending.active) {
+          markReplacedDeviceGone();
         }
       },
       release: () => {

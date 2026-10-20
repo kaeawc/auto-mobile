@@ -220,6 +220,7 @@ export class IosSimCapacityGate
         return { decision: result.decision, releaseAdmission: release };
       },
       () => release({ bootFailed: true }),
+      () => held.bind(),
     );
   }
 

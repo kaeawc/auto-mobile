@@ -1,8 +1,5 @@
-import type {
-  BootSlotReservation,
-  BootReservationOptions,
-} from "../../../devices/bootAdmission/BootSlotReservation";
-import type { BindingBootReservation } from "./reconcilerContracts";
+import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
+import type { BindingBootReservation, BindingBootReservationOptions } from "./reconcilerContracts";
 import {
   assertBootCapacityAvailable,
   reserveBootCapacity,
@@ -40,7 +37,7 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
 
   async reserve(
     platform: BindingPlatform,
-    options: BootReservationOptions,
+    options: BindingBootReservationOptions,
   ): Promise<BindingBootReservation> {
     const controller = new AbortController();
     const signal = options.signal
@@ -51,7 +48,11 @@ export class GateBindingBootCapacity implements BindingBootCapacity {
     try {
       const reservation = await raceWithDeadline(
         async () => {
-          pending = await this.reserveCapacity(platform, { ...options, signal });
+          const replacingDeviceId = options.resolveReplacingDeviceId
+            ? await options.resolveReplacingDeviceId({ signal })
+            : options.replacingDeviceId;
+          signal.throwIfAborted();
+          pending = await this.reserveCapacity(platform, { ...options, replacingDeviceId, signal });
           if (signal.aborted) {
             pending.release();
             signal.throwIfAborted();

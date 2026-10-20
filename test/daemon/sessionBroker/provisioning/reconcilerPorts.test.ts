@@ -417,6 +417,7 @@ test("late reservation after adapter timeout is released", async () => {
   expect(await result).toMatchObject({ kind: "unknown" });
   complete?.({
     run: (operation) => operation(),
+    markReplacedDeviceGone: () => {},
     release: () => {
       released += 1;
     },

@@ -204,10 +204,15 @@ export type BindingBootReservation =
   | { kind: "available"; reservation: BootSlotReservation }
   | Exclude<BindingCapacityCheck, { kind: "available" }>;
 
+export interface BindingBootReservationOptions extends BootReservationOptions {
+  /** Runtime discovery shares the capacity reservation's deadline and cancellation. */
+  resolveReplacingDeviceId?: (options: { signal?: AbortSignal }) => Promise<string | undefined>;
+}
+
 export interface BindingBootCapacity {
   reserve(
     platform: BindingPlatform,
-    options: BootReservationOptions,
+    options: BindingBootReservationOptions,
   ): Promise<BindingBootReservation>;
   check(
     platform: BindingPlatform,

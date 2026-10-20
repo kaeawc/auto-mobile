@@ -169,6 +169,7 @@ export async function reserveBootCapacity(
     (await gates[platform]?.reserveBoot(options)) ?? {
       run: (operation) => operation(),
       release: () => {},
+      markReplacedDeviceGone: () => {},
     }
   );
 }

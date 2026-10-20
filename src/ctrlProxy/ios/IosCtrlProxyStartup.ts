@@ -47,6 +47,7 @@ interface IosCtrlProxyStartupHost {
     perf: PerformanceTracker,
     delayMs: number,
     windowMs: number,
+    firstLaunchOwned: boolean,
   ): Promise<boolean>;
   checkHealthEndpointOnPortForDevice(
     port: number,
@@ -84,6 +85,7 @@ export class IosCtrlProxyStartup {
       | "sharedStart"
       | "timer"
       | "isStopping"
+      | "isProcessSupervisorRestarting"
       | "xcTestProcessId"
       | "servicePort"
       | "device"
@@ -265,12 +267,13 @@ export class IosCtrlProxyStartup {
         perf,
         delayMs,
         defaultHealthPollDurationMs,
+        !waitedForStartingRunner && !this.state.isProcessSupervisorRestarting,
       )
     ) {
       return;
     }
 
-    // The tracked first launch may have raised the shared deadline above the default.
+    // The owned first launch may have raised the shared deadline above the default.
     const timeoutSeconds = Math.round(
       ((sharedStart.healthPollDeadlineMs ?? 0) - healthPollStartedAt) / 1000,
     );

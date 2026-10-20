@@ -1769,6 +1769,50 @@ describe("IosCtrlProxyBuilder", function () {
       );
     });
 
+    test.each([false, true])(
+      "cache requires an unchanged bundle during inspection (mutate=%s)",
+      async (mutate) => {
+        if (process.platform !== "darwin") {
+          return;
+        }
+        const { builder, verifier } = await buildForCodesign();
+        process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+        const appPath = await builder.getRunnerAppPath("simulator");
+        if (!appPath) {
+          throw new Error("missing fixture app");
+        }
+        const resource = path.join(appPath, "cache-race-resource");
+        await fs.writeFile(resource, "tampered");
+        const checking = spyOn(verifier, "verifyAppBundle").mockImplementation(async () => {
+          if (mutate) {
+            await fs.writeFile(resource, "good");
+          }
+          return verifier.outcome;
+        });
+        try {
+          await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+          // Restore the pre-check tree: a poisoned cache would accept it here.
+          await fs.writeFile(resource, "tampered");
+          if (mutate) {
+            verifier.outcome = {
+              verified: false,
+              notarized: false,
+              teamId: null,
+              detail: "tampered",
+            };
+            await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+              "Refusing to launch",
+            );
+          } else {
+            await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+          }
+          expect(checking).toHaveBeenCalledTimes(mutate ? 2 : 1);
+        } finally {
+          checking.mockRestore();
+        }
+      },
+    );
+
     test("unchanged signed bundle executes 3 then 0 commands; changed resources and signatures reverify", async () => {
       if (process.platform !== "darwin") {
         return;

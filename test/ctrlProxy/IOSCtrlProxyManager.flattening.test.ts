@@ -639,10 +639,10 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       completed: false,
     };
     await expect(manager.startInternal(shared)).rejects.toThrow(
-      "CtrlProxy failed to start within timeout (60s)",
+      "CtrlProxy failed to start within timeout (30s)",
     );
     expect(events).toEqual([
-      "[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID 123) never became healthy within 60s; terminating it so the next start spawns a fresh runner",
+      "[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID 123) never became healthy within 30s; terminating it so the next start spawns a fresh runner",
       "remote stop",
       "[IOSCtrlProxy] Remote runner stop of hung runner 123 failed: remote stop unavailable",
       "cache",

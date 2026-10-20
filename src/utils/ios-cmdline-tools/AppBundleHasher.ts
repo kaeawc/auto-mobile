@@ -57,7 +57,7 @@ const collectPaths = async (
 export const hashAppBundle = async (
   bundlePath: string,
   deps: AppBundleHasherDependencies = defaultDependencies,
-  options: { includeSigningMetadata?: boolean } = {},
+  options: { includeSigningMetadata?: boolean; lengthPrefixed?: boolean } = {},
 ): Promise<string> => {
   const hash = createHash("sha256");
   const files: string[] = [];
@@ -65,11 +65,20 @@ export const hashAppBundle = async (
   files.sort();
   for (const relativePath of files) {
     const fullPath = join(bundlePath, relativePath);
-    hash.update(relativePath);
-    hash.update("\0");
     const contents = await deps.readFile(fullPath);
-    hash.update(contents);
-    hash.update("\0");
+    // Preserve the legacy digest for persisted app-content/compatibility hashes.
+    // Security cache keys opt into unambiguous byte-length framing instead.
+    for (const bytes of [Buffer.from(relativePath, "utf8"), contents]) {
+      if (options.lengthPrefixed) {
+        const length = Buffer.alloc(8);
+        length.writeBigUInt64BE(BigInt(bytes.length));
+        hash.update(length);
+        hash.update(bytes);
+      } else {
+        hash.update(bytes);
+        hash.update("\0");
+      }
+    }
   }
   return hash.digest("hex");
 };

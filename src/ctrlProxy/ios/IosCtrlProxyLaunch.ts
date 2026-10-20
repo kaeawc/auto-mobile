@@ -569,6 +569,8 @@ export class IosCtrlProxyLaunch {
   }
 
   async startProcessSupervision(): Promise<void> {
+    this.consecutiveHealthMisses = 0;
+    this.supervisedPid = this.state.xcTestProcessId;
     if (!this.state.isProcessSupervisorRestarting) {
       await this.state.processSupervisor.start();
     }

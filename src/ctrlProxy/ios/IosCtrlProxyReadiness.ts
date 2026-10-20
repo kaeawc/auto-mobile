@@ -88,9 +88,9 @@ export class IosCtrlProxyReadiness {
    * terminated and startup fails with an actionable error inside the deadline.
    *
    * Only a runner this manager tracks is bounded this way; an adopted external
-   * runner keeps the whole deadline, as before. The first tracked launch raises
-   * the shared default deadline to cover its full cold-launch window. Subsequent
-   * launches never extend the shared budget.
+   * runner keeps the whole deadline, as before. Only a first launch spawned by
+   * this start raises the shared default deadline for its full cold-launch
+   * window; deferred runners and supervisor restarts retain the existing budget.
    *
    * Returns true once startup completed; false when the shared deadline ended
    * without a relaunch, leaving the caller's existing timeout handling in charge.
@@ -100,6 +100,7 @@ export class IosCtrlProxyReadiness {
     perf: PerformanceTracker,
     delayMs: number,
     windowMs: number,
+    firstLaunchOwned: boolean,
   ): Promise<boolean> {
     const launchWindowsMs: number[] = [];
     for (;;) {
@@ -112,7 +113,11 @@ export class IosCtrlProxyReadiness {
       const launchDeadlineMs = bounded
         ? this.state.timer.now() + launchWindowMs
         : Number.POSITIVE_INFINITY;
-      this.extendFirstLaunchDeadline(sharedStart, launchWindowsMs.length === 1, launchDeadlineMs);
+      this.extendFirstLaunchDeadline(
+        sharedStart,
+        firstLaunchOwned && launchWindowsMs.length === 1,
+        launchDeadlineMs,
+      );
       if (
         await this.state.steps.waitForHealthEndpoint(sharedStart, perf, delayMs, launchDeadlineMs)
       ) {

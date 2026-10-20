@@ -8,6 +8,10 @@ import { logger } from "../../src/utils/logger";
 import { PortManager } from "../../src/utils/PortManager";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import {
+  DefaultProcessSupervisor,
+  type ProcessSupervisorOptions,
+} from "../../src/utils/ProcessSupervisor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
 
@@ -45,6 +49,7 @@ interface Harness {
   /** Fake-clock time of each runner launch's first health poll. */
   launches: number[];
   terminated: number[];
+  restartSupervisor(): Promise<void>;
 }
 
 /**
@@ -53,21 +58,28 @@ interface Harness {
  */
 function createHarness(
   healthy: (launchIndex: number, sinceLaunchMs: number) => boolean,
-  options: { exitOnTerminate?: boolean } = {},
+  options: { exitOnTerminate?: boolean; deferredPid?: number } = {},
 ): Harness {
   const timer = new FakeTimer();
   const executor = new FakeProcessExecutor();
   const launchedPids = (): number[] =>
     executor.getSpawnedProcesses().map((spawned) => spawned.process.pid ?? -1);
   const terminated: number[] = [];
+  let supervisorOptions: ProcessSupervisorOptions | undefined;
   const manager: IOSCtrlProxyManager = IOSCtrlProxyManager.createForTestingWithOptions({
     device: DEVICE,
     timer,
     builder: fakeBuilder(),
     processExecutor: executor,
+    processSupervisorFactory: (options) => {
+      supervisorOptions = options;
+      return new DefaultProcessSupervisor(options);
+    },
     steps: {
       isOwnRunnerProcessAlive: async (pid = manager.getXcTestProcessId()) =>
-        pid !== null && launchedPids().includes(pid) && !terminated.includes(pid),
+        pid !== null &&
+        (launchedPids().includes(pid) || pid === options.deferredPid) &&
+        !terminated.includes(pid),
       terminateHungRunnerProcess: async (pid) => {
         terminated.push(pid);
         if (options.exitOnTerminate) {
@@ -81,7 +93,19 @@ function createHarness(
       },
     },
   });
-  const harness: Harness = { manager, executor, timer, launches: [], terminated };
+  const harness: Harness = {
+    manager,
+    executor,
+    timer,
+    launches: [],
+    terminated,
+    restartSupervisor: async () => {
+      if (!supervisorOptions) {
+        throw new Error("missing supervisor options");
+      }
+      await supervisorOptions.restart();
+    },
+  };
   executor.setCommandResponse("pgrep", createExecResult("", ""));
   executor.setCommandHandler("curl -s", () => {
     // The health poll begins right after each launch, so record launches here.
@@ -225,6 +249,32 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     expect(harness.launches).toHaveLength(2);
     expect(harness.launches[1] - harness.launches[0]).toBe(60_000);
     expect(harness.timer.now() - harness.launches[0]).toBe(75_000);
+  });
+
+  test("a deferred runner without our exit handler retains the 30s default budget", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness(() => false, { deferredPid: 12345 });
+    harness.manager.testHooks.setState({ xcTestProcessId: 12345 });
+    harness.timer.enableAutoAdvance();
+    const startedAt = harness.timer.now();
+    await expect(harness.manager.start()).rejects.toThrow(
+      "CtrlProxy failed to start within timeout (30s)",
+    );
+    expect(harness.launches).toEqual([]);
+    expect(harness.executor.getSpawnedProcesses()).toHaveLength(0);
+    expect(harness.terminated).toEqual([12345]);
+    expect(harness.timer.now() - startedAt).toBe(30_000);
+  });
+
+  test("supervisor restarts retain the 30s default health budget", async () => {
+    delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
+    const harness = createHarness(() => false);
+    harness.timer.enableAutoAdvance();
+    await expect(harness.restartSupervisor()).rejects.toThrow(
+      "CtrlProxy failed to start within timeout (30s)",
+    );
+    expect(harness.launches).toHaveLength(1);
+    expect(harness.timer.now() - harness.launches[0]).toBe(30_000);
   });
 
   test("gives a frozen first launch exactly twice the default window without a caller extension", async () => {

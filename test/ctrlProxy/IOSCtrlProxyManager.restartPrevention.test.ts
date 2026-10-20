@@ -819,8 +819,8 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         await expect(defaultStart).rejects.toThrow("CtrlProxy failed to start within timeout");
       });
 
-      // The cold-launch floor survives removal of the caller's longer budget.
-      expect(curlCalls).toBe(5);
+      // Deferred runners retain the default budget after the caller extension is removed.
+      expect(curlCalls).toBe(4);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(0);
     });
 
@@ -1310,6 +1310,32 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(restarts).toBe(1);
       supervisor.stop();
+    });
+
+    test("starting supervision resets misses after stop for the same PID", async () => {
+      const probe = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: probe.factory,
+        healthMissThreshold: 2,
+      });
+      manager.testHooks.setState({ xcTestProcessId: 12345 });
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("kill -0 12345", createExecResult("", ""));
+      expect(await probe.supervisor.isAlive()).toBe(true);
+      probe.supervisor.stop();
+      const running = spyOn(manager, "isRunning").mockResolvedValue(true);
+      try {
+        // Reusing a running service goes through startProcessSupervision.
+        await manager.start();
+        expect(await probe.supervisor.isAlive()).toBe(true);
+        expect(await probe.supervisor.isAlive()).toBe(false);
+      } finally {
+        running.mockRestore();
+        probe.supervisor.stop();
+      }
     });
 
     test("a dead tracked runner bypasses the live-process miss allowance", async () => {

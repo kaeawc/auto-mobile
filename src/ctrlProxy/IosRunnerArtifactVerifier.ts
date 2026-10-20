@@ -169,12 +169,14 @@ export class IosRunnerArtifactVerifier {
   private cachedAppBundleHash: Map<IOSCtrlProxyPlatform, string | null> = new Map();
   // Cache successful raw inspections only. Gatekeeper failures can be transient,
   // and exceptions/timeouts must be retried. Live launch policy is always reapplied.
+  // A cached spctl success lasts the daemon lifetime: later revocation is unseen.
+  // Acceptable for warn-by-default policy; simulators do not enforce signing.
   private readonly codesignOutcomes = new Map<string, CodesignVerificationOutcome>();
 
   constructor(
     private readonly host: IosRunnerArtifactVerifierHost,
     private readonly hashRunnerBundle = (appPath: string): Promise<string> =>
-      hashAppBundle(appPath, undefined, { includeSigningMetadata: true }),
+      hashAppBundle(appPath, undefined, { includeSigningMetadata: true, lengthPrefixed: true }),
   ) {}
 
   /** A replacement extraction invalidates every platform's local integrity pin. */
@@ -692,15 +694,7 @@ export class IosRunnerArtifactVerifier {
 
     let outcome: CodesignVerificationOutcome;
     try {
-      // The preceding gate hashes a selected executable, not the entire signed
-      // tree. Include signatures/resources here so changing either invalidates it.
-      const digest = await this.hashRunnerBundle(appPath);
-      const key = `${appPath}:${digest}`;
-      const cached = this.codesignOutcomes.get(key);
-      outcome = cached ?? (await this.host.getSettings().codesignVerifier.verifyAppBundle(appPath));
-      if (outcome.verified && outcome.notarized === true && outcome.cacheable !== false) {
-        this.codesignOutcomes.set(key, outcome);
-      }
+      outcome = await this.inspectRunnerCodesign(appPath);
     } catch (error) {
       // The codesign/spctl tools themselves errored (e.g. not installed). Treat
       // as a non-fatal warning by default so a broken toolchain does not block
@@ -726,6 +720,31 @@ export class IosRunnerArtifactVerifier {
       `Code-signing verification issues for the ${platform} runner: ${problems.join("; ")}.` +
       (outcome.detail ? ` (${outcome.detail})` : "");
     this.applyCodesignPolicy(summary, requireCodesign);
+  }
+
+  /** Cache an inspection only when the signed tree is stable across the check. */
+  private async inspectRunnerCodesign(appPath: string): Promise<CodesignVerificationOutcome> {
+    // The preceding gate hashes a selected executable, not the entire signed
+    // tree. Include signatures/resources here so changing either invalidates it.
+    const digest = await this.hashRunnerBundle(appPath);
+    const key = `${appPath}:${digest}`;
+    const cached = this.codesignOutcomes.get(key);
+    if (cached) {
+      return cached;
+    }
+    const outcome = await this.host.getSettings().codesignVerifier.verifyAppBundle(appPath);
+    // Never associate an inspection of a changed tree with the pre-check digest.
+    // A change is inconclusive for caching only; launch policy still uses this outcome.
+    const verifiedDigest = await this.hashRunnerBundle(appPath);
+    if (
+      digest === verifiedDigest &&
+      outcome.verified &&
+      outcome.notarized === true &&
+      outcome.cacheable !== false
+    ) {
+      this.codesignOutcomes.set(key, outcome);
+    }
+    return outcome;
   }
 
   /**

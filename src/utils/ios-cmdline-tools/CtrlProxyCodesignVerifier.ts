@@ -1,8 +1,9 @@
+import { logger } from "../logger";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { ActionableError } from "../../models/ActionableError";
 import { runExecSeam } from "../ExecSeam";
-import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
+import { execFileAsync as sharedExecFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
 
 /**
  * Result of running `codesign`/`spctl` against the downloaded CtrlProxy runner
@@ -61,35 +62,48 @@ export const CTRL_PROXY_SPCTL_TIMEOUT_MS = 15_000;
 const CODESIGN = "codesign";
 const SPCTL = "spctl";
 
-const defaultExec: CodesignExec = async (file, args, { timeoutMs }) => {
-  try {
-    const result = await runExecSeam(
-      (options) => sharedExecFileAsync(file, [...args], options),
-      { maxBuffer: 16 * 1024 * 1024, timeoutMs },
-      { command: file, args: [...args] },
-      { preserveError: true },
-    );
-    return { code: 0, stdout: result.stdout, stderr: result.stderr };
-  } catch (error) {
-    const timedOut =
-      typeof error === "object" &&
-      error !== null &&
-      (("killed" in error && error.killed === true) ||
-        ("code" in error && error.code === "ETIMEDOUT"));
-    if (timedOut) {
-      throw new ActionableError(`${file} ${args[0]} timed out after ${timeoutMs}ms`, {
-        cause: error,
-      });
-    }
-    // This verifier reports command failures as structured outcomes for the caller.
-    const commandError = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
-    return {
-      code: typeof commandError.code === "number" ? commandError.code : 1,
-      stdout: String(commandError.stdout ?? ""),
-      stderr: String(commandError.stderr ?? ""),
-    };
+// Node also sets killed for maxBuffer overflow; it is not a timeout marker alone.
+function isCodesignTimeout(error: unknown, elapsedMs: number, timeoutMs: number): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
   }
-};
+  const code = "code" in error ? error.code : undefined;
+  const killed = "killed" in error && error.killed === true;
+  return (
+    code === "ETIMEDOUT" ||
+    (code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" && killed && elapsedMs >= timeoutMs)
+  );
+}
+
+/** Adapt the shared exec leaf; injectable so error mapping never needs native tools in tests. */
+export const createCodesignExec =
+  (execFile: ExecFileAsync = sharedExecFileAsync, timer: Timer = defaultTimer): CodesignExec =>
+  async (file, args, { timeoutMs }) => {
+    const startedAt = timer.now();
+    try {
+      const result = await runExecSeam(
+        (options) => execFile(file, [...args], options),
+        { maxBuffer: 16 * 1024 * 1024, timeoutMs },
+        { command: file, args: [...args] },
+        { preserveError: true },
+      );
+      return { code: 0, stdout: result.stdout, stderr: result.stderr };
+    } catch (error) {
+      if (isCodesignTimeout(error, timer.now() - startedAt, timeoutMs)) {
+        throw new ActionableError(`${file} ${args[0]} timed out after ${timeoutMs}ms`, {
+          cause: error,
+        });
+      }
+      // This verifier reports command failures as structured outcomes for the caller.
+      logger.warn(`[CtrlProxyCodesignVerifier] ${file} ${args[0]} failed`, error);
+      const commandError = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
+      return {
+        code: typeof commandError.code === "number" ? commandError.code : 1,
+        stdout: String(commandError.stdout ?? ""),
+        stderr: String(commandError.stderr ?? ""),
+      };
+    }
+  };
 
 const TEAM_ID_PATTERN = /^TeamIdentifier=(.+)$/m;
 
@@ -119,7 +133,7 @@ export function parseTeamIdentifier(codesignDisplayOutput: string): string | nul
  */
 export class DefaultCtrlProxyCodesignVerifier implements CtrlProxyCodesignVerifier {
   constructor(
-    private readonly exec: CodesignExec = defaultExec,
+    private readonly exec: CodesignExec = createCodesignExec(),
     private readonly timer: Timer = defaultTimer,
   ) {}
 

@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -9,6 +9,8 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { androidDevice } from "./takeScreenshotTestHelpers";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+
+afterEach(() => mock.restore());
 
 describe("TakeScreenshot Android cancellation", function () {
   test("abandons an in-flight CtrlProxy screenshot as soon as the signal aborts", async function () {

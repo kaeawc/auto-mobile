@@ -138,7 +138,7 @@ class IntegrationTest {
     val events2 = mutableListOf<NavigationEvent>()
 
     // Listener that throws exception
-    AutoMobileSDK.addNavigationListener { throw RuntimeException("Test exception") }
+    AutoMobileSDK.addNavigationListener { throw TestFailureException("Test exception") }
 
     // Normal listeners
     AutoMobileSDK.addNavigationListener { events1.add(it) }

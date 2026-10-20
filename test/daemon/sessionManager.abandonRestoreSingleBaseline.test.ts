@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test, afterEach, mock } from "bun:test";
 import { SessionManager, SESSION_RELEASE_TEARDOWN_CAP_MS } from "../../src/daemon/sessionManager";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { logger } from "../../src/utils/logger";
@@ -6,6 +6,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+
+afterEach(() => mock.restore());
 
 for (const reason of ["keep-screen-awake", "biometric-enrollment", "network-condition"] as const) {
   test(`${reason}: capped release and late retry give-ups restore one saved baseline`, async () => {

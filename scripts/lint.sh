@@ -2,17 +2,20 @@
 
 set -euo pipefail
 
+# shellcheck source=scripts/lib/host-heavy-run.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/host-heavy-run.sh"
+
 oxfmt_mode=--write
 # Only these CI values enable read-only checks; unset/empty/false stay local.
 set +e
 case "${CI:-}" in
   true | 1)
-    oxlint "$@"
+    host_heavy_run host_heavy_oxlint "$@"
     oxlint_status=$?
     oxfmt_mode=--check
     ;;
   *)
-    oxlint --fix "$@"
+    host_heavy_run host_heavy_oxlint --fix "$@"
     oxlint_status=$?
     ;;
 esac

@@ -179,6 +179,17 @@ describe("PerformancePushSocketServer", () => {
     expect(server.hasSubscriberForDevice("unresolved-device", "other")).toBe(true);
   });
 
+  it("does not demand samples for quarantined identities and resumes after resolution", () => {
+    server.simulateSubscription({});
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(true);
+    resolver.quarantine("device-1");
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(false);
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(false);
+    expect(server.hasSubscriberForDevice("device-2", "app")).toBe(true);
+    resolver.resolveIdentity("device-1");
+    expect(server.hasSubscriberForDevice("device-1", "app")).toBe(true);
+  });
+
   it("stores subscription filters correctly", () => {
     const { subscriptionId } = server.simulateSubscription({
       deviceSessionUuid: "uuid-a",

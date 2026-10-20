@@ -12,6 +12,7 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import type { AwaitIdle as AwaitIdleInterface, UiStabilityState } from "./interfaces/AwaitIdle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { shellQuote } from "../../utils/shellQuote";
 
 /** Consecutive missing-frame polls allowed before ending the stability wait. */
@@ -37,10 +38,11 @@ export class AwaitIdle implements AwaitIdleInterface {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    hierarchyReader?: ViewHierarchyRequestReader,
   ) {
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
-    this.idle = new Idle(device, this.adbFactory, timer);
+    this.idle = new Idle(device, this.adbFactory, timer, hierarchyReader);
     this.timer = timer;
   }
 
@@ -243,6 +245,23 @@ export class AwaitIdle implements AwaitIdleInterface {
    * @returns Promise that resolves with GfxMetrics when UI is stable
    */
   async waitForUiStabilityWithState(
+    packageName: string,
+    timeoutMs: number,
+    initState: UiStabilityState,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<GfxMetrics | null> {
+    return (
+      (await this.idle.waitForQuietTreeStability(
+        packageName,
+        initState.startTime,
+        timeoutMs,
+        signal,
+      )) ?? this.waitForFrameStabilityWithState(packageName, timeoutMs, initState, perf, signal)
+    );
+  }
+
+  private async waitForFrameStabilityWithState(
     packageName: string,
     timeoutMs: number,
     initState: {

@@ -19,6 +19,13 @@ signal_lane() {
   if [[ -n "$target" ]]; then expected_calls=1; fi
   wait_for_stub_calls "$expected_calls"
   record_lane_tree "$lane"
+  if [[ "${STUB_ASSERT_SHARD_PGID:-0}" == 1 ]]; then
+    local shard_root="$AUTOMOBILE_TEST_TS_COVERAGE_DIR/shards"
+    if [[ "$mode" == unit ]]; then shard_root="$AUTOMOBILE_TEST_TS_SCRATCH_DIR/test-ts-unit-shards"; fi
+    local pgid_files=("$shard_root"/shard-1.pgid.*)
+    [[ -f "${pgid_files[0]}" ]]
+    grep -q 'start$' "$STUB_CALLS.probes"
+  fi
   if [[ "$scope" == group ]]; then kill -"$signal" -- "-$lane"; else kill -"$signal" "$lane"; fi
   wait "$lane" || result=$?
   [[ "$result" -eq "$expected" ]]
@@ -93,6 +100,16 @@ signal_lane() {
 
 @test "coverage shard cancellation cleans up its command and watchdog groups" {
   signal_lane pid TERM 143 coverage
+}
+
+@test "calibration-on coverage cancellation retains the held shard PGID record" {
+  export AUTOMOBILE_RUNNER_CALIBRATION=1 STUB_ASSERT_SHARD_PGID=1
+  signal_lane pid TERM 143 coverage
+}
+
+@test "calibration-on unit cancellation retains the held shard PGID record" {
+  export AUTOMOBILE_RUNNER_CALIBRATION=1 STUB_ASSERT_SHARD_PGID=1
+  signal_lane pid
 }
 
 @test "TERM interrupts integration timeout and cleans up its descendants" {

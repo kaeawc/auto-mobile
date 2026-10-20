@@ -47,7 +47,7 @@ const IOS_CLOSE_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
  * iOS implementation of {@link NotificationUIDetector}. NotificationCenter
  * is hosted by SpringBoard, so the predicate first gates on the
  * observation's `packageName` containing "springboard" before scanning
- * for any of the known NotificationCenter class / identifier hints.
+ * for legacy NotificationCenter hints or the captured cover-sheet list structure.
  *
  * Expand and collapse are vertical swipes anchored at the screen's
  * mid-X. The detector requires the caller to pass the most recent
@@ -67,7 +67,7 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
     if (!viewHierarchy) {
       return false;
     }
-    const packageName = (viewHierarchy as any).packageName ?? "";
+    const packageName = viewHierarchy.packageName ?? "";
     if (!packageName.includes("springboard")) {
       return false;
     }

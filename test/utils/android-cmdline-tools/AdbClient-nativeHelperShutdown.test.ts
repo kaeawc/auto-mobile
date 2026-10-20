@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import {
   AdbClient,
@@ -12,6 +12,8 @@ import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProc
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeLogger } from "../../fakes/FakeLogger";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
+
+afterEach(() => mock.restore());
 
 function harness() {
   const timer = new FakeTimer();
@@ -54,15 +56,16 @@ describe("host adb native helper shutdown", () => {
     const h = harness();
     const children = [new FakeChildProcess(h.timer), new FakeChildProcess(h.timer)];
     const signals: string[] = [];
-    const spies = children.map((child, index) =>
-      spyOn(child, "kill").mockImplementation((signal) => {
+    const spies = [spyOn(children[0]!, "kill"), spyOn(children[1]!, "kill")];
+    for (const [index, child] of children.entries()) {
+      spies[index]!.mockImplementation((signal) => {
         signals.push(`${index}:${signal}`);
         if (signal === "SIGKILL" || index === 0) {
           child.simulateExit(0, typeof signal === "string" ? signal : null);
         }
         return true;
-      }),
-    );
+      });
+    }
     try {
       await h.client(children[0]!).spawn(["shell", "getevent"]);
       await h.client(children[1]!).spawn(["exec-out", "screenrecord"]);

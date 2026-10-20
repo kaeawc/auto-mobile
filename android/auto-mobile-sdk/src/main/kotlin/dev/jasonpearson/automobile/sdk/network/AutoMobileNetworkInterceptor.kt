@@ -205,7 +205,7 @@ internal class AutoMobileNetworkInterceptor(
     val finalReqHeaders =
       if (headersEnabled) RequestHeaders.toHeaderMap(response.request.headers) else reqHeaders
     val respHeaders = if (headersEnabled) RequestHeaders.toHeaderMap(response.headers) else null
-    val responseBodySize = response.body?.contentLength() ?: -1
+    val responseBodySize = response.body.contentLength()
     fun event(respBody: String?) =
       SdkNetworkRequestEvent(
         timestamp = startMs,

@@ -1,3 +1,4 @@
+import { FakeSimulatorDeviceTypeProfiles } from "../../fakes/FakeSimulatorDeviceTypeProfiles";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   SimCtlClient,
@@ -125,7 +126,12 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     return createExecResult("", "");
   };
 
-  const simctl = new SimCtlClient(null, execAsync, { timer, platform: "darwin", bootOptions });
+  const simctl = new SimCtlClient(null, execAsync, {
+    timer,
+    platform: "darwin",
+    bootOptions,
+    deviceTypeProfiles: new FakeSimulatorDeviceTypeProfiles(),
+  });
 
   return {
     simctl,

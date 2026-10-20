@@ -37,46 +37,48 @@ private data class DemoEntry(
   val onClick: () -> Unit,
 )
 
+data class DemoIndexNavigation(
+  val onNavigateToUxFlow: () -> Unit,
+  val onNavigateToStartup: () -> Unit,
+  val onNavigateToPerformanceList: () -> Unit,
+  val onNavigateToContrast: () -> Unit,
+  val onNavigateToTapTargets: () -> Unit,
+  val onNavigateToXmlSemanticLinks: () -> Unit,
+  val onNavigateToComposeSemanticLinks: () -> Unit,
+  val onNavigateToNestedSelection: () -> Unit,
+  val onNavigateToBugRepro: () -> Unit,
+  val onNavigateToHandledException: () -> Unit = {},
+  val onNavigateToNetworkTest: () -> Unit = {},
+  val onNavigateToDesignSystem: () -> Unit = {},
+  val onNavigateToPointerProbe: () -> Unit = {},
+  val onNavigateBack: () -> Unit = {},
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DemoIndexScreen(
-  onNavigateToUxFlow: () -> Unit,
-  onNavigateToStartup: () -> Unit,
-  onNavigateToPerformanceList: () -> Unit,
-  onNavigateToContrast: () -> Unit,
-  onNavigateToTapTargets: () -> Unit,
-  onNavigateToXmlSemanticLinks: () -> Unit,
-  onNavigateToComposeSemanticLinks: () -> Unit,
-  onNavigateToNestedSelection: () -> Unit,
-  onNavigateToBugRepro: () -> Unit,
-  onNavigateToHandledException: () -> Unit = {},
-  onNavigateToNetworkTest: () -> Unit = {},
-  onNavigateToDesignSystem: () -> Unit = {},
-  onNavigateToPointerProbe: () -> Unit = {},
-  onNavigateBack: () -> Unit = {},
-) {
+fun DemoIndexScreen(navigation: DemoIndexNavigation) {
   TrackRecomposition(id = "screen.demo.index", composableName = "DemoIndexScreen") {
     val demos =
       primaryDemos(
-        onNavigateToUxFlow,
-        onNavigateToStartup,
-        onNavigateToPerformanceList,
+        navigation.onNavigateToUxFlow,
+        navigation.onNavigateToStartup,
+        navigation.onNavigateToPerformanceList,
       ) +
         accessibilityDemos(
-          onNavigateToContrast,
-          onNavigateToTapTargets,
-          onNavigateToXmlSemanticLinks,
-          onNavigateToComposeSemanticLinks,
+          navigation.onNavigateToContrast,
+          navigation.onNavigateToTapTargets,
+          navigation.onNavigateToXmlSemanticLinks,
+          navigation.onNavigateToComposeSemanticLinks,
         ) +
         diagnosticDemos(
-          onNavigateToNestedSelection,
-          onNavigateToBugRepro,
-          onNavigateToHandledException,
-          onNavigateToNetworkTest,
+          navigation.onNavigateToNestedSelection,
+          navigation.onNavigateToBugRepro,
+          navigation.onNavigateToHandledException,
+          navigation.onNavigateToNetworkTest,
         ) +
         toolingDemos(
-          onNavigateToDesignSystem,
-          onNavigateToPointerProbe,
+          navigation.onNavigateToDesignSystem,
+          navigation.onNavigateToPointerProbe,
         )
 
     Scaffold(
@@ -85,7 +87,7 @@ fun DemoIndexScreen(
           title = { Text(text = "Docs Demo Index") },
           navigationIcon = {
             IconButton(
-              onClick = onNavigateBack,
+              onClick = navigation.onNavigateBack,
               modifier = Modifier.semantics { testTag = "demo_index_back" },
             ) {
               Icon(

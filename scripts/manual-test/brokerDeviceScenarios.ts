@@ -355,7 +355,7 @@ async function crossClientIsolation(ctx: BrokerScenarioContext) {
     [a, b],
     [b, a],
   ]) {
-    const refusal = await ctx.record(
+    const refusal: Awaited<ReturnType<typeof control>> = await ctx.record(
       "proxy/foreign-control",
       { client: from.name, to: to.name },
       () => control(from, to),

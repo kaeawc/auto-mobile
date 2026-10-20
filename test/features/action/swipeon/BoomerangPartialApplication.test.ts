@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { VoiceOverSwipeExecutor } from "../../../../src/features/action/swipeon/VoiceOverSwipeExecutor";
 import type {
@@ -15,6 +15,10 @@ import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../../fakes/FakeIosVoiceOverDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const BOOMERANG: BoomerangConfig = { apexPauseMs: 50, returnSpeed: 1 };
 const perf = new NoOpPerformanceTracker();
@@ -51,6 +55,14 @@ type Boomerang = (
   signal?: AbortSignal,
 ) => Promise<SwipeResult>;
 
+let proxy: FakeCtrlProxy;
+beforeEach(() => {
+  proxy = new FakeCtrlProxy();
+  spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
+    hierarchy: { node: { $: {} } },
+  });
+});
+
 function androidBoomerang(): Boomerang {
   const device: BootedDevice = {
     name: "emulator",
@@ -58,10 +70,6 @@ function androidBoomerang(): Boomerang {
     deviceId: "emulator-5554",
   };
   return (gesture, timer, signal) => {
-    const proxy = new FakeCtrlProxy();
-    spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
-      hierarchy: { node: { $: {} } },
-    });
     const executor = new TalkBackSwipeExecutor({
       device,
       executeGesture: gesture,

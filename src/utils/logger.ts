@@ -629,6 +629,7 @@ const writeSynchronousStderr = (line: string): void => {
 };
 
 const reportSinkStall = (timer: LogSinkTimer, event: string, message: string): void => {
+  lastSinkStallReportedAtMs = timer.now();
   writeSynchronousStderr(
     logFormat === "json"
       ? JSON.stringify({
@@ -777,6 +778,23 @@ const divertFileRecord = (line: string): void => {
 const sinkStalled = (): boolean =>
   rotationWait?.guard.stalled === true ||
   (logStream !== undefined && streamStallGuards.get(logStream)?.stalled === true);
+
+/**
+ * When a stall was last reported. A stalled stream is abandoned after LOG_SINK_ABANDON_TIMEOUT_MS
+ * and only counts as stalled again once a later write has itself gone unanswered, so the live flag
+ * alone drops out for part of every long host-wide I/O stall (#11990).
+ */
+let lastSinkStallReportedAtMs: number | undefined;
+
+/**
+ * True if the file log sink is stalled now, or reported a stall within `windowMs`: a signal that
+ * host disk I/O is blocked, not that any one consumer is broken (#11990). Always false when the
+ * sink is not a file (stderr), since nothing then writes to disk.
+ */
+export const logSinkStalledWithin = (windowMs: number): boolean =>
+  sinkStalled() ||
+  (lastSinkStallReportedAtMs !== undefined &&
+    logSinkStallTimer.now() - lastSinkStallReportedAtMs <= windowMs);
 
 const waitForPriorRotation = async (): Promise<boolean> => {
   while (rotationInFlight) {

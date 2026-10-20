@@ -1,3 +1,5 @@
+import { CtrlProxyRunnerExitedDuringStartupError } from "../../src/ctrlProxy/ios/CtrlProxyRunnerExitedDuringStartupError";
+import { CtrlProxyLaunchTimeoutError } from "../../src/ctrlProxy/ios/CtrlProxyLaunchTimeoutError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
@@ -77,6 +79,36 @@ describe("IOSCtrlProxyManager", function () {
       warn.mockRestore();
     }
   });
+
+  test.each([
+    [new CtrlProxyRunnerExitedDuringStartupError(), true],
+    [new CtrlProxyLaunchTimeoutError("launch deadline"), true],
+    [new Error("missing runner artifact"), false],
+  ] as const)(
+    "setup preserves typed startup retry eligibility for %s",
+    async (failure, retryable) => {
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: new FakeProcessExecutor(),
+        steps: { uninstallLegacyAppIfPresent: async () => {} },
+      });
+      const running = spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(manager, "start").mockRejectedValue(failure);
+      try {
+        const result = await manager.setup();
+        expect(result).toMatchObject({
+          success: false,
+          error: failure.message,
+        });
+        expect(result.retryableStartupFailure).toBe(retryable ? true : undefined);
+      } finally {
+        running.mockRestore();
+        start.mockRestore();
+      }
+    },
+  );
 
   describe("setup fail-closed on unverifiable pin", function () {
     test("returns failure for an unknown pin before any reuse short-circuit (#2746)", async function () {

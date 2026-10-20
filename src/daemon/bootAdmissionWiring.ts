@@ -1,3 +1,7 @@
+import { defaultDaemonContext } from "./daemonContext";
+import { createIosSimulatorOwnershipReader } from "./iosSimulatorOwnership";
+import { createDefaultBindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import { installIosSimulatorOwnershipReader } from "../features/bootAdmission/sharedBootAdmissionGates";
 import { installBootAdmissionServices } from "../devices/bootAdmissionServices";
 import { assertBootCapacityAvailable } from "../features/bootAdmission/sharedBootAdmissionGates";
 import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
@@ -10,6 +14,12 @@ import { defaultTimer } from "../utils/SystemTimer";
  * server modes) imports this module before anything that can boot a device;
  * test/lint/bootAdmissionWiringEntry.test.ts guards that.
  */
+installIosSimulatorOwnershipReader(
+  createIosSimulatorOwnershipReader(createDefaultBindingExclusion(defaultTimer), () =>
+    defaultDaemonContext.sessionManager(),
+  ),
+);
+
 installBootAdmissionServices({
   androidColdBootAdmitter: () => getSharedBootAdmissionGates().android,
   iosBootInstrumentation: () => {

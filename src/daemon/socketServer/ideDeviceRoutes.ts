@@ -1,3 +1,8 @@
+import { DAEMON_LAUNCH_NONCE_ENV } from "../constants";
+import {
+  availableDaemonSockets,
+  getUnavailableAuxiliarySockets,
+} from "../auxiliarySocketAvailability";
 import { IDE_ROUTE_PARSERS } from "../ideRoutes";
 import type { IdeMutationCall } from "./ideMutationCall";
 import { runWithAbortSignal } from "../../utils/AbortContext";
@@ -196,6 +201,7 @@ export class IdeDeviceRoutes {
       // daemon will fetch (#2746).
       version: this.ports.daemonIdentity().version,
       pid: process.pid,
+      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
       buildId: this.ports.daemonIdentity().build.buildId,
       entryScript: this.ports.daemonIdentity().build.entryScript,
       acceptanceCapabilityFingerprint: acceptanceDiscoveryCapability
@@ -206,7 +212,8 @@ export class IdeDeviceRoutes {
       dbPath: this.ports.identityDbPath(),
       reportedPidFilePath: this.ports.identityPidFilePath(),
       reportedSocketPath: this.ports.socketPath(),
-      reportedSockets: this.ports.identitySockets(),
+      reportedSockets: availableDaemonSockets(this.ports.identitySockets() ?? {}),
+      unavailableSockets: getUnavailableAuxiliarySockets(),
       effectiveDebug: isDebugModeEnabled(),
       options: this.ports.startupOptions(),
       ...processGenerationRecordFields(this.ports.processGenerationToken()),

@@ -7,7 +7,7 @@ protocol PrototypeEmitContextInputs {
     func data(_ pointer: String) -> JSONValue?
 }
 
-struct PrototypeResolvedEmitContext: Equatable {
+struct PrototypeResolvedEmitContext: Equatable, Sendable {
     let context: [String: JSONValue]
     let contextTruncated: Bool?
 }

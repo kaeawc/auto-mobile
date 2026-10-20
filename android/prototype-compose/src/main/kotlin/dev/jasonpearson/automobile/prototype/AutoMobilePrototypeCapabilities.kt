@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.prototype
+package dev.jasonpearson.automobile.prototype
 
 /** Entry point for the embedded prototype renderer. */
 object AutoMobilePrototype {

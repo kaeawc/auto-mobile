@@ -1,7 +1,7 @@
 import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
 import { AndroidEmulatorUnavailableError } from "../../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { DeviceManagerBindingInventory } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
 import {
   BOOT_CAPACITY_CHECK_TIMEOUT_MS,
@@ -26,6 +26,8 @@ import { MultiPlatformDeviceManager } from "../../../../src/devices/deviceUtils"
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../../../fakes/FakeAndroidEmulator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { logger } from "../../../../src/utils/logger";
 
 const IOS_18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
 const IPHONE_16 = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
@@ -317,6 +319,36 @@ describe("PoolBindingDeviceClaims", () => {
 });
 
 describe("GateBindingBootCapacity", () => {
+  test.each(["check", "reserve"] as const)(
+    "%s maps an escaping ownership reader failure to typed unknown capacity",
+    async (route) => {
+      const error = new BindingDiscoveryIncompleteError("registry unreadable");
+      const reader = { refresh: () => Promise.reject(error) };
+      const capacity = new GateBindingBootCapacity(
+        new FakeTimer(),
+        () => reader.refresh(),
+        async () => {
+          await reader.refresh();
+          throw new Error("unreachable after failed ownership read");
+        },
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result =
+          route === "check"
+            ? await capacity.check("ios", {})
+            : await capacity.reserve("ios", { timeoutMs: 1000 });
+        expect(result).toMatchObject({
+          kind: "unknown",
+          message: expect.stringContaining("registry unreadable"),
+        });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("capacity is unknown"), error);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   test("a passing gate check is available capacity", async () => {
     const platforms: string[] = [];
     const capacity = new GateBindingBootCapacity(new FakeTimer(), async (platform) => {
@@ -327,10 +359,17 @@ describe("GateBindingBootCapacity", () => {
     expect(platforms).toEqual(["ios"]);
   });
 
-  test("the gate's refusal keeps its limit, count, wait hint and external devices", async () => {
+  test("the gate's refusal keeps its limit, count, wait hint and external and held devices", async () => {
     const capacity = new GateBindingBootCapacity(new FakeTimer(), async () => {
       throw new BootCapacityExhaustedError(
-        { platform: "ios", limit: 2, booted: 3, retryAfterMs: 5_000, externalDevices: ["UDID-1"] },
+        {
+          platform: "ios",
+          limit: 2,
+          booted: 3,
+          retryAfterMs: 5_000,
+          externalDevices: ["UDID-1"],
+          heldDevices: ["UDID-HELD"],
+        },
         "full",
       );
     });
@@ -341,6 +380,7 @@ describe("GateBindingBootCapacity", () => {
       booted: 3,
       retryAfterMs: 5_000,
       externalDevices: ["UDID-1"],
+      heldDevices: ["UDID-HELD"],
     });
   });
 

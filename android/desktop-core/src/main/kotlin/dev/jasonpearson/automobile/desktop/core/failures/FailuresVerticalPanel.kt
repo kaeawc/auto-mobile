@@ -70,21 +70,24 @@ fun FailuresVerticalPanel(
         onCollapse = onToggle,
       )
       FailuresDashboard(
-        onNavigateToScreen = onNavigateToScreen,
-        onNavigateToTest = onNavigateToTest,
-        onNavigateToSource = onNavigateToSource,
-        onNewFailureNotification = onNewFailureNotification,
-        initialSelectedFailureId = initialSelectedFailureId,
-        onFailureSelected = onFailureSelected,
-        initialDateRange = initialDateRange,
-        onDateRangeChanged = onDateRangeChanged,
-        onFailureCountsChanged = onFailureCountsChanged,
-        dataSourceMode = dataSourceMode,
-        clientProvider = clientProvider,
-        streamingDataSource = streamingDataSource,
-        failuresPushClient = failuresPushClient,
-        sessionUuidProvider = sessionUuidProvider,
         modifier = Modifier.fillMaxSize(),
+        options =
+          FailuresDashboardOptions(
+            onNavigateToScreen = onNavigateToScreen,
+            onNavigateToTest = onNavigateToTest,
+            onNavigateToSource = onNavigateToSource,
+            onNewFailureNotification = onNewFailureNotification,
+            initialSelectedFailureId = initialSelectedFailureId,
+            onFailureSelected = onFailureSelected,
+            initialDateRange = initialDateRange,
+            onDateRangeChanged = onDateRangeChanged,
+            onFailureCountsChanged = onFailureCountsChanged,
+            dataSourceMode = dataSourceMode,
+            clientProvider = clientProvider,
+            streamingDataSource = streamingDataSource,
+            failuresPushClient = failuresPushClient,
+            sessionUuidProvider = sessionUuidProvider,
+          ),
       )
     }
   }

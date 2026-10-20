@@ -4,6 +4,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.snapshots.SnapshotStateObserver
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.layout.HierarchyUpdateOptions
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorMockData
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
 import dev.jasonpearson.automobile.desktop.core.layout.buildParsedHierarchy
@@ -956,11 +957,14 @@ internal class DeviceControlSessionProvenanceTest : DeviceControlSessionFixture(
       nativeScale = 1.0,
     )
     state.applyHierarchyUpdate(
-      buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy),
-      emptySet(),
-      deviceId = "emulator-5554",
-      captureSequence = 8L,
-      coordinateSpace = CoordinateSpace.Pixels,
+      parsed = buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy),
+      changedIds = emptySet(),
+      options =
+        HierarchyUpdateOptions(
+          deviceId = "emulator-5554",
+          captureSequence = 8L,
+          coordinateSpace = CoordinateSpace.Pixels,
+        ),
     )
 
     // INSIDE the debounce window. The facts still hold the OLD declaration — evaluate() has nothing

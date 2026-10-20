@@ -48,6 +48,7 @@ fun DiagnosticsDashboard(
   connectedMcpProcess: McpProcess?,
   dataSourceMode: DataSourceMode,
   modifier: Modifier = Modifier,
+  ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) {
   val colors = SharedTheme.globalColors
 
@@ -55,7 +56,7 @@ fun DiagnosticsDashboard(
   var systemChecks by remember { mutableStateOf(emptyList<DiagnosticCheck>()) }
   LaunchedEffect(Unit) {
     while (true) {
-      systemChecks = withContext(Dispatchers.IO) { runSystemChecks() }
+      systemChecks = withContext(ioDispatcher) { runSystemChecks() }
       delay(30_000)
     }
   }
@@ -71,98 +72,9 @@ fun DiagnosticsDashboard(
       }
     }
 
-    // MCP Daemon Status Section
-    DiagnosticSection(title = "MCP Daemon") {
-      if (connectedMcpProcess != null) {
-        DiagnosticRow(
-          label = "Status",
-          value = "Connected",
-          status = DiagnosticStatus.Success,
-        )
-        DiagnosticRow(
-          label = "Process Name",
-          value = connectedMcpProcess.name,
-          status = DiagnosticStatus.Info,
-        )
-        DiagnosticRow(
-          label = "PID",
-          value = connectedMcpProcess.pid.toString(),
-          status = DiagnosticStatus.Info,
-        )
-        DiagnosticRow(
-          label = "Connection Type",
-          value =
-            when (connectedMcpProcess.connectionType) {
-              McpConnectionType.UnixSocket -> "Unix Socket"
-              McpConnectionType.StreamableHttp -> "HTTP (Port ${connectedMcpProcess.port ?: "?"})"
-              McpConnectionType.Stdio -> "Standard I/O"
-            },
-          status = DiagnosticStatus.Info,
-        )
-        connectedMcpProcess.socketPath?.let { path ->
-          DiagnosticRow(
-            label = "Socket Path",
-            value = path,
-            status =
-              if (File(path).exists()) DiagnosticStatus.Success else DiagnosticStatus.Warning,
-            isMonospace = true,
-          )
-        }
-      } else {
-        DiagnosticRow(
-          label = "Status",
-          value =
-            if (dataSourceMode == DataSourceMode.Fake) "Not Required (Fake Mode)"
-            else "Not Connected",
-          status =
-            if (dataSourceMode == DataSourceMode.Fake) DiagnosticStatus.Info
-            else DiagnosticStatus.Warning,
-        )
-        if (dataSourceMode == DataSourceMode.Real) {
-          Text(
-            "Start the AutoMobile MCP server to connect.",
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
-            modifier = Modifier.padding(top = 8.dp),
-          )
-        }
-      }
-    }
-
+    DaemonStatus(connectedMcpProcess, dataSourceMode)
     // Socket Connection Health Section
-    if (connectedMcpProcess?.connectionType == McpConnectionType.UnixSocket) {
-      val socketPath = connectedMcpProcess.socketPath
-      DiagnosticSection(title = "Unix Socket Health") {
-        if (socketPath != null) {
-          val socketFile = File(socketPath)
-          DiagnosticRow(
-            label = "Socket Exists",
-            value = if (socketFile.exists()) "Yes" else "No",
-            status = if (socketFile.exists()) DiagnosticStatus.Success else DiagnosticStatus.Error,
-          )
-          if (socketFile.exists()) {
-            DiagnosticRow(
-              label = "Readable",
-              value = if (socketFile.canRead()) "Yes" else "No",
-              status =
-                if (socketFile.canRead()) DiagnosticStatus.Success else DiagnosticStatus.Error,
-            )
-            DiagnosticRow(
-              label = "Writable",
-              value = if (socketFile.canWrite()) "Yes" else "No",
-              status =
-                if (socketFile.canWrite()) DiagnosticStatus.Success else DiagnosticStatus.Error,
-            )
-          }
-        } else {
-          DiagnosticRow(
-            label = "Socket Path",
-            value = "Not configured",
-            status = DiagnosticStatus.Warning,
-          )
-        }
-      }
-    }
+    SocketHealth(connectedMcpProcess)
 
     // Data Source Mode Section
     DiagnosticSection(title = "Data Source") {
@@ -274,101 +186,104 @@ private fun StatusIndicator(status: DiagnosticStatus) {
   Box(modifier = Modifier.size(8.dp).background(color, CircleShape))
 }
 
-private enum class DiagnosticStatus {
-  Success,
-  Warning,
-  Error,
-  Info,
-}
-
-private data class DiagnosticCheck(
-  val name: String,
-  val status: DiagnosticStatus,
-  val details: String? = null,
-)
-
-private fun runSystemChecks(): List<DiagnosticCheck> {
-  val checks = mutableListOf<DiagnosticCheck>()
-
-  // Check ADB
-  val adbCheck =
-    try {
-      val process = ProcessBuilder("which", "adb").start()
-      val exitCode = process.waitFor()
-      if (exitCode == 0) {
-        val path = process.inputStream.bufferedReader().readText().trim()
-        DiagnosticCheck("ADB", DiagnosticStatus.Success, path)
-      } else {
-        DiagnosticCheck("ADB", DiagnosticStatus.Error, "Not found in PATH")
-      }
-    } catch (e: Exception) {
-      DiagnosticCheck("ADB", DiagnosticStatus.Error, e.message)
-    }
-  checks.add(adbCheck)
-
-  // Check Node.js
-  val nodeCheck =
-    try {
-      val process = ProcessBuilder("node", "--version").start()
-      val exitCode = process.waitFor()
-      if (exitCode == 0) {
-        val version = process.inputStream.bufferedReader().readText().trim()
-        DiagnosticCheck("Node.js", DiagnosticStatus.Success, version)
-      } else {
-        DiagnosticCheck("Node.js", DiagnosticStatus.Error, "Not found")
-      }
-    } catch (e: Exception) {
-      DiagnosticCheck("Node.js", DiagnosticStatus.Error, e.message)
-    }
-  checks.add(nodeCheck)
-
-  // Check Bun (optional)
-  val bunCheck =
-    try {
-      val process = ProcessBuilder("bun", "--version").start()
-      val exitCode = process.waitFor()
-      if (exitCode == 0) {
-        val version = process.inputStream.bufferedReader().readText().trim()
-        DiagnosticCheck("Bun", DiagnosticStatus.Success, version)
-      } else {
-        DiagnosticCheck("Bun", DiagnosticStatus.Info, "Not installed (optional)")
-      }
-    } catch (e: Exception) {
-      DiagnosticCheck("Bun", DiagnosticStatus.Info, "Not installed (optional)")
-    }
-  checks.add(bunCheck)
-
-  // Check ANDROID_HOME
-  val androidHomeCheck =
-    System.getenv("ANDROID_HOME")?.let { path ->
-      if (File(path).exists()) {
-        DiagnosticCheck("ANDROID_HOME", DiagnosticStatus.Success, path)
-      } else {
-        DiagnosticCheck(
-          "ANDROID_HOME",
-          DiagnosticStatus.Warning,
-          "Set but path doesn't exist: $path",
+@Composable
+private fun DaemonStatus(connectedMcpProcess: McpProcess?, dataSourceMode: DataSourceMode) {
+  val colors = SharedTheme.globalColors
+  // MCP Daemon Status Section
+  DiagnosticSection(title = "MCP Daemon") {
+    if (connectedMcpProcess != null) {
+      ConnectedDaemonStatus(connectedMcpProcess)
+    } else {
+      DiagnosticRow(
+        label = "Status",
+        value =
+          if (dataSourceMode == DataSourceMode.Fake) "Not Required (Fake Mode)"
+          else "Not Connected",
+        status =
+          if (dataSourceMode == DataSourceMode.Fake) DiagnosticStatus.Info
+          else DiagnosticStatus.Warning,
+      )
+      if (dataSourceMode == DataSourceMode.Real) {
+        Text(
+          "Start the AutoMobile MCP server to connect.",
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+          modifier = Modifier.padding(top = 8.dp),
         )
       }
-    } ?: DiagnosticCheck("ANDROID_HOME", DiagnosticStatus.Warning, "Not set")
-  checks.add(androidHomeCheck)
-
-  // Check Java
-  val javaCheck =
-    try {
-      val process = ProcessBuilder("java", "-version").redirectErrorStream(true).start()
-      val exitCode = process.waitFor()
-      if (exitCode == 0) {
-        val output = process.inputStream.bufferedReader().readText()
-        val versionLine = output.lines().firstOrNull() ?: "Unknown"
-        DiagnosticCheck("Java", DiagnosticStatus.Success, versionLine)
-      } else {
-        DiagnosticCheck("Java", DiagnosticStatus.Error, "Not found")
-      }
-    } catch (e: Exception) {
-      DiagnosticCheck("Java", DiagnosticStatus.Error, e.message)
     }
-  checks.add(javaCheck)
+  }
+}
 
-  return checks
+@Composable
+private fun SocketHealth(connectedMcpProcess: McpProcess?) {
+  if (connectedMcpProcess?.connectionType == McpConnectionType.UnixSocket) {
+    val socketPath = connectedMcpProcess.socketPath
+    DiagnosticSection(title = "Unix Socket Health") {
+      if (socketPath != null) {
+        val socketFile = File(socketPath)
+        DiagnosticRow(
+          label = "Socket Exists",
+          value = if (socketFile.exists()) "Yes" else "No",
+          status = if (socketFile.exists()) DiagnosticStatus.Success else DiagnosticStatus.Error,
+        )
+        if (socketFile.exists()) {
+          DiagnosticRow(
+            label = "Readable",
+            value = if (socketFile.canRead()) "Yes" else "No",
+            status = if (socketFile.canRead()) DiagnosticStatus.Success else DiagnosticStatus.Error,
+          )
+          DiagnosticRow(
+            label = "Writable",
+            value = if (socketFile.canWrite()) "Yes" else "No",
+            status =
+              if (socketFile.canWrite()) DiagnosticStatus.Success else DiagnosticStatus.Error,
+          )
+        }
+      } else {
+        DiagnosticRow(
+          label = "Socket Path",
+          value = "Not configured",
+          status = DiagnosticStatus.Warning,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun ConnectedDaemonStatus(connectedMcpProcess: McpProcess) {
+  DiagnosticRow(
+    label = "Status",
+    value = "Connected",
+    status = DiagnosticStatus.Success,
+  )
+  DiagnosticRow(
+    label = "Process Name",
+    value = connectedMcpProcess.name,
+    status = DiagnosticStatus.Info,
+  )
+  DiagnosticRow(
+    label = "PID",
+    value = connectedMcpProcess.pid.toString(),
+    status = DiagnosticStatus.Info,
+  )
+  DiagnosticRow(
+    label = "Connection Type",
+    value =
+      when (connectedMcpProcess.connectionType) {
+        McpConnectionType.UnixSocket -> "Unix Socket"
+        McpConnectionType.StreamableHttp -> "HTTP (Port ${connectedMcpProcess.port ?: "?"})"
+        McpConnectionType.Stdio -> "Standard I/O"
+      },
+    status = DiagnosticStatus.Info,
+  )
+  connectedMcpProcess.socketPath?.let { path ->
+    DiagnosticRow(
+      label = "Socket Path",
+      value = path,
+      status = if (File(path).exists()) DiagnosticStatus.Success else DiagnosticStatus.Warning,
+      isMonospace = true,
+    )
+  }
 }

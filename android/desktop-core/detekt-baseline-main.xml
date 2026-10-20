@@ -7,8 +7,6 @@
     <ID>ComplexCondition:DatabaseInspector.kt:event.type == KeyEventType.KeyDown &amp;&amp; event.key == Key.Enter &amp;&amp; (event.isCtrlPressed || event.isMetaPressed)</ID>
     <ID>ComplexCondition:DesktopDaemonSessionComposition.kt:!alive &amp;&amp; bindingAcknowledged &amp;&amp; target != null &amp;&amp; !sessionGone &amp;&amp; !lapsedPastLease</ID>
     <ID>ComplexCondition:DeviceControlSession.kt:DeviceControlSession$screenshotFlipped == true || hierarchyFlipped == true || screenshotScaleChanged == true || hierarchyScaleChanged == true</ID>
-    <ID>ComplexCondition:DeviceScreenView.kt:!hasInitialFit &amp;&amp; viewportWidth &gt; 0 &amp;&amp; viewportHeight &gt; 0 &amp;&amp; frameWidthPx &gt; 0</ID>
-    <ID>ComplexCondition:DeviceScreenView.kt:showTapTargetIssues &amp;&amp; hierarchy != null &amp;&amp; screenWidth &gt; 0 &amp;&amp; screenHeight &gt; 0</ID>
     <ID>ComplexCondition:NavigationCanvasView.kt:!hasInitialFit &amp;&amp; externalHighlightedScreens.isEmpty() &amp;&amp; nodePositions.isNotEmpty() &amp;&amp; viewportWidth &gt; 0 &amp;&amp; viewportHeight &gt; 0</ID>
     <ID>ComplexCondition:NavigationCanvasView.kt:fitToViewTrigger &gt; 0 &amp;&amp; nodePositions.isNotEmpty() &amp;&amp; viewportWidth &gt; 0 &amp;&amp; viewportHeight &gt; 0</ID>
     <ID>ComplexCondition:NavigationCanvasView.kt:fogModeEnabled &amp;&amp; focusedScreenName != null &amp;&amp; viewportWidth &gt; 0 &amp;&amp; viewportHeight &gt; 0</ID>
@@ -24,57 +22,38 @@
     <ID>CyclomaticComplexMethod:AutoMobileContent.kt:@Composable internal fun rememberLiveVideoFrame: LiveVideoFrame?</ID>
     <ID>CyclomaticComplexMethod:AutoMobileContent.kt:@Composable private fun DraggableTabs</ID>
     <ID>CyclomaticComplexMethod:AvailableDeviceImagesSection.kt:@Composable internal fun AvailableDeviceImagesSection</ID>
-    <ID>CyclomaticComplexMethod:CommandPalette.kt:@Composable fun CommandPalette</ID>
     <ID>CyclomaticComplexMethod:DatabaseInspector.kt:@Composable fun DatabaseInspector</ID>
     <ID>CyclomaticComplexMethod:DatabaseInspector.kt:@Composable private fun DataView</ID>
     <ID>CyclomaticComplexMethod:DesktopDaemonSessionComposition.kt:@Composable fun rememberDesktopDaemonSession: DesktopDaemonSessionState</ID>
     <ID>CyclomaticComplexMethod:DeviceControlBlockedNotice.kt:internal fun deviceControlBlockReasonText: String?</ID>
     <ID>CyclomaticComplexMethod:DeviceControlSession.kt:DeviceControlSession$private suspend fun streamGesture</ID>
-    <ID>CyclomaticComplexMethod:DeviceControlsDashboard.kt:@Composable fun DeviceControlsDashboard</ID>
     <ID>CyclomaticComplexMethod:DeviceListSection.kt:@Composable fun DeviceListSection</ID>
     <ID>CyclomaticComplexMethod:DeviceManagementPanel.kt:@Composable private fun DeviceManagementPanel</ID>
     <ID>CyclomaticComplexMethod:DevicePickerViewModel.kt:DevicePickerViewModel$fun onAction</ID>
     <ID>CyclomaticComplexMethod:DevicePickerViewModel.kt:DevicePickerViewModel$private suspend fun fetchDevices: PickerInventory</ID>
-    <ID>CyclomaticComplexMethod:DeviceScreenView.kt:@Composable fun DeviceScreenView</ID>
-    <ID>CyclomaticComplexMethod:DeviceScreenView.kt:private suspend fun PointerInputScope.deviceScreenDragGestures</ID>
     <ID>CyclomaticComplexMethod:DeviceThumbnail.kt:@Composable fun DeviceThumbnail</ID>
-    <ID>CyclomaticComplexMethod:DevicesSection.kt:@Composable private fun BootedDeviceRow</ID>
-    <ID>CyclomaticComplexMethod:DiagnosticsDashboard.kt:@Composable fun DiagnosticsDashboard</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@Composable fun FailuresDashboard</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@Composable private fun FailureBarChart</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@Composable private fun FailureListView</ID>
-    <ID>CyclomaticComplexMethod:FailuresDashboard.kt:@OptIn(ExperimentalLayoutApi::class) @Composable internal fun FailureDetailView</ID>
-    <ID>CyclomaticComplexMethod:FailuresDataSource.kt:FailureGroupDto$fun toModel: FailureGroup</ID>
     <ID>CyclomaticComplexMethod:FailuresStreamSocketClient.kt:FailureGroupDto$fun toModel: FailureGroup</ID>
-    <ID>CyclomaticComplexMethod:GlobalSearchOverlay.kt:@Composable fun GlobalSearchOverlay</ID>
     <ID>CyclomaticComplexMethod:HierarchyDiff.kt:private fun alignChildSlots: Pair&lt;IntArray, IntArray&gt;</ID>
     <ID>CyclomaticComplexMethod:HierarchyDiff.kt:private fun alignWindowSlots: Pair&lt;IntArray, IntArray&gt;</ID>
     <ID>CyclomaticComplexMethod:HierarchyParser.kt:private fun parseBoundsElement: ElementBounds?</ID>
     <ID>CyclomaticComplexMethod:HierarchyTreeView.kt:@Composable fun HierarchyTreeView</ID>
     <ID>CyclomaticComplexMethod:HierarchyTreeView.kt:@Composable private fun ElementIcon</ID>
     <ID>CyclomaticComplexMethod:HierarchyTreeView.kt:@Composable private fun TreeNodeRow</ID>
-    <ID>CyclomaticComplexMethod:KeyValueInspector.kt:@Composable fun KeyValueInspector</ID>
-    <ID>CyclomaticComplexMethod:LogsPanel.kt:@Composable fun LogsPanel</ID>
     <ID>CyclomaticComplexMethod:McpProcessDetector.kt:RealMcpProcessDetector$override fun detectProcesses: List&lt;McpProcess&gt;</ID>
     <ID>CyclomaticComplexMethod:NavigationCanvasView.kt:@Composable fun NavigationCanvasView</ID>
     <ID>CyclomaticComplexMethod:NavigationCanvasView.kt:@Composable private fun ScreenNodeCard</ID>
     <ID>CyclomaticComplexMethod:NavigationCanvasView.kt:private fun computeNodePositions: List&lt;NodePosition&gt;</ID>
     <ID>CyclomaticComplexMethod:NavigationDashboard.kt:@Composable fun NavigationDashboard</ID>
-    <ID>CyclomaticComplexMethod:NavigationFacet.kt:@Composable fun NavigationFacet</ID>
     <ID>CyclomaticComplexMethod:NetworkRequestRunner.kt:NetworkRequestRunner$override fun run: NetworkReplayResult</ID>
     <ID>CyclomaticComplexMethod:ObservationStreamClient.kt:ObservationStreamClient$internal suspend fun handleMessage</ID>
     <ID>CyclomaticComplexMethod:ObservationStreamClient.kt:ObservationStreamClient$private suspend fun readMessages</ID>
-    <ID>CyclomaticComplexMethod:OfflineNavigationBrowser.kt:@Composable private fun AppGraphStep</ID>
     <ID>CyclomaticComplexMethod:PerformanceDashboard.kt:@Composable fun PerformanceDashboard</ID>
-    <ID>CyclomaticComplexMethod:PerformanceSummary.kt:@Composable fun PerformanceSummary</ID>
     <ID>CyclomaticComplexMethod:PickerFilters.kt:private fun matches: Boolean</ID>
-    <ID>CyclomaticComplexMethod:PickerModels.kt:fun buildPickerDevices: List&lt;PickerDevice&gt;</ID>
     <ID>CyclomaticComplexMethod:RealLayoutDataSource.kt:RealLayoutDataSource$override suspend fun getObservation: Result&lt;ObservationData&gt;</ID>
     <ID>CyclomaticComplexMethod:RealLayoutDataSource.kt:RealLayoutDataSource$private fun parseBounds: ElementBounds</ID>
     <ID>CyclomaticComplexMethod:RealStorageDataSource.kt:RealStorageDataSource$override suspend fun getDatabases: Result&lt;List&lt;DatabaseInfo&gt;&gt;</ID>
     <ID>CyclomaticComplexMethod:RealStorageDataSource.kt:RealStorageDataSource$override suspend fun getKeyValueFiles: Result&lt;List&lt;KeyValueFile&gt;&gt;</ID>
     <ID>CyclomaticComplexMethod:ReconnectingObservationStream.kt:@Composable fun rememberReconnectingObservationState: ReconnectingObservationState</ID>
-    <ID>CyclomaticComplexMethod:SnapshotsDashboard.kt:@Composable fun SnapshotsDashboard</ID>
     <ID>CyclomaticComplexMethod:StorageDashboard.kt:@Composable fun StorageDashboard</ID>
     <ID>CyclomaticComplexMethod:TelemetryDetailPanel.kt:@Composable fun TelemetryDetailPanel</ID>
     <ID>CyclomaticComplexMethod:TelemetryDetailPanel.kt:@Composable private fun NetworkOverviewTab</ID>
@@ -84,44 +63,34 @@
     <ID>CyclomaticComplexMethod:TelemetryModels.kt:fun TelemetryDisplayEvent.classifyEventSeverity: EventSeverity</ID>
     <ID>CyclomaticComplexMethod:TelemetryModels.kt:fun parseTelemetryEvent: TelemetryDisplayEvent?</ID>
     <ID>CyclomaticComplexMethod:TelemetryModels.kt:private inline fun TelemetryDisplayEvent.anyField: Boolean</ID>
-    <ID>CyclomaticComplexMethod:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$private suspend fun handleMessage: Boolean</ID>
     <ID>CyclomaticComplexMethod:VideoStreamClient.kt:VideoStreamClient$private fun pumpFrames: VideoStreamEndReason?</ID>
     <ID>CyclomaticComplexMethod:VideoStreamClient.kt:VideoStreamClient$private fun runSession</ID>
     <ID>CyclomaticComplexMethod:VideoStreamParser.kt:VideoStreamParser$fun onBytes</ID>
     <ID>CyclomaticComplexMethod:WorkspaceDeviceControl.kt:@Composable fun rememberWorkspaceDeviceControl: WorkspaceDeviceControlState</ID>
-    <ID>CyclomaticComplexMethod:WorkspaceShell.kt:@Composable fun WorkspaceShell</ID>
     <ID>EmptyFunctionBlock:FileSaver.kt:NoOpFileSaver${}</ID>
     <ID>InjectDispatcher:AutoMobileContent.kt:Default</ID>
     <ID>InjectDispatcher:AutoMobileContent.kt:IO</ID>
     <ID>InjectDispatcher:DaemonNotificationClient.kt:DaemonNotificationClient$IO</ID>
     <ID>InjectDispatcher:DaemonStatusSection.kt:IO</ID>
     <ID>InjectDispatcher:DatabaseInspector.kt:IO</ID>
-    <ID>InjectDispatcher:DeviceControlsDashboard.kt:IO</ID>
     <ID>InjectDispatcher:DeviceListSection.kt:IO</ID>
     <ID>InjectDispatcher:DeviceThumbnail.kt:ObservationScreenshotSource$Default</ID>
     <ID>InjectDispatcher:DeviceThumbnail.kt:ObservationScreenshotSource$IO</ID>
-    <ID>InjectDispatcher:DiagnosticsDashboard.kt:IO</ID>
     <ID>InjectDispatcher:GitHubReleaseSource.kt:GitHubReleaseSource$IO</ID>
     <ID>InjectDispatcher:NavigationCanvasView.kt:IO</ID>
     <ID>InjectDispatcher:NavigationDashboard.kt:IO</ID>
     <ID>InjectDispatcher:NavigationDetailViews.kt:IO</ID>
-    <ID>InjectDispatcher:NavigationFacet.kt:IO</ID>
     <ID>InjectDispatcher:NetworkFacet.kt:IO</ID>
     <ID>InjectDispatcher:ObservationStreamClient.kt:ObservationStreamClient$IO</ID>
-    <ID>InjectDispatcher:OfflineNavigationBrowser.kt:IO</ID>
     <ID>InjectDispatcher:PerformanceDashboard.kt:IO</ID>
     <ID>InjectDispatcher:RealNetworkGraphDataSource.kt:RealNetworkGraphDataSource$IO</ID>
     <ID>InjectDispatcher:RealNetworkRequestsDataSource.kt:RealNetworkRequestsDataSource$IO</ID>
     <ID>InjectDispatcher:RealStorageDataSource.kt:RealStorageDataSource$IO</ID>
     <ID>InjectDispatcher:SettingsDialog.kt:FeatureFlagsViewModel$IO</ID>
-    <ID>InjectDispatcher:SnapshotsDashboard.kt:IO</ID>
     <ID>InjectDispatcher:StorageDashboard.kt:IO</ID>
     <ID>InjectDispatcher:StorageFacet.kt:IO</ID>
-    <ID>InjectDispatcher:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$IO</ID>
     <ID>InjectDispatcher:TestFacet.kt:IO</ID>
     <ID>InjectDispatcher:WorkspaceDeviceControl.kt:Default</ID>
-    <ID>InjectDispatcher:WorkspaceShell.kt:IO</ID>
-    <ID>LargeClass:McpDaemonClient.kt:McpDaemonClient : AutoMobileClient</ID>
     <ID>LargeClass:McpHttpClient.kt:McpHttpClient : AutoMobileClient</ID>
     <ID>LargeClass:ObservationStreamClient.kt:ObservationStreamClient : ObservationStream</ID>
     <ID>LongMethod:AppFilterSection.kt:@Composable fun AppFilterSection</ID>
@@ -131,8 +100,6 @@
     <ID>LongMethod:AutoMobileContent.kt:@Composable internal fun rememberLiveVideoFrame: LiveVideoFrame?</ID>
     <ID>LongMethod:AutoMobileContent.kt:@Composable private fun DraggableTabs</ID>
     <ID>LongMethod:AvailableDeviceImagesSection.kt:@Composable internal fun AvailableDeviceImagesSection</ID>
-    <ID>LongMethod:CenterContentTabs.kt:@Composable fun CenterTabStrip</ID>
-    <ID>LongMethod:CommandPalette.kt:@Composable fun CommandPalette</ID>
     <ID>LongMethod:DaemonStatusSection.kt:@Composable fun DaemonStatusSection</ID>
     <ID>LongMethod:DatabaseInspector.kt:@Composable fun DatabaseInspector</ID>
     <ID>LongMethod:DatabaseInspector.kt:@Composable private fun &lt;T&gt; DropdownSelector</ID>
@@ -142,62 +109,35 @@
     <ID>LongMethod:DatabaseInspector.kt:@Composable private fun StructureView</ID>
     <ID>LongMethod:DatabaseInspector.kt:private fun highlightSQL: AnnotatedString</ID>
     <ID>LongMethod:DesktopDaemonSessionComposition.kt:@Composable fun rememberDesktopDaemonSession: DesktopDaemonSessionState</ID>
-    <ID>LongMethod:DeviceControlsDashboard.kt:@Composable fun DeviceControlsDashboard</ID>
     <ID>LongMethod:DeviceListSection.kt:@Composable fun DeviceListSection</ID>
     <ID>LongMethod:DeviceListSection.kt:@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class) @Composable private fun DeviceRow</ID>
     <ID>LongMethod:DeviceManagementPanel.kt:@Composable private fun DeviceManagementPanel</ID>
     <ID>LongMethod:DevicePickerViewModel.kt:DevicePickerViewModel$private suspend fun fetchDevices: PickerInventory</ID>
-    <ID>LongMethod:DeviceScreenView.kt:@Composable fun DeviceScreenView</ID>
-    <ID>LongMethod:DeviceScreenView.kt:private suspend fun PointerInputScope.deviceScreenDragGestures</ID>
     <ID>LongMethod:DeviceThumbnail.kt:@Composable fun DeviceThumbnail</ID>
-    <ID>LongMethod:DevicesSection.kt:@Composable internal fun DevicesSection</ID>
-    <ID>LongMethod:DevicesSection.kt:@Composable private fun BootedDeviceRow</ID>
-    <ID>LongMethod:DevicesSection.kt:@Composable private fun DeviceImageRow</ID>
-    <ID>LongMethod:DiagnosticsDashboard.kt:@Composable fun DiagnosticsDashboard</ID>
-    <ID>LongMethod:DiagnosticsDashboard.kt:private fun runSystemChecks: List&lt;DiagnosticCheck&gt;</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable fun FailuresDashboard</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun EventTrendsSection</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun FailureBarChart</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun FailureListView</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@Composable private fun ToolCallDetailsSection</ID>
-    <ID>LongMethod:FailuresDashboard.kt:@OptIn(ExperimentalLayoutApi::class) @Composable internal fun FailureDetailView</ID>
-    <ID>LongMethod:FailuresDataSource.kt:FailureGroupDto$fun toModel: FailureGroup</ID>
-    <ID>LongMethod:FailuresDataSource.kt:internal fun createMockFailureGroups: List&lt;FailureGroup&gt;</ID>
     <ID>LongMethod:FailuresStreamSocketClient.kt:FailureGroupDto$fun toModel: FailureGroup</ID>
-    <ID>LongMethod:GlobalSearchOverlay.kt:@Composable fun GlobalSearchOverlay</ID>
     <ID>LongMethod:HierarchyDiff.kt:private fun alignWindowSlots: Pair&lt;IntArray, IntArray&gt;</ID>
     <ID>LongMethod:HierarchyTreeView.kt:@Composable fun HierarchyTreeView</ID>
     <ID>LongMethod:HierarchyTreeView.kt:@Composable private fun TreeNodeRow</ID>
     <ID>LongMethod:HorizontalTabBar.kt:@Composable fun HorizontalTabBar</ID>
-    <ID>LongMethod:KeyValueInspector.kt:@Composable fun KeyValueInspector</ID>
-    <ID>LongMethod:LogsPanel.kt:@Composable fun LogsPanel</ID>
-    <ID>LongMethod:LogsPanel.kt:@Composable private fun LogsFilterBar</ID>
-    <ID>LongMethod:McpDaemonClient.kt:McpDaemonClient$private fun sendRequest: DaemonResponse</ID>
     <ID>LongMethod:NavigationCanvasView.kt:@Composable fun NavigationCanvasView</ID>
     <ID>LongMethod:NavigationCanvasView.kt:@Composable private fun ScreenNodeCard</ID>
     <ID>LongMethod:NavigationCanvasView.kt:private fun computeNodePositions: List&lt;NodePosition&gt;</ID>
     <ID>LongMethod:NavigationDashboard.kt:@Composable fun NavigationDashboard</ID>
     <ID>LongMethod:NavigationDetailViews.kt:@Composable fun ScreenDetailView</ID>
     <ID>LongMethod:NavigationDetailViews.kt:@Composable fun TransitionRow</ID>
-    <ID>LongMethod:NavigationFacet.kt:@Composable fun NavigationFacet</ID>
     <ID>LongMethod:NavigationGraphView.kt:@Composable private fun GraphCanvas</ID>
     <ID>LongMethod:NetworkRequestRunner.kt:NetworkRequestRunner$override fun run: NetworkReplayResult</ID>
     <ID>LongMethod:ObservationStreamClient.kt:ObservationStreamClient$internal suspend fun handleMessage</ID>
-    <ID>LongMethod:OfflineNavigationBrowser.kt:@Composable private fun AppGraphStep</ID>
     <ID>LongMethod:PerformanceDashboard.kt:@Composable fun PerformanceDashboard</ID>
     <ID>LongMethod:PerformanceDashboard.kt:@Composable private fun MetricCard</ID>
     <ID>LongMethod:PerformanceDashboard.kt:@Composable private fun PerformanceOverviewScreen</ID>
-    <ID>LongMethod:PerformanceSummary.kt:@Composable fun PerformanceSummary</ID>
     <ID>LongMethod:PickerFilters.kt:fun options: List&lt;FilterOption&gt;</ID>
-    <ID>LongMethod:PickerModels.kt:fun buildPickerDevices: List&lt;PickerDevice&gt;</ID>
     <ID>LongMethod:QuickJumpDialog.kt:@Composable fun QuickJumpDialog</ID>
     <ID>LongMethod:RealStorageDataSource.kt:RealStorageDataSource$override suspend fun getDatabases: Result&lt;List&lt;DatabaseInfo&gt;&gt;</ID>
     <ID>LongMethod:RealStorageDataSource.kt:RealStorageDataSource$override suspend fun getKeyValueFiles: Result&lt;List&lt;KeyValueFile&gt;&gt;</ID>
     <ID>LongMethod:ReconnectingObservationStream.kt:@Composable fun rememberReconnectingObservationState: ReconnectingObservationState</ID>
-    <ID>LongMethod:SearchBar.kt:@Composable fun SearchBar</ID>
     <ID>LongMethod:SettingsDialog.kt:@Composable fun SettingsPanel</ID>
     <ID>LongMethod:SettingsDialog.kt:@Composable private fun AccessibilityConfigPanel</ID>
-    <ID>LongMethod:SnapshotsDashboard.kt:@Composable fun SnapshotsDashboard</ID>
     <ID>LongMethod:StatusBar.kt:@Composable fun StatusBar</ID>
     <ID>LongMethod:StorageDashboard.kt:@Composable fun StorageDashboard</ID>
     <ID>LongMethod:TelemetryDetailPanel.kt:@Composable fun TelemetryDetailPanel</ID>
@@ -206,20 +146,14 @@
     <ID>LongMethod:TelemetryDetailPanel.kt:private fun buildSyntaxHighlightedJson: AnnotatedString</ID>
     <ID>LongMethod:TelemetryDetailPanel.kt:private fun serializeEventToJson: String</ID>
     <ID>LongMethod:TelemetryModels.kt:fun parseTelemetryEvent: TelemetryDisplayEvent?</ID>
-    <ID>LongMethod:TimelineCanvas.kt:@Composable fun TimelineCanvas</ID>
     <ID>LongMethod:VideoStreamClient.kt:VideoStreamClient$private fun pumpFrames: VideoStreamEndReason?</ID>
     <ID>LongMethod:VideoStreamClient.kt:VideoStreamClient$private fun runSession</ID>
     <ID>LongMethod:VideoStreamParser.kt:VideoStreamParser$fun onBytes</ID>
     <ID>LongMethod:WorkspaceDeviceControl.kt:@Composable fun rememberWorkspaceDeviceControl: WorkspaceDeviceControlState</ID>
-    <ID>LongMethod:WorkspaceShell.kt:@Composable fun WorkspaceShell</ID>
-    <ID>LongMethod:WorkspaceShell.kt:@Composable private fun StreamArea</ID>
-    <ID>LongMethod:WorkspaceShell.kt:@Composable private fun TopBar</ID>
     <ID>LongParameterList:AppSelectorDropdown.kt:@Composable private fun AppSelectorDropdown</ID>
     <ID>LongParameterList:AutoMobileContent.kt:@Composable fun AutoMobileContent</ID>
     <ID>LongParameterList:AutoMobileContent.kt:@Composable internal fun rememberLiveVideoFrame: LiveVideoFrame?</ID>
     <ID>LongParameterList:AutoMobileContent.kt:@Composable private fun DraggableTabs</ID>
-    <ID>LongParameterList:CenterContentTabs.kt:@Composable fun CenterTabStrip</ID>
-    <ID>LongParameterList:CommandPalette.kt:fun buildDefaultCommands: List&lt;Command&gt;</ID>
     <ID>LongParameterList:DatabaseInspector.kt:@Composable fun DatabaseInspector</ID>
     <ID>LongParameterList:DatabaseInspector.kt:@Composable private fun SQLView</ID>
     <ID>LongParameterList:DesktopDaemonSessionComposition.kt:@Composable fun rememberDesktopDaemonSession: DesktopDaemonSessionState</ID>
@@ -229,22 +163,13 @@
     <ID>LongParameterList:DeviceControlInputForwarder.kt:DeviceControlInputForwarder$fun forwardTap</ID>
     <ID>LongParameterList:DeviceControlInputForwarder.kt:DeviceControlInputForwarder$fun forwardTypeText</ID>
     <ID>LongParameterList:DeviceControlSession.kt:DeviceControlSession</ID>
-    <ID>LongParameterList:DeviceControlsDashboard.kt:@Composable fun DeviceControlsDashboard</ID>
     <ID>LongParameterList:DeviceFilterPersistence.kt:internal fun saveDeviceFilter</ID>
-    <ID>LongParameterList:DeviceKeyboardEventTranslator.kt:DeviceKeyboardEventTranslator$fun translate: DeviceKeyStroke</ID>
     <ID>LongParameterList:DeviceListSection.kt:@Composable fun DeviceListSection</ID>
     <ID>LongParameterList:DeviceListSection.kt:@Composable private fun DevicePlatformGroup</ID>
     <ID>LongParameterList:DeviceListSection.kt:@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class) @Composable private fun DeviceRow</ID>
     <ID>LongParameterList:DeviceManagementPanel.kt:@Composable private fun DeviceManagementPanel</ID>
-    <ID>LongParameterList:DeviceScreenView.kt:@Composable fun DeviceScreenView</ID>
-    <ID>LongParameterList:DeviceScreenView.kt:private fun handleDeviceScreenKeyEvent: Boolean</ID>
     <ID>LongParameterList:DeviceThumbnail.kt:internal suspend fun captureScreenshotWithRetry: ImageBitmap</ID>
-    <ID>LongParameterList:DevicesSection.kt:@Composable internal fun DevicesSection</ID>
-    <ID>LongParameterList:DevicesSection.kt:@Composable private fun BootedDeviceRow</ID>
     <ID>LongParameterList:FailuresBadge.kt:@Composable fun FailuresCollapsedContent</ID>
-    <ID>LongParameterList:FailuresDashboard.kt:@Composable fun FailuresDashboard</ID>
-    <ID>LongParameterList:FailuresDashboard.kt:@Composable private fun FailureListView</ID>
-    <ID>LongParameterList:FailuresDashboard.kt:@Composable private fun StatBox</ID>
     <ID>LongParameterList:FailuresVerticalPanel.kt:@Composable fun FailuresVerticalPanel</ID>
     <ID>LongParameterList:FakeSettingsProvider.kt:FakeSettingsProvider</ID>
     <ID>LongParameterList:HierarchyDiff.kt:private fun addAlignedChildren</ID>
@@ -254,89 +179,51 @@
     <ID>LongParameterList:HierarchyParser.kt:private fun parseNodeElement: UIElementInfo?</ID>
     <ID>LongParameterList:HierarchyTreeView.kt:@Composable fun HierarchyTreeView</ID>
     <ID>LongParameterList:HierarchyTreeView.kt:@Composable private fun TreeNodeRow</ID>
-    <ID>LongParameterList:KeyValueInspector.kt:@Composable fun KeyValueInspector</ID>
     <ID>LongParameterList:LayoutFacet.kt:@Composable fun LayoutFacet</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun applyHierarchyUpdate</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun applyHierarchyUpdateImmediate</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun updateHierarchy</ID>
-    <ID>LongParameterList:LayoutInspectorState.kt:LayoutInspectorState$fun updateScreenshot</ID>
     <ID>LongParameterList:LeftSidebarPanel.kt:@Composable fun LeftSidebarPanel</ID>
-    <ID>LongParameterList:LogsPanel.kt:@Composable fun LogsPanel</ID>
-    <ID>LongParameterList:LogsPanel.kt:@Composable private fun LogsFilterBar</ID>
-    <ID>LongParameterList:LogsPanel.kt:fun filterLogs: List&lt;TelemetryDisplayEvent.Log&gt;</ID>
-    <ID>LongParameterList:McpDaemonClient.kt:McpDaemonClient</ID>
     <ID>LongParameterList:McpHttpClient.kt:McpHttpClient</ID>
     <ID>LongParameterList:NavigationCanvasView.kt:@Composable fun NavigationCanvasView</ID>
     <ID>LongParameterList:NavigationCanvasView.kt:@Composable private fun ScreenNodeCard</ID>
     <ID>LongParameterList:NavigationDashboard.kt:@Composable fun NavigationDashboard</ID>
-    <ID>LongParameterList:NavigationFacet.kt:@Composable fun NavigationFacet</ID>
     <ID>LongParameterList:NavigationGraphView.kt:private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEdges</ID>
-    <ID>LongParameterList:PaneToggleToolbar.kt:@Composable fun PaneToggleToolbar</ID>
     <ID>LongParameterList:PerformanceDashboard.kt:@Composable fun PerformanceDashboard</ID>
-    <ID>LongParameterList:PerformanceSummary.kt:@Composable fun PerformanceSummary</ID>
     <ID>LongParameterList:QualityController.kt:QualityController</ID>
     <ID>LongParameterList:RealStorageDataSource.kt:RealStorageDataSource$private fun buildTableDataUri: String</ID>
     <ID>LongParameterList:ReconnectingObservationStream.kt:@Composable fun rememberReconnectingObservationState: ReconnectingObservationState</ID>
     <ID>LongParameterList:ReconnectingObservationStream.kt:@Composable fun rememberReconnectingObservationStream: ObservationStream?</ID>
     <ID>LongParameterList:RememberDeviceControlSession.kt:@Composable internal fun rememberDeviceControlSession: DeviceControlSession</ID>
-    <ID>LongParameterList:RightInspectorPanel.kt:@Composable fun RightInspectorPanel</ID>
-    <ID>LongParameterList:SearchBar.kt:@Composable fun SearchBar</ID>
     <ID>LongParameterList:StatusBar.kt:@Composable fun StatusBar</ID>
     <ID>LongParameterList:StorageDashboard.kt:@Composable fun StorageDashboard</ID>
     <ID>LongParameterList:StorageFacet.kt:@Composable fun StorageFacet</ID>
     <ID>LongParameterList:StreamQualityControls.kt:@Composable fun StreamQualityControls</ID>
     <ID>LongParameterList:TelemetryDetailPanel.kt:@Composable fun TelemetryDetailPanel</ID>
-    <ID>LongParameterList:TwoDeviceCompareView.kt:@Composable fun TwoDeviceCompareView</ID>
-    <ID>LongParameterList:TwoDeviceCompareView.kt:@Composable private fun CompareSide</ID>
     <ID>LongParameterList:VideoStreamClient.kt:FakeVideoStreamSource</ID>
     <ID>LongParameterList:VideoStreamClient.kt:VideoStreamClient</ID>
     <ID>LongParameterList:WorkspaceDeviceControl.kt:@Composable fun rememberWorkspaceDeviceControl: WorkspaceDeviceControlState</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable fun WorkspaceShell</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun DeviceColumnView</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun DockedFacet</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun HealthSheetOverlay</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun PaneMainContent</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun StreamArea</ID>
-    <ID>LongParameterList:WorkspaceShell.kt:@Composable private fun TopBar</ID>
     <ID>NestedBlockDepth:AvailableDeviceImagesSection.kt:@Composable internal fun AvailableDeviceImagesSection</ID>
     <ID>NestedBlockDepth:DeviceControlSession.kt:DeviceControlSession$private suspend fun streamGesture</ID>
     <ID>NestedBlockDepth:NavigationCanvasView.kt:private fun computeNodePositions: List&lt;NodePosition&gt;</ID>
     <ID>NestedBlockDepth:RealLayoutDataSource.kt:RealLayoutDataSource$override suspend fun getObservation: Result&lt;ObservationData&gt;</ID>
-    <ID>RedundantSuspendModifier:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$suspend</ID>
-    <ID>SwallowedException:DeviceModels.kt:DeviceResourceParser$e: Exception</ID>
-    <ID>SwallowedException:DeviceScreenView.kt:e: Exception</ID>
-    <ID>SwallowedException:DiagnosticsDashboard.kt:e: Exception</ID>
     <ID>SwallowedException:McpProcessDetector.kt:RealMcpProcessDetector$e: Exception</ID>
     <ID>SwallowedException:McpProcessDetector.kt:SystemProcessRunner$e: Exception</ID>
     <ID>SwallowedException:NavigationScreenshotLoader.kt:NavigationScreenshotLoader$e: Exception</ID>
     <ID>SwallowedException:NavigationScreenshotLoader.kt:NavigationScreenshotLoader$e: McpConnectionException</ID>
     <ID>SwallowedException:RealLayoutDataSource.kt:HierarchyNodeDto$e: Exception</ID>
     <ID>SwallowedException:RealLayoutDataSource.kt:RealLayoutDataSource$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:AppListDataSource.kt:RealAppListDataSource$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileContent.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DaemonNotificationClient.kt:DaemonNotificationClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DaemonStatusSection.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DatabaseInspector.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceBootController.kt:RealDeviceBootController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceControlInputForwarder.kt:DeviceControlInputForwarder$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:DeviceControlsDashboard.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceFilterPersistence.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceListSection.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DeviceModels.kt:DeviceResourceParser$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DevicePickerViewModel.kt:DevicePickerViewModel$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DeviceScreenView.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceThumbnail.kt:ObservationScreenshotSource$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:DiagnosticsDashboard.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:FailuresDashboard.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FailuresDataSource.kt:McpFailuresDataSource$e: Exception</ID>
     <ID>TooGenericExceptionCaught:FailuresViewModel.kt:FailuresViewModel$e: Exception</ID>
     <ID>TooGenericExceptionCaught:FileSaver.kt:SwingFileSaver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FileSettingsProvider.kt:FileSettingsProvider$error: Exception</ID>
     <ID>TooGenericExceptionCaught:HierarchyParser.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient.McpGestureInputStream$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:McpHttpClient.kt:McpHttpClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:McpProcessDetector.kt:RealMcpProcessDetector$e: Exception</ID>
     <ID>TooGenericExceptionCaught:McpProcessDetector.kt:SystemProcessRunner$e: Exception</ID>
@@ -359,34 +246,23 @@
     <ID>TooGenericExceptionCaught:RealStorageDataSource.kt:RealStorageDataSource$e: Exception</ID>
     <ID>TooGenericExceptionCaught:RetryPolicy.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:SettingsDialog.kt:FeatureFlagsViewModel$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:SnapshotsDashboard.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:StdioResponsePump.kt:StdioResponsePump$e: Exception</ID>
     <ID>TooGenericExceptionCaught:StorageDashboard.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:StreamingFailuresDataSource.kt:StreamingFailuresDataSource$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:VideoStreamClient.kt:VideoStreamClient$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:WorkspaceShell.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:WorkspaceViewModel.kt:WorkspaceViewModel$error: Exception</ID>
     <ID>TooManyFunctions:DatabaseInspector.kt:dev.jasonpearson.automobile.desktop.core.storage.DatabaseInspector.kt</ID>
     <ID>TooManyFunctions:DeviceControlSession.kt:DeviceControlSession</ID>
     <ID>TooManyFunctions:DevicePickerViewModel.kt:DevicePickerViewModel</ID>
-    <ID>TooManyFunctions:FailuresDashboard.kt:dev.jasonpearson.automobile.desktop.core.failures.FailuresDashboard.kt</ID>
     <ID>TooManyFunctions:FakeObservationStream.kt:FakeObservationStream : ObservationStream</ID>
     <ID>TooManyFunctions:HierarchyDiff.kt:dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiff.kt</ID>
     <ID>TooManyFunctions:HierarchyParser.kt:dev.jasonpearson.automobile.desktop.core.layout.HierarchyParser.kt</ID>
-    <ID>TooManyFunctions:InputAllocatingClient.kt:InputAllocatingClient : AutoMobileClient</ID>
-    <ID>TooManyFunctions:LayoutInspectorState.kt:LayoutInspectorState</ID>
-    <ID>TooManyFunctions:LogsPanel.kt:dev.jasonpearson.automobile.desktop.core.telemetry.LogsPanel.kt</ID>
-    <ID>TooManyFunctions:McpDaemonClient.kt:McpDaemonClient : AutoMobileClient</ID>
     <ID>TooManyFunctions:McpHttpClient.kt:McpHttpClient : AutoMobileClient</ID>
     <ID>TooManyFunctions:NetworkFacet.kt:dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet.kt</ID>
     <ID>TooManyFunctions:ObservationStreamClient.kt:ObservationStreamClient : ObservationStream</ID>
     <ID>TooManyFunctions:PerformanceDashboard.kt:dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard.kt</ID>
     <ID>TooManyFunctions:RealStorageDataSource.kt:RealStorageDataSource : StorageDataSource</ID>
     <ID>TooManyFunctions:TelemetryDetailPanel.kt:dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDetailPanel.kt</ID>
-    <ID>TooManyFunctions:TelemetryPushSocketClient.kt:TelemetryPushSocketClient : TelemetryPushClient</ID>
     <ID>TooManyFunctions:VideoStreamClient.kt:FakeVideoStreamSource : VideoStreamSource</ID>
-    <ID>TooManyFunctions:WorkspaceShell.kt:dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell.kt</ID>
     <ID>TooManyFunctions:WorkspaceViewModel.kt:WorkspaceViewModel</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.recompositionRate!!</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.timeToInteractiveMs!!</ID>
@@ -394,9 +270,6 @@
     <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:onUpdateCell!!</ID>
     <ID>UnsafeCallOnNullableType:DatabaseInspector.kt:selectedTable!!</ID>
     <ID>UnsafeCallOnNullableType:DeviceListSection.kt:error!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.fileName!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.lineNumber!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:selectedFailure!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:hoveredTransitionId!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:screenshotBitmap!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationDetailViews.kt:screenshotBitmap!!</ID>

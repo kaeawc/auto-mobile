@@ -96,6 +96,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.screenshotObserveArgument
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import dev.jasonpearson.automobile.desktop.core.device.DeviceControlsClients
 import dev.jasonpearson.automobile.desktop.core.device.DeviceControlsDashboard
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
@@ -109,11 +110,21 @@ import dev.jasonpearson.automobile.desktop.core.layout.DeviceBindErrorNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlBlockedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlTapErrorBanner
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceIdleReleasedNotice
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenOptions
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceViewingNotice
+import dev.jasonpearson.automobile.desktop.core.layout.HierarchyUpdateOptions
 import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotMetadataOverlay
+import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotUpdateOptions
+import dev.jasonpearson.automobile.desktop.core.layout.computeChangedElements
+import dev.jasonpearson.automobile.desktop.core.layout.connect
+import dev.jasonpearson.automobile.desktop.core.layout.disconnect
+import dev.jasonpearson.automobile.desktop.core.layout.hoverElement
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
 import dev.jasonpearson.automobile.desktop.core.layout.rememberLayoutInspectorState
+import dev.jasonpearson.automobile.desktop.core.layout.selectElement
+import dev.jasonpearson.automobile.desktop.core.layout.toggleTapTargetIssues
+import dev.jasonpearson.automobile.desktop.core.layout.updateConnectionStatus
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.AvailableEmulator
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
@@ -139,7 +150,9 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.AvailableDeviceImagesSection
 import dev.jasonpearson.automobile.desktop.core.shell.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.shell.CommandRegistry
+import dev.jasonpearson.automobile.desktop.core.shell.DefaultCommandActions
 import dev.jasonpearson.automobile.desktop.core.shell.GlobalSearchOverlay
+import dev.jasonpearson.automobile.desktop.core.shell.InspectorPanelOptions
 import dev.jasonpearson.automobile.desktop.core.shell.LeftSidebarPanel
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.shell.RightInspectorPanel
@@ -1250,23 +1263,30 @@ fun AutoMobileContent(
           // hit-tested hierarchy (not just the screenshot) to match the selected device (issue
           // #3347). The frame already passed the active-device filter above.
           layoutInspectorState.applyHierarchyUpdate(
-            it.first,
-            it.second,
-            deviceId = update.deviceId,
+            parsed = it.first,
+            changedIds = it.second,
             generation = generation,
-            // The daemon's shared capture id is this update's provenance: device control pairs it
-            // by EQUALITY against the screenshot update's id, so a hierarchy left behind by a
-            // resolution change can never supply the bounds a tap is mapped through — however few
-            // milliseconds behind it is (issue #3348).
-            captureSequence = update.captureSequence,
-            frameContext = update.frameContext,
-            // The unit this update's bounds are in, as the daemon declared it. Carried per update
-            // rather than per session because the declaration is per message, and the control
-            // policy only compares dimensions exactly when the paired screenshot declared the same
-            // thing (issue #4550).
-            coordinateSpace = update.coordinateSpace,
-            nativeScale = update.nativeScale,
-            captureRotation = update.rotation,
+            options =
+              HierarchyUpdateOptions(
+                deviceId = update.deviceId,
+                // The daemon's shared capture id is this update's provenance: device control pairs
+                // it
+                // by EQUALITY against the screenshot update's id, so a hierarchy left behind by a
+                // resolution change can never supply the bounds a tap is mapped through — however
+                // few
+                // milliseconds behind it is (issue #3348).
+                captureSequence = update.captureSequence,
+                frameContext = update.frameContext,
+                // The unit this update's bounds are in, as the daemon declared it. Carried per
+                // update
+                // rather than per session because the declaration is per message, and the control
+                // policy only compares dimensions exactly when the paired screenshot declared the
+                // same
+                // thing (issue #4550).
+                coordinateSpace = update.coordinateSpace,
+                nativeScale = update.nativeScale,
+                captureRotation = update.rotation,
+              ),
           )
         }
       }
@@ -1304,24 +1324,28 @@ fun AutoMobileContent(
           width = update.screenWidth,
           height = update.screenHeight,
           timestamp = update.timestamp,
-          fallback = update.screenshotFallback ?: false,
-          fallbackReason = update.screenshotFallbackReason,
-          format = update.screenshotFormat,
-          captureSource = update.screenshotCaptureSource,
-          // Tag the rendered frame with its source device so device control can require the
-          // on-screen frame to match the selected device (issue #3347). The frame already passed
-          // the
-          // active-device filter above, so this equals activeDeviceId at apply time.
-          deviceId = update.deviceId,
-          generation = generation,
-          // Pairs by equality against the hierarchy's id; see the hierarchy collector above.
-          captureSequence = update.captureSequence,
-          frameContext = update.frameContext,
-          // Same reasoning as the hierarchy collector: the declared unit travels with the frame
-          // (issue #4550).
-          coordinateSpace = update.coordinateSpace,
-          nativeScale = update.nativeScale,
-          rotation = update.rotation,
+          options =
+            ScreenshotUpdateOptions(
+              fallback = update.screenshotFallback ?: false,
+              fallbackReason = update.screenshotFallbackReason,
+              format = update.screenshotFormat,
+              captureSource = update.screenshotCaptureSource,
+              // Tag the rendered frame with its source device so device control can require the
+              // on-screen frame to match the selected device (issue #3347). The frame already
+              // passed
+              // the
+              // active-device filter above, so this equals activeDeviceId at apply time.
+              deviceId = update.deviceId,
+              generation = generation,
+              // Pairs by equality against the hierarchy's id; see the hierarchy collector above.
+              captureSequence = update.captureSequence,
+              frameContext = update.frameContext,
+              // Same reasoning as the hierarchy collector: the declared unit travels with the frame
+              // (issue #4550).
+              coordinateSpace = update.coordinateSpace,
+              nativeScale = update.nativeScale,
+              rotation = update.rotation,
+            ),
         )
       }
     }
@@ -1744,33 +1768,36 @@ fun AutoMobileContent(
     commandRegistry.clear()
     commandRegistry.registerAll(
       buildDefaultCommands(
-        onToggleLeftPane = { showLeftPane = !showLeftPane },
-        onToggleRightPane = { showRightPane = !showRightPane },
-        onToggleBottomPane = { showBottomPane = !showBottomPane },
-        onClearTelemetry = { telemetryEventCache.clear() },
-        onExportEvents = {
-          val jsonArray = buildJsonArray {
-            telemetryEventCache.take(1000).forEach { event ->
-              add(
-                buildJsonObject {
-                  put("type", event::class.simpleName ?: "unknown")
-                  put("timestamp", event.timestamp)
-                },
+        options =
+          DefaultCommandActions(
+            onToggleLeftPane = { showLeftPane = !showLeftPane },
+            onToggleRightPane = { showRightPane = !showRightPane },
+            onToggleBottomPane = { showBottomPane = !showBottomPane },
+            onClearTelemetry = { telemetryEventCache.clear() },
+            onExportEvents = {
+              val jsonArray = buildJsonArray {
+                telemetryEventCache.take(1000).forEach { event ->
+                  add(
+                    buildJsonObject {
+                      put("type", event::class.simpleName ?: "unknown")
+                      put("timestamp", event.timestamp)
+                    },
+                  )
+                }
+              }
+              SwingFileSaver.save(
+                "telemetry_events.json",
+                jsonArray.toString(),
+                onSuccess = {},
+                onError = { LOG.warn("Failed to export telemetry events: ${it.message}") },
               )
-            }
-          }
-          SwingFileSaver.save(
-            "telemetry_events.json",
-            jsonArray.toString(),
-            onSuccess = {},
-            onError = { LOG.warn("Failed to export telemetry events: ${it.message}") },
-          )
-        },
-        onSwitchToDarkMode = { isDarkMode = true },
-        onSwitchToLightMode = { isDarkMode = false },
-        onOpenSettings = { showSettings = true },
-        onTakeScreenshot = takeScreenshot,
-        onToggleLiveLayout = { showNavigationView = !showNavigationView },
+            },
+            onSwitchToDarkMode = { isDarkMode = true },
+            onSwitchToLightMode = { isDarkMode = false },
+            onOpenSettings = { showSettings = true },
+            onTakeScreenshot = takeScreenshot,
+            onToggleLiveLayout = { showNavigationView = !showNavigationView },
+          ),
       ),
     )
   }
@@ -2049,66 +2076,88 @@ fun AutoMobileContent(
                   // observation screenshot instead, so the pixels the user clicks carry the same
                   // frameContext as the hierarchy and input request.
                   liveFrame = if (controlSnapshot == null) liveVideoFrame?.bitmap else null,
-                  screenWidth = renderSnapshot?.deviceWidth ?: layoutInspectorState.screenWidth,
-                  screenHeight = renderSnapshot?.deviceHeight ?: layoutInspectorState.screenHeight,
-                  rotation = layoutInspectorState.rotation,
-                  hierarchy = renderSnapshot?.hierarchy?.root ?: layoutInspectorState.hierarchy,
-                  selectedElementId = layoutInspectorState.selectedElementId,
-                  hoveredElementId = layoutInspectorState.hoveredElementId,
-                  onElementSelected = { layoutInspectorState.selectElement(it) },
-                  onElementHovered = { layoutInspectorState.hoverElement(it) },
-                  showTapTargetIssues = layoutInspectorState.showTapTargetIssues,
-                  onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
-                  connectionStatus = layoutInspectorState.connectionStatus,
-                  socketExists = true,
-                  elementMap =
-                    (renderSnapshot?.hierarchy?.elementMap
-                        ?: layoutInspectorState.currentElementMap)
-                      .takeIf { it.isNotEmpty() },
                   modifier = Modifier.fillMaxSize(),
-                  // Device control (issues #3347, #3348): the reference desktop app opts in via
-                  // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only.
-                  // Every other condition is decided by DeviceControlPolicy above — control mode is
-                  // on
-                  // exactly when it produced a snapshot, and off (inspector) otherwise.
-                  controlMode =
-                    if (controlSnapshot != null) DeviceScreenControlMode.Control
-                    else DeviceScreenControlMode.Inspector,
-                  // The snapshot the view maps clicks through. Passing it here — rather than
-                  // letting
-                  // the view derive bounds from whatever live state it last recomposed with — is
-                  // what
-                  // makes an equal-aspect resolution change unable to mis-scale a tap.
-                  controlSnapshot = controlSnapshot,
-                  // The view maps a click through `snapshot` and hands both back atomically; the
-                  // session forwards it to the daemon input/tap helper off the UI thread and never
-                  // crashes on failure — the daemon's actionable error surfaces in
-                  // deviceControlTapError instead.
-                  onControlTap = { snapshot, point -> deviceControlSession.tap(snapshot, point) },
-                  // A control-mode drag (issue #3350) travels the SAME session — the same bounded
-                  // ordered queue, the same error claim, the same post-input refresh tracker — so a
-                  // tap-then-swipe sequence reaches the device in the order the user made it. The
-                  // threshold and out-of-bounds rules live in the session's pure drag policy, not
-                  // here.
-                  onControlSwipe = { snapshot, start, end, durationMs ->
-                    deviceControlSession.swipe(snapshot, start, end, durationMs)
-                  },
-                  // Streaming (real-time) drag on the SAME session: a non-null handle streams live,
-                  // null keeps the atomic onControlSwipe above (flag off / unsupported).
-                  onControlGestureStreamBegin = { snapshot, downPoint ->
-                    deviceControlSession.beginGestureStream(snapshot, downPoint)
-                  },
-                  // Keyboard, text and device buttons (issue #3351) travel that SAME session too,
-                  // so a
-                  // tap-then-type sequence reaches the device in order. The session answers whether
-                  // it
-                  // forwarded anything, and the view returns that as its onKeyEvent result — so a
-                  // chord
-                  // the policy leaves to the host is not consumed here and still reaches this app's
-                  // own
-                  // shortcuts.
-                  onControlKey = { snapshot, stroke -> deviceControlSession.key(snapshot, stroke) },
-                  onControlFocusChanged = { focused -> deviceCanvasFocused = focused },
+                  options =
+                    DeviceScreenOptions(
+                      screenWidth = renderSnapshot?.deviceWidth ?: layoutInspectorState.screenWidth,
+                      screenHeight =
+                        renderSnapshot?.deviceHeight ?: layoutInspectorState.screenHeight,
+                      rotation = layoutInspectorState.rotation,
+                      hierarchy = renderSnapshot?.hierarchy?.root ?: layoutInspectorState.hierarchy,
+                      selectedElementId = layoutInspectorState.selectedElementId,
+                      hoveredElementId = layoutInspectorState.hoveredElementId,
+                      onElementSelected = { layoutInspectorState.selectElement(it) },
+                      onElementHovered = { layoutInspectorState.hoverElement(it) },
+                      showTapTargetIssues = layoutInspectorState.showTapTargetIssues,
+                      onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
+                      connectionStatus = layoutInspectorState.connectionStatus,
+                      socketExists = true,
+                      elementMap =
+                        (renderSnapshot?.hierarchy?.elementMap
+                            ?: layoutInspectorState.currentElementMap)
+                          .takeIf { it.isNotEmpty() },
+                      // Device control (issues #3347, #3348): the reference desktop app opts in via
+                      // enableDeviceControl; the IDE plugin leaves it false and stays
+                      // inspector-only.
+                      // Every other condition is decided by DeviceControlPolicy above — control
+                      // mode is
+                      // on
+                      // exactly when it produced a snapshot, and off (inspector) otherwise.
+                      controlMode =
+                        if (controlSnapshot != null) DeviceScreenControlMode.Control
+                        else DeviceScreenControlMode.Inspector,
+                      // The snapshot the view maps clicks through. Passing it here — rather than
+                      // letting
+                      // the view derive bounds from whatever live state it last recomposed with —
+                      // is
+                      // what
+                      // makes an equal-aspect resolution change unable to mis-scale a tap.
+                      controlSnapshot = controlSnapshot,
+                      // The view maps a click through `snapshot` and hands both back atomically;
+                      // the
+                      // session forwards it to the daemon input/tap helper off the UI thread and
+                      // never
+                      // crashes on failure — the daemon's actionable error surfaces in
+                      // deviceControlTapError instead.
+                      onControlTap = { snapshot, point ->
+                        deviceControlSession.tap(snapshot, point)
+                      },
+                      // A control-mode drag (issue #3350) travels the SAME session — the same
+                      // bounded
+                      // ordered queue, the same error claim, the same post-input refresh tracker —
+                      // so a
+                      // tap-then-swipe sequence reaches the device in the order the user made it.
+                      // The
+                      // threshold and out-of-bounds rules live in the session's pure drag policy,
+                      // not
+                      // here.
+                      onControlSwipe = { snapshot, start, end, durationMs ->
+                        deviceControlSession.swipe(snapshot, start, end, durationMs)
+                      },
+                      // Streaming (real-time) drag on the SAME session: a non-null handle streams
+                      // live,
+                      // null keeps the atomic onControlSwipe above (flag off / unsupported).
+                      onControlGestureStreamBegin = { snapshot, downPoint ->
+                        deviceControlSession.beginGestureStream(snapshot, downPoint)
+                      },
+                      // Keyboard, text and device buttons (issue #3351) travel that SAME session
+                      // too,
+                      // so a
+                      // tap-then-type sequence reaches the device in order. The session answers
+                      // whether
+                      // it
+                      // forwarded anything, and the view returns that as its onKeyEvent result — so
+                      // a
+                      // chord
+                      // the policy leaves to the host is not consumed here and still reaches this
+                      // app's
+                      // own
+                      // shortcuts.
+                      onControlKey = { snapshot, stroke ->
+                        deviceControlSession.key(snapshot, stroke)
+                      },
+                      onControlFocusChanged = { focused -> deviceCanvasFocused = focused },
+                    ),
                 )
 
                 ScreenshotMetadataOverlay(
@@ -2255,14 +2304,17 @@ fun AutoMobileContent(
                         )
                       "device_controls" ->
                         DeviceControlsDashboard(
-                          appearanceClient = appearanceClient,
-                          recordingActions = recordingActions,
-                          recordingConfigClient = recordingConfigClient,
-                          streamClient = webRtcStreamClient,
                           activeDeviceId = activeDeviceId,
                           activeRecordings = activeRecordings,
-                          sessionUuidProvider = desktopSessionState.sessionUuidProvider,
                           releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
+                          options =
+                            DeviceControlsClients(
+                              appearanceClient = appearanceClient,
+                              recordingActions = recordingActions,
+                              recordingConfigClient = recordingConfigClient,
+                              streamClient = webRtcStreamClient,
+                              sessionUuidProvider = desktopSessionState.sessionUuidProvider,
+                            ),
                         )
                       "diagnostics" ->
                         DiagnosticsDashboard(
@@ -2375,20 +2427,23 @@ fun AutoMobileContent(
               onClose = {
                 if (isLiveLayoutMode) isLiveLayoutMode = false else selectedTelemetryEvent = null
               },
-              isLiveMode = isLiveLayoutMode,
-              onToggleLiveMode = { live ->
-                isLiveLayoutMode = live
-                if (live && !showRightPane) showRightPane = true
-              },
-              layoutInspectorState = layoutInspectorState,
-              hasDevice = observationStreamClient != null,
-              onOpenSource = onOpenSource,
-              screenshotLoader =
-                remember(clientProvider, dataSourceMode) {
-                  if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
-                    NavigationScreenshotLoader(clientProvider)
-                  else null
-                },
+              options =
+                InspectorPanelOptions(
+                  isLiveMode = isLiveLayoutMode,
+                  onToggleLiveMode = { live ->
+                    isLiveLayoutMode = live
+                    if (live && !showRightPane) showRightPane = true
+                  },
+                  layoutInspectorState = layoutInspectorState,
+                  hasDevice = observationStreamClient != null,
+                  onOpenSource = onOpenSource,
+                  screenshotLoader =
+                    remember(clientProvider, dataSourceMode) {
+                      if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
+                        NavigationScreenshotLoader(clientProvider)
+                      else null
+                    },
+                ),
             )
           },
           bottomPaneContent = {

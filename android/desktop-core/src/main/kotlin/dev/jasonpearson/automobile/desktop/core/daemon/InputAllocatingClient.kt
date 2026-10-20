@@ -28,7 +28,7 @@ class InputAllocatingClient(
   private val allocation: DesktopInputAllocation,
   /** The desktop session a device-targeted tool call acts as; null leaves the call unnamed. */
   private val sessionUuidProvider: () -> String? = { null },
-) : AutoMobileClient by delegate {
+) : AutoMobileClient by AllocatingStorageClient(delegate, allocation, sessionUuidProvider) {
 
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
     val deviceId = (arguments["deviceId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -127,68 +127,6 @@ class InputAllocatingClient(
   ): InputActionResult =
     allocated("input/key", platform, deviceId) {
       delegate.inputKey(key, platform, deviceId, frameContext)
-    }
-
-  // Key-value edits are device mutations (#10827): claim the device for the desktop session, then
-  // send as it. A refused claim reports a typed failure instead of reaching the daemon. The reads
-  // (resources) never come through here, so they only watch.
-  override fun setKeyValue(input: SetKeyValueRequest): SetKeyValueResult =
-    with(input) {
-      if (!allocation.awaitInputAllowed(deviceId)) {
-        SetKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
-      } else {
-        delegate.setKeyValue(
-          input =
-            SetKeyValueRequest(
-              deviceId = deviceId,
-              appId = appId,
-              fileName = fileName,
-              key = key,
-              value = value,
-              type = type,
-              platform = platform,
-              sessionUuid = sessionUuid ?: sessionUuidProvider(),
-            ),
-        )
-      }
-    }
-
-  override fun removeKeyValue(input: RemoveKeyValueRequest): RemoveKeyValueResult =
-    with(input) {
-      if (!allocation.awaitInputAllowed(deviceId)) {
-        RemoveKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
-      } else {
-        delegate.removeKeyValue(
-          input =
-            RemoveKeyValueRequest(
-              deviceId = deviceId,
-              appId = appId,
-              fileName = fileName,
-              key = key,
-              platform = platform,
-              sessionUuid = sessionUuid ?: sessionUuidProvider(),
-            ),
-        )
-      }
-    }
-
-  override fun clearKeyValueFile(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    platform: String,
-    sessionUuid: String?,
-  ): ClearKeyValueResult =
-    if (!allocation.awaitInputAllowed(deviceId)) {
-      ClearKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
-    } else {
-      delegate.clearKeyValueFile(
-        deviceId,
-        appId,
-        fileName,
-        platform,
-        sessionUuid ?: sessionUuidProvider(),
-      )
     }
 
   /**

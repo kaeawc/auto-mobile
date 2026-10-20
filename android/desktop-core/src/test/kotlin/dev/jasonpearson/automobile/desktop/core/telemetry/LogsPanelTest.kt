@@ -84,7 +84,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
         log(5, "B", "warn message", 2),
         log(6, "C", "error message", 3),
       )
-    val result = filterLogs(logs, LogLevel.entries.toSet(), "")
+    val result =
+      filterLogs(
+        logs = logs,
+        options =
+          LogFilter(
+            enabledLevels = LogLevel.entries.toSet(),
+            query = "",
+          ),
+      )
     assertEquals(logs, result)
   }
 
@@ -99,15 +107,39 @@ internal class LogsPanelTest : LogsPanelFixture() {
     assertFalse(isAutoMobileInternalTag("MainActivity"))
     assertEquals(
       listOf(mainActivity),
-      filterLogs(listOf(mainActivity), setOf(LogLevel.Info), "", showInternalTags = false),
+      filterLogs(
+        logs = listOf(mainActivity),
+        options =
+          LogFilter(
+            enabledLevels = setOf(LogLevel.Info),
+            query = "",
+            showInternalTags = false,
+          ),
+      ),
     )
     assertEquals(
       listOf(app),
-      filterLogs(listOf(internal, app), setOf(LogLevel.Info), "matching", showInternalTags = false),
+      filterLogs(
+        logs = listOf(internal, app),
+        options =
+          LogFilter(
+            enabledLevels = setOf(LogLevel.Info),
+            query = "matching",
+            showInternalTags = false,
+          ),
+      ),
     )
     assertEquals(
       listOf(internal, app),
-      filterLogs(listOf(internal, app), setOf(LogLevel.Info), "matching", showInternalTags = true),
+      filterLogs(
+        logs = listOf(internal, app),
+        options =
+          LogFilter(
+            enabledLevels = setOf(LogLevel.Info),
+            query = "matching",
+            showInternalTags = true,
+          ),
+      ),
     )
   }
 
@@ -139,7 +171,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
         log(4, "Ui", "button tapped", 2),
         log(4, "Db", "NETWORK cache miss", 3),
       )
-    val result = filterLogs(logs, LogLevel.entries.toSet(), "network")
+    val result =
+      filterLogs(
+        logs = logs,
+        options =
+          LogFilter(
+            enabledLevels = LogLevel.entries.toSet(),
+            query = "network",
+          ),
+      )
     assertEquals(listOf(logs[0], logs[2]), result)
   }
 
@@ -160,10 +200,13 @@ internal class LogsPanelTest : LogsPanelFixture() {
     assertEquals(
       listOf(matching, queryMatchesTag),
       filterLogs(
-        listOf(matching, wrongLevel, wrongTag, wrongMessage, queryMatchesTag),
-        view.enabledLevels,
-        view.query,
-        tag = view.tag,
+        logs = listOf(matching, wrongLevel, wrongTag, wrongMessage, queryMatchesTag),
+        options =
+          LogFilter(
+            enabledLevels = view.enabledLevels,
+            query = view.query,
+            tag = view.tag,
+          ),
       ),
     )
     assertTrue(matchesSavedView(wrongTag, view.copy(tag = null)))
@@ -205,7 +248,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
         log(5, "B", "warn message", 2),
         log(6, "C", "error message", 3),
       )
-    val result = filterLogs(logs, LogLevel.entries.toSet() - LogLevel.Warn, "")
+    val result =
+      filterLogs(
+        logs = logs,
+        options =
+          LogFilter(
+            enabledLevels = LogLevel.entries.toSet() - LogLevel.Warn,
+            query = "",
+          ),
+      )
     assertEquals(listOf(logs[0], logs[2]), result)
   }
 
@@ -217,7 +268,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
         log(5, "B", "keep me", 2),
         log(4, "C", "drop me", 3),
       )
-    val result = filterLogs(logs, setOf(LogLevel.Info), "keep")
+    val result =
+      filterLogs(
+        logs = logs,
+        options =
+          LogFilter(
+            enabledLevels = setOf(LogLevel.Info),
+            query = "keep",
+          ),
+      )
     assertEquals(listOf(logs[0]), result)
   }
 
@@ -233,7 +292,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
     assertEquals(listOf("m7", "m8", "m9", "m10", "m11"), buffer.map { it.message })
 
     // Filtering still works over the bounded buffer (substring "m1" matches m10 and m11).
-    val filtered = filterLogs(buffer, LogLevel.entries.toSet(), "m1")
+    val filtered =
+      filterLogs(
+        logs = buffer,
+        options =
+          LogFilter(
+            enabledLevels = LogLevel.entries.toSet(),
+            query = "m1",
+          ),
+      )
     assertEquals(listOf("m10", "m11"), filtered.map { it.message })
   }
 
@@ -254,8 +321,30 @@ internal class LogsPanelTest : LogsPanelFixture() {
   fun `filterLogs buckets ios rows on the ios scale`() {
     val logs = listOf(log(3, "T", "ios warning", 1), log(5, "T", "ios fault", 2))
     // On the iOS scale level 3 = Warn and level 5 = Error (fault).
-    assertEquals(listOf(logs[0]), filterLogs(logs, setOf(LogLevel.Warn), "", LogPlatform.Ios))
-    assertEquals(listOf(logs[1]), filterLogs(logs, setOf(LogLevel.Error), "", LogPlatform.Ios))
+    assertEquals(
+      listOf(logs[0]),
+      filterLogs(
+        logs = logs,
+        options =
+          LogFilter(
+            enabledLevels = setOf(LogLevel.Warn),
+            query = "",
+            platform = LogPlatform.Ios,
+          ),
+      ),
+    )
+    assertEquals(
+      listOf(logs[1]),
+      filterLogs(
+        logs = logs,
+        options =
+          LogFilter(
+            enabledLevels = setOf(LogLevel.Error),
+            query = "",
+            platform = LogPlatform.Ios,
+          ),
+      ),
+    )
   }
 
   @Test
@@ -287,7 +376,10 @@ internal class LogsPanelTest : LogsPanelFixture() {
           LogsPanel(
             telemetryPushClient = fake,
             settingsProvider = settings,
-            activeDeviceId = "dev-1",
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+              ),
           )
         }
       }
@@ -343,7 +435,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
   fun `search field narrows the visible rows and clearing restores them`() = runComposeUiTest {
     val fake = FakeTelemetryPushClient()
     setContent {
-      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = fake,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
     }
     waitForIdle()
     fake.emitEvent(log(4, "Net", "alpha connected", 10))
@@ -373,7 +473,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
   fun `toggling a level chip off hides logs of that level`() = runComposeUiTest {
     val fake = FakeTelemetryPushClient()
     setContent {
-      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = fake,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
     }
     waitForIdle()
     fake.emitEvent(log(4, "Net", "info line", 10))
@@ -402,7 +510,15 @@ internal class LogsPanelTest : LogsPanelFixture() {
   fun `defaults to app Info and above and toggle reveals internal rows`() = runComposeUiTest {
     val fake = FakeTelemetryPushClient()
     setContent {
-      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = fake,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
     }
     waitForIdle()
     fake.emitEvent(log(3, "AppTag", "debug app row", 1))
@@ -433,7 +549,14 @@ internal class LogsPanelTest : LogsPanelFixture() {
     setContent {
       MaterialTheme {
         Box(Modifier.height(120.dp)) {
-          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", listState = listState)
+          LogsPanel(
+            telemetryPushClient = fake,
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+                listState = listState,
+              ),
+          )
         }
       }
     }
@@ -465,7 +588,14 @@ internal class LogsPanelTest : LogsPanelFixture() {
     setContent {
       MaterialTheme {
         Box(Modifier.height(120.dp)) {
-          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", listState = listState)
+          LogsPanel(
+            telemetryPushClient = fake,
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+                listState = listState,
+              ),
+          )
         }
       }
     }
@@ -498,7 +628,10 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
         LogsPanel(
           telemetryPushClient = null,
           settingsProvider = settings,
-          activeDeviceId = deviceId.value,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = deviceId.value,
+            ),
         )
       }
     }
@@ -522,7 +655,13 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
       MaterialTheme {
         settings = LocalAutoMobileGraph.current.settingsProvider
         settings.logsEnabledLevelsByDevice = "{}"
-        LogsPanel(telemetryPushClient = null, activeDeviceId = "dev-1")
+        LogsPanel(
+          telemetryPushClient = null,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
       }
     }
 
@@ -544,7 +683,14 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
     val deviceId = mutableStateOf("dev-1")
     setContent {
       MaterialTheme {
-        LogsPanel(null, settingsProvider = settings, activeDeviceId = deviceId.value)
+        LogsPanel(
+          telemetryPushClient = null,
+          settingsProvider = settings,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = deviceId.value,
+            ),
+        )
       }
     }
     onNodeWithContentDescription("Toggle Warn logs").performClick()
@@ -566,7 +712,14 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
     val deviceId = mutableStateOf("dev-1")
     setContent {
       MaterialTheme {
-        LogsPanel(null, settingsProvider = settings, activeDeviceId = deviceId.value)
+        LogsPanel(
+          telemetryPushClient = null,
+          settingsProvider = settings,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = deviceId.value,
+            ),
+        )
       }
     }
     setOf(LogLevel.Info, LogLevel.Warn, LogLevel.Error).forEach { level ->
@@ -589,7 +742,14 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
     val settings = FakeSettingsProvider(logsMinLevelByDevice = "{\"dev-1\":\"Warn\"}")
     setContent {
       MaterialTheme {
-        LogsPanel(null, settingsProvider = settings, activeDeviceId = "dev-1")
+        LogsPanel(
+          telemetryPushClient = null,
+          settingsProvider = settings,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
       }
     }
     onNodeWithContentDescription("Toggle Verbose logs").assertIsNotSelected()
@@ -602,7 +762,15 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
   @Test
   fun `shows empty state before any logs arrive`() = runComposeUiTest {
     setContent {
-      MaterialTheme { LogsPanel(telemetryPushClient = null, activeDeviceId = "dev-1") }
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = null,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
     }
     onNodeWithText("No logs yet").assertIsDisplayed()
   }
@@ -610,7 +778,15 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
   @Test
   fun `level chip exposes a selected state that flips when toggled`() = runComposeUiTest {
     setContent {
-      MaterialTheme { LogsPanel(telemetryPushClient = null, activeDeviceId = "dev-1") }
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = null,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
     }
     // Chips start enabled (selected); toggling off flips selected to false, toggling on restores
     // it.
@@ -625,7 +801,15 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
   fun `surfaces a connection banner instead of a misleading no-logs-yet`() = runComposeUiTest {
     val fake = FakeTelemetryPushClient()
     setContent {
-      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = fake,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
     }
     fake.setConnectionState(ConnectionState.Connecting)
     waitUntil(timeoutMillis = 2_000) {
@@ -639,7 +823,15 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
   fun `terminal telemetry error offers Retry for the active device`() = runComposeUiTest {
     val fake = FakeTelemetryPushClient()
     setContent {
-      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = fake,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
     }
     fake.setConnectionState(ConnectionState.Error("Telemetry unavailable on this daemon"))
     waitUntil(timeoutMillis = 2_000) {
@@ -657,7 +849,13 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
       MaterialTheme {
         // Constrain height so the row list overflows and scroll position actually matters.
         Box(Modifier.height(120.dp)) {
-          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1")
+          LogsPanel(
+            telemetryPushClient = fake,
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+              ),
+          )
         }
       }
     }
@@ -694,7 +892,14 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
       MaterialTheme {
         Box(Modifier.height(120.dp)) {
           // Tiny cap so the buffer pins quickly and `filtered.size` stops changing on append.
-          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", maxRows = 4)
+          LogsPanel(
+            telemetryPushClient = fake,
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+                maxRows = 4,
+              ),
+          )
         }
       }
     }
@@ -726,8 +931,11 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
           Box(Modifier.height(120.dp)) {
             LogsPanel(
               telemetryPushClient = fake,
-              activeDeviceId = "dev-1",
-              onFollowTailChange = { followStates.add(it) },
+              options =
+                LogsPanelOptions(
+                  activeDeviceId = "dev-1",
+                  onFollowTailChange = { followStates.add(it) },
+                ),
             )
           }
         }
@@ -764,7 +972,13 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
     setContent {
       MaterialTheme {
         Box(Modifier.height(120.dp)) {
-          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1")
+          LogsPanel(
+            telemetryPushClient = fake,
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+              ),
+          )
         }
       }
     }
@@ -811,8 +1025,11 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
       MaterialTheme {
         LogsPanel(
           telemetryPushClient = fake,
-          activeDeviceId = "dev-1",
-          platform = platform.value,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+              platform = platform.value,
+            ),
         )
       }
     }
@@ -847,7 +1064,13 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
     val deviceId = mutableStateOf("dev-1")
     setContent {
       MaterialTheme {
-        LogsPanel(telemetryPushClient = fake, activeDeviceId = deviceId.value)
+        LogsPanel(
+          telemetryPushClient = fake,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = deviceId.value,
+            ),
+        )
       }
     }
     waitForIdle()
@@ -873,7 +1096,13 @@ internal class LogsPanelFilteringTest : LogsPanelFixture() {
       setContent {
         MaterialTheme {
           Box(Modifier.height(120.dp)) {
-            LogsPanel(telemetryPushClient = fake, activeDeviceId = deviceId.value)
+            LogsPanel(
+              telemetryPushClient = fake,
+              options =
+                LogsPanelOptions(
+                  activeDeviceId = deviceId.value,
+                ),
+            )
           }
         }
       }
@@ -912,7 +1141,15 @@ internal class LogsPanelSelectionTest : LogsPanelFixture() {
     runComposeUiTest {
       val fake = FakeTelemetryPushClient()
       setContent {
-        MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+        MaterialTheme {
+          LogsPanel(
+            telemetryPushClient = fake,
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+              ),
+          )
+        }
       }
       waitForIdle()
       fake.emitEvent(log(4, "Net", "selectable row", 10))
@@ -936,7 +1173,17 @@ internal class LogsPanelSelectionTest : LogsPanelFixture() {
   @Test
   fun `selecting a log row reveals a detail surface with the full content`() = runComposeUiTest {
     val fake = FakeTelemetryPushClient()
-    setContent { MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") } }
+    setContent {
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = fake,
+          options =
+            LogsPanelOptions(
+              activeDeviceId = "dev-1",
+            ),
+        )
+      }
+    }
     waitForIdle()
     fake.emitEvent(log(6, "Crash", "the full message body reachable only via detail", 10))
     waitUntil(timeoutMillis = 2_000) {
@@ -971,7 +1218,14 @@ internal class LogsPanelSelectionTest : LogsPanelFixture() {
       setContent {
         MaterialTheme {
           // Cap of 1 so the very next row evicts the selected one from the front of the buffer.
-          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", maxRows = 1)
+          LogsPanel(
+            telemetryPushClient = fake,
+            options =
+              LogsPanelOptions(
+                activeDeviceId = "dev-1",
+                maxRows = 1,
+              ),
+          )
         }
       }
       waitForIdle()
@@ -1003,10 +1257,22 @@ internal class LogsPanelSelectionTest : LogsPanelFixture() {
       MaterialTheme {
         Column {
           Box(Modifier.height(200.dp)) {
-            LogsPanel(telemetryPushClient = fakeA, activeDeviceId = "dev-A")
+            LogsPanel(
+              telemetryPushClient = fakeA,
+              options =
+                LogsPanelOptions(
+                  activeDeviceId = "dev-A",
+                ),
+            )
           }
           Box(Modifier.height(200.dp)) {
-            LogsPanel(telemetryPushClient = fakeB, activeDeviceId = "dev-B")
+            LogsPanel(
+              telemetryPushClient = fakeB,
+              options =
+                LogsPanelOptions(
+                  activeDeviceId = "dev-B",
+                ),
+            )
           }
         }
       }

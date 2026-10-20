@@ -148,10 +148,13 @@ private suspend fun applyLayoutHierarchy(
     )
     state.updateConnectionStatus(ConnectionStatus.Connected)
     state.applyHierarchyUpdate(
-      result.first,
-      result.second,
-      deviceId = update.deviceId ?: deviceId,
+      parsed = result.first,
+      changedIds = result.second,
       generation = frameGeneration,
+      options =
+        HierarchyUpdateOptions(
+          deviceId = update.deviceId ?: deviceId,
+        ),
     )
     dashboardLog.info("Updated state with new hierarchy")
   } else {
@@ -204,12 +207,15 @@ private fun CollectLayoutScreenshots(
           width = update.screenWidth,
           height = update.screenHeight,
           timestamp = update.timestamp,
-          fallback = update.screenshotFallback ?: false,
-          fallbackReason = update.screenshotFallbackReason,
-          format = update.screenshotFormat,
-          captureSource = update.screenshotCaptureSource,
-          deviceId = update.deviceId ?: deviceId,
-          generation = frameGeneration,
+          options =
+            ScreenshotUpdateOptions(
+              fallback = update.screenshotFallback ?: false,
+              fallbackReason = update.screenshotFallbackReason,
+              format = update.screenshotFormat,
+              captureSource = update.screenshotCaptureSource,
+              deviceId = update.deviceId ?: deviceId,
+              generation = frameGeneration,
+            ),
         )
         dashboardLog.info("Updated state with new screenshot")
       }
@@ -366,25 +372,28 @@ private fun androidx.compose.foundation.layout.RowScope.LayoutDevicePanel(
         DeviceScreenView(
           screenshotData = state.screenshotData,
           liveFrame = liveFrame,
-          screenWidth = state.screenWidth,
-          screenHeight = state.screenHeight,
-          rotation = state.rotation,
-          hierarchy = state.hierarchy,
-          selectedElementId = state.selectedElementId,
-          hoveredElementId = state.hoveredElementId,
-          flashElementId = flashElementId,
-          onFlashComplete = { flashElementId = null },
-          onElementSelected = { state.selectElement(it) },
-          onElementHovered = { state.hoverElement(it) },
-          showTapTargetIssues = state.showTapTargetIssues,
-          onToggleTapTargetIssues = { state.toggleTapTargetIssues() },
-          connectionStatus = state.connectionStatus,
-          hierarchyUnavailableReason = state.hierarchyUnavailableReason,
-          socketExists = socketExists,
-          onRestartDaemon = onRestartDaemon,
-          elementMap = state.currentElementMap.takeIf { it.isNotEmpty() },
           modifier = Modifier.fillMaxSize(),
-          refitTrigger = refitTrigger, // Trigger refit when panels toggle
+          options =
+            DeviceScreenOptions(
+              screenWidth = state.screenWidth,
+              screenHeight = state.screenHeight,
+              rotation = state.rotation,
+              hierarchy = state.hierarchy,
+              selectedElementId = state.selectedElementId,
+              hoveredElementId = state.hoveredElementId,
+              flashElementId = flashElementId,
+              onFlashComplete = { flashElementId = null },
+              onElementSelected = { state.selectElement(it) },
+              onElementHovered = { state.hoverElement(it) },
+              showTapTargetIssues = state.showTapTargetIssues,
+              onToggleTapTargetIssues = { state.toggleTapTargetIssues() },
+              connectionStatus = state.connectionStatus,
+              hierarchyUnavailableReason = state.hierarchyUnavailableReason,
+              socketExists = socketExists,
+              onRestartDaemon = onRestartDaemon,
+              elementMap = state.currentElementMap.takeIf { it.isNotEmpty() },
+              refitTrigger = refitTrigger,
+            ),
         )
 
         // The metadata badge describes the SCREENSHOT pixels (format/fallback/capture source), so

@@ -43,6 +43,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.clipboard.LocalClipboardWriter
+import dev.jasonpearson.automobile.desktop.core.components.SearchBarOptions
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.delay
 
@@ -154,8 +155,11 @@ fun HierarchyTreeView(
     dev.jasonpearson.automobile.desktop.core.components.SearchBar(
       query = searchQuery,
       onQueryChange = { searchQuery = it },
-      placeholder = "Search views...",
       modifier = Modifier.fillMaxWidth().padding(8.dp),
+      options =
+        SearchBarOptions(
+          placeholder = "Search views...",
+        ),
     )
 
     // Tree list

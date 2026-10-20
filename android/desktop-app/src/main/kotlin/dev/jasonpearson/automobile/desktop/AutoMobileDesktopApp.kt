@@ -13,6 +13,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacetOptions
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
@@ -103,7 +104,14 @@ internal fun WorkspaceFacet(
     // Navigation is app-scoped (#4837 Phase C): the facet resolves the pane device's foreground app
     // from the stream, then pulls that app's persisted graph by appId — so same-app panes share the
     // graph and a foreign broadcast can't overwrite a pane (the #4838 contamination).
-    Tool.Navigation -> NavigationFacet(column, sessionUuidProvider = sessionUuidProvider)
+    Tool.Navigation ->
+      NavigationFacet(
+        column = column,
+        options =
+          NavigationFacetOptions(
+            sessionUuidProvider = sessionUuidProvider,
+          ),
+      )
     // Test reads the per-device test-runs daemon resource (automobile:test-runs?deviceId=<id>,
     // #4715 / #5017), scoped to the pane device so panes don't cross-contaminate (#5019).
     Tool.Test -> TestFacet(column)

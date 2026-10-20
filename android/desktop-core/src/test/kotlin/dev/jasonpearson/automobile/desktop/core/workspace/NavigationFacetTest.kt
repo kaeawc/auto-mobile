@@ -153,8 +153,11 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { source },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { source },
+                ),
             )
           }
         }
@@ -204,12 +207,15 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
             if (visible.value) {
               NavigationFacet(
                 column = column(),
-                observationStreamFactory = { fake },
-                navigationDataSourceProvider = {
-                  StubNavigationDataSource(
-                    Result.Success(NavigationGraph(emptyList(), emptyList())),
-                  )
-                },
+                options =
+                  NavigationFacetOptions(
+                    observationStreamFactory = { fake },
+                    navigationDataSourceProvider = {
+                      StubNavigationDataSource(
+                        Result.Success(NavigationGraph(emptyList(), emptyList())),
+                      )
+                    },
+                  ),
               )
             }
           }
@@ -242,8 +248,11 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { source },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { source },
+              ),
           )
         }
       }
@@ -268,12 +277,15 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-                )
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -309,8 +321,11 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { growingSource },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { growingSource },
+                ),
             )
           }
         }
@@ -354,10 +369,13 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { appId ->
-                if (appId == "com.example.b") bSource else aSource
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { appId ->
+                    if (appId == "com.example.b") bSource else aSource
+                  },
+                ),
             )
           }
         }
@@ -414,8 +432,11 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { refreshingSource },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { refreshingSource },
+              ),
           )
         }
       }
@@ -454,10 +475,15 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(emptyList(), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -490,12 +516,15 @@ internal class NavigationFacetTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-                )
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -525,13 +554,19 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column("dev-1"),
-            observationStreamFactory = { streamA },
-            navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { streamA },
+                navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+              ),
           )
           NavigationFacet(
             column = column("dev-2"),
-            observationStreamFactory = { streamB },
-            navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { streamB },
+                navigationDataSourceProvider = { StubNavigationDataSource(Result.Success(shared)) },
+              ),
           )
         }
       }
@@ -559,10 +594,15 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(emptyList(), emptyList())),
+                  )
+                },
+              ),
           )
         }
       }
@@ -587,10 +627,15 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(Result.Error(RuntimeException("daemon down"), "daemon down"))
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Error(RuntimeException("daemon down"), "daemon down"),
+                  )
+                },
+              ),
           )
         }
       }
@@ -621,8 +666,11 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { recovering },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { recovering },
+              ),
           )
         }
       }
@@ -657,14 +705,17 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { controlled },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-              )
-            },
-            backoffDelay = { backoff.await() },
-            socketAvailable = { socketUp.value },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { controlled },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                  )
+                },
+                backoffDelay = { backoff.await() },
+                socketAvailable = { socketUp.value },
+              ),
           )
         }
       }
@@ -707,20 +758,23 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
-              )
-            },
-            backoffDelay = { reconnectMayStart.await() },
-            socketAvailable = { true },
-            connectionStateCollectorGate = { next ->
-              if (next is ConnectionState.Disconnected && next.reason == "Stream ended") {
-                collectorBlocked.complete(Unit)
-                collectorMayResume.await()
-              }
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
+                  )
+                },
+                backoffDelay = { reconnectMayStart.await() },
+                socketAvailable = { true },
+                connectionStateCollectorGate = { next ->
+                  if (next is ConnectionState.Disconnected && next.reason == "Stream ended") {
+                    collectorBlocked.complete(Unit)
+                    collectorMayResume.await()
+                  }
+                },
+              ),
           )
         }
       }
@@ -759,14 +813,17 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
-              )
-            },
-            backoffDelay = { backoff.await() },
-            socketAvailable = { true },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
+                  )
+                },
+                backoffDelay = { backoff.await() },
+                socketAvailable = { true },
+              ),
           )
         }
       }
@@ -805,16 +862,19 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { appId ->
-                // Distinct graph per app so a stale render is detectable by screen name.
-                val label = if (appId == "com.example.b") "Beta" else "Alpha"
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
-                )
-              },
-              backoffDelay = { backoff.await() },
-              socketAvailable = { true },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { appId ->
+                    // Distinct graph per app so a stale render is detectable by screen name.
+                    val label = if (appId == "com.example.b") "Beta" else "Alpha"
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
+                    )
+                  },
+                  backoffDelay = { backoff.await() },
+                  socketAvailable = { true },
+                ),
             )
           }
         }
@@ -867,14 +927,17 @@ internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
-                )
-              },
-              backoffDelay = { backoff.await() },
-              socketAvailable = { true },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
+                    )
+                  },
+                  backoffDelay = { backoff.await() },
+                  socketAvailable = { true },
+                ),
             )
           }
         }
@@ -925,10 +988,15 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { throwing },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { throwing },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(emptyList(), emptyList())),
+                    )
+                  },
+                ),
             )
           }
         }
@@ -962,15 +1030,20 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = {
-                StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-              },
-              resolveTimeout = {
-                // Mount can relaunch the effect before Retry; all such launches share the first
-                // gate. The user action, not the number of launches, selects the retry gate.
-                if (!retryStarted.get()) fireTimeout.await() else retryTimeout.await()
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = {
+                    StubNavigationDataSource(
+                      Result.Success(NavigationGraph(emptyList(), emptyList())),
+                    )
+                  },
+                  resolveTimeout = {
+                    // Mount can relaunch the effect before Retry; all such launches share the first
+                    // gate. The user action, not the number of launches, selects the retry gate.
+                    if (!retryStarted.get()) fireTimeout.await() else retryTimeout.await()
+                  },
+                ),
             )
           }
         }
@@ -1014,17 +1087,20 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
-              )
-            },
-            backoffDelay = {},
-            socketAvailable = { true },
-            resolveTimeout = {
-              if (retryStarted.get()) retryTimeout.await() else reconnectTimeout.await()
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
+                  )
+                },
+                backoffDelay = {},
+                socketAvailable = { true },
+                resolveTimeout = {
+                  if (retryStarted.get()) retryTimeout.await() else reconnectTimeout.await()
+                },
+              ),
           )
         }
       }
@@ -1077,13 +1153,16 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { fake },
-            navigationDataSourceProvider = { appId ->
-              val label = if (appId == "com.example.b") "Beta" else "Alpha"
-              StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
-              )
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { fake },
+                navigationDataSourceProvider = { appId ->
+                  val label = if (appId == "com.example.b") "Beta" else "Alpha"
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
+                  )
+                },
+              ),
           )
         }
       }
@@ -1113,10 +1192,17 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(deviceId.value),
-            observationStreamFactory = { id -> streams.getOrPut(id) { FakeObservationStream() } },
-            navigationDataSourceProvider = {
-              StubNavigationDataSource(Result.Success(NavigationGraph(emptyList(), emptyList())))
-            },
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { id ->
+                  streams.getOrPut(id) { FakeObservationStream() }
+                },
+                navigationDataSourceProvider = {
+                  StubNavigationDataSource(
+                    Result.Success(NavigationGraph(emptyList(), emptyList())),
+                  )
+                },
+              ),
           )
         }
       }
@@ -1145,10 +1231,13 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
           if (visible.value) {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { FakeObservationStream() },
-              screenshotLoaderProvider = { deviceId ->
-                registry.forDevice(deviceId) { FakeAutoMobileClient() }.also { used += it }
-              },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { FakeObservationStream() },
+                  screenshotLoaderProvider = { deviceId ->
+                    registry.forDevice(deviceId) { FakeAutoMobileClient() }.also { used += it }
+                  },
+                ),
             )
           }
         }
@@ -1182,7 +1271,10 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(deviceId),
-              observationStreamFactory = { FakeObservationStream() },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { FakeObservationStream() },
+                ),
             )
           }
         }
@@ -1212,8 +1304,11 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
         MaterialTheme {
           NavigationFacet(
             column = column(),
-            observationStreamFactory = { FakeObservationStream() },
-            screenshotLoaderProvider = provider.value,
+            options =
+              NavigationFacetOptions(
+                observationStreamFactory = { FakeObservationStream() },
+                screenshotLoaderProvider = provider.value,
+              ),
           )
         }
       }
@@ -1270,9 +1365,12 @@ internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
           MaterialTheme {
             NavigationFacet(
               column = column(),
-              observationStreamFactory = { fake },
-              navigationDataSourceProvider = { source },
-              screenshotLoaderProvider = { loader },
+              options =
+                NavigationFacetOptions(
+                  observationStreamFactory = { fake },
+                  navigationDataSourceProvider = { source },
+                  screenshotLoaderProvider = { loader },
+                ),
             )
           }
         }

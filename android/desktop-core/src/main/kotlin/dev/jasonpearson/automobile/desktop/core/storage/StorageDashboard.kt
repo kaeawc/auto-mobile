@@ -470,41 +470,48 @@ fun StorageDashboard(
       StorageTab.KeyValue ->
         KeyValueInspector(
           keyValueFiles = keyValueFiles,
-          loadError = keyValueError?.message,
-          loadErrorCode = keyValueError?.errorCode,
-          onSetValue =
-            dataSource?.let { ds ->
-              { fileName, key, value, type ->
-                // Snapshot this key's live-update generation before the suspending save. Value
-                // equality is insufficient: an A -> B -> A live sequence must still win over
-                // the older submitted value when the save completes.
-                val generationKey = highlightKey(fileName, key)
-                val preSaveGeneration = storageUpdateGenerations[generationKey] ?: 0L
-                val result = ds.setKeyValue(fileName, key, value, type)
-                // Optimistic local update: reflect the saved value immediately rather than leaving
-                // it stale until a live storage_update frame arrives (or the facet is reopened).
-                // A later frame for the same key folds in idempotently over this (#4709). No
-                // highlight — a highlight signals a change that happened *under* the user, not one
-                // they just made. Skipped when a concurrent live frame already advanced the key.
-                if (result is Result.Success) {
-                  keyValueFiles =
-                    keyValueFiles.applyKeyValueEditIfGenerationUnchanged(
-                      edit =
-                        KeyValueEdit(
-                          fileName,
-                          key,
-                          value,
-                          type,
-                        ),
-                      preSaveGeneration,
-                      storageUpdateGenerations[generationKey] ?: 0L,
-                    )
-                }
-                result
-              }
-            },
-          recentlyChangedKeys = recentlyChangedKeys,
           modifier = Modifier.fillMaxSize(),
+          options =
+            KeyValueInspectorOptions(
+              loadError = keyValueError?.message,
+              loadErrorCode = keyValueError?.errorCode,
+              onSetValue =
+                dataSource?.let { ds ->
+                  { fileName, key, value, type ->
+                    // Snapshot this key's live-update generation before the suspending save. Value
+                    // equality is insufficient: an A -> B -> A live sequence must still win over
+                    // the older submitted value when the save completes.
+                    val generationKey = highlightKey(fileName, key)
+                    val preSaveGeneration = storageUpdateGenerations[generationKey] ?: 0L
+                    val result = ds.setKeyValue(fileName, key, value, type)
+                    // Optimistic local update: reflect the saved value immediately rather than
+                    // leaving
+                    // it stale until a live storage_update frame arrives (or the facet is
+                    // reopened).
+                    // A later frame for the same key folds in idempotently over this (#4709). No
+                    // highlight — a highlight signals a change that happened *under* the user, not
+                    // one
+                    // they just made. Skipped when a concurrent live frame already advanced the
+                    // key.
+                    if (result is Result.Success) {
+                      keyValueFiles =
+                        keyValueFiles.applyKeyValueEditIfGenerationUnchanged(
+                          edit =
+                            KeyValueEdit(
+                              fileName,
+                              key,
+                              value,
+                              type,
+                            ),
+                          preSaveGeneration,
+                          storageUpdateGenerations[generationKey] ?: 0L,
+                        )
+                    }
+                    result
+                  }
+                },
+              recentlyChangedKeys = recentlyChangedKeys,
+            ),
         )
     }
   }

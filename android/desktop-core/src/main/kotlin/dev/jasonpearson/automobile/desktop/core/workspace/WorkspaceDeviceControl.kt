@@ -15,8 +15,12 @@ import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.layout.HierarchyUpdateOptions
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorState
+import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotUpdateOptions
+import dev.jasonpearson.automobile.desktop.core.layout.computeChangedElements
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
+import dev.jasonpearson.automobile.desktop.core.layout.updateConnectionStatus
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.rememberControlFreshnessTick
 import dev.jasonpearson.automobile.desktop.domain.ConnectionStatus
@@ -199,15 +203,18 @@ fun rememberWorkspaceDeviceControl(
         result?.let {
           layoutState.updateConnectionStatus(ConnectionStatus.Connected)
           layoutState.applyHierarchyUpdate(
-            it.first,
-            it.second,
-            deviceId = update.deviceId,
+            parsed = it.first,
+            changedIds = it.second,
             generation = generation,
-            captureSequence = update.captureSequence,
-            frameContext = update.frameContext,
-            coordinateSpace = update.coordinateSpace,
-            nativeScale = update.nativeScale,
-            captureRotation = update.rotation,
+            options =
+              HierarchyUpdateOptions(
+                deviceId = update.deviceId,
+                captureSequence = update.captureSequence,
+                frameContext = update.frameContext,
+                coordinateSpace = update.coordinateSpace,
+                nativeScale = update.nativeScale,
+                captureRotation = update.rotation,
+              ),
           )
         }
       }
@@ -236,17 +243,20 @@ fun rememberWorkspaceDeviceControl(
           width = update.screenWidth,
           height = update.screenHeight,
           timestamp = update.timestamp,
-          fallback = update.screenshotFallback ?: false,
-          fallbackReason = update.screenshotFallbackReason,
-          format = update.screenshotFormat,
-          captureSource = update.screenshotCaptureSource,
-          deviceId = update.deviceId,
-          generation = generation,
-          captureSequence = update.captureSequence,
-          frameContext = update.frameContext,
-          coordinateSpace = update.coordinateSpace,
-          nativeScale = update.nativeScale,
-          rotation = update.rotation,
+          options =
+            ScreenshotUpdateOptions(
+              fallback = update.screenshotFallback ?: false,
+              fallbackReason = update.screenshotFallbackReason,
+              format = update.screenshotFormat,
+              captureSource = update.screenshotCaptureSource,
+              deviceId = update.deviceId,
+              generation = generation,
+              captureSequence = update.captureSequence,
+              frameContext = update.frameContext,
+              coordinateSpace = update.coordinateSpace,
+              nativeScale = update.nativeScale,
+              rotation = update.rotation,
+            ),
         )
       }
     }

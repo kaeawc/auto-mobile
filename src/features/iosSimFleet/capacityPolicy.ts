@@ -27,13 +27,16 @@ export function estimatePerSimulatorBytes(
       ? [{ udid: sim.udid, rssBytes: sim.process.rssBytes }]
       : [],
   );
-  const namedBoots = new Set(inFlight.flatMap((boot) => (boot.deviceId ? [boot.deviceId] : [])));
+  // Replacement reservations are anonymous charges; the old simulator's RSS stays settled.
+  const namedBoots = new Set(
+    inFlight.flatMap((boot) => (boot.deviceId && !boot.replacement ? [boot.deviceId] : [])),
+  );
   for (const sim of simulators) {
     if (sim.state === "Booting") {
       namedBoots.add(sim.udid);
     }
   }
-  const anonymousBoots = inFlight.filter((boot) => boot.deviceId === undefined);
+  const anonymousBoots = inFlight.filter((boot) => boot.deviceId === undefined || boot.replacement);
   if (namedBoots.size === 0 && anonymousBoots.length === 0) {
     return estimatePerDeviceBytes(
       measured.map((sim) => sim.rssBytes),
@@ -44,7 +47,7 @@ export function estimatePerSimulatorBytes(
   // for the shared process matcher; no PID is available (or needed) in SimulatorProcessCost.
   const rowIds = new Map(measured.map((sim, index) => [sim.udid, index]));
   const boots: InFlightBootMemory[] = [
-    ...anonymousBoots,
+    ...anonymousBoots.map(({ handedOff }) => ({ handedOff })),
     ...[...namedBoots].map((udid) => ({ processId: rowIds.get(udid), handedOff: false })),
   ];
   return estimateSettledPerDeviceBytes(

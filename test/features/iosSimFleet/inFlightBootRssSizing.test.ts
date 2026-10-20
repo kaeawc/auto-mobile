@@ -109,13 +109,30 @@ test("a boot released during sampling stays excluded for that sample", async () 
 });
 
 test("duplicate admissions for one UDID charge the boot only once", async () => {
-  const { report, gate } = setup([simulator("settled", 1.5)]);
+  const { report, gate } = setup([simulator("settled", 1)]);
   const first = await gate.admitBoot(undefined, { bootUdid: "new" });
   const second = await gate.admitBoot(undefined, { bootUdid: "new" });
   report.simulators.push(simulator("new", 0.8, "Booting"));
-  expect((await gate.describeCapacity()).limit).toBe(3);
+  expect((await gate.describeCapacity()).limit).toBe(4);
   first.releaseAdmission?.();
   second.releaseAdmission?.();
+});
+
+test("a replacement reservation keeps the heavy settled simulator in sizing", async () => {
+  const { gate } = setup([simulator("old", 5), simulator("other", 2)]);
+  expect((await gate.describeCapacity()).limit).toBe(2);
+  const reservation = await gate.reserveBoot({ replacingDeviceId: "old", timeoutMs: 1000 });
+  try {
+    expect(await gate.describeCapacity()).toMatchObject({ limit: 2, booted: 2, inFlight: 0 });
+    expect((await gate.evaluateBoot()).outcome).toBe("refuse");
+  } finally {
+    reservation.release();
+  }
+});
+
+test("an anonymous boot's process id cannot match a simulator RSS row index", () => {
+  const { report } = setup([simulator("settled", 5), simulator("other", 2)]);
+  expect(estimatePerSimulatorBytes(report, [{ processId: 0, handedOff: false }])).toBe(3.5 * GIB);
 });
 
 test("an admission without a UDID still charges the policy default", async () => {

@@ -16,6 +16,7 @@ import {
   ExternalCtrlProxyProcess,
   ListeningProcess,
   IOS_CTRL_PROXY_DEFAULT_PORT,
+  IOS_CTRL_PROXY_HEALTH_POLL_INTERVAL_MS,
 } from "./IosCtrlProxyContracts";
 
 interface IosCtrlProxyStartupHost {
@@ -256,7 +257,8 @@ export class IosCtrlProxyStartup {
     // is env-configurable (AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS) and defaults
     // generous — too short a budget declares failure while the runner is still
     // coming up, which then triggers a kill+respawn livelock (#2834).
-    const delayMs = 500;
+    // Keep the configured timeout budget independent of the faster initial polling cadence.
+    const delayMs = IOS_CTRL_PROXY_HEALTH_POLL_INTERVAL_MS;
     const defaultHealthPollDurationMs = this.host.resolveHealthPollMaxAttempts() * delayMs;
     const healthPollStartedAt = this.state.timer.now();
     sharedStart.defaultHealthPollDeadlineMs = healthPollStartedAt + defaultHealthPollDurationMs;
@@ -386,8 +388,7 @@ export class IosCtrlProxyStartup {
       );
       this.host.adoptServicePort(IOS_CTRL_PROXY_DEFAULT_PORT);
       this.host.clearCaches();
-      // Mirror the normal success path's WebSocket-init settle (#2834 review — MINOR-3).
-      await this.host.sleepForHealthPoll(500, sharedStart.controller.signal);
+      sharedStart.controller.signal.throwIfAborted();
       await this.host.startProcessSupervision();
       return true;
     }

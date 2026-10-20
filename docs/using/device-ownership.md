@@ -173,6 +173,18 @@ below are the defaults; the constants live in
   with `device_owned_by_other_session`. A successful restore moves ownership, so
   the previous connection no longer owns the session.
 
+After a daemon restart, managed execution calls receive `binding_ownership_unconfirmed`
+while the daemon reclaims the binding. Its `retryAfterMs` starts at 1,000 ms, increases
+by 1,000 ms per complete second of the ownership episode, and caps at 5,000 ms
+(without jitter). Ownership must be confirmed within 15 s on the daemon's timer;
+otherwise the existing ownership-loss path releases the session and calls receive
+`session_ownership_lost`, `retryable: false`, `nextAction: "acquire_new_session"`.
+`scope_not_valid`, `binding_missing`, and `device_assigned_elsewhere` claim refusals
+lose ownership immediately. `binding_not_ready`, `stale_binding`, `binding_in_use`,
+and registry contention/deadline failures retry within the same 15 s bound.
+A retained session that is no longer live stops retrying, except during an active
+release hold. A synchronous registry write can delay deadline delivery until it returns.
+
 A managed session released while binding ownership is unconfirmed holds device teardown for
 up to 1.9 s on the daemon’s timer: two shared turns at their worst case
 (700 ms attempt bound + the registry’s 250 ms busy timeout each), covering the turn

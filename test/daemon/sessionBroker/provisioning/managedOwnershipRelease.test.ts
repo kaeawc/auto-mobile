@@ -384,11 +384,11 @@ describe("managed ownership release", () => {
     expect(h.writes).toEqual(["restore"]);
   });
 
-  test("the hold ends at the cap; the re-own lands afterwards without device writes", async () => {
+  test("the hold ends at the cap and a releasing retained session stops re-owning", async () => {
     const h = await harness();
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const bookkeeping = Promise.withResolvers<void>();
-    // Keep the releasing session present: background re-owning stops once its object is gone.
+    // Keep the releasing object present to distinguish retention from live ownership.
     const markReleased = h.persistence.markReleased.bind(h.persistence);
     const persist = spyOn(h.persistence, "markReleased").mockImplementation(async (...args) => {
       await bookkeeping.promise;
@@ -435,14 +435,14 @@ describe("managed ownership release", () => {
       expect(h.confirmed).toEqual([]);
       h.timer.advanceTime(1);
       await h.reowner.whenIdle();
-      expect(h.confirmed).toEqual([SESSION]);
+      expect(h.confirmed).toEqual([]);
       expect(h.lost).toEqual([]);
       expect(h.writes).toEqual([]);
       h.behavior.busyMark = false;
       bookkeeping.resolve();
       await release;
       await settleWithFakeTime(h.timer, h.drain.whenIdle(), {
-        description: "settlement after post-cap ownership confirmation",
+        description: "settlement after the non-live re-own stops",
         stepMs: 100,
         maxSteps: 100,
       });

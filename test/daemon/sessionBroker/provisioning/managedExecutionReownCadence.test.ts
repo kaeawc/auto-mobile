@@ -5,6 +5,7 @@ import {
   MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS,
   MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS,
   MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS,
+  MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS,
   ManagedExecutionReowner,
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
@@ -18,6 +19,7 @@ import {
   MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
 } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import {
+  BindingOwnershipLostError,
   BindingDiscoveryIncompleteError,
   BindingOwnershipUnconfirmedError,
 } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
@@ -33,7 +35,10 @@ import {
   REGISTRY_RETRY_MAX_DELAY_MS,
   REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
 } from "../../../../src/daemon/sessionBroker/registry/registryRetryPacing";
-import type { BindingAssignmentRecord } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import type {
+  ClaimExecutionResult,
+  BindingAssignmentRecord,
+} from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { logger } from "../../../../src/utils/logger";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -93,6 +98,7 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
     blocked: 0,
     successBlocked: 0,
     retry: false,
+    refusal: undefined as ClaimExecutionResult | undefined,
     hangClaim: false,
   };
   const calls: Array<{ id: string; at: number; end: number }> = [];
@@ -108,8 +114,11 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
         call.end = timer.now();
         throw new Error("SQLITE_BUSY: last error");
       }
+      if (behavior.refusal) {
+        return behavior.refusal;
+      }
       if (behavior.retry) {
-        return { kind: "binding_missing" };
+        return { kind: "binding_not_ready", assignment: assignmentA! };
       }
       if (behavior.hangClaim) {
         return claim.promise;
@@ -124,6 +133,8 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
   const opening = { hang: false };
   const present = new Set(["a", "b"]);
   const confirmed: number[] = [];
+  const held = new Set(present);
+  const lost: number[] = [];
   const reowner = new ManagedExecutionReowner({
     registry: () => {
       opens++;
@@ -132,7 +143,12 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
     owner: () => OWNER,
     timer,
     retryBackoff: policy,
-    isSessionHeld: (id) => present.has(id),
+    isSessionHeld: (id) => held.has(id),
+    isSessionPresent: (id) => present.has(id),
+    onOwnershipLost: (id) => {
+      lost.push(timer.now());
+      held.delete(id);
+    },
     onOwnershipConfirmed: () => {
       confirmed.push(timer.now());
     },
@@ -162,6 +178,8 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
     behavior,
     calls,
     confirmed,
+    lost,
+    held,
     warn,
     info,
     debug,
@@ -542,7 +560,7 @@ test("a hold during an in-flight retry starts no concurrent session attempt", as
   await h.step(0);
   expect(h.calls.map((call) => call.id)).toEqual(["a", "a"]);
   h.behavior.hangClaim = false;
-  h.claim.resolve({ kind: "binding_missing" });
+  h.claim.resolve({ kind: "binding_not_ready", assignment: h.assignmentA });
   await h.step(0);
   await peer;
   expect(h.calls.map((call) => call.id)).toEqual(["a", "a", "b"]);
@@ -582,7 +600,7 @@ test("A's release expedites its attempt behind B's blocking in-flight attempt", 
   // Hold A was created while B owned the turn; model B blocking before its failure completes.
   h.timer.setCurrentTime(REGISTRY_BUSY_WRITE_MS);
   h.behavior.hangClaim = false;
-  h.claim.resolve({ kind: "binding_missing" });
+  h.claim.resolve({ kind: "binding_not_ready", assignment: h.assignmentA });
   await h.step(0);
   await peer;
   expect(h.calls.map((c) => [c.id, c.at])).toEqual([
@@ -705,3 +723,133 @@ test("published hold timing matches the derived cap in the ownership guide", () 
     expect(guide).not.toContain("the previous worst-case 3.3 s is retained as headroom");
   }
 });
+
+const MAX_UNCONFIRMED_MS = MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS;
+
+for (const kind of ["scope_not_valid", "binding_missing", "device_assigned_elsewhere"] as const) {
+  test(`${kind} loses ownership on the first claim and releases through the hook`, async () => {
+    const h = await harness();
+    const refusals: Record<typeof kind, ClaimExecutionResult> = {
+      scope_not_valid: { kind: "scope_not_valid", scope: null },
+      binding_missing: { kind: "binding_missing" },
+      device_assigned_elsewhere: { kind: "device_assigned_elsewhere", holder: h.assignmentA },
+    };
+    h.behavior.refusal = refusals[kind];
+    await h.reowner.reown(["a"], { rehydrated: true });
+    expect(h.lost).toEqual([0]);
+    expect(h.held.has("a")).toBe(false);
+    expect(h.reowner.automationRefusal("a")).toBeInstanceOf(BindingOwnershipLostError);
+    await h.step(MAX_UNCONFIRMED_MS);
+    expect(h.calls).toHaveLength(1);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+}
+
+for (const kind of ["binding_not_ready", "stale_binding", "binding_in_use"] as const) {
+  test(`${kind} retries and can confirm later`, async () => {
+    const h = await harness();
+    const assignment = h.assignmentA;
+    const refusals: Record<typeof kind, ClaimExecutionResult> = {
+      binding_not_ready: { kind: "binding_not_ready", assignment },
+      stale_binding: { kind: "stale_binding", current: assignment },
+      binding_in_use: {
+        kind: "binding_in_use",
+        assignment,
+        owner: { ...OWNER, sessionUuid: "peer" },
+      },
+    };
+    h.behavior.refusal = refusals[kind];
+    await h.reowner.reown(["a"], { rehydrated: true });
+    expect(h.reowner.ownershipState("a")).toBe("unconfirmed");
+    h.behavior.refusal = undefined;
+    await h.step(25);
+    expect(h.confirmed).toEqual([25]);
+    expect(h.lost).toEqual([]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    await h.step(MAX_UNCONFIRMED_MS);
+    expect(h.calls).toHaveLength(2);
+  });
+}
+
+test("busy ownership becomes a typed terminal refusal exactly at the episode bound", async () => {
+  const h = await harness();
+  h.behavior.failures = Infinity;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  await h.step(MAX_UNCONFIRMED_MS - 1);
+  expect(h.reowner.ownershipState("a")).toBe("unconfirmed");
+  expect(h.lost).toEqual([]);
+  await h.step(1);
+  expect(h.lost).toEqual([MAX_UNCONFIRMED_MS]);
+  await h.reowner.whenIdle();
+  expect(h.held.has("a")).toBe(false);
+  expect(h.reowner.automationRefusal("a")).toMatchObject({
+    code: "session_ownership_lost",
+    retryable: false,
+    nextAction: "acquire_new_session",
+  });
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("client retry hints grow by episode age and cap at five seconds", async () => {
+  const h = await harness();
+  h.behavior.failures = Infinity;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  for (const [age, hint] of [
+    [0, 1_000],
+    [999, 1_000],
+    [1_000, 2_000],
+    [2_000, 3_000],
+    [4_000, 5_000],
+    [12_000, 5_000],
+  ]) {
+    await h.step(age - h.timer.now());
+    expect(h.reowner.automationRefusal("a")).toMatchObject({ retryAfterMs: hint });
+  }
+});
+
+test("a retained non-live session stops retrying without discarding its admission fence", async () => {
+  const h = await harness();
+  h.behavior.failures = Infinity;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  h.held.delete("a");
+  await h.step(25);
+  expect(h.calls).toHaveLength(1);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  await h.reowner.whenIdle();
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  await h.step(MAX_UNCONFIRMED_MS);
+  expect(h.lost).toEqual([]);
+  expect(h.reowner.automationRefusal("a")).toBeInstanceOf(BindingOwnershipUnconfirmedError);
+});
+
+test("the episode deadline cancels a hung claim and ignores its late success", async () => {
+  const h = await harness();
+  h.behavior.hangClaim = true;
+  const inline = h.reowner.reown(["a"], { rehydrated: true });
+  await h.step(MAX_UNCONFIRMED_MS - 1);
+  await inline;
+  expect(h.lost).toEqual([]);
+  await h.step(1);
+  await h.reowner.whenIdle();
+  expect(h.lost).toEqual([MAX_UNCONFIRMED_MS]);
+  h.claim.resolve({ kind: "claimed", assignment: h.assignmentA });
+  await h.step(0);
+  expect(h.confirmed).toEqual([]);
+  expect(h.reowner.automationRefusal("a")).toBeInstanceOf(BindingOwnershipLostError);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+for (const elapsed of [14_999, 15_000]) {
+  test(`a synchronous claim completing at ${elapsed} ms obeys the episode deadline`, async () => {
+    const h = await harness();
+    expect(MAX_UNCONFIRMED_MS).toBe(15_000);
+    h.behavior.successBlocked = elapsed;
+    await h.reowner.reown(["a"], { rehydrated: true });
+    await h.reowner.whenIdle();
+    expect(h.confirmed).toEqual(elapsed < MAX_UNCONFIRMED_MS ? [elapsed] : []);
+    expect(h.lost).toEqual(elapsed < MAX_UNCONFIRMED_MS ? [] : [elapsed]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    await h.step(MAX_UNCONFIRMED_MS);
+    expect(h.calls).toHaveLength(1);
+  });
+}

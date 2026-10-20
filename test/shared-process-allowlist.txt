@@ -382,6 +382,7 @@ test/daemon/sessionBroker/provisioning/executionReleaseBusyRegistry.test.ts
 test/daemon/sessionBroker/provisioning/iosBindingDeviceUnexcludedWhileCreating.test.ts
 test/daemon/sessionBroker/provisioning/iosDeviceTypeNewest.test.ts
 test/daemon/sessionBroker/provisioning/managedExecutionDaemonRestart.test.ts
+test/daemon/sessionBroker/provisioning/managedExecutionReownTerminal.test.ts
 test/daemon/sessionBroker/provisioning/ownExecutionRetainedSnapshot.test.ts
 test/daemon/sessionBroker/provisioning/reconciler.test.ts
 test/daemon/sessionBroker/provisioning/reconcilerPorts.test.ts

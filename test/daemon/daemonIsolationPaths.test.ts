@@ -6,7 +6,7 @@ import {
 } from "../../src/daemon/constants";
 import vectors from "../fixtures/daemon-isolation-paths.json";
 import { tmpdir } from "node:os";
-import { win32 } from "node:path";
+import { resolve, win32 } from "node:path";
 
 describe("daemon isolation state paths (issue #10871)", () => {
   test("without an aux socket dir the resident unsuffixed paths are used", () => {
@@ -41,7 +41,7 @@ describe("daemon isolation state paths (issue #10871)", () => {
         "501",
         "linux",
       ),
-    ).toBe("/work/lane/daemon.token");
+    ).toBe(resolve("/work/lane", "daemon.token"));
   });
 
   test("paths are stable per dir, distinct across dirs, and short for deep dirs", () => {

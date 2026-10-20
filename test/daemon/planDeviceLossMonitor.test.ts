@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscoveryOptions } from "../../src/devices/deviceUtils";
@@ -107,9 +108,11 @@ function harness() {
       reconcileDiscoveryObservation: async () => {
         throw new Error("Plan discovery must remain presence-only");
       },
-      getAllDevices: () => [...devices.values()],
-      getDevice: (id: string) => devices.get(id) ?? null,
-      isDeviceLeasedForAndroidStartup: () => leased,
+      ...({
+        getAllDevices: () => [...devices.values()],
+        getDevice: (id) => devices.get(id) ?? null,
+        isDeviceLeasedForAndroidStartup: () => leased,
+      } satisfies DisconnectMonitorPool),
       isShutdownReservationHeld: async () => {
         onReservation();
         return reserved;
@@ -413,8 +416,16 @@ describe("confirmed plan device loss", () => {
       expect(cancel).toHaveBeenCalledTimes(1);
       expect(await h.incidents.list()).toHaveLength(1);
       expect(h.manager.calls.slice(0, 2)).toEqual([
-        { bypassAndroidDeviceListCache: false },
-        { bypassAndroidDeviceListCache: true },
+        {
+          bypassAndroidDeviceListCache: false,
+          skipAndroidProfileEnrichment: true,
+          skipPhysicalIosDiscovery: true,
+        },
+        {
+          bypassAndroidDeviceListCache: true,
+          skipAndroidProfileEnrichment: true,
+          skipPhysicalIosDiscovery: true,
+        },
       ]);
       expect(h.manager.platforms.slice(0, 4)).toEqual(["either", "android", "either", "android"]);
       expect(h.daemon["deviceDisconnectMisses"].get(h.device.id)).toBe(1);

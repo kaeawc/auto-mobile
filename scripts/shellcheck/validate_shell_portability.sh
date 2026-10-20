@@ -95,8 +95,8 @@ scan "bare-python" \
 # The empty-array rule needs whole-file context (which arrays are initialized
 # empty, and whether a nearby `${#arr[@]}` guard covers the expansion), so it
 # cannot reuse the line-oriented `scan` helper above.
-# shellcheck disable=SC2016 # awk program: $0/$NR are awk fields, not shell.
-EMPTY_ARRAY_AWK='
+IFS= read -r -d '' EMPTY_ARRAY_AWK <<'LITERAL_PROGRAM' || true
+
 {
   lines[NR] = $0
   # `set -u` has several spellings, and every one of them arms nounset:
@@ -241,7 +241,7 @@ END {
     }
   }
 }
-'
+LITERAL_PROGRAM
 
 scanner_errors=0
 
@@ -261,9 +261,8 @@ while IFS= read -r file; do
   [ -z "$awk_out" ] && continue
   while IFS=: read -r lineno text; do
     [ -z "$lineno" ] && continue
-    # shellcheck disable=SC2016 # literal hint text, not a shell expansion.
     report "empty-array-set-u" "$file" "$lineno" "$text" \
-      'Bash 3.2 aborts on an empty "${arr[@]}" under set -u — use ${arr[@]+"${arr[@]}"}.'
+      "Bash 3.2 aborts on an empty \"\${arr[@]}\" under set -u — use \${arr[@]+\"\${arr[@]}\"}."
   done <<EOF
 $awk_out
 EOF

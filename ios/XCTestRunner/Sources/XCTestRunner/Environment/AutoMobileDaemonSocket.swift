@@ -16,11 +16,13 @@ enum AutoMobileDaemonSocket {
 enum DaemonStateFile: Sendable {
     case socket
     case pid
+    case token
 
     var fileExtension: String {
         switch self {
         case .socket: return "sock"
         case .pid: return "pid"
+        case .token: return "token"
         }
     }
 
@@ -28,6 +30,7 @@ enum DaemonStateFile: Sendable {
         switch self {
         case .socket: return ["AUTOMOBILE_DAEMON_SOCKET_PATH", "AUTO_MOBILE_DAEMON_SOCKET_PATH"]
         case .pid: return ["AUTOMOBILE_DAEMON_PID_FILE_PATH", "AUTO_MOBILE_DAEMON_PID_FILE_PATH"]
+        case .token: return ["AUTOMOBILE_DAEMON_TOKEN_FILE_PATH"]
         }
     }
 }

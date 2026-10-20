@@ -152,41 +152,29 @@ run_sdk_api_check() {
 }
 
 # Lint also consumes non-Kotlin inputs, so run before Kotlin-only early exits.
-lint_all="$root_gradle_changed"
-lint_modules=()
-for changed_file in "${android_changes[@]}"; do
-  case "$changed_file" in
-    scripts/android/check-lint-baseline-shrink.sh|scripts/prepush-android.sh|.github/workflows/pull_request.yml|.github/workflows/merge.yml)
-      lint_all=true
-      ;;
-    android/**/build.gradle.kts)
-      lint_all=true
-      ;;
-    android/**/src/*|android/**/lint-baseline.xml)
-      module_dir="$(dirname "$changed_file")"
-      while [[ "$module_dir" != android && ! -f "$module_dir/build.gradle.kts" ]]; do
-        module_dir="$(dirname "$module_dir")"
-      done
-      if [[ "$module_dir" != android ]] && grep -Eq 'alias\(libs\.plugins\.android\.(application|library)\)|id\("automobile\.android-(library|application)"\)' "$module_dir/build.gradle.kts"; then
-        module_path=":${module_dir#android/}"
-        lint_modules+=("${module_path//\//:}:lintDebug")
-      fi
-      ;;
-  esac
-done
+# Module selection is shared with the PR Detekt job (one script, no drift).
+lint_selection="$(printf '%s\n' "${android_changes[@]}" | bash scripts/android/select-lint-modules.sh)"
+if [[ "$root_gradle_changed" == true ]]; then
+  lint_selection=all
+fi
+lint_all=false
+lint_tasks=()
+if [[ "$lint_selection" == all ]]; then
+  lint_all=true
+elif [[ -n "$lint_selection" ]]; then
+  while IFS= read -r lint_task; do
+    lint_tasks+=("$lint_task")
+  done <<< "$lint_selection"
+fi
 if [[ "$lint_all" == true ]]; then
   echo "==> Android lint (all modules; build configuration or gate changed)"
   (cd android && ./gradlew lintDebug --continue)
-elif [[ "${#lint_modules[@]}" -gt 0 ]]; then
-  lint_tasks=()
-  while IFS= read -r lint_task; do
-    lint_tasks+=("$lint_task")
-  done < <(printf '%s\n' "${lint_modules[@]}" | sort -u)
+elif [[ "${#lint_tasks[@]}" -gt 0 ]]; then
   echo "==> Android lint (${lint_tasks[*]})"
   (cd android && ./gradlew "${lint_tasks[@]}" --continue)
 fi
 
-if [[ "$lint_all" == true || "$lint_baseline_changed" == true || "${#lint_modules[@]}" -gt 0 ]]; then
+if [[ "$lint_all" == true || "$lint_baseline_changed" == true || "${#lint_tasks[@]}" -gt 0 ]]; then
   echo "==> Android lint baseline shrink-only guard"
   bash scripts/android/check-lint-baseline-shrink.sh --base-ref "$base_ref" --worktree
 fi

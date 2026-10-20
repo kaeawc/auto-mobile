@@ -122,12 +122,13 @@ release_holder() {
   release_holder
 }
 
-@test "changed mode preserves bun selection and uses the capped shard count" {
+@test "changed mode chunks the explicit selection with the capped worker count" {
   export AUTOMOBILE_HOST_TEST_SLOTS=2
   hold_slots 2
   run bash scripts/test-ts.sh changed
   [[ "$status" -eq 0 && "$output" == *'host slots demand=2 acquired=0 workers=1'* ]]
-  grep -q -- '--changed=origin/main --shard=1/1' "$STUB_CALLS"
+  grep -q -- 'test/fixture00.test.ts' "$STUB_CALLS"
+  ! grep -q -- '--changed=\|--shard=' "$STUB_CALLS"
   [[ "$(wc -l < "$STUB_CALLS")" -eq 1 ]]
   release_holder
 }

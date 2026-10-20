@@ -18,6 +18,11 @@ setup_test_ts_stubs() {
   echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
   cat > "$STUB_BIN/bun" <<'STUB'
 #!/usr/bin/env bash
+if [[ "$1" == */scripts/lib/changedUnitTests.ts ]]; then
+  printf '%s\n' "$2" >> "$STUB_CALLS.selection"
+  for ((i=0; i<${STUB_SELECTED_COUNT:-12}; i+=1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+  exit "${STUB_SELECTION_STATUS:-0}"
+fi
 if [[ "$1" == --config=* ]]; then shift; fi
 [[ "$1" == test ]] || exit 0
 if [[ -n "${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}" ]]; then exit 99; fi

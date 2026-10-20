@@ -592,9 +592,34 @@ acquisition.
 
 A timed-out unit shard is not retried when one-minute host load exceeds the
 logical core count. `AUTOMOBILE_TEST_LOADAVG_FILE` can inject a load-average
-file (first field is the one-minute value) for deterministic tests. Changed
-mode still delegates selection to Bun with `--changed` and `--shard`; only its
-shard count is capped. Sharing a changed-file list is deferred.
+file (first field is the one-minute value) for deterministic tests.
+
+The ordinary POSIX `changed` lane resolves its unit file list **once**, before
+sharding, with `scripts/lib/changedUnitTests.ts`. It uses the same ref-to-worktree
+`git diff` plus untracked files as Bun 1.3.14's `--changed`, rather than a
+merge-base diff. Selection unions a parse-only reverse import closure with
+`affectedTests.ts`'s full `unit` result (the existing CLI's `unit.txt` contains
+only reference extras and is insufficient). No test modules are executed during
+selection. The closure uses Bun's scanner and module resolver plus the existing
+TypeScript AST import scanner, follows import and require resolution conditions,
+canonicalizes symlinks, and excludes `node_modules`. Lexical AST edges retain
+imports Bun's public scanner can fold away in dead code. References and
+`test/always-run-tests.txt` add coverage beyond Bun's import graph; missing
+resolutions, parse errors, and unsupported graph loaders conservatively select
+the complete unit list. Thus this is intentionally a **superset**, rather than
+an exact emulation of Bun's private bundler graph. No changes selects zero files.
+The reference behavior was checked against
+[Bun 1.3.14's changed-file filter](https://github.com/oven-sh/bun/blob/bun-v1.3.14/src/cli/test/ChangedFilesFilter.zig).
+
+The sorted selection is split round-robin across the capped worker count. Each
+shard uses the unit lane's shared/isolated group runner under its existing
+watchdog and process-group cleanup. Both groups in changed mode are split into
+processes of at most `AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE` files (default 30;
+an explicit 0 retains the existing unbounded opt-out). Allow-listed files still
+share a process within each shared chunk. JUnit uses the unit chunk names
+(`shard-N.xml`, `shard-N-iso-K.xml`, and `shard-N-shared[-K].xml`). Empty selection
+succeeds without workers. Changed shards retain their existing no-retry policy.
+Windows and explicit targets/passthrough arguments retain native Bun selection.
 
 `scripts/typecheck-baseline.sh` and the type-aware stage of `scripts/oxlint-baseline.sh` (`tsgo`, and
 `tsgolint` through `oxlint --type-aware`) run through `scripts/lib/host-heavy-run.sh`, which takes

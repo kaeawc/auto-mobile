@@ -445,6 +445,10 @@ done
 # Both the ordinary shards and the randomized diagnostic consume this list.
 discover_unit_test_files() {
   local file
+  if [[ -n "${unit_selection_file:-}" ]]; then
+    cat "$unit_selection_file"
+    return
+  fi
   while IFS= read -r file; do
     case "$file" in
       *.integration.test.ts | test/stress/*) ;;
@@ -519,18 +523,18 @@ shared_process_unit_files() {
 # locals through Bash's dynamic scoping.
 configure_unit_shard_groups() {
   local shard="$1"
-  if [[ "$shard_mode" != unit ]]; then
-    return 0
-  fi
   export AUTOMOBILE_UNIT_SHARED_FILE_COUNT=0
   if [[ "$shared_total" -gt "$shard" ]]; then
     AUTOMOBILE_UNIT_SHARED_FILE_COUNT=$(((shared_total - shard + worker_count - 1) / worker_count))
+  fi
+  if [[ "$shard_mode" == changed ]]; then
+    export AUTOMOBILE_UNIT_SHARED_CHUNK_SIZE="$isolated_chunk_size"
   fi
   # Nightly-chunked shards split inside bun-unit-chunks.sh. Other shards run
   # their groups (shared process, then fixed-size isolated chunks) through
   # bun-unit-groups.sh under the same watchdog; with no shared files and an
   # isolated chunk size of 0 the direct single invocation is kept.
-  if [[ -z "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" &&
+  if [[ ( "$shard_mode" == changed || -z "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ) &&
     ("$AUTOMOBILE_UNIT_SHARED_FILE_COUNT" -gt 0 || "$isolated_chunk_size" -gt 0) ]]; then
     shard_args=(bash "$ROOT/scripts/lib/bun-unit-groups.sh" "$ROOT" "$runner_os"
       "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
@@ -599,19 +603,12 @@ launch_unit_shard() {
   local shard="$1" attempt="$2" index
   shard_files=()
   shard_number="$shard"
-  if [[ "$shard_mode" == "unit" ]]; then
-    for ((index = shard; index < ${#test_files[@]}; index += worker_count)); do
-      shard_files+=("${test_files[$index]}")
-    done
-    report_name="shard-${shard}.xml"
-  else
+  for ((index = shard; index < ${#test_files[@]}; index += worker_count)); do
+    shard_files+=("${test_files[$index]}")
+  done
+  report_name="shard-${shard}.xml"
+  if [[ "$shard_mode" == changed ]]; then
     shard_number=$((shard + 1))
-    shard_files=(
-      --path-ignore-patterns "**/*.integration.test.ts"
-      --path-ignore-patterns "test/stress/**"
-      "--changed=${changed_ref}" "--shard=${shard_number}/${worker_count}"
-    )
-    report_name="changed-shard-${shard_number}.xml"
   fi
 
   if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
@@ -985,6 +982,7 @@ run_windows_integration_shards() {
 run_unit_shards() {
   local shard_mode="$1"
   local changed_ref="${2:-}"
+  local unit_selection_file=""
   # AUTOMOBILE_TEST_TS_SCRATCH_DIR relocates the shard scratch tree so the bats
   # suite can run this lane hermetically (per-test dir) instead of serially.
   local shard_root="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-${shard_mode}-shards"
@@ -1037,11 +1035,16 @@ run_unit_shards() {
     rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
     mkdir -p "$AUTOMOBILE_UNIT_JUNIT_DIR"
   fi
-  if [[ "$shard_mode" == unit ]]; then
-    while IFS= read -r file; do
-      shared_files+=("$file")
-    done < <(shared_process_unit_files)
+  if [[ "$shard_mode" == changed ]]; then
+    unit_selection_file="$shard_root/selected-unit.txt"
+    # Resolve once before sharding. The selector unions a parse-only Bun graph
+    # with affectedTests' reference/always-run extras; uncertain edges select
+    # all units rather than silently narrowing Bun --changed coverage (#13909).
+    TEST_TS_PRINT_CMD=0 run_test_command bun "$ROOT/scripts/lib/changedUnitTests.ts" "$changed_ref" > "$unit_selection_file"
   fi
+  while IFS= read -r file; do
+    shared_files+=("$file")
+  done < <(shared_process_unit_files)
   shared_total="${#shared_files[@]}"
   # Both lists keep discovery order, so one merge walk separates them. Shared
   # files go first so round-robin spreads both groups evenly across shards.
@@ -1056,6 +1059,7 @@ run_unit_shards() {
   test_files=(${shared_files[@]+"${shared_files[@]}"} ${isolated_files[@]+"${isolated_files[@]}"})
 
   if [[ "${#test_files[@]}" -eq 0 ]]; then
+    if [[ "$shard_mode" == changed ]]; then echo 'No changed unit tests'; return 0; fi
     echo "No unit test files discovered" >&2
     return 1
   fi

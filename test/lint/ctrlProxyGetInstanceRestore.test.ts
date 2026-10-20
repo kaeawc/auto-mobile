@@ -1,6 +1,7 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative, sep } from "node:path";
 
 /**
@@ -593,7 +594,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
   }
 
   function walk(dir: string, files: string[] = []): string[] {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(dir)) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full, files);
@@ -617,7 +618,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const facts = new Map<string, FileFacts>();
     const candidates = new Map<string, string>();
     for (const file of walk(TEST)) {
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       if (!source.includes(PREFILTER) || !source.includes("getInstance")) {
         continue;
       }

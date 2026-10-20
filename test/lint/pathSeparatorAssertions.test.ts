@@ -1,7 +1,13 @@
+import {
+  guardDirectoryEntries,
+  readGuardFile,
+  guardTextMayMatch,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import path from "node:path";
-import { parseSync, Visitor, type Expression } from "oxc-parser";
+import { parseSync, type Expression } from "oxc-parser";
 
 // Windows unit lanes reached main red when a test asserted the result of path.join/resolve
 // against a literal containing "/": on win32 those helpers return backslash-separated
@@ -17,7 +23,7 @@ const EQUALITY_MATCHERS = new Set(["toBe", "toEqual", "toStrictEqual"]);
 const ALLOWLIST: Record<string, readonly string[]> = {};
 
 function testFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(dir).flatMap((entry) => {
     const file = path.join(dir, entry.name);
     return entry.isDirectory() ? testFiles(file) : entry.name.endsWith(".test.ts") ? [file] : [];
   });
@@ -67,6 +73,10 @@ export function findPathSeparatorAssertions(source: string): string[] {
   const parsed = parseSync("pathSeparator.test.ts", source);
   if (parsed.errors.length > 0) {
     return parsed.errors.map((error) => `parse error: ${error.message}`);
+  }
+  // A path comparison requires an equality matcher; pathname has its separate visitor below.
+  if (!guardTextMayMatch(source, /toBe|toEqual|toStrictEqual|pathname/)) {
+    return [];
   }
   const pathBindings = new Set<string>();
   // First pass: names bound once to a platform path call. A name that is ever reassigned or
@@ -215,7 +225,7 @@ describe("path separator assertions (Windows unit lane)", () => {
         return [];
       }
       const allowed = ALLOWLIST[relative] ?? [];
-      return findPathSeparatorAssertions(readFileSync(file, "utf8"))
+      return findPathSeparatorAssertions(readGuardFile(file))
         .filter((line) => !allowed.includes(line))
         .map((line) => `test/${relative}:${line}`);
     });

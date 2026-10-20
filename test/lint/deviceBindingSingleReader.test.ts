@@ -1,8 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 import {
-  Visitor,
   type Expression,
   type MemberExpression,
   type ParamPattern,
@@ -17,6 +16,9 @@ import {
   relativePosix,
   typeScriptFiles,
   unwrapCallee,
+  guardTextMayMatch,
+  readGuardFile,
+  GuardVisitor as Visitor,
 } from "./astGuard";
 import preChangeReaders from "./fixtures/deviceBindingReaders.json";
 
@@ -93,7 +95,15 @@ function unwrapRead(expression: Expression): Expression {
 }
 
 function scan(file: string, source: string): { reads: string[] } {
-  const program = parseGuardSource(file, source);
+  // Every finding names a binding field, including destructures and receiver aliases.
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /sessionId|status|health/),
+  );
+  if (!program) {
+    return { reads: [] };
+  }
   const binding = localBindings(program);
   const reads: string[] = [];
   const writes = new Set<MemberExpression>();
@@ -318,7 +328,7 @@ describe("device binding single reader", () => {
     for (const file of typeScriptFiles(path.join(ROOT, "src"))) {
       const relative = relativePosix(ROOT, file);
       if (relative !== OWNER) {
-        facts.set(relative, scan(relative, readFileSync(file, "utf8")));
+        facts.set(relative, scan(relative, readGuardFile(file)));
       }
     }
     for (const row of preChangeReaders) {

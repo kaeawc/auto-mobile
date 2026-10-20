@@ -1,5 +1,11 @@
-import { parseGuardSource, unwrapCallee, valueImports } from "./astGuard";
-import { Visitor, type Expression } from "oxc-parser";
+import {
+  parseGuardSource,
+  unwrapCallee,
+  valueImports,
+  guardTextMayMatch,
+  GuardVisitor as Visitor,
+} from "./astGuard";
+import { type Expression } from "oxc-parser";
 
 const CLASS_NAME = "DaemonState";
 
@@ -44,7 +50,10 @@ function classMatcher(
 
 /** Count `DaemonState.getInstance(...)` calls (direct, optional, computed, parenthesized or aliased). */
 export function countDaemonStateGetInstanceCalls(file: string, source: string): number {
-  const program = parseGuardSource(file, source);
+  const program = parseGuardSource(file, source, guardTextMayMatch(source, "DaemonState"));
+  if (!program) {
+    return 0;
+  }
   const isClass = classMatcher(file, program);
   let count = 0;
   new Visitor({

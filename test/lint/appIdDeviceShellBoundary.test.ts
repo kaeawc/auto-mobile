@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -89,7 +90,7 @@ function templateLiteralText(node: ts.TemplateExpression): string {
   return [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join("");
 }
 
-function findOffenses(file: string, sourceText = readFileSync(join(ROOT, file), "utf8")): string[] {
+function findOffenses(file: string, sourceText = readGuardFile(join(ROOT, file))): string[] {
   const sourceFile = ts.createSourceFile(
     file,
     sourceText,

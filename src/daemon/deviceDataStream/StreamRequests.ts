@@ -12,7 +12,7 @@ import type {
   OnNavigationGraphRequestedCallback,
   OnObservationRequestedCallback,
   RequestedObservation,
-} from "../deviceDataStreamSocketServer";
+} from "./streamContracts";
 
 // iOS observe (ViewHierarchy.getiOSViewHierarchy -> getLatestHierarchy) can
 // legitimately wait up to 15s for a fresh hierarchy. Keep this wrapper timeout

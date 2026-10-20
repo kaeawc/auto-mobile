@@ -96,10 +96,13 @@ class CtrlProxyObserverGateTest {
     val debouncer =
       HierarchyDebouncer(
         scope = CoroutineScope(UnconfinedTestDispatcher()),
-        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions ->
-          extractCalls.incrementAndGet()
-          expected
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions ->
+              extractCalls.incrementAndGet()
+              expected
+            },
+          ),
       )
 
     // No onAccessibilityEvent() has ever run — the push path is fully idle/gated.

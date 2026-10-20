@@ -20,7 +20,10 @@ class HierarchyDebouncerErrorEmitTest {
     val debouncer =
       HierarchyDebouncer(
         scope = backgroundScope,
-        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null },
+          ),
       )
 
     assertNull(debouncer.extractImmediately(skipFlowEmit = true))
@@ -37,7 +40,12 @@ class HierarchyDebouncerErrorEmitTest {
     val debouncer =
       HierarchyDebouncer(
         scope = CoroutineScope(UnconfinedTestDispatcher()),
-        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null as ViewHierarchy? },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions ->
+              null as ViewHierarchy?
+            },
+          ),
       )
 
     debouncer.extractImmediately()

@@ -26,6 +26,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
+/** Performance and work accounting shared by hierarchy extraction and its debouncer. */
+internal data class HierarchyDiagnosticsDependencies(
+  val perfProvider: PerfProvider,
+  val timeProvider: TimeProvider,
+  val workStats: CtrlProxyWorkStats,
+)
+
 /**
  * Hierarchy extraction orchestration: owns the [HierarchyDebouncer] and its result collector, the
  * `request_hierarchy` / stale / interval request handling, the direct and ADB-broadcast extractor
@@ -38,11 +45,13 @@ internal class HierarchyController(
   private val serviceScope: CoroutineScope,
   private val viewHierarchyExtractor: ViewHierarchyExtractor,
   private val displayController: DisplayController,
-  private val perfProvider: PerfProvider,
-  private val timeProvider: TimeProvider,
-  private val workStats: CtrlProxyWorkStats,
+  diagnostics: HierarchyDiagnosticsDependencies,
   private val jsonCompact: Json,
 ) {
+  private val perfProvider = diagnostics.perfProvider
+  private val timeProvider = diagnostics.timeProvider
+  private val workStats = diagnostics.workStats
+
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
     fun currentFrameContext(): String
@@ -116,14 +125,20 @@ internal class HierarchyController(
         scope = serviceScope,
         timeProvider = timeProvider,
         perfProvider = perfProvider,
-        quickDebounceMs = 5L,
-        animationSkipWindowMs = 100L,
-        unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 5L,
+            animationSkipWindowMs = 100L,
+            unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
+          ),
         stats = workStats,
-        onDiscardedHierarchy = { extractedHierarchyFrameContexts.remove(it) },
-        extractHierarchy = { disableAllFiltering, snapshotOptions ->
-          extractHierarchyDirect(disableAllFiltering, snapshotOptions)
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            onDiscardedHierarchy = { extractedHierarchyFrameContexts.remove(it) },
+            extractHierarchy = { disableAllFiltering, snapshotOptions ->
+              extractHierarchyDirect(disableAllFiltering, snapshotOptions)
+            },
+          ),
       )
 
     // Event-driven extraction is admitted before this collector at the configured interval.

@@ -600,11 +600,17 @@ class GestureStreamSessionTest {
           scope = CoroutineScope(backgroundScope.coroutineContext + dispatcher),
           dispatcher = dispatcher,
           delegate = delegate,
-          reply = { _, _, _ -> error("Unexpected reply") },
-          hasRequestOwner = { false },
-          logError = { _, error -> throw AssertionError(error) },
-          logWarning = { error(it) },
-          logDebug = {},
+          replies =
+            ConnectionReplyDependencies(
+              reply = { _, _, _ -> error("Unexpected reply") },
+              hasRequestOwner = { false },
+            ),
+          logging =
+            ConnectionLogDependencies(
+              logError = { _, error -> throw AssertionError(error) },
+              logWarning = { error(it) },
+              logDebug = {},
+            ),
         )
       commands.enqueue(origin, RequestGestureStart("start", "g", 1.0, 2.0))
       runCurrent()

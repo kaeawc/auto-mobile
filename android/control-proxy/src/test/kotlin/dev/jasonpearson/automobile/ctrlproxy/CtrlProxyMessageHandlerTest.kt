@@ -2289,13 +2289,16 @@ class CtrlProxyActionOverloadServiceTest {
       fixture.service.hierarchyController.debouncer =
         HierarchyDebouncer(
           scope = backgroundScope,
-          extractHierarchy = { disableAllFiltering, snapshot ->
-            options.add(
-              disableAllFiltering to
-                Triple(snapshot.maxDepth, snapshot.maxNodes, snapshot.displayId),
-            )
-            null
-          },
+          dependencies =
+            HierarchyDebouncerDependencies(
+              extractHierarchy = { disableAllFiltering, snapshot ->
+                options.add(
+                  disableAllFiltering to
+                    Triple(snapshot.maxDepth, snapshot.maxNodes, snapshot.displayId),
+                )
+                null
+              },
+            ),
         )
       fixture.actions.requestHierarchy(
         RequestHierarchy(disableAllFiltering = true, requestId = null),

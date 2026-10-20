@@ -1,214 +1,54 @@
-import {
-  getDefaultDeviceCaptureRegistry,
-  createDeviceCaptureRegistry,
-  canRetainSharedCapture,
-  stopStaleCapture,
-  type DeviceCaptureRegistry,
-} from "../features/webrtc/deviceCaptureRegistry";
-import { createVideoStreamRelaySingleton, type VideoStreamRelay } from "./videoStreamRelay";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
-import {
-  decideLifecycleEvent,
-  decideOwnershipChange,
-  subscriptionKindForIdentity,
-  type StreamSubscriptionKind,
-  type StreamSubscriptionIdentity,
-  type StreamSubscriptionEndReason,
-} from "./streamSubscriptionPolicy";
-import {
-  getDaemonStreamDeviceLifecycleEmitter,
-  type StreamDeviceLifecycleEvents,
-} from "./streamDeviceLifecycleEvents";
-import { errorMessage } from "../utils/describeUnknownError";
 import type { Socket } from "node:net";
-import { logger } from "../utils/logger";
-import { toActionableError } from "../models/ActionableError";
-import { ActionableError } from "../models";
-import { DeviceReadiness } from "./readiness/DeviceReadiness";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
-import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
-import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
-import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
-import type { BootedDevice } from "../models";
-import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
+import {
+  canRetainSharedCapture,
+  createDeviceCaptureRegistry,
+  stopStaleCapture,
+} from "../features/webrtc/deviceCaptureRegistry";
 import { H264AccessUnitAssembler, H264AnnexBParser } from "../features/webrtc/h264";
+import type { BootedDevice } from "../models";
+import { ActionableError } from "../models";
+import { toActionableError } from "../models/ActionableError";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { errorMessage } from "../utils/describeUnknownError";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
+import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { VIDEO_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { BaseSocketServer, getSocketPath } from "./socketServer/index";
 import {
   authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
-  streamAuthRefusalFields,
 } from "./streamSocketAuth";
-import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
-import { resolveStreamDevice } from "./streamDeviceResolver";
-import { defaultDaemonContext } from "./daemonContext";
-import { encodeStreamHeader, encodeSubscriptionNotice } from "./videoStreamFraming";
-import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
 import {
-  VideoStreamCapturePipeline,
+  decideLifecycleEvent,
+  decideOwnershipChange,
+  subscriptionKindForIdentity,
+  type StreamSubscriptionEndReason,
+  type StreamSubscriptionIdentity,
+  type StreamSubscriptionKind,
+} from "./streamSubscriptionPolicy";
+import {
   HEARTBEAT_INTERVAL_MS,
   OUTBOUND_STALL_TIMEOUT_MS,
+  VideoStreamCapturePipeline,
 } from "./videoStream/VideoStreamCapturePipeline";
-import type { CaptureHints, CaptureSourceFactory, DeviceCapture } from "./videoStream/captureTypes";
-
-export type { CaptureSourceFactory } from "./videoStream/captureTypes";
-
-function tracksConsumers(
-  source: H264CaptureSource | null,
-): source is H264CaptureSource & { setHasConsumers(hasConsumers: boolean): void } {
-  return (
-    source !== null && "setHasConsumers" in source && typeof source.setHasConsumers === "function"
-  );
-}
-
-export interface VideoStreamSocketServerDependencies {
-  createCaptureSource: CaptureSourceFactory;
-  /** Share across transports by injection; omitted registries are local to this server. */
-  captureRegistry?: DeviceCaptureRegistry;
-  resolveDevice: (deviceId?: string, platform?: "android" | "ios") => Promise<BootedDevice>;
-  /** Monotonic microseconds, used for packet presentation timestamps. */
-  nowUs: () => bigint;
-  ownershipChanges?: () => DeviceOwnershipChanges | null;
-  deviceLifecycle?: () => StreamDeviceLifecycleEvents | null;
-  /** Also covers device-less viewer sessions, whose release changes no device owner. */
-  sessionReleases?: { subscribe(callback: (sessionId: string) => void): () => void };
-  /** Released or expired observer registrations, which change no device owner (#11076). */
-  observerReleases?: ObserverReleaseSource;
-  /** Maximum time a subscriber may wait for outbound drain. */
-  outboundStallTimeoutMs?: number;
-}
-
-/** The only session-manager event surface the relay needs. */
-export interface DeviceOwnershipChanges {
-  onDeviceOwnershipChange(callback: (deviceId: string) => void): () => void;
-}
-
-/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
-const VIDEO_STREAM_PURPOSE = "to stream video";
-
-const SUPPORTED_QUALITIES = new Set(["low", "medium", "high"]);
-// The relay resolves the device only after this validation, so it bounds fps to the range every
-// capture backend can honor rather than a per-platform limit. The iOS Simulator helper is the
-// tightest at [5, 60] (SIMULATOR_FPS_MIN/MAX); the Android video-server accepts any positive
-// rate, so [5, 60] is the safe universal window — a hint outside it would pass here and then throw
-// at iOS capture startup.
-const MIN_FPS_HINT = 5;
-const MAX_FPS_HINT = 60;
-// A generous encoder ceiling (~1 Gbps) that still leaves headroom below Number.MAX_SAFE_INTEGER
-// after the kbps→bps ×1000 conversion at the capture-options boundary, so a huge-but-finite hint
-// cannot silently lose integer precision downstream.
-const MAX_BITRATE_KBPS = 1_000_000;
-
-// Covers brief viewer reconnects without keeping an abandoned encoder alive for long.
-const CAPTURE_IDLE_GRACE_MS = 3_000;
-const RECONFIGURE_DEBOUNCE_MS = 200;
-
-// Same bound the WebRTC server puts on its close (WEBRTC_SOCKET_CLOSE_TIMEOUT_MS).
-const VIDEO_STREAM_SOCKET_CLOSE_TIMEOUT_MS = 5_000;
-
-function subscriberMaySetCaptureHints(
-  kind: StreamSubscriptionKind,
-  identity?: StreamSubscriptionIdentity,
-): boolean {
-  return kind !== "viewer" || identity?.hasDeviceOwner === false;
-}
-
-function sameHints(left: CaptureHints, right: CaptureHints): boolean {
-  return (
-    left.quality === right.quality &&
-    left.fps === right.fps &&
-    left.bitrateKbps === right.bitrateKbps &&
-    left.size?.width === right.size?.width &&
-    left.size?.height === right.size?.height
-  );
-}
-
-function isIntegerInRange(value: number, min: number, max: number): boolean {
-  return Number.isInteger(value) && value >= min && value <= max;
-}
-
-function validateQuality(quality: VideoStreamSocketRequest["quality"]): string | null {
-  return quality === undefined || SUPPORTED_QUALITIES.has(quality)
-    ? null
-    : `Unsupported quality "${quality}"; expected low, medium, or high.`;
-}
-
-function validateFps(fps: VideoStreamSocketRequest["fps"]): string | null {
-  return fps === undefined || isIntegerInRange(fps, MIN_FPS_HINT, MAX_FPS_HINT)
-    ? null
-    : `Invalid fps ${fps}; expected an integer between ${MIN_FPS_HINT} and ${MAX_FPS_HINT}.`;
-}
-
-function validateBitrate(bitrateKbps: VideoStreamSocketRequest["bitrateKbps"]): string | null {
-  return bitrateKbps === undefined || isIntegerInRange(bitrateKbps, 1, MAX_BITRATE_KBPS)
-    ? null
-    : `Invalid bitrateKbps ${bitrateKbps}; expected an integer between 1 and ${MAX_BITRATE_KBPS}.`;
-}
-
-function validateSize(size: VideoStreamSocketRequest["size"]): string | null {
-  if (size === undefined) {
-    return null;
-  }
-  const { width, height } = size ?? {};
-  return isIntegerInRange(width, 2, Number.MAX_SAFE_INTEGER) &&
-    isIntegerInRange(height, 2, Number.MAX_SAFE_INTEGER)
-    ? null
-    : `Invalid size ${JSON.stringify(size)}; expected integer width/height >= 2.`;
-}
-
-/**
- * Validate the optional capture hints on a subscribe request, returning an error message for the
- * first invalid field or null when all hints are usable. TypeScript's wire types are erased at
- * runtime, so this is the only thing standing between a malformed hint and the encoder argv.
- */
-export function validateCaptureHints(
-  request: Omit<VideoStreamSocketRequest, "platform"> & { platform?: unknown },
-): string | null {
-  return (
-    validatePlatform(request.platform) ??
-    validateQuality(request.quality) ??
-    validateFps(request.fps) ??
-    validateBitrate(request.bitrateKbps) ??
-    validateSize(request.size)
-  );
-}
-
-function validatePlatform(platform: unknown): string | null {
-  return platform === undefined || platform === "android" || platform === "ios"
-    ? null
-    : `Invalid platform ${JSON.stringify(platform)}; expected "android" or "ios".`;
-}
-
-function subscribeFailureResponse(
-  requestId: string | undefined,
-  error: unknown,
-): VideoStreamSocketResponse {
-  if (error instanceof ScreenRecordingPermissionError) {
-    return {
-      id: requestId,
-      type: "video_stream_response",
-      success: false,
-      permission: {
-        kind: "screen_recording",
-        status: "needs_approval",
-        approvalTarget: error.approvalTarget,
-      },
-      // Keep pre-permission desktop clients actionable during rolling updates.
-      error: error.message,
-    };
-  }
-  return {
-    id: requestId,
-    type: "video_stream_response",
-    success: false,
-    error: errorMessage(error),
-    ...streamAuthRefusalFields(error),
-  };
-}
+import type { CaptureHints, DeviceCapture } from "./videoStream/captureTypes";
+import { encodeStreamHeader, encodeSubscriptionNotice } from "./videoStreamFraming";
+import { defaultDependencies, socketServer } from "./videoStreamSocketDefaults";
+import {
+  CAPTURE_IDLE_GRACE_MS,
+  RECONFIGURE_DEBOUNCE_MS,
+  VIDEO_STREAM_PURPOSE,
+  VIDEO_STREAM_SOCKET_CLOSE_TIMEOUT_MS,
+  sameHints,
+  subscribeFailureResponse,
+  subscriberMaySetCaptureHints,
+  tracksConsumers,
+  validateCaptureHints,
+  type VideoStreamSocketServerDependencies,
+} from "./videoStreamSocketSupport";
+import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
 
 /**
  * Relays a device's live H.264 stream to local clients over `~/.auto-mobile/video-stream.sock`.
@@ -1170,80 +1010,6 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 }
 
-const socketServer = createVideoStreamRelaySingleton();
-
-export function getVideoStreamSocketPath(): string {
-  return socketServer.instance?.getSocketPath?.() ?? getSocketPath(VIDEO_STREAM_SOCKET_CONFIG);
-}
-
-export function setVideoStreamSocketServerForTesting(server: VideoStreamRelay | null): void {
-  socketServer.instance = server;
-}
-
-/** Legacy video requests discover either platform; explicit platform requests stay scoped. */
-export async function resolveVideoStreamDevice(
-  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
-  deviceId?: string,
-  platform: "android" | "ios" | "either" = "either",
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal,
-): Promise<BootedDevice> {
-  return resolveStreamDevice(
-    deviceManager,
-    deviceId,
-    platform,
-    timer,
-    signal,
-    "video-stream-resolve",
-  );
-}
-
-async function defaultResolveDevice(
-  deviceId?: string,
-  platform?: "android" | "ios",
-): Promise<BootedDevice> {
-  return resolveVideoStreamDevice(
-    DeviceReadiness.getInstance().getPlatformDeviceManager(),
-    deviceId,
-    platform,
-  );
-}
-
-function defaultDependencies(): VideoStreamSocketServerDependencies {
-  return {
-    captureRegistry: getDefaultDeviceCaptureRegistry(),
-    ownershipChanges: () => defaultDaemonContext.sessionManager() ?? null,
-    deviceLifecycle: getDaemonStreamDeviceLifecycleEmitter,
-    sessionReleases: SessionReleaseBroadcaster,
-    observerReleases: ObserverReleaseBroadcaster,
-    resolveDevice: defaultResolveDevice,
-    createCaptureSource: async (options) => {
-      // Resolved once per stream, off the frame path. A null jar means the Android source falls
-      // back to `screenrecord`.
-      const jarPath = await resolveVideoServerJar();
-      return createH264CaptureSource(
-        {
-          device: options.device,
-          onData: options.onData,
-          onSourceFrame: options.onSourceFrame,
-          onSourceIdle: options.onSourceIdle,
-          onEncodedAccessUnit: options.onEncodedAccessUnit,
-          onIdleAttestationSupport: options.onIdleAttestationSupport,
-          onError: options.onError,
-          onRotation: options.onRotation,
-          onDroppedFrames: options.onDroppedFrames,
-          bitrateBps: options.bitrateBps,
-          size: options.size,
-          quality: options.quality,
-          fps: options.fps,
-        },
-        jarPath,
-      );
-    },
-    nowUs: () => BigInt(Math.round(performance.now() * 1000)),
-  };
-}
-
 export async function startVideoStreamSocketServer(): Promise<void> {
   await socketServer.start(() => new VideoStreamSocketServer(defaultDependencies()));
 }
@@ -1251,3 +1017,13 @@ export async function startVideoStreamSocketServer(): Promise<void> {
 export async function stopVideoStreamSocketServer(): Promise<void> {
   await socketServer.stop();
 }
+
+export {
+  getVideoStreamSocketPath,
+  resolveVideoStreamDevice,
+  setVideoStreamSocketServerForTesting,
+  validateCaptureHints,
+  type DeviceOwnershipChanges,
+  type VideoStreamSocketServerDependencies,
+  type CaptureSourceFactory,
+} from "./videoStreamSocketDefaults";

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.prototype
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest as InternalPrototypeHttpRequest
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import kotlinx.serialization.json.JsonElement
 
@@ -15,16 +16,15 @@ import kotlinx.serialization.json.JsonElement
  * @property body Optional JSON body.
  * @property timeoutMs Effective timeout in milliseconds.
  */
-class PrototypeHttpRequest
-internal constructor(
-  val requestId: String,
-  val prototypeId: String,
-  val method: String,
-  val url: String,
-  val headers: Map<String, String>,
-  val body: JsonElement?,
-  val timeoutMs: Int,
-)
+class PrototypeHttpRequest internal constructor(request: InternalPrototypeHttpRequest) {
+  val requestId: String = request.requestId
+  val prototypeId: String = request.prototypeId
+  val method: String = request.method
+  val url: String = request.url
+  val headers: Map<String, String> = request.headers
+  val body: JsonElement? = request.body
+  val timeoutMs: Int = request.timeoutMs
+}
 
 /** An app-owned transport; the renderer adds no HTTP stack or network policy. */
 fun interface PrototypeHttpClient {
@@ -58,15 +58,5 @@ class PrototypeNetwork(
 
 private fun PrototypeHttpClient.adapt() =
   dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient { request ->
-    execute(
-      PrototypeHttpRequest(
-        request.requestId,
-        request.prototypeId,
-        request.method,
-        request.url,
-        request.headers,
-        request.body,
-        request.timeoutMs,
-      ),
-    )
+    execute(PrototypeHttpRequest(request))
   }

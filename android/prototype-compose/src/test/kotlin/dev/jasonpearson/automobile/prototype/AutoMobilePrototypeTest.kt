@@ -208,17 +208,18 @@ class AutoMobilePrototypeTest {
     }
     compose.onNodeWithTag("dark").performClick()
     compose.runOnIdle {
-      host.owner.onBackPressedDispatcher.onBackPressed()
+      host.backInput.backCompleted()
       assertEquals(1, host.unhandledBacks)
       assertTrue(dismissed.isEmpty())
       handleBack.value = true
     }
     compose.onNodeWithTag("dark").assertIsOn()
-    compose.runOnIdle { host.owner.onBackPressedDispatcher.onBackPressed() }
+    compose.runOnIdle { host.backInput.backCompleted() }
     compose.onNodeWithTag("dark").assertDoesNotExist()
     compose.runOnIdle {
       assertEquals(listOf(PrototypeDismissReason.USER), dismissed)
-      host.owner.onBackPressedDispatcher.onBackPressed()
+      assertEquals(1, host.unhandledBacks)
+      host.backInput.backCompleted()
       assertEquals(2, host.unhandledBacks)
       assertEquals(1, dismissed.size)
     }

@@ -1,13 +1,15 @@
 package dev.jasonpearson.automobile.prototype
 
-import androidx.activity.OnBackPressedDispatcher
-import androidx.activity.OnBackPressedDispatcherOwner
-import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigationevent.DirectNavigationEventInput
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventDispatcherOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
@@ -50,14 +52,20 @@ internal class FakePrototypeHttp : PrototypeHttpClient {
 }
 
 internal class EmbeddedPrototypeTestHost {
+  interface Owner : LifecycleOwner, NavigationEventDispatcherOwner
+
   val dispatcher = UnconfinedTestDispatcher()
   val scope = TestScope(dispatcher)
   var unhandledBacks = 0
     private set
 
-  val owner =
-    object : OnBackPressedDispatcherOwner {
-      override val onBackPressedDispatcher = OnBackPressedDispatcher(Runnable { unhandledBacks++ })
+  val backInput = DirectNavigationEventInput()
+  val owner: Owner =
+    object : Owner {
+      override val navigationEventDispatcher =
+        NavigationEventDispatcher(onBackCompletedFallback = { unhandledBacks++ }).apply {
+          addInput(backInput)
+        }
       override val lifecycle =
         LifecycleRegistry.createUnsafe(this).apply { currentState = Lifecycle.State.RESUMED }
     }
@@ -75,12 +83,15 @@ internal class EmbeddedPrototypeTestHost {
     CompositionLocalProvider(
       LocalEmbeddedPrototypeEnvironment provides environment,
       LocalLifecycleOwner provides owner,
-      LocalOnBackPressedDispatcherOwner provides owner,
+      // BackHandler prefers this owner; use the same dispatcher that receives the test's back
+      // input.
+      LocalNavigationEventDispatcherOwner provides owner,
       content = content,
     )
   }
 
   fun close() {
+    owner.navigationEventDispatcher.dispose()
     scope.backgroundScope.cancel()
     scope.cancel()
   }

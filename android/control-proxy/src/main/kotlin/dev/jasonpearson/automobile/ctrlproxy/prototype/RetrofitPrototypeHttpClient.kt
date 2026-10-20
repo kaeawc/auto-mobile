@@ -9,13 +9,16 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ConnectException
+import java.net.Proxy
 import java.net.UnknownServiceException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.Call
+import okhttp3.ConnectionPool
 import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -115,9 +118,8 @@ internal interface PrototypeHttpService {
 
 /**
  * Runs a prototype request from the device itself (`via: "device"`), to any absolute http or https
- * URL: there is no host allowlist, and cleartext is permitted by the app's network security
- * configuration. The caller injects the [OkHttpClient] (its pool, DNS and interceptors); each call
- * gets its own whole-call timeout from the request.
+ * URL allowed by the egress policy. The caller supplies the transport configuration and DNS; the
+ * client enforces destination checks and validates each redirect before following it.
  *
  * Mirrors the host executor (`PrototypeHttpExecutor.ts`): a non-string body is sent as JSON, with
  * `Content-Type: application/json` unless a header sets one; redirects are followed; the body is
@@ -132,12 +134,26 @@ class RetrofitPrototypeHttpClient(
   private val warn: (String, Throwable) -> Unit = { message, error -> Log.w(TAG, message, error) },
   /** Expected non-errors, such as a body that is not JSON. */
   private val debug: (String) -> Unit = { Log.d(TAG, it) },
-  baseUrl: HttpUrl = PLACEHOLDER_BASE_URL.toHttpUrl(),
+  private val policy: PrototypeDestinationPolicy = PrototypeEgressPolicy(),
 ) : PrototypeHttpClient {
   private val service: PrototypeHttpService =
     Retrofit.Builder()
-      .baseUrl(baseUrl)
-      .callFactory(TimeoutCallFactory(client))
+      .baseUrl(PLACEHOLDER_BASE_URL.toHttpUrl())
+      .callFactory(
+        TimeoutCallFactory(
+          client
+            .newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            // Direct connections keep the checked DNS address and the destination socket aligned.
+            .proxy(Proxy.NO_PROXY)
+            .connectionPool(ConnectionPool())
+            .addNetworkInterceptor(PrototypeEgressInterceptor(policy))
+            .build(),
+          policy,
+        ),
+      )
       .build()
       .create(PrototypeHttpService::class.java)
 
@@ -152,9 +168,11 @@ class RetrofitPrototypeHttpClient(
           "Not an absolute URL: ${request.url}",
         )
     return try {
-      call(request, url.toString()).let { response -> received(response, request.method, started) }
+      followRedirects(request, url, started)
     } catch (error: CancellationException) {
       throw error
+    } catch (error: PrototypeBlockedDestinationException) {
+      failed(PrototypeRequestErrorCode.BLOCKED_DESTINATION, error.message)
     } catch (error: InterruptedIOException) {
       // The whole-call timeout expired; SocketTimeoutException is an InterruptedIOException too.
       warn("Prototype request timed out: ${request.url}", error)
@@ -183,6 +201,63 @@ class RetrofitPrototypeHttpClient(
       // A header name or value, or a Content-Type, that OkHttp refuses to put on the wire.
       failed(PrototypeRequestErrorCode.INVALID_REQUEST, error.message ?: "Invalid request")
     }
+  }
+
+  private suspend fun followRedirects(
+    initial: PrototypeHttpRequest,
+    initialUrl: HttpUrl,
+    started: Long,
+  ): PrototypeRequestResponse {
+    var request = initial
+    var url = initialUrl
+    for (hop in 0..MAX_REDIRECTS) {
+      validate(request, url)
+      url = PrototypeEgressPolicy.normalize(url)
+      val response = call(request, url.toString())
+      if (response.code() !in REDIRECT_CODES) return received(response, request.method, started)
+      val location = response.headers()["Location"]
+      (response.body() as? ResponseBody)?.close()
+      response.errorBody()?.close()
+      if (location == null) throw IOException("Redirect has no Location")
+      if (hop == MAX_REDIRECTS) throw IOException("Too many redirects")
+      val next =
+        url.resolve(location)
+          ?: return PrototypeRequestResponse.Failed(
+            PrototypeRequestError(PrototypeRequestErrorCode.INVALID_URL, "Invalid redirect URL"),
+            clock() - started,
+          )
+      if (url.isHttps && !next.isHttps) {
+        throw PrototypeBlockedDestinationException("Blocked destination scheme downgrade")
+      }
+      val sameOrigin =
+        Triple(url.scheme, url.host, url.port) == Triple(next.scheme, next.host, next.port)
+      val toGet = response.code() in setOf(301, 302, 303) && request.method !in setOf("GET", "HEAD")
+      val remaining = initial.timeoutMs - (clock() - started)
+      if (remaining <= 0) throw InterruptedIOException("Request timed out")
+      request =
+        request.copy(
+          url = next.toString(),
+          method = if (toGet) "GET" else request.method,
+          body = if (toGet) null else request.body,
+          headers = request.headers.filterKeys { sameOrigin || !it.equals("Authorization", true) },
+          timeoutMs = remaining.coerceAtMost(initial.timeoutMs.toLong()).toInt(),
+        )
+      url = next
+    }
+    throw IOException("Too many redirects")
+  }
+
+  private fun validate(request: PrototypeHttpRequest, url: HttpUrl) {
+    require(
+      request.headers.keys.none { name ->
+        name.lowercase() in FORBIDDEN_HEADERS ||
+          name.startsWith("Proxy-", true) ||
+          name.startsWith("X-Forwarded-", true)
+      },
+    ) {
+      "Forbidden request header"
+    }
+    policy.check(url.host, url.port, emptyList()).requireAllowed()
   }
 
   /**
@@ -287,13 +362,29 @@ class RetrofitPrototypeHttpClient(
     headers.toMultimap().mapValues { (_, values) -> values.joinToString(", ") }
 
   /** Applies the request's whole-call timeout to the call OkHttp creates for it. */
-  private class TimeoutCallFactory(private val delegate: Call.Factory) : Call.Factory {
+  private class TimeoutCallFactory(
+    private val delegate: OkHttpClient,
+    private val policy: PrototypeDestinationPolicy,
+  ) : Call.Factory {
+    // OkHttp compares DNS identity when matching pooled connections. Keep it stable per port
+    // so same-origin calls can reuse a connection; another host still requires DNS validation.
+    private val dnsByPort = ConcurrentHashMap<Int, PrototypePolicyDns>()
+
     override fun newCall(request: Request): Call =
-      delegate.newCall(request).also { call ->
-        request.tag(PrototypeCallTimeout::class.java)?.let {
-          call.timeout().timeout(it.millis, TimeUnit.MILLISECONDS)
+      delegate
+        .newBuilder()
+        .dns(
+          dnsByPort.computeIfAbsent(request.url.port) {
+            PrototypePolicyDns(delegate.dns, policy, it)
+          },
+        )
+        .build()
+        .newCall(request)
+        .also { call ->
+          request.tag(PrototypeCallTimeout::class.java)?.let {
+            call.timeout().timeout(it.millis, TimeUnit.MILLISECONDS)
+          }
         }
-      }
   }
 
   internal companion object {
@@ -310,6 +401,25 @@ class RetrofitPrototypeHttpClient(
         (a == 169 && b == 254)
     }
 
+    private const val MAX_REDIRECTS = 5
+    private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
+    private val FORBIDDEN_HEADERS =
+      setOf(
+        "host",
+        "connection",
+        "upgrade",
+        "transfer-encoding",
+        "content-length",
+        "te",
+        "trailer",
+        "keep-alive",
+        "cookie",
+        "origin",
+        "expect",
+        "via",
+        "forwarded",
+        "accept-encoding",
+      )
     const val TAG = "RetrofitPrototypeHttp"
     const val NANOS_PER_MILLI = 1_000_000L
 

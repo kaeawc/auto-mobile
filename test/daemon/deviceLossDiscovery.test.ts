@@ -9,7 +9,7 @@ import {
   probeListedAndroidStates,
   stopRecordingAfterDeviceDisconnect,
 } from "../../src/daemon/deviceLossDiscovery";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { AndroidOfflineProbeError } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";

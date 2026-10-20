@@ -11,7 +11,7 @@ import {
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 const device = { deviceId: "telemetry-device", platform: "ios", name: "iPhone" } as BootedDevice;

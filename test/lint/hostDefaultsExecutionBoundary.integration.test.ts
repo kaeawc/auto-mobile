@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative } from "node:path";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
@@ -37,7 +38,7 @@ export function directlyExecutesHostDefaults(source: string): boolean {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);
@@ -60,7 +61,7 @@ describe("host defaults execution boundary (issue #4062)", () => {
       if (repoPath === OWNER || exceptions.has(repoPath)) {
         return [];
       }
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       return directlyExecutesHostDefaults(source)
         ? [`${repoPath} directly executes host defaults; route it through ${OWNER} instead.`]
         : [];

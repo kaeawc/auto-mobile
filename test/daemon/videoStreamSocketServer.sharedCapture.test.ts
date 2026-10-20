@@ -7,7 +7,7 @@ import {
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 import type { BootedDevice } from "../../src/models";
 import type {
   H264CaptureSource,

@@ -1,6 +1,12 @@
+import {
+  guardDirectoryEntries,
+  readGuardFile,
+  guardTextMayMatch,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { parseSync, Visitor, type Expression, type MemberExpression } from "oxc-parser";
+
+import { parseSync, type Expression, type MemberExpression } from "oxc-parser";
 import path from "node:path";
 
 const TEST_DIR = path.join(import.meta.dir, "..");
@@ -25,7 +31,7 @@ const SERVER_CLASSES = [
 const ALLOWLIST: Record<string, string[]> = {};
 
 function testFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(dir).flatMap((entry) => {
     const file = path.join(dir, entry.name);
     return entry.isDirectory() ? testFiles(file) : entry.name.endsWith(".test.ts") ? [file] : [];
   });
@@ -78,13 +84,13 @@ function violations(source: string): string[] {
   }
   // Every recognized constructor ends in SocketServer; home paths require
   // homedir, and listeners require both listen and a defaultPath/getSocketPath
-  // origin (even through local aliases). Escaped identifiers or
-  // computed string keys contain a backslash, so they always reach the visitor.
+  // origin (even through local aliases). Escapes that could spell these names
+  // still reach the visitor.
   // Keep parsing all files above: a syntax error must still fail the inventory.
   // Access program only for candidates (Oxc materializes its AST lazily).
   if (
-    !/SocketServer|homedir|\\/.test(source) &&
-    !(source.includes("listen") && /defaultPath|getSocketPath/.test(source))
+    !guardTextMayMatch(source, /SocketServer|homedir/) &&
+    !(guardTextMayMatch(source, "listen") && guardTextMayMatch(source, /defaultPath|getSocketPath/))
   ) {
     return [];
   }
@@ -199,7 +205,7 @@ describe("auxiliary socket test boundary (issue #7616)", () => {
         return [];
       }
       const allowed = [...(ALLOWLIST[relative] ?? [])];
-      return violations(readFileSync(file, "utf8"))
+      return violations(readGuardFile(file))
         .filter((violation) => {
           const index = allowed.indexOf(violation);
           if (index < 0) {

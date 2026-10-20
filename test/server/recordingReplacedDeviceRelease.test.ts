@@ -4,14 +4,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { promises as fsPromises } from "node:fs";
-import * as segmentedTools from "../../src/server/videoRecordingTools";
+import { segmentedRecordingCleanup } from "../../src/daemon/segmentedRecordingCleanup";
 import * as gestures from "../../src/daemon/deviceGestureRecordingManager";
-import * as manager from "../../src/server/videoRecordingManager";
+import * as manager from "../../src/daemon/videoRecordingManager";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import { VideoRecorderService } from "../../src/features/video";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -319,7 +319,7 @@ describe("recording release after serial identity replacement", () => {
   test("a wedged segmented abandon cannot starve single-file or gesture host cleanup", async () => {
     const active = await startA();
     const segment = spyOn(
-      segmentedTools,
+      segmentedRecordingCleanup,
       "finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice",
     ).mockImplementation(() => new Promise<void>(() => {}));
     const owned = spyOn(gestures, "ownedDeviceGestureRecordingId").mockReturnValue("gesture-A");

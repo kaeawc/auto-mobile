@@ -56,5 +56,5 @@ done
 if [[ "$lint_all" == true ]]; then
   echo all
 elif [[ "${#tasks[@]}" -gt 0 ]]; then
-  printf '%s\n' "${tasks[@]}" | sort -u
+  printf '%s\n' ${tasks[@]+"${tasks[@]}"} | sort -u
 fi

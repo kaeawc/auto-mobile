@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import type { BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
-import { IOS_MAX_DURATION_SECONDS } from "./videoRecordingManager";
+import { IOS_MAX_DURATION_SECONDS } from "../daemon/videoRecordingManager";
 import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import {
   assertLifecycleCallerHoldsDevice,

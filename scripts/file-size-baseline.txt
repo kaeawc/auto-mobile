@@ -10,7 +10,6 @@
 1180	src/daemon/videoStreamSocketServer.ts
 1596	src/doctor/checks/ios.ts
 1874	src/features/observe/android/ctrlProxyProtocol.ts
-2135	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1399	src/features/utility/ElementResolver.ts
 1502	src/features/video/FfmpegVideoProcessingBackend.ts

@@ -25,6 +25,9 @@ struct AuthenticatedDaemonHTTPRequestPerformer: HTTPRequestPerforming {
     let tokenProvider: any DaemonHTTPTokenProviding
 
     func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        guard let url = request.url, Self.isDaemonEndpoint(url),
+              request.value(forHTTPHeaderField: "Authorization") == nil
+        else { return try await performer.perform(request) }
         var refreshed = false
         while true {
             try Task.checkCancellation()
@@ -36,5 +39,13 @@ struct AuthenticatedDaemonHTTPRequestPerformer: HTTPRequestPerforming {
             if (response.1 as? HTTPURLResponse)?.statusCode != 401 || refreshed { return response }
             refreshed = true
         }
+    }
+
+    /// Exact loopback names only, matching the shared daemon HTTP endpoint vectors.
+    static func isDaemonEndpoint(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = url.host?.lowercased()
+        else { return false }
+        return ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)
     }
 }

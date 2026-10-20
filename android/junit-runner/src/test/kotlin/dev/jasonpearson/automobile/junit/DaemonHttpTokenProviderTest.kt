@@ -1,12 +1,23 @@
 package dev.jasonpearson.automobile.junit
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLConnection
+import java.net.URLStreamHandler
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.BeforeClass
@@ -26,6 +37,67 @@ class DaemonHttpTokenProviderTest {
       logUnavailable = logs::add,
     )
   private var directory: Path? = null
+
+  @Test
+  fun `shared HTTP endpoint vectors limit heartbeat credentials and preserve caller authorization`() {
+    val vectors =
+      Json.parseToJsonElement(File("../../test/fixtures/daemon-http-endpoints.json").readText())
+        .jsonArray
+    for (vector in vectors) {
+      val fields = vector.jsonObject
+      val url = fields.getValue("url").jsonPrimitive.content
+      val daemon = fields.getValue("daemon").jsonPrimitive.content.toBooleanStrict()
+      for (caller in listOf(false, true)) {
+        assertEndpointAuthentication(url, daemon, caller)
+      }
+    }
+  }
+
+  private fun assertEndpointAuthentication(url: String, daemon: Boolean, caller: Boolean) {
+    var reads = 0
+    val connections = mutableListOf<HeartbeatConnection>()
+    val endpoint =
+      URL(
+        null,
+        url,
+        object : URLStreamHandler() {
+          override fun openConnection(endpoint: URL): URLConnection =
+            HeartbeatConnection(endpoint).also {
+              if (caller) it.setRequestProperty("Authorization", "caller")
+              connections.add(it)
+            }
+        },
+      )
+    kotlin.test.assertFailsWith<IOException> {
+      HeartbeatTransport.sendHeartbeat(
+        endpoint,
+        "session",
+        "owner",
+        DaemonHttpTokenProvider {
+          reads++
+          "local"
+        },
+      )
+    }
+    val expected = if (caller) "caller" else if (daemon) "Bearer local" else null
+    assertTrue(connections.all { it.getRequestProperty("Authorization") == expected }, url)
+    assertEquals(if (daemon && !caller) 2 else 1, connections.size, url)
+    assertEquals(if (daemon && !caller) 2 else 0, reads, url)
+  }
+
+  private class HeartbeatConnection(endpoint: URL) : HttpURLConnection(endpoint) {
+    override fun connect() = Unit
+
+    override fun disconnect() = Unit
+
+    override fun usingProxy() = false
+
+    override fun getOutputStream() = ByteArrayOutputStream()
+
+    override fun getErrorStream() = ByteArrayInputStream(byteArrayOf())
+
+    override fun getResponseCode() = 401
+  }
 
   @After
   fun cleanup() {

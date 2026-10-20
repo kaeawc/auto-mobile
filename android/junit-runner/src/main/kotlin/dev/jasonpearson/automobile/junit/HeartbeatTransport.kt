@@ -55,7 +55,11 @@ internal object HeartbeatTransport {
     try {
       connection.instanceFollowRedirects = false
       connection.requestMethod = "POST"
-      tokenProvider.read()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+      val usesDaemonAuthentication =
+        isDaemonHttpEndpoint(endpoint) && connection.getRequestProperty("Authorization") == null
+      if (usesDaemonAuthentication) {
+        tokenProvider.read()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+      }
       connection.setRequestProperty("Content-Type", "application/json")
       DaemonHeartbeat.applyBeatTimeouts(connection)
       connection.doOutput = true
@@ -70,7 +74,11 @@ internal object HeartbeatTransport {
       connection.outputStream.use { it.write(payload.toByteArray()) }
 
       val status = connection.responseCode
-      if (status == HttpURLConnection.HTTP_UNAUTHORIZED && retryAuthentication) {
+      if (
+        status == HttpURLConnection.HTTP_UNAUTHORIZED &&
+          retryAuthentication &&
+          usesDaemonAuthentication
+      ) {
         connection.errorStream?.use { it.readBytes() }
         return true
       }

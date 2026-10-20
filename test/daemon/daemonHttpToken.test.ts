@@ -33,9 +33,30 @@ import {
   verifyBearerToken,
 } from "../../src/daemon/daemonHttpToken";
 
+const endpointVectors: { url: string; daemon: boolean }[] = JSON.parse(
+  readFileSync(new URL("../fixtures/daemon-http-endpoints.json", import.meta.url), "utf8"),
+);
+import type { DaemonHttpTokenRemovalFiles } from "../../src/daemon/daemonHttpToken";
+
 const TOKEN = "private-test-token";
 
 describe("daemon HTTP token helpers", () => {
+  test.each(endpointVectors)(
+    "scopes credentials to shared endpoint vector $url",
+    ({ url, daemon }) => {
+      const env = { AUTOMOBILE_DAEMON_HTTP_TOKEN: TOKEN };
+      expect(daemonHttpAuthHeaders(url, env)).toEqual(
+        daemon ? { Authorization: `Bearer ${TOKEN}` } : {},
+      );
+      expect(
+        daemonHttpAuthHeaders(url, env, { aUtHoRiZaTiOn: "caller", Accept: "application/json" }),
+      ).toEqual({
+        aUtHoRiZaTiOn: "caller",
+        Accept: "application/json",
+      });
+    },
+  );
+
   test("uses the injected identifier deterministically", () => {
     const ids = new CountingIdGenerator("uuid");
     expect(generateDaemonHttpToken(ids)).toBe("uuid-1");
@@ -75,7 +96,9 @@ describe("daemon HTTP token helpers", () => {
       AUTOMOBILE_DAEMON_TOKEN_FILE_PATH: "/unused/token",
     };
     expect(readDaemonHttpToken(env)).toBe(TOKEN);
-    expect(daemonHttpAuthHeaders(env)).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    expect(daemonHttpAuthHeaders("http://localhost:3161", env)).toEqual({
+      Authorization: `Bearer ${TOKEN}`,
+    });
   });
 });
 
@@ -310,6 +333,21 @@ describe("daemon HTTP token runtime file", () => {
     },
   );
 
+  test("removal leaves a directory replacement in place without logging the token", () => {
+    store.write(TOKEN);
+    rmSync(path);
+    mkdirSync(path);
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      store.remove();
+      expect(statSync(path).isDirectory()).toBe(true);
+      expect(readdirSync(directory)).toEqual(["daemon.token"]);
+      expect(JSON.stringify(debug.mock.calls)).not.toContain(TOKEN);
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
   test("daemon startup publication overwrites stale content and clean shutdown removes the file", async () => {
     resetDbWriteBarrier();
     const restore = await fakeDaemonShutdownIo();
@@ -344,13 +382,93 @@ describe("daemon HTTP token runtime file", () => {
   test("client helpers trim file content and treat missing or unsafe files as absent", () => {
     const env = { AUTOMOBILE_DAEMON_TOKEN_FILE_PATH: path };
     expect(readDaemonHttpToken(env)).toBeUndefined();
-    expect(daemonHttpAuthHeaders(env)).toEqual({});
+    expect(daemonHttpAuthHeaders("http://localhost:3161", env)).toEqual({});
     store.write(` ${TOKEN}\n`);
     expect(readDaemonHttpToken(env)).toBe(TOKEN);
-    expect(daemonHttpAuthHeaders(env)).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    expect(daemonHttpAuthHeaders("http://localhost:3161", env)).toEqual({
+      Authorization: `Bearer ${TOKEN}`,
+    });
     store.remove();
     expect(existsSync(path)).toBe(false);
     expect(store.read()).toBeUndefined();
     store.remove();
   });
+});
+
+/** The removal seam controls publication at each filesystem operation without scheduling or sockets. */
+class RemovalFiles implements DaemonHttpTokenRemovalFiles {
+  files = new Map<string, string>();
+  beforeMove: () => void = () => {};
+  afterMove: () => void = () => {};
+  beforeRestore: () => void = () => {};
+  createDirectory(prefix: string): string {
+    return `${prefix}private`;
+  }
+  move(source: string, destination: string): void {
+    this.beforeMove();
+    const token = this.files.get(source);
+    if (token === undefined) {
+      throw new Error("Missing file");
+    }
+    this.files.set(destination, token);
+    this.files.delete(source);
+    this.afterMove();
+  }
+  read(path: string): string | undefined {
+    return this.files.get(path);
+  }
+  restore(source: string, destination: string): void {
+    this.beforeRestore();
+    if (this.files.has(destination)) {
+      throw new Error("Destination exists");
+    }
+    const token = this.files.get(source);
+    if (token === undefined) {
+      throw new Error("Missing file");
+    }
+    this.files.set(destination, token);
+  }
+  remove(path: string): void {
+    this.files.delete(path);
+  }
+  removeDirectory(_path: string): void {}
+}
+
+describe("atomic token removal", () => {
+  const scratch = useScratchRoot("am-token-remove-");
+  test.each(["before move", "after move", "before restore"])(
+    "preserves successor publication %s",
+    (step) => {
+      const path = join(scratch.next(), "daemon.token");
+      const files = new RemovalFiles();
+      const store = new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+        removalFiles: files,
+      });
+      store.write(TOKEN);
+      files.files.set(path, TOKEN);
+      if (step === "before move") {
+        files.beforeMove = () => {
+          files.files.set(path, "successor");
+        };
+      }
+      if (step === "after move") {
+        files.afterMove = () => {
+          files.files.set(path, "successor");
+        };
+      }
+      if (step === "before restore") {
+        files.beforeMove = () => {
+          files.files.set(path, "successor");
+        };
+        files.beforeRestore = () => {
+          files.files.set(path, "newest");
+        };
+      }
+      store.remove();
+      expect(files.files.get(path)).toBe(step === "before restore" ? "newest" : "successor");
+      if (step === "before restore") {
+        expect([...files.files.values()]).toContain("successor");
+      }
+    },
+  );
 });

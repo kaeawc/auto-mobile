@@ -22,7 +22,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
   private val retryPolicy = options.retryPolicy
   private val requestSender = options.requestSender
   private val mcpSessionKey = options.mcpSessionKey
-  private val httpClient = HttpClient.newBuilder().build()
+  private val httpClient by lazy { HttpClient.newBuilder().build() }
   private val decoder = McpHttpResponseDecoder(json)
   @Volatile private var sessionId: String? = null
   @Volatile private var protocolVersion: String? = null
@@ -181,6 +181,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
         .header("Accept", MCP_ACCEPT_HEADER)
         .header(MCP_SESSION_KEY_HEADER, mcpSessionKey)
 
+    options.requestHeaders.forEach { (name, value) -> builder.header(name, value) }
     if (includeSession) {
       sessionId?.let { builder.header(SESSION_HEADER, it) }
     }
@@ -200,7 +201,9 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
         sendAuthenticatedRequest(httpRequest)
       }
 
-    if (response.statusCode() == 401 && retryAuthentication) {
+    if (
+      response.statusCode() == 401 && retryAuthentication && usesDaemonAuthentication(httpRequest)
+    ) {
       return exchange(request, includeSession, deadline, retryAuthentication = false)
     }
     response.headers().firstValue(SESSION_HEADER).ifPresent { header ->
@@ -245,15 +248,18 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
   }
 
   private fun sendAuthenticatedRequest(request: HttpRequest): HttpResponse<String> {
-    val builder =
-      HttpRequest.newBuilder(request) { name, _ ->
-        !name.equals("Authorization", ignoreCase = true)
-      }
-    options.tokenProvider.read()?.let { builder.header("Authorization", "Bearer $it") }
-    val authenticated = builder.build()
+    val authenticated =
+      if (usesDaemonAuthentication(request)) {
+        val builder = HttpRequest.newBuilder(request) { _, _ -> true }
+        options.tokenProvider.read()?.let { builder.header("Authorization", "Bearer $it") }
+        builder.build()
+      } else request
     return requestSender?.send(authenticated)
       ?: httpClient.send(authenticated, HttpResponse.BodyHandlers.ofString())
   }
+
+  private fun usesDaemonAuthentication(request: HttpRequest): Boolean =
+    isDaemonHttpEndpoint(request.uri()) && request.headers().firstValue("Authorization").isEmpty
 
   companion object {
     /** Must match `MCP_SESSION_KEY_HEADER` in src/daemon/mcpSessionKey.ts. */

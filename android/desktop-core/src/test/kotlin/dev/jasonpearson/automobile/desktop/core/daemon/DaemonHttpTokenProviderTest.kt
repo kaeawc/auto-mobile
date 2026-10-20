@@ -1,12 +1,25 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import java.io.File
 import java.io.IOException
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpHeaders
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
+import java.util.Optional
+import javax.net.ssl.SSLSession
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.BeforeClass
@@ -26,6 +39,80 @@ class DaemonHttpTokenProviderTest {
       logUnavailable = logs::add,
     )
   private var directory: Path? = null
+
+  @Test
+  fun `shared HTTP endpoint vectors limit credentials and preserve caller authorization`() {
+    val vectors =
+      Json.parseToJsonElement(File("../../test/fixtures/daemon-http-endpoints.json").readText())
+        .jsonArray
+    for (vector in vectors) {
+      val fields = vector.jsonObject
+      val url = fields.getValue("url").jsonPrimitive.content
+      val daemon = fields.getValue("daemon").jsonPrimitive.content.toBooleanStrict()
+      val endpoint = URI.create(url)
+      assertEquals(daemon, isDaemonHttpEndpoint(endpoint), url)
+      // HttpRequest rejects schemes and authorities it cannot represent before sending.
+      if (endpoint.scheme !in setOf("http", "https") || endpoint.host == null) continue
+      for (caller in listOf(false, true)) {
+        assertEndpointAuthentication(url, daemon, caller)
+      }
+    }
+  }
+
+  private fun assertEndpointAuthentication(url: String, daemon: Boolean, caller: Boolean) {
+    var reads = 0
+    val requests = mutableListOf<HttpRequest>()
+    val transport =
+      McpHttpTransport(
+        McpHttpClientOptions(
+          endpoint = url,
+          mcpSessionKey = "test-session",
+          requestHeaders = if (caller) mapOf("aUtHoRiZaTiOn" to "caller") else emptyMap(),
+          tokenProvider =
+            DaemonHttpTokenProvider {
+              reads++
+              "local"
+            },
+          requestSender =
+            HttpRequestSender { request ->
+              requests.add(request)
+              UnauthorizedResponse(request)
+            },
+        ),
+      )
+    kotlin.test.assertFailsWith<McpConnectionException> {
+      transport.sendRequest(
+        JsonRpcRequest(id = JsonPrimitive("test"), method = "ping"),
+        false,
+        true,
+      )
+    }
+    val expected = if (caller) "caller" else if (daemon) "Bearer local" else null
+    assertTrue(
+      requests.all { it.headers().firstValue("Authorization").orElse(null) == expected },
+      url,
+    )
+    assertEquals(if (daemon && !caller) 2 else 1, requests.size, url)
+    assertEquals(if (daemon && !caller) 2 else 0, reads, url)
+  }
+
+  private class UnauthorizedResponse(private val original: HttpRequest) : HttpResponse<String> {
+    override fun statusCode() = 401
+
+    override fun request() = original
+
+    override fun previousResponse(): Optional<HttpResponse<String>> = Optional.empty()
+
+    override fun headers(): HttpHeaders = HttpHeaders.of(emptyMap()) { _, _ -> true }
+
+    override fun body() = "Unauthorized"
+
+    override fun sslSession(): Optional<SSLSession> = Optional.empty()
+
+    override fun uri(): URI = original.uri()
+
+    override fun version(): HttpClient.Version = HttpClient.Version.HTTP_1_1
+  }
 
   @After
   fun cleanup() {
@@ -185,6 +272,9 @@ class DaemonHttpTokenProviderTest {
     @BeforeClass
     @JvmStatic
     fun warmReader() {
+      // Initialize JDK request and serialization classes in setup, with a fake sender.
+      DaemonHttpTokenProviderTest()
+        .assertEndpointAuthentication("http://localhost/mcp", daemon = true, caller = false)
       val directory =
         Files.createTempDirectory(Files.createDirectories(Path.of("build")), "token-warmup-")
       val path = directory.resolve("daemon.token")

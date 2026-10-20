@@ -12,9 +12,86 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
         throws -> StreamableHTTPMCPClient
     {
         try StreamableHTTPMCPClient(
-            endpoint: XCTUnwrap(URL(string: "http://unused/auto-mobile/streamable")), performer: performer,
+            endpoint: XCTUnwrap(URL(string: "http://localhost/auto-mobile/streamable")), performer: performer,
             options: .init(scheduler: scheduler, tokenProvider: tokens)
         )
+    }
+
+    private struct EndpointVector: Decodable {
+        let url: String
+        let daemon: Bool
+    }
+
+    func testSharedEndpointVectorsPreserveCallerAuthorizationAndLimitRefresh() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0 ..< 5 {
+            root.deleteLastPathComponent()
+        }
+        let vectors = try JSONDecoder().decode(
+            [EndpointVector].self,
+            from: Data(contentsOf: root.appendingPathComponent("test/fixtures/daemon-http-endpoints.json"))
+        )
+        for vector in vectors {
+            for caller in [false, true] {
+                let performer = AsyncFakeHTTPPerformer()
+                let tokens = FakeDaemonHTTPTokenProvider(["local", "refreshed"])
+                let authenticated = AuthenticatedDaemonHTTPRequestPerformer(performer: performer, tokenProvider: tokens)
+                var request = try URLRequest(url: XCTUnwrap(URL(string: vector.url)))
+                if caller { request.setValue("caller", forHTTPHeaderField: "aUtHoRiZaTiOn") }
+                let original = request
+                let task = Task { try await authenticated.perform(original) }
+                try await performer.requests.wait(for: 1)
+                let expected = caller ? "caller" : (vector.daemon ? "Bearer local" : nil)
+                XCTAssertEqual(authorization(performer, 0), expected, vector.url)
+                performer.reply(0, data: Data(), status: vector.daemon && !caller ? 401 : 200, headers: [:])
+                if vector.daemon, !caller {
+                    try await performer.requests.wait(for: 2)
+                    XCTAssertEqual(authorization(performer, 1), "Bearer refreshed", vector.url)
+                    performer.reply(1, data: Data(), status: 401, headers: [:])
+                }
+                _ = try await task.value
+                XCTAssertEqual(tokens.reads, vector.daemon && !caller ? 2 : 0, vector.url)
+                XCTAssertEqual(performer.requests.count, vector.daemon && !caller ? 2 : 1, vector.url)
+            }
+        }
+    }
+
+    private struct RejectedPerformer: HTTPRequestPerforming {
+        func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+            guard let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 401, httpVersion: nil, headerFields: nil)
+            else { throw URLError(.badURL) }
+            return (Data(), response)
+        }
+    }
+
+    func testRemote401AndCallerAuthorizationDoNotRefreshDaemonCredentials() async throws {
+        for endpoint in ["https://example.com/mcp", "http://localhost/mcp"] {
+            var request = try URLRequest(url: XCTUnwrap(URL(string: endpoint)))
+            if endpoint.contains("localhost") { request.setValue("caller", forHTTPHeaderField: "Authorization") }
+            let tokens = FakeDaemonHTTPTokenProvider(["local", "refreshed"])
+            let performer = AuthenticatedDaemonHTTPRequestPerformer(
+                performer: RejectedPerformer(),
+                tokenProvider: tokens
+            )
+            _ = try await performer.perform(request)
+            XCTAssertEqual(tokens.reads, 0)
+        }
+    }
+
+    func testRemoteClientDoesNotReadDaemonCredentials() async throws {
+        let performer = AsyncFakeHTTPPerformer()
+        let tokens = FakeDaemonHTTPTokenProvider(["local"])
+        let client = try StreamableHTTPMCPClient(
+            endpoint: XCTUnwrap(URL(string: "https://example.com/mcp")), performer: performer,
+            options: .init(scheduler: VirtualDeadlineScheduler(), tokenProvider: tokens)
+        )
+        let task = Task { try await client.initialize(timeout: 5) }
+        try await performer.requests.wait(for: 1)
+        XCTAssertNil(authorization(performer, 0))
+        performer.reply(0)
+        try await task.value
+        XCTAssertEqual(tokens.reads, 0)
     }
 
     private func authorization(_ performer: AsyncFakeHTTPPerformer, _ index: Int) -> String? {
@@ -122,7 +199,7 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
         let performer = AsyncFakeHTTPPerformer()
         let tokens = FakeDaemonHTTPTokenProvider(["heartbeat-old", "heartbeat-new"])
         let authenticated = AuthenticatedDaemonHTTPRequestPerformer(performer: performer, tokenProvider: tokens)
-        var request = try URLRequest(url: XCTUnwrap(URL(string: "http://unused/heartbeat")))
+        var request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost/heartbeat")))
         request.httpMethod = "POST"
         let heartbeatRequest = request
         let task = Task { try await authenticated.perform(heartbeatRequest) }
@@ -141,7 +218,7 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
         let authenticated = AuthenticatedDaemonHTTPRequestPerformer(
             performer: performer, tokenProvider: FakeDaemonHTTPTokenProvider()
         )
-        let request = try URLRequest(url: XCTUnwrap(URL(string: "http://unused/heartbeat")))
+        let request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost/heartbeat")))
         let task = Task { try await authenticated.perform(request) }
         try await performer.requests.wait(for: 1)
         XCTAssertNil(authorization(performer, 0))

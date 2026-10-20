@@ -13,4 +13,5 @@ data class McpHttpClientOptions(
   val requestSender: HttpRequestSender? = null,
   val mcpSessionKey: String = McpSessionKeyProvider.appSession.key,
   val tokenProvider: DaemonHttpTokenProvider = FileDaemonHttpTokenProvider(),
+  val requestHeaders: Map<String, String> = emptyMap(),
 )

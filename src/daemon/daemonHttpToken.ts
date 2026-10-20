@@ -6,6 +6,9 @@ import {
   fchmodSync,
   fstatSync,
   lstatSync,
+  linkSync,
+  mkdtempSync,
+  rmdirSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -34,7 +37,18 @@ export function generateDaemonHttpToken(idGen?: IdGenerator): string {
 
 export { FakeDaemonHttpTokenStore } from "./FakeDaemonHttpTokenStore";
 
+/** Only removal operations are injectable; reads retain descriptor validation in production. */
+export interface DaemonHttpTokenRemovalFiles {
+  createDirectory(prefix: string): string;
+  move(source: string, destination: string): void;
+  read(path: string): string | undefined;
+  restore(source: string, destination: string): void;
+  remove(path: string): void;
+  removeDirectory(path: string): void;
+}
+
 interface FileDaemonHttpTokenStoreOptions {
+  removalFiles?: DaemonHttpTokenRemovalFiles;
   platform?: NodeJS.Platform;
   renameFile?: (source: string, destination: string) => void;
   sleep?: (ms: number) => void;
@@ -43,6 +57,7 @@ interface FileDaemonHttpTokenStoreOptions {
 /** Atomic publication; readers validate the opened inode, not a prior path stat. */
 export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
   private publishedToken: string | undefined;
+  private readonly removalFiles: DaemonHttpTokenRemovalFiles;
   private readonly platform: NodeJS.Platform;
   private readonly renameFile: (source: string, destination: string) => void;
   private readonly sleep: (ms: number) => void;
@@ -52,6 +67,17 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
     private readonly idGen: IdGenerator = defaultIdGenerator,
     options: FileDaemonHttpTokenStoreOptions = {},
   ) {
+    this.removalFiles = options.removalFiles ?? {
+      createDirectory: mkdtempSync,
+      move: (source, destination) => {
+        this.assertTarget(source);
+        renameSync(source, destination);
+      },
+      read: (path) => this.readAt(path),
+      restore: linkSync,
+      remove: unlinkSync,
+      removeDirectory: rmdirSync,
+    };
     this.platform = options.platform ?? process.platform;
     this.renameFile = options.renameFile ?? renameSync;
     this.sleep =
@@ -61,8 +87,8 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
       });
   }
 
-  private assertTarget(): void {
-    const stat = lstatSync(this.path, { throwIfNoEntry: false });
+  private assertTarget(path = this.path): void {
+    const stat = lstatSync(path, { throwIfNoEntry: false });
     if (stat && (!stat.isFile() || stat.isSymbolicLink())) {
       throw new Error("Unsafe daemon HTTP token file");
     }
@@ -128,11 +154,15 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
   }
 
   read(): string | undefined {
+    return this.readAt(this.path);
+  }
+
+  private readAt(path: string): string | undefined {
     let fd: number | undefined;
     try {
-      this.assertTarget();
+      this.assertTarget(path);
       fd = openSync(
-        this.path,
+        path,
         constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW),
       );
       const stat = fstatSync(fd);
@@ -164,14 +194,38 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
   remove(): void {
     const token = this.publishedToken;
     this.publishedToken = undefined;
-    if (!token || !tokensEqual(this.read() ?? "", token)) {
+    if (!token) {
       return;
     }
+    const files = this.removalFiles;
+    let directory: string | undefined;
+    let retained = false;
     try {
-      unlinkSync(this.path);
+      directory = files.createDirectory(`${this.path}.remove-`);
+      const moved = `${directory}/token`;
+      // Rename claims one directory entry atomically. A later publication stays at the public path.
+      // Windows sharing violations leave that path untouched; shutdown cleanup is best effort.
+      files.move(this.path, moved);
+      retained = true;
+      if (!tokensEqual(files.read(moved) ?? "", token)) {
+        // link is no-replace on POSIX and Windows. If another publication already occupies the
+        // path, preserve the claimed file in its private directory rather than replacing either.
+        files.restore(moved, this.path);
+      }
+      files.remove(moved);
+      retained = false;
     } catch {
-      // The runtime file may already be absent during best-effort shutdown.
+      // Missing files, sharing locks, and a newer publication are expected during shutdown.
       logger.debug("Daemon HTTP token file removal unavailable");
+    } finally {
+      if (directory && !retained) {
+        try {
+          files.removeDirectory(directory);
+        } catch {
+          // A private empty cleanup directory may remain after best-effort shutdown.
+          logger.debug("Daemon HTTP token removal directory cleanup unavailable");
+        }
+      }
     }
   }
 }
@@ -189,11 +243,37 @@ export function readDaemonHttpToken(env: NodeJS.ProcessEnv = process.env): strin
   }
 }
 
+/** Exact loopback names only; other 127/8 and IPv4-mapped IPv6 addresses are excluded. */
+export function isDaemonHttpEndpoint(endpoint: string | URL): boolean {
+  const url = URL.parse(String(endpoint));
+  // WHATWG normalizes numeric aliases and expanded IPv6. For string inputs also require
+  // an explicit allowlisted authority spelling, retaining URL parsing as the validity check.
+  const literalHost =
+    typeof endpoint !== "string" ||
+    /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:[/?#]|$)/i.test(
+      endpoint,
+    );
+  return (
+    literalHost &&
+    !!url &&
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase())
+  );
+}
+
 export function daemonHttpAuthHeaders(
+  endpoint: string | URL,
   env: NodeJS.ProcessEnv = process.env,
+  headers: Record<string, string> = {},
 ): Record<string, string> {
+  if (
+    !isDaemonHttpEndpoint(endpoint) ||
+    Object.keys(headers).some((key) => key.toLowerCase() === "authorization")
+  ) {
+    return { ...headers };
+  }
   const token = readDaemonHttpToken(env);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : { ...headers };
 }
 
 export function verifyBearerToken(headerValue: string | undefined, expected: string): boolean {

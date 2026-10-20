@@ -668,6 +668,7 @@ class DaemonHeartbeatTest {
     var userNameCalls = 0
     val resolver =
       DaemonUserIdResolver(
+        envProvider = { null },
         osName = { "Linux" },
         userName = {
           userNameCalls++

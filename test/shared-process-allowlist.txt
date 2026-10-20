@@ -200,6 +200,7 @@ test/daemon/deviceTable.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-offlineRecovery.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-sourceUnavailable.test.ts
 test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
@@ -592,6 +593,7 @@ test/fakes/FakeIOSCtrlProxy.test.ts
 test/fakes/FakeImageBackend.test.ts
 test/fakes/FakeIosVoiceOverDetector.test.ts
 test/fakes/FakeNavigationGraphManager.test.ts
+test/fakes/FakePrototypeAgentClient.test.ts
 test/fakes/FakeSystemConfigurationAdapter.test.ts
 test/fakes/FakeTimer.test.ts
 test/fakes/adbStdout.test.ts

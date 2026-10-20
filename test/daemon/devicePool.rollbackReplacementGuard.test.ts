@@ -50,7 +50,7 @@ test("rollback releases the device when no replacement session appears", async (
   const context = await createContext();
   const { manager, pool, allocated } = context;
   try {
-    await pool["rollbackAssignments"](
+    await pool.testHooks.rollbackAssignments(
       new Map([[SESSION_ID, { deviceId: DEVICE.deviceId, session: allocated }]]),
     );
 
@@ -78,7 +78,7 @@ test("rollback keeps the device bound when a replacement session binds it during
   );
 
   try {
-    await pool["rollbackAssignments"](
+    await pool.testHooks.rollbackAssignments(
       new Map([[SESSION_ID, { deviceId: DEVICE.deviceId, session: allocated }]]),
     );
 
@@ -112,7 +112,7 @@ test("rollback still frees the device when the replacement session is bound to a
   );
 
   try {
-    await pool["rollbackAssignments"](
+    await pool.testHooks.rollbackAssignments(
       new Map([[SESSION_ID, { deviceId: DEVICE.deviceId, session: allocated }]]),
     );
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { resolve } from "node:path";
 import {
   computeBuildIdentity,
@@ -133,4 +133,8 @@ describe("buildIdentity", () => {
       expect(buildIdentitiesMatch(client, buildIdentityFromStatus({}))).toBe(true);
     });
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { SESSION_RELEASE_TEARDOWN_CAP_MS, SessionManager } from "../../src/daemon/sessionManager";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
@@ -198,4 +198,8 @@ describe("rebind and network TTL restores use the teardown shield", () => {
     expect(h.fake.calls).toHaveLength(1);
     expect(h.manager.getPendingDeviceCleanup(oldDevice)).toBeNull();
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

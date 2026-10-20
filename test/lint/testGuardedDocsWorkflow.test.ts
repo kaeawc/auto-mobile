@@ -8,6 +8,7 @@ interface Workflow {
     string,
     {
       if?: string;
+      env: Record<string, string>;
       steps: { id?: string; with?: { script?: string } }[];
     }
   >;

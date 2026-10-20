@@ -81,7 +81,7 @@ describe("no database reopen after the shutdown close (#11601)", () => {
     expect(runMigrations).not.toHaveBeenCalled();
     expect(getMigrationsPromiseForTest()).toBeNull();
     expect(refusedDatabaseAccessCountAfterShutdownClose()).toBe(1);
-    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+    expect(warn.mock.calls.map((call: Parameters<typeof logger.warn>) => call[0])).toEqual([
       "[Database] Refused database access #1 after the shutdown close",
     ]);
     expect(warn.mock.calls[0]?.[1]).toBe(error);

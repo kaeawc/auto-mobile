@@ -40,7 +40,7 @@ async function realHarness(replies: IosCtrlProxyReplies): Promise<IosCtrlProxyHa
     ...Object.entries(replies).map(([type, response], index) => ({
       fileName: `reply-${index}.json`,
       request: { type },
-      response: response as Record<string, unknown>,
+      response: { ...response },
     })),
   ];
   const replay = createReplayWebSocketFactory(exchanges, timer);

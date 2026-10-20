@@ -1,3 +1,4 @@
+import * as io from "../../src/utils/io";
 import { promises as fsPromises } from "node:fs";
 import { ActionableError } from "../../src/models/ActionableError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -80,7 +81,7 @@ describe("IosCtrlProxyBuilder", function () {
     const cached = path.join(tempDir, "stale.xctestrun");
     builder["cachedXctestrunPath"].set("any", cached);
     const access = spyOn(fs, "access").mockRejectedValue(new Error("removed"));
-    const listing = spyOn(fsPromises, "readdir").mockResolvedValue(["fresh.xctestrun"]);
+    const listing = spyOn(io, "sortedReaddir").mockResolvedValue(["fresh.xctestrun"]);
     const log = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       expect(await builder.getXctestrunPath()).toBe(

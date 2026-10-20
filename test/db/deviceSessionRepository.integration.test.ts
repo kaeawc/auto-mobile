@@ -1459,7 +1459,7 @@ describe("DeviceSessionRepository", () => {
 
       const row = await repo.getSession("session-1");
       expect(row!.release_reason).toBe(deviceRestartReleaseReason(androidDevice.name));
-      expect(isRecoverableDaemonReleaseReason(row!.release_reason)).toBe(true);
+      expect(isRecoverableDaemonReleaseReason(row!.release_reason!)).toBe(true);
     } finally {
       sessionManager.stopCleanupTimer();
     }

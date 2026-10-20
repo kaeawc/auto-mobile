@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
@@ -35,7 +36,7 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
     timer,
     { hierarchyCapture: new FakeHierarchyCapture(() => viewHierarchy) },
   );
-  command.observedInteraction = (action) => action(observationOf(viewHierarchy));
+  command.observedInteraction = runBlockWith(observationOf(viewHierarchy));
   return { command, service };
 }
 

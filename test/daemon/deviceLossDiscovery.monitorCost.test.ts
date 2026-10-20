@@ -62,10 +62,25 @@ function managerWithPhysicalCounter() {
 describe("deviceLossDiscovery monitor cost", () => {
   beforeEach(() => resetAndroidInventoryEnrichmentCache());
 
+  test("reconciles other devices while plan observations remain presence-only", async () => {
+    const rig = managerWithPhysicalCounter();
+    const pool = poolFor([SIM, PHONE]);
+    const reconciled: string[][] = [];
+    pool.reconcileDiscoveryObservation = async (devices) => {
+      reconciled.push(devices.map((device) => device.deviceId));
+    };
+    const discovery = await discoverAndReconcile(pool, rig.manager, {
+      isPlanDevice: (id) => id === SIM.deviceId,
+    });
+    expect(reconciled).toEqual([[PHONE.deviceId]]);
+    expect(discovery.devices).toContainEqual(SIM);
+    expect(discovery.devices).toContainEqual(PHONE);
+  });
+
   test("six simulator-only monitor sweeps never ask devicectl", async () => {
     const rig = managerWithPhysicalCounter();
     for (let tick = 0; tick < 6; tick++) {
-      await discoverAndReconcile(poolFor([SIM]), rig.manager, { planActive: false });
+      await discoverAndReconcile(poolFor([SIM]), rig.manager, {});
     }
     expect(rig.calls()).toBe(0);
     // Allocation/default discovery still includes physical devices.
@@ -78,12 +93,11 @@ describe("deviceLossDiscovery monitor cost", () => {
     "a physical iOS device in the %s keeps physical-source liveness",
     async (trackedBy) => {
       const rig = managerWithPhysicalCounter();
-      await discoverAndReconcile(poolFor([SIM]), rig.manager, { planActive: false });
+      await discoverAndReconcile(poolFor([SIM]), rig.manager, {});
       const result = await discoverAndReconcile(
         poolFor(trackedBy === "pool" ? [PHONE] : [SIM]),
         rig.manager,
         {
-          planActive: false,
           heldDevices:
             trackedBy === "held" ? [{ platform: "ios", assignedDevice: PHONE.deviceId }] : [],
         },
@@ -137,7 +151,7 @@ describe("deviceLossDiscovery monitor cost", () => {
     };
     for (let tick = 0; tick < 6; tick++) {
       timer.advanceTime(5_000);
-      await discoverAndReconcile(pool, manager, { planActive: false, platform: "android" });
+      await discoverAndReconcile(pool, manager, { platform: "android" });
     }
     expect(reconciled).toHaveLength(6);
     expect(reconciled[5].map(({ deviceId, name }) => ({ deviceId, name }))).toEqual([

@@ -17,7 +17,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { ActionableError, BootedDevice, ExecutePlanResult, PlanExecutionResult } from "../models";
 import { PlanExecutionOptions } from "../models/ExecutePlanResult";
 import type { Plan } from "../models/Plan";
-import { serverConfig } from "../utils/ServerConfig";
+import { serverConfig, type PlanExecutionLease } from "../utils/ServerConfig";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -148,6 +148,15 @@ export class PlanExecutionOrchestrator {
     logger.info(`[PERF +${this.timer.now() - this.perfStart}ms] ${message}`);
   }
 
+  private registerPlanExecution(): PlanExecutionLease {
+    const context = getToolSelectionContext();
+    return serverConfig.acquirePlanExecutionLease({
+      sessionUuid: this.request.sessionUuid ?? context?.routingSessionUuid,
+      deviceId: this.device.deviceId,
+      executionId: context?.execution?.executionId,
+    });
+  }
+
   /**
    * Run all phases, returning a structured ExecutePlanResult for ordinary plan
    * failures. Device-loss cancellation is rethrown for the MCP boundary to
@@ -172,7 +181,7 @@ export class PlanExecutionOrchestrator {
       // a just-booted device out from under it (otherwise allocation fails with
       // "no devices match criteria"). The finally always releases this lease, even
       // if allocation or video startup throws.
-      const planExecutionLease = serverConfig.acquirePlanExecutionLease();
+      const planExecutionLease = this.registerPlanExecution();
 
       let deviceMapping: Record<string, string> | undefined;
       let video: VideoState | undefined;

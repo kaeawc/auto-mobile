@@ -8,6 +8,7 @@ import { DevicePool, type PooledDevice } from "../devicePool";
 import { holderOf, isIdle } from "../deviceBinding";
 import { deviceLossCancellationReason } from "../emulatorLossIncident";
 import { executionTracker } from "../executionTracker";
+import { PlanDeviceActivity } from "../planDeviceActivity";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
 import { getPerformanceMonitor } from "../../features/performance/PerformanceMonitor";
 import {
@@ -114,6 +115,13 @@ export interface DaemonDisconnectHost extends Pick<
 /** Tracks device-loss evidence and coordinates fenced recovery and recording cleanup. */
 export class DaemonDisconnect {
   constructor(private readonly host: DaemonDisconnectHost) {}
+
+  private hasPlanExecution(deviceId: string, sessionUuid?: string): boolean {
+    return new PlanDeviceActivity(this.host.services.sessionManager()).hasPlanExecution(
+      deviceId,
+      sessionUuid,
+    );
+  }
 
   private async tryRecoverCapturedDisconnectTarget(
     options: CapturedDisconnectRecoveryOptions,
@@ -241,7 +249,6 @@ export class DaemonDisconnect {
       deviceManager,
       (platform) =>
         this.discoverAndReconcile(deviceManager, {
-          planActive: true,
           platform,
           bypassAndroidDeviceListCache: true,
         }),
@@ -254,9 +261,7 @@ export class DaemonDisconnect {
         this.host.services.timer(),
         cadence.activeIntervalMs,
         async () => {
-          const planActive = serverConfig.isPlanExecutionActive();
-          const sweep: { planActive: boolean; adbServerResetCohort: readonly PooledDevice[] } = {
-            planActive,
+          const sweep: { adbServerResetCohort: readonly PooledDevice[] } = {
             adbServerResetCohort: [],
           };
           try {
@@ -310,6 +315,7 @@ export class DaemonDisconnect {
   ) {
     return discoverAndReconcile(this.host.services.devicePool(), deviceManager, {
       ...options,
+      isPlanDevice: (id) => this.hasPlanExecution(id),
       heldDevices: [
         ...this.host.services.sessionManager().getAllSessions(),
         ...(options.heldDevices ?? []),
@@ -345,11 +351,7 @@ export class DaemonDisconnect {
       getDevice: (id) => this.host.services.devicePool().getDevice(id),
       getPlanSessionUuid: (id) =>
         resolveToolSelectionBaseSessionUuid(id, this.host.services.sessionManager()) ?? id,
-      hasPlanExecution: (id, sessionUuid) =>
-        executionTracker.hasActiveDeviceExecutions(id, {
-          onlySessionUuid: sessionUuid,
-          onlyToolName: "executePlan",
-        }),
+      hasPlanExecution: (id, sessionUuid) => this.hasPlanExecution(id, sessionUuid),
       isStartupLeased: (id) => this.host.services.devicePool().isDeviceLeasedForAndroidStartup(id),
       isShutdownReserved: (id) => this.host.services.devicePool().isShutdownReservationHeld(id),
       discover,
@@ -383,11 +385,16 @@ export class DaemonDisconnect {
           ),
       finishLoss: (incidentId) =>
         this.host.services.devicePool().finishEmulatorLossIncident(incidentId, "not-attempted"),
-      cancelPlan: (id, sessionUuid, reason) =>
-        executionTracker.cancelDeviceExecutions(id, reason, {
+      cancelPlan: (id, sessionUuid, reason) => {
+        new PlanDeviceActivity(this.host.services.sessionManager()).bindPlanExecutions(
+          id,
+          sessionUuid,
+        );
+        return executionTracker.cancelDeviceExecutions(id, reason, {
           onlySessionUuid: sessionUuid,
           onlyToolName: "executePlan",
-        }),
+        });
+      },
     });
     return async (result, bootedDeviceIds) => {
       await monitor.check(
@@ -398,20 +405,18 @@ export class DaemonDisconnect {
     };
   }
 
-  private startDeferredSessionRecoverySweep(planActive: boolean): void {
-    if (!planActive) {
-      this.host.trackDeferredSessionRecoverySweep(
-        this.host.services
-          .devicePool()
-          .retryDueDeferredSessionRecoveries()
-          .catch((error) => {
-            logger.warn(
-              `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
-              error,
-            );
-          }),
-      );
-    }
+  private startDeferredSessionRecoverySweep(): void {
+    this.host.trackDeferredSessionRecoverySweep(
+      this.host.services
+        .devicePool()
+        .retryDueDeferredSessionRecoveries((id) => !this.hasPlanExecution(id))
+        .catch((error) => {
+          logger.warn(
+            `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
+            error,
+          );
+        }),
+    );
   }
 
   private prepareOfflineRecovery(
@@ -437,15 +442,20 @@ export class DaemonDisconnect {
     // monitor never races a second reconnect against the readiness
     // wait's own dispatch.
     const inFlightStartupOfflineDeviceIds = new Set(
-      [...(offlineDeviceIds ?? [])].filter((deviceId) =>
-        this.host.services.devicePool().isDeviceLeasedForAndroidStartup(deviceId),
+      [...(offlineDeviceIds ?? [])].filter(
+        (deviceId) =>
+          !this.hasPlanExecution(deviceId) &&
+          this.host.services.devicePool().isDeviceLeasedForAndroidStartup(deviceId),
       ),
     );
     const offlineRecoveryTargets = selectOfflineRecoveryCandidates(
       offlineDeviceIds ?? new Set(),
       candidateDeviceIds,
       this.host.offlineRecoveryAttemptedDeviceIds(),
-      inFlightStartupOfflineDeviceIds,
+      new Set([
+        ...inFlightStartupOfflineDeviceIds,
+        ...[...(offlineDeviceIds ?? [])].filter((id) => this.hasPlanExecution(id)),
+      ]),
     );
     const dispatchTargets = inFlightStartupOfflineDeviceIds.size > 0 ? [] : offlineRecoveryTargets;
     this.host.setOfflineRecoveryAttemptedDeviceIds(
@@ -459,6 +469,44 @@ export class DaemonDisconnect {
       ),
     );
     return { dispatchTargets, offlineRecoveryTargets };
+  }
+
+  private async recoverOfflineCandidates(
+    deviceManager: Pick<MultiPlatformDeviceManager, "recoverAndroidOfflineDevices">,
+    listed: Awaited<ReturnType<typeof probeListedAndroidStates>>,
+    candidateDeviceIds: Set<string>,
+    candidateIncarnations: ReturnType<typeof recordingCandidateIncarnations>,
+  ): Promise<boolean> {
+    if ([...candidateDeviceIds].every((id) => this.hasPlanExecution(id))) {
+      return false;
+    }
+    // Unprobed plan devices retain their episode; they cannot dispatch reconnect.
+    const offlineDeviceIds =
+      listed.offlineDeviceIds &&
+      new Set([
+        ...listed.offlineDeviceIds,
+        ...[...this.host.offlineRecoveryAttemptedDeviceIds()].filter((id) =>
+          this.hasPlanExecution(id),
+        ),
+      ]);
+    const { dispatchTargets } = this.prepareOfflineRecovery(
+      candidateDeviceIds,
+      offlineDeviceIds,
+      candidateIncarnations,
+    );
+    if (dispatchTargets.length === 0) {
+      return false;
+    }
+    logger.warn(
+      `[DisconnectMonitor] In-session device(s) ADB-offline (${dispatchTargets.join(", ")}); attempting bounded 'adb -s <serial> reconnect' recovery before miss-counting`,
+    );
+    const transports = dispatchTargets.flatMap((id) => {
+      const aliases = listed.offlineTransportIds?.get(id);
+      return aliases?.size ? [...aliases] : [id];
+    });
+    // Recovery logs its own failures and is bounded per serial.
+    await deviceManager.recoverAndroidOfflineDevices(transports);
+    return true;
   }
 
   captureDisconnectCleanup(
@@ -797,18 +845,15 @@ export class DaemonDisconnect {
     listRecordings: DaemonDisconnectHost["listActiveVideoRecordings"],
     transportRestarts: AdbTransportRestartLookup,
     checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>,
-    sweep: { planActive: boolean; adbServerResetCohort: readonly PooledDevice[] },
+    sweep: { adbServerResetCohort: readonly PooledDevice[] },
   ): Promise<void> {
-    const { planActive } = sweep;
-
-    this.startDeferredSessionRecoverySweep(planActive);
+    this.startDeferredSessionRecoverySweep();
     const activeRecordings = await listRecordings();
     const heldDevices = activeRecordings.map(({ deviceId, platform }) => ({
       assignedDevice: deviceId,
       platform,
     }));
     let discovery = await this.discoverAndReconcile(deviceManager, {
-      planActive,
       heldDevices,
     });
     let succeededPlatforms = discovery.succeededPlatforms;
@@ -816,11 +861,7 @@ export class DaemonDisconnect {
     const missingByDevice = new Map<string, string[]>();
     const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
       this.collectDisconnectCandidates(activeRecordings);
-    const planDeviceIds = new Set(
-      [...candidateDeviceIds].filter((id) =>
-        executionTracker.hasActiveDeviceExecutions(id, { onlyToolName: "executePlan" }),
-      ),
-    );
+    let planDeviceIds = new Set([...candidateDeviceIds].filter((id) => this.hasPlanExecution(id)));
     const ordinaryCandidateIds = new Set(
       [...candidateDeviceIds].filter((id) => !planDeviceIds.has(id)),
     );
@@ -832,35 +873,21 @@ export class DaemonDisconnect {
       bootedDeviceIds,
       candidatePlatforms,
     );
-    if (!planActive) {
-      const { dispatchTargets } = this.prepareOfflineRecovery(
+    if (
+      await this.recoverOfflineCandidates(
+        deviceManager,
+        listed,
         candidateDeviceIds,
-        listed.offlineDeviceIds,
         candidateIncarnations,
-      );
-      if (dispatchTargets.length > 0) {
-        logger.warn(
-          `[DisconnectMonitor] In-session device(s) ADB-offline (${dispatchTargets.join(", ")}); attempting bounded 'adb -s <serial> reconnect' recovery before miss-counting`,
-        );
-        // Serial-scoped reconnects for the dispatch targets, one
-        // shot per offline episode; failures are logged and swallowed
-        // inside recoverAndroidOfflineDevices so a probe or recovery
-        // hiccup here never blocks the miss-count/disconnect path below.
-        const offlineTransportIds = dispatchTargets.flatMap((deviceId) => {
-          const transports = listed.offlineTransportIds?.get(deviceId);
-          return transports?.size ? [...transports] : [deviceId];
-        });
-        await deviceManager.recoverAndroidOfflineDevices(offlineTransportIds);
-        // Reconnect may restore the transport during this await. Never use
-        // the pre-recovery absence for miss counting or ADB-reset detection.
-        discovery = await this.discoverAndReconcile(deviceManager, {
-          planActive,
-          heldDevices,
-          bypassAndroidDeviceListCache: true,
-        });
-        succeededPlatforms = discovery.succeededPlatforms;
-        bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
-      }
+      )
+    ) {
+      // Reconnect may restore a transport; discard the pre-recovery absence.
+      discovery = await this.discoverAndReconcile(deviceManager, {
+        heldDevices,
+        bypassAndroidDeviceListCache: true,
+      });
+      succeededPlatforms = discovery.succeededPlatforms;
+      bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
     }
     const disconnectResult = evaluateDeviceDisconnects({
       deviceDisconnectMisses: this.host.lifecycle.deviceDisconnectMisses(),
@@ -894,21 +921,31 @@ export class DaemonDisconnect {
       );
       return;
     }
+    // A lease or device switch can land during the listed-state/reconnect awaits.
+    // Retain earlier protection for this sweep and include the current assignments.
+    planDeviceIds = new Set([
+      ...planDeviceIds,
+      ...[...candidateDeviceIds].filter((id) => this.hasPlanExecution(id)),
+    ]);
     this.logDisconnectMisses(disconnectResult, planDeviceIds, bootedDeviceIds);
-    // Only a plan bound to this device owns its bounded confirmation and grace.
+    // Only this device's plan owns bounded confirmation and grace.
     await checkPlanDeviceLoss(disconnectResult, bootedDeviceIds);
     for (const deviceId of disconnectResult.disconnected.filter((id) => !planDeviceIds.has(id))) {
       missingByDevice.set(deviceId, []);
     }
-    // Cohort detachment is process-wide and must not race plan-owned recovery.
-    const detectedAdbServerResetCohort = planActive
+    const resetCohort = getProcessWideAdbServerResetCohort(
+      bootedDeviceIds,
+      succeededPlatforms,
+      this.host.forceDisconnectedDeviceIds(),
+      this.host.services.devicePool().getAllDevices(),
+    );
+    // Detachment is atomic for the whole owned Android cohort. Defer if one
+    // member has plan work, but an unrelated iOS plan cannot block Android recovery.
+    const detectedAdbServerResetCohort = resetCohort.some((device) =>
+      this.hasPlanExecution(device.id),
+    )
       ? []
-      : getProcessWideAdbServerResetCohort(
-          bootedDeviceIds,
-          succeededPlatforms,
-          this.host.forceDisconnectedDeviceIds(),
-          this.host.services.devicePool().getAllDevices(),
-        );
+      : resetCohort;
     const adbServerResetDetachment =
       detectedAdbServerResetCohort.length > 0
         ? await this.host.services
@@ -927,12 +964,14 @@ export class DaemonDisconnect {
       missingByDevice,
       activeRecordings,
     );
-    for (const [deviceId, recordingIds] of missingByDevice.entries()) {
-      await this.host.cleanupDisconnectedDevice(
-        deviceId,
-        recordingIds,
-        adbServerResetCohortByDeviceId,
-      );
+    for (const [deviceId, recordingIds] of missingByDevice) {
+      if (!this.hasPlanExecution(deviceId)) {
+        await this.host.cleanupDisconnectedDevice(
+          deviceId,
+          recordingIds,
+          adbServerResetCohortByDeviceId,
+        );
+      }
     }
   }
 }

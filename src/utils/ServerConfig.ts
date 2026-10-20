@@ -15,6 +15,12 @@ export interface PlanExecutionLease {
   release(): void;
 }
 
+export interface PlanExecutionTarget {
+  readonly sessionUuid?: string;
+  readonly deviceId?: string;
+  readonly executionId?: string;
+}
+
 /**
  * Global server configuration state
  * Set once during server initialization
@@ -42,7 +48,7 @@ class ServerConfig {
   private _a11yReportViewIds: boolean = true;
   private _a11yRetrieveInteractiveWindows: boolean = true;
   private _occlusionEnabled: boolean = true;
-  private _planExecutionLeaseCount = 0;
+  private readonly _planExecutions = new Set<PlanExecutionTarget>();
   private _compatPlanExecutionLease?: PlanExecutionLease;
   private _observeResultIncludeElements: boolean = false;
   private _toolResultsNoStructuredContent: boolean = false;
@@ -260,18 +266,18 @@ class ServerConfig {
     };
   }
 
-  acquirePlanExecutionLease(): PlanExecutionLease {
-    this._planExecutionLeaseCount++;
-    let released = false;
+  acquirePlanExecutionLease(target: PlanExecutionTarget = {}): PlanExecutionLease {
+    const execution = { ...target };
+    this._planExecutions.add(execution);
     return {
       release: () => {
-        if (released) {
-          return;
-        }
-        released = true;
-        this._planExecutionLeaseCount--;
+        this._planExecutions.delete(execution);
       },
     };
+  }
+
+  getActivePlanExecutions(): readonly PlanExecutionTarget[] {
+    return [...this._planExecutions];
   }
 
   // Compatibility/test seam; production code must use acquirePlanExecutionLease().
@@ -285,7 +291,7 @@ class ServerConfig {
   }
 
   isPlanExecutionActive(): boolean {
-    return this._planExecutionLeaseCount > 0;
+    return this._planExecutions.size > 0;
   }
 
   // --- Output-size reduction flags (issue #2756) ---

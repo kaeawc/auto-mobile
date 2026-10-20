@@ -61,12 +61,12 @@ export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
   {
-    planActive,
+    isPlanDevice = () => false,
     platform = "either",
     bypassAndroidDeviceListCache = false,
     heldDevices = [],
   }: {
-    planActive: boolean;
+    isPlanDevice?: (deviceId: string) => boolean;
     heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
@@ -82,13 +82,13 @@ export async function discoverAndReconcile(
     ].some((device) => discoverySourceFor(device.platform, device.id) === "ios-physical"),
   });
   discovery.devices = await mapMonitorAndroidDiscovery(devicePool, discovery.devices);
-  // Reconciliation can quarantine identity and cancel in-flight work. During
-  // allocation, discovery supplies only presence evidence for miss counting.
-  if (!planActive) {
-    await devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor", {
-      settleMembership: true,
-    });
-  }
+  // Reconciliation can quarantine identity and cancel in-flight work. Only
+  // plan-owned observations stay presence-only during allocation/restarts.
+  await devicePool.reconcileDiscoveryObservation(
+    discovery.devices.filter((device) => !isPlanDevice(device.deviceId)),
+    "disconnect-monitor",
+    { settleMembership: true },
+  );
   return discovery;
 }
 

@@ -92,8 +92,10 @@ export function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
     },
   });
   const pool = daemon.getDevicePool();
-  pool.retryDueDeferredSessionRecoveries = async () => {
-    actions.push("deferred-recovery");
+  pool.retryDueDeferredSessionRecoveries = async (mayRecover = () => true) => {
+    if (devices.some((device) => mayRecover(device.id))) {
+      actions.push("deferred-recovery");
+    }
   };
   pool.reconcileDiscoveryObservation = async () => {
     actions.push("reconcile");

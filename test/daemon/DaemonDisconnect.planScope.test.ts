@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { PlanExecutionOrchestrator } from "../../src/server/planExecutionOrchestrator";
+import * as planUtils from "../../src/server/planExecutorFactory";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   DEVICE_DISCONNECT_MISS_THRESHOLD,
@@ -7,7 +10,7 @@ import {
 import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/planDeviceLossMonitor";
 import type { Session } from "../../src/daemon/sessionManager";
 import type { SomePlatform } from "../../src/models";
-import { serverConfig } from "../../src/utils/ServerConfig";
+import { serverConfig, type PlanExecutionLease } from "../../src/utils/ServerConfig";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createPooledDevice, DaemonDisconnectHarness } from "./helpers/DaemonDisconnectHarness";
@@ -91,6 +94,7 @@ function harness(platform: "android" | "ios" = "ios") {
   class Manager extends FakeDeviceManager {
     platforms: SomePlatform[] = [];
     offlineProbes = 0;
+    reconnects: string[][] = [];
     override async getBootedDevicesDetailed(requested: SomePlatform) {
       this.platforms.push(requested);
       return super.getBootedDevicesDetailed(requested);
@@ -99,13 +103,17 @@ function harness(platform: "android" | "ios" = "ios") {
       this.offlineProbes++;
       return new Set<string>();
     }
-    async recoverAndroidOfflineDevices() {}
+    async recoverAndroidOfflineDevices(ids: Iterable<string>) {
+      this.reconnects.push([...ids]);
+    }
   }
   const manager = new Manager([], [{ deviceId: peer.id, platform: "android", name: "peer" }]);
   daemon.startMonitor(manager, async () => []);
   return {
     daemon,
     device,
+    session,
+    devices,
     peer,
     manager,
     losses,
@@ -119,6 +127,73 @@ function harness(platform: "android" | "ios" = "ios") {
 }
 
 describe("DaemonDisconnect per-device plan deferral", () => {
+  test("a lease acquired during the listed-state probe protects the device in the same sweep", async () => {
+    const h = harness("android");
+    let lease: PlanExecutionLease | undefined;
+    h.daemon.disconnectMisses.set(h.device.id, DEVICE_DISCONNECT_MISS_THRESHOLD - 1);
+    h.manager.getAndroidListedDeviceStates = async () => {
+      lease = serverConfig.acquirePlanExecutionLease({
+        sessionUuid: "holder",
+        deviceId: h.device.id,
+      });
+      return new Map();
+    };
+    try {
+      await h.tick();
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DEVICE_DISCONNECT_MISS_CAP);
+      expect(h.losses).toEqual([]);
+      expect(h.released).toEqual([]);
+    } finally {
+      lease?.release();
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+  test("an unrelated plan does not hold deferred iOS recovery", async () => {
+    const h = harness();
+    startPlan(h.peer.id, "peer");
+    const recoveries: string[] = [];
+    h.daemon.getDevicePool().retryDueDeferredSessionRecoveries = async (
+      mayRecover = () => true,
+    ) => {
+      for (const id of [h.device.id, h.peer.id]) {
+        if (mayRecover(id)) {
+          recoveries.push(id);
+        }
+      }
+    };
+    try {
+      await h.tick();
+      expect(recoveries).toEqual([h.device.id]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
+
+  test("an iOS plan does not block an unrelated Android reset cohort", async () => {
+    const h = harness();
+    startPlan(h.device.id, "holder");
+    const cohort = ["emulator-5560", "emulator-5562"].map((id) =>
+      createPooledDevice(id, {
+        avdName: id,
+        androidImage: { name: id, platform: "android", isRunning: true },
+      }),
+    );
+    for (const device of cohort) {
+      h.devices.set(device.id, device);
+    }
+    h.daemon.forcedDisconnected = new Set([cohort[0].id]);
+    const detached: string[][] = [];
+    h.daemon.getDevicePool().detachAdbServerResetCohort = async (devices) => {
+      detached.push(devices.map((device) => device.id));
+      return { devices: [], deferred: false };
+    };
+    try {
+      await h.tick();
+      expect(detached).toEqual([cohort.map((device) => device.id)]);
+    } finally {
+      await h.daemon.disconnectMonitor?.stop();
+    }
+  });
   test.each(["android", "ios"] as const)(
     "%s without a plan reaches disconnect handling while an unrelated plan runs",
     async (platform) => {
@@ -155,6 +230,9 @@ describe("DaemonDisconnect per-device plan deferral", () => {
   test("an unrelated plan does not remove ordinary Android offline protection", async () => {
     const h = harness("android");
     startPlan(h.peer.id, "peer");
+    h.daemon.getDevicePool().isDeviceLeasedForAndroidStartup = (id) => id === h.peer.id;
+    h.daemon.offlineRecoveryAttempted.add(h.peer.id);
+    h.daemon.offlineRecoveryIncarnations.set(h.peer.id, h.peer.incarnation);
     h.manager.androidListedDeviceStates.set(h.device.id, "offline");
     try {
       for (let n = 0; n < DEVICE_DISCONNECT_MISS_THRESHOLD; n++) {
@@ -163,10 +241,84 @@ describe("DaemonDisconnect per-device plan deferral", () => {
       expect(h.losses).toEqual([]);
       expect(h.released).toEqual([]);
       expect(h.daemon.disconnectMisses.has(h.device.id)).toBe(false);
+      expect(h.manager.reconnects).toEqual([[h.device.id]]);
+      expect(h.daemon.offlineRecoveryAttempted.has(h.peer.id)).toBe(true);
     } finally {
       await h.daemon.disconnectMonitor?.stop();
     }
   });
+
+  test.each(["android", "ios"] as const)(
+    "%s orchestrator lease protects and cancels its device before any adb binding",
+    async (platform) => {
+      const h = harness(platform);
+      const execution = executionTracker.startExecution("executePlan", undefined, "holder");
+      executions.push(execution.id);
+      const recordingStarted = Promise.withResolvers<void>();
+      const unblockRecording = Promise.withResolvers<void>();
+      const execute = spyOn(planUtils, "executePlan").mockImplementation(() => {
+        execution.abortController.signal.throwIfAborted();
+        return Promise.resolve({ success: true, executedSteps: 1, totalSteps: 1 });
+      });
+      const run = runWithToolSelectionContext(
+        { execution: { executionId: execution.id, startTime: execution.startTime } },
+        () =>
+          new PlanExecutionOrchestrator(
+            {
+              device: { deviceId: h.device.id, platform, name: "simulator" },
+              request: {
+                planContent: "name: lease-ingress\nsteps:\n  - tool: observe\n    params: {}\n",
+                startStep: 0,
+                platform,
+                sessionUuid: "holder",
+                deviceAllocationTimeoutMs: 5000,
+              },
+              signal: execution.abortController.signal,
+            },
+            {
+              timer: h.timer,
+              createSchemaValidator: () => ({
+                loadSchema: async () => undefined,
+                validateYaml: () => ({ valid: true }),
+              }),
+              videoRecorder: {
+                startVideoRecording: async () => {
+                  recordingStarted.resolve();
+                  await unblockRecording.promise;
+                  throw new Error("recording unavailable");
+                },
+                stopVideoRecording: async () => {
+                  throw new Error("no recording started");
+                },
+              },
+            },
+          ).execute(),
+      );
+      const outcome = run.catch((error: unknown) => error);
+      try {
+        await recordingStarted.promise;
+        expect(executionTracker.hasActiveDeviceExecutions(h.device.id)).toBe(false);
+        await h.tick();
+        expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DEVICE_DISCONNECT_MISS_CAP);
+        expect(h.losses).toEqual([]);
+        await h.tick();
+        expect(h.losses).toEqual([h.device.id]);
+        expect(execution.abortController.signal.aborted).toBe(true);
+        expect(h.released).toEqual([]);
+        unblockRecording.resolve();
+        expect(await outcome).toBeInstanceOf(Error);
+        executionTracker.endExecution(execution.id);
+        await h.tick();
+        await h.tick();
+        expect(h.released).toEqual(["holder"]);
+      } finally {
+        unblockRecording.resolve();
+        await outcome;
+        execute.mockRestore();
+        await h.daemon.disconnectMonitor?.stop();
+      }
+    },
+  );
 
   test("Android with its own plan retains the capped miss grace", async () => {
     const h = harness("android");

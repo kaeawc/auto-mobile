@@ -44,7 +44,7 @@ export interface SessionRecoveryOperations {
     incidentId?: string,
     expectedDevice?: PooledDevice,
   ): Promise<SessionPreservingRecoveryResult>;
-  retryDueDeferredSessionRecoveries(): Promise<void>;
+  retryDueDeferredSessionRecoveries(mayRecover?: (deviceId: string) => boolean): Promise<void>;
   performSessionPreservingRecovery(
     device: SessionContinuityDevice,
     session: Session,
@@ -239,8 +239,10 @@ export class DevicePoolSessionRecovery {
     );
   }
 
-  async retryDueDeferredSessionRecoveries(): Promise<void> {
-    return this.state.recoveryCoordinator.retryDueDeferredSessionRecoveries();
+  async retryDueDeferredSessionRecoveries(
+    mayRecover?: (deviceId: string) => boolean,
+  ): Promise<void> {
+    return this.state.recoveryCoordinator.retryDueDeferredSessionRecoveries(mayRecover);
   }
 
   async performSessionPreservingRecovery(

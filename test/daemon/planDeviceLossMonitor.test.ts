@@ -4,6 +4,7 @@ import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDi
 import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscoveryOptions } from "../../src/devices/deviceUtils";
+import type { BootedDevice } from "../../src/models";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossDetectionPath,
@@ -103,10 +104,17 @@ function harness() {
     offlineRecoveryAttemptedIncarnations: new Map(),
     deferredSessionRecoverySweeps: new Set(),
     devicePool: {
+      retryDueDeferredSessionRecoveries: async () => {},
       mapAndroidDiscovery: transportAliases.mapDiscovery.bind(transportAliases),
       getAndroidTransportAliases: transportAliases.aliases.bind(transportAliases),
-      reconcileDiscoveryObservation: async () => {
-        throw new Error("Plan discovery must remain presence-only");
+      reconcileDiscoveryObservation: async (observations: readonly BootedDevice[]) => {
+        expect(
+          observations.some((row) =>
+            executionTracker.hasActiveDeviceExecutions(row.deviceId, {
+              onlyToolName: "executePlan",
+            }),
+          ),
+        ).toBe(false);
       },
       ...({
         getAllDevices: () => [...devices.values()],

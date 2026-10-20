@@ -921,7 +921,7 @@ class WebSocketServer(
       return
     }
 
-    broadcastSerialized(message, mode, waitForClient)
+    broadcastSerialized(message, waitForClient)
   }
 
   /**
@@ -937,13 +937,11 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
-    broadcastSerialized(message, mode, waitForClient)
+    broadcastSerialized(message, waitForClient)
   }
 
-  @Suppress("UNUSED_PARAMETER")
   private suspend fun broadcastSerialized(
     message: String,
-    mode: BroadcastMode,
     waitForClient: Boolean,
   ) {
     if (waitForClient) {
@@ -1015,7 +1013,7 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(SdkEvent.serializer(), event)
-    broadcastSerialized(message, mode, waitForClient)
+    broadcastSerialized(message, waitForClient)
   }
 
   /** Wait for a live client to accept the event into its bounded outgoing queue. */
@@ -1197,11 +1195,10 @@ class WebSocketServer(
    * Get the actual port the server is listening on. Useful when port 0 is specified to let the OS
    * assign an available port. Returns null if server is not running.
    */
-  @Suppress("UNCHECKED_CAST")
   suspend fun getActualPort(): Int? {
     val srv = server ?: return null
     return try {
-      val engine = (srv as EmbeddedServer<CIOApplicationEngine, *>).engine
+      val engine = srv.engine
       engine.resolvedConnectors().firstOrNull()?.port ?: port
     } catch (e: CancellationException) {
       throw e

@@ -2,8 +2,10 @@ import { holderOf } from "./deviceBinding";
 import { classifyMissingDeviceObservation } from "./missingDeviceLiveness";
 import { logger } from "../utils/logger";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
-import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
-import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
+import {
+  resetBootedDevicesResourceCache,
+  resetAndroidDeviceImageResourceCache,
+} from "./deviceResourceInvalidation";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../models";
 import type { DeviceRecoveryPolicy } from "./poolConfig";

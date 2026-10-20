@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.clipboard.LocalClipboardWriter
 import dev.jasonpearson.automobile.desktop.core.formatUiNumber
+import dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeOptions
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.shell.InspectorTabBar
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -1213,12 +1214,15 @@ private fun LayoutDetailHierarchy(
   val hierarchy = parsed ?: return
 
   dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeView(
-    hierarchy = hierarchy.root,
-    selectedElementId = null,
-    hoveredElementId = null,
-    onElementSelected = {},
-    onElementHovered = {},
-    parentMap = hierarchy.parentMap,
+    options =
+      HierarchyTreeOptions(
+        hierarchy = hierarchy.root,
+        selectedElementId = null,
+        hoveredElementId = null,
+        onElementSelected = {},
+        onElementHovered = {},
+        parentMap = hierarchy.parentMap,
+      ),
     modifier = modifier,
   )
 }

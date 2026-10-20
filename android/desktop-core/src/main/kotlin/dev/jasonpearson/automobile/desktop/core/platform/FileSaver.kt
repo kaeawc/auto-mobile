@@ -29,7 +29,9 @@ object NoOpFileSaver : FileSaver {
     content: String,
     onSuccess: (String) -> Unit,
     onError: (Throwable) -> Unit,
-  ) {}
+  ) {
+    // This implementation intentionally offers no save dialog or callbacks.
+  }
 }
 
 /**
@@ -47,7 +49,11 @@ object SwingFileSaver : FileSaver {
         val chooser = javax.swing.JFileChooser()
         chooser.selectedFile = java.io.File(fileName)
         chooser.showSaveDialog(null) to chooser.selectedFile
-      } catch (e: Exception) {
+      } catch (e: java.awt.HeadlessException) {
+        LOG.warn("Failed to present save dialog for '$fileName': ${e.message}")
+        onError(e)
+        return
+      } catch (e: SecurityException) {
         LOG.warn("Failed to present save dialog for '$fileName': ${e.message}")
         onError(e)
         return

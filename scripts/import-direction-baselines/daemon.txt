@@ -1,15 +1,10 @@
 src/daemon/childProcessCleanup.ts -> src/server/videoRecordingManager
-src/daemon/daemon.ts -> src/server/bootedDeviceResources
 src/daemon/daemon.ts -> src/server/recordingSessionCleanup
-src/daemon/daemon.ts -> src/server/recordingTeardownRedrive
-src/daemon/daemon.ts -> src/server/videoRecordingManager
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/recordingSessionCleanup
-src/daemon/deviceDisconnectHandler.ts -> src/server/bootedDeviceResources
-src/daemon/deviceDisconnectHandler.ts -> src/server/deviceImageResources
+src/daemon/daemonStartHost.ts -> src/server/recordingTeardownRedrive
+src/daemon/daemonStartHost.ts -> src/server/videoRecordingManager
 src/daemon/deviceLossDiscovery.ts -> src/server/videoRecordingManager
 src/daemon/deviceSnapshotSocketServer.ts -> src/server/deviceSnapshotManager
-src/daemon/missingDeviceLiveness.ts -> src/server/bootedDeviceResources
-src/daemon/missingDeviceLiveness.ts -> src/server/deviceImageResources
 src/daemon/statelessMcpServerFactory.ts -> src/server
 src/daemon/videoRecordingSocketServer.ts -> src/server/videoRecordingManager
 src/daemon/webrtcStreamSocketServer.ts -> src/server/webrtcStreamManager

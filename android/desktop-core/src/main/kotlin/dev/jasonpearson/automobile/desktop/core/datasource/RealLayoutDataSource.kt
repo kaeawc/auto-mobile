@@ -4,6 +4,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.layout.ElementBounds
 import dev.jasonpearson.automobile.desktop.core.layout.UIElementInfo
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import java.io.IOException
 import java.util.Base64
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.Serializable
@@ -16,6 +18,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.serializer
+
+private val LOG = LoggerFactory.getLogger("RealLayoutDataSource")
 
 /**
  * Real layout data source that fetches from MCP. Calls the 'observe' tool to capture fresh screen
@@ -45,37 +49,8 @@ class RealLayoutDataSource(
       // Call the observe tool to capture fresh screen state
       val observeResult = client.observe(platform = platform)
 
-      // Parse the view hierarchy from the observe result
-      val hierarchy =
-        observeResult.viewHierarchy?.let { viewHierarchyJson ->
-          try {
-            val viewHierarchyResult =
-              json.decodeFromJsonElement(
-                serializer<ViewHierarchyResultDto>(),
-                viewHierarchyJson,
-              )
-            viewHierarchyResult.hierarchy?.node?.let { nodes ->
-              if (nodes.isNotEmpty()) {
-                val counter = intArrayOf(0)
-                parseHierarchy(nodes.first(), 0, counter)
-              } else null
-            }
-          } catch (e: Exception) {
-            // Malformed hierarchy data falls back to an empty hierarchy.
-            null
-          }
-        } ?: createEmptyHierarchy()
-
-      // Fetch screenshot from the resource (observe populates it)
-      val screenshotData =
-        try {
-          val screenshotContents = client.readResource("automobile:observation/latest/screenshot")
-          val screenshotBlob = screenshotContents.firstOrNull { !it.blob.isNullOrBlank() }?.blob
-          screenshotBlob?.let { Base64.getDecoder().decode(it) }
-        } catch (e: Exception) {
-          // Screenshot fetch failed - continue without it
-          null
-        }
+      val hierarchy = readHierarchy(observeResult.viewHierarchy)
+      val screenshotData = readScreenshot(client)
 
       Result.Success(
         ObservationData(
@@ -87,11 +62,45 @@ class RealLayoutDataSource(
           rotation = observeResult.rotation ?: 0,
         ),
       )
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: IOException) {
       Result.Error(e, "Failed to load observation: ${e.message}")
+    } catch (e: IllegalArgumentException) {
+      Result.Error(e, "Failed to load observation: ${e.message}")
+    } catch (e: IllegalStateException) {
+      Result.Error(e, "Failed to load observation: ${e.message}")
+    }
+  }
+
+  private fun readHierarchy(viewHierarchy: JsonElement?): UIElementInfo {
+    if (viewHierarchy == null) return createEmptyHierarchy()
+    return try {
+      val result = json.decodeFromJsonElement(serializer<ViewHierarchyResultDto>(), viewHierarchy)
+      val root = result.hierarchy?.node?.firstOrNull()
+      if (root == null) createEmptyHierarchy() else parseHierarchy(root, 0, intArrayOf(0))
+    } catch (e: IllegalArgumentException) {
+      LOG.warn("Malformed observation hierarchy; using an empty hierarchy", e)
+      createEmptyHierarchy()
+    }
+  }
+
+  private fun readScreenshot(client: AutoMobileClient): ByteArray? {
+    return try {
+      val contents = client.readResource("automobile:observation/latest/screenshot")
+      val blob = contents.firstOrNull { !it.blob.isNullOrBlank() }?.blob
+      blob?.let { Base64.getDecoder().decode(it) }
+    } catch (e: McpConnectionException) {
+      LOG.warn("Could not fetch observation screenshot", e)
+      null
+    } catch (e: IOException) {
+      LOG.warn("Could not fetch observation screenshot", e)
+      null
+    } catch (e: IllegalArgumentException) {
+      LOG.warn("Could not decode observation screenshot", e)
+      null
     }
   }
 
@@ -128,29 +137,33 @@ class RealLayoutDataSource(
 
   private fun parseBounds(boundsElement: JsonElement?): ElementBounds {
     return when (boundsElement) {
-      is JsonObject ->
-        ElementBounds(
-          left = (boundsElement["left"] as? JsonPrimitive)?.intOrNull ?: 0,
-          top = (boundsElement["top"] as? JsonPrimitive)?.intOrNull ?: 0,
-          right = (boundsElement["right"] as? JsonPrimitive)?.intOrNull ?: 0,
-          bottom = (boundsElement["bottom"] as? JsonPrimitive)?.intOrNull ?: 0,
-        )
+      is JsonObject -> parseObjectBounds(boundsElement)
       is JsonPrimitive ->
         boundsElement.contentOrNull?.let { parseBoundsString(it) } ?: ElementBounds(0, 0, 0, 0)
       // Compact form emitted by the MCP server's --observe-result-compact flag:
       // bounds is the positional tuple [left, top, right, bottom].
-      is JsonArray ->
-        if (boundsElement.size == 4)
-          ElementBounds(
-            left = (boundsElement[0] as? JsonPrimitive)?.intOrNull ?: 0,
-            top = (boundsElement[1] as? JsonPrimitive)?.intOrNull ?: 0,
-            right = (boundsElement[2] as? JsonPrimitive)?.intOrNull ?: 0,
-            bottom = (boundsElement[3] as? JsonPrimitive)?.intOrNull ?: 0,
-          )
-        else ElementBounds(0, 0, 0, 0)
+      is JsonArray -> parseArrayBounds(boundsElement)
       else -> ElementBounds(0, 0, 0, 0)
     }
   }
+
+  private fun parseObjectBounds(bounds: JsonObject): ElementBounds =
+    ElementBounds(
+      left = (bounds["left"] as? JsonPrimitive)?.intOrNull ?: 0,
+      top = (bounds["top"] as? JsonPrimitive)?.intOrNull ?: 0,
+      right = (bounds["right"] as? JsonPrimitive)?.intOrNull ?: 0,
+      bottom = (bounds["bottom"] as? JsonPrimitive)?.intOrNull ?: 0,
+    )
+
+  private fun parseArrayBounds(bounds: JsonArray): ElementBounds =
+    if (bounds.size == 4)
+      ElementBounds(
+        left = (bounds[0] as? JsonPrimitive)?.intOrNull ?: 0,
+        top = (bounds[1] as? JsonPrimitive)?.intOrNull ?: 0,
+        right = (bounds[2] as? JsonPrimitive)?.intOrNull ?: 0,
+        bottom = (bounds[3] as? JsonPrimitive)?.intOrNull ?: 0,
+      )
+    else ElementBounds(0, 0, 0, 0)
 
   private fun parseBoundsString(boundsStr: String): ElementBounds {
     val regex = """\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]""".toRegex()
@@ -240,7 +253,8 @@ private data class HierarchyNodeDto(
             try {
               Json { ignoreUnknownKeys = true }
                 .decodeFromJsonElement(serializer<HierarchyNodeDto>(), elem)
-            } catch (e: Exception) {
+            } catch (e: IllegalArgumentException) {
+              LOG.warn("Could not decode hierarchy child", e)
               null
             }
           }
@@ -251,7 +265,8 @@ private data class HierarchyNodeDto(
               Json { ignoreUnknownKeys = true }
                 .decodeFromJsonElement(serializer<HierarchyNodeDto>(), nodeElement),
             )
-          } catch (e: Exception) {
+          } catch (e: IllegalArgumentException) {
+            LOG.warn("Could not decode hierarchy children", e)
             emptyList()
           }
         }

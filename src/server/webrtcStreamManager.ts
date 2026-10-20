@@ -1,156 +1,55 @@
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import {
+  decideLifecycleEvent,
+  decideOwnershipChange,
+  type StreamSubscriptionEndReason,
+  type StreamSubscriptionIdentity,
+  type StreamSubscriptionKind,
+  type StreamSubscriptionLifecycleEndReason,
+} from "../daemon/streamSubscriptionPolicy";
+import { WebRtcSubscriptionEndedError } from "../daemon/WebRtcSubscriptionEndedError";
+import {
+  H264AnnexBParser,
+  NAL_TYPE_IDR,
+  NAL_TYPE_PPS,
+  NAL_TYPE_SPS,
+  WebRtcPublisher,
+  createH264CaptureSource,
+  nalUnitType,
+  resolveVideoServerJar,
+  resolveWebRtcStreamingConfig,
+  type H264CaptureSource,
+  type WebRtcPublisherLifecycleEvent,
+  type WebRtcStreamDescriptor,
+  type WebRtcStreamPublisher,
+} from "../features/webrtc";
 import {
   getDefaultDeviceCaptureRegistry,
   type DeviceCaptureRegistry,
 } from "../features/webrtc/deviceCaptureRegistry";
-import { isDeepStrictEqual } from "node:util";
-import {
-  decideOwnershipChange,
-  decideLifecycleEvent,
-  type StreamSubscriptionIdentity,
-  type StreamSubscriptionKind,
-  type StreamSubscriptionEndReason,
-  type StreamSubscriptionLifecycleEndReason,
-} from "../daemon/streamSubscriptionPolicy";
-import { WebRtcSubscriptionEndedError } from "../daemon/WebRtcSubscriptionEndedError";
-import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice } from "../models";
+import { errorMessage } from "../utils/describeUnknownError";
+import { defaultIdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { defaultDaemonContext } from "../daemon/daemonContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { defaultTimer } from "../utils/SystemTimer";
 import { registerWebRtcStreamIncarnationCleanup } from "./webrtcStreamIncarnationListener";
 import {
-  createH264CaptureSource,
-  resolveVideoServerJar,
-  WebRtcPublisher,
-  resolveWebRtcStreamingConfig,
-  type H264CaptureSource,
-  type H264CaptureSourceMetrics,
-  type H264CaptureSourceOptions,
-  type H264CaptureSourceTelemetry,
-  type WebRtcCaptureSourceState,
-  type WebRtcPublisherConfig,
-  type WebRtcPublisherDeps,
-  type WebRtcStreamPublisher,
-  type WebRtcPublisherLifecycleEvent,
-  type WebRtcStreamDescriptor,
-  type WebRtcStreamingOverrides,
-  H264AnnexBParser,
-  nalUnitType,
-  NAL_TYPE_IDR,
-  NAL_TYPE_PPS,
-  NAL_TYPE_SPS,
-} from "../features/webrtc";
-
-export type VideoStreamLifecycleState =
-  | "idle"
-  | "preparing"
-  | "capture_ready"
-  | "publishing"
-  | "degraded"
-  | "stopping"
-  | "failed";
-
-export type VideoStreamFailureCode =
-  | "capture_start_failed"
-  | "capture_runtime_failed"
-  | "whip_publish_failed"
-  | "capture_ready_timeout"
-  | "publishing_timeout"
-  | "stopped";
-
-export interface VideoStreamFailure {
-  code: VideoStreamFailureCode;
-  message: string;
-  at: string;
-}
-
-export interface VideoStreamTelemetry {
-  requestReceived: string;
-  captureSourcePrepared?: string;
-  firstMediaFrame?: string;
-  firstIdr?: string;
-  sdpOffer?: string;
-  sdpAnswer?: string;
-  iceConnected?: string;
-  firstRtpSent?: string;
-  nonTrickleIceGatheringDelayMs?: number;
-}
-
-export interface StartWebRtcStreamRequest {
-  device: BootedDevice;
-  streamId?: string;
-  /** Existing lease identity to renew instead of minting another consumer. */
-  leaseId?: string;
-  sessionUuid?: string;
-  subscriptionKind?: StreamSubscriptionKind;
-  /** Resolved by the socket authenticator; the manager never queries daemon ownership. */
-  ownsDevice?: boolean;
-  overrides?: WebRtcStreamingOverrides;
-}
-
-interface WebRtcStreamRecord {
-  config: ReturnType<typeof resolveWebRtcStreamingConfig>;
-  streamId: string;
-  device: BootedDevice;
-  publisher: WebRtcStreamPublisher;
-  source: H264CaptureSource | null;
-  /** Persistent-encoder jar resolved once at stream start; null → screenrecord. */
-  jarPath: string | null;
-  bitrateBps?: number;
-  size?: { width: number; height: number };
-  /**
-   * Capture rate handed to the source. For Android it is `config.androidFps`
-   * (forwarded to the video-server as `--fps`); for iOS it is
-   * `config.iosSimulatorFps`. Physical-iOS captures at its own device rate.
-   */
-  fps: number;
-  audioEnabled: boolean;
-  startedAt: string;
-  /**
-   * True once this session's capture source started. Surfaced on the descriptor
-   * so an out-of-process observer can separate "WHIP publish accepted" from
-   * "capture running" — a video-only start returns before capture begins.
-   */
-  sourceStarted: boolean;
-  sourceState: WebRtcCaptureSourceState;
-  lastSourceError: string | null;
-  sourceTelemetry: H264CaptureSourceTelemetry | null;
-  frameMetrics?: H264CaptureSourceMetrics;
-  lifecycleState: VideoStreamLifecycleState;
-  failure: VideoStreamFailure | null;
-  telemetry: VideoStreamTelemetry;
-  sourceFailed: boolean;
-  /** Initial capture failed, but raced consumers still need its failure descriptor. */
-  initialStartFailed: boolean;
-  mediaParser: H264AnnexBParser;
-  cachedSps: Buffer | null;
-  cachedPps: Buffer | null;
-  stateWaiters: Set<() => void>;
-  leases: Map<string, { expiresAt: number; sessionUuid?: string; kind: StreamSubscriptionKind }>;
-  leaseExpiryHandle: NodeJS.Timeout | null;
-}
-
-export interface WebRtcStreamManagerDependencies {
-  captureRegistry?: DeviceCaptureRegistry;
-  idGenerator: IdGenerator;
-  createPublisher: (
-    config: WebRtcPublisherConfig,
-    deps: WebRtcPublisherDeps,
-  ) => WebRtcStreamPublisher;
-  createSource: (options: H264CaptureSourceOptions, jarPath: string | null) => H264CaptureSource;
-  /**
-   * Resolve the Android persistent-encoder jar once, off the frame path. Returns
-   * the verified path, or null to degrade to screenrecord; throws on a fatal
-   * fail-mode (checksum mismatch, or REQUIRE with nothing available). Non-Android
-   * devices resolve to null.
-   */
-  resolveVideoJar: (device: BootedDevice) => Promise<string | null>;
-  now: () => Date;
-  timer: Timer;
-  isSessionLive?: (sessionUuid: string) => boolean;
-}
+  WebRtcStreamQueries,
+  type StartWebRtcStreamRequest,
+  type VideoStreamFailureCode,
+  type VideoStreamLifecycleState,
+  type WebRtcStreamManagerDependencies,
+  type WebRtcStreamRecord,
+} from "./webrtcStreamQueries";
+export {
+  type StartWebRtcStreamRequest,
+  type VideoStreamFailure,
+  type VideoStreamFailureCode,
+  type VideoStreamLifecycleState,
+  type VideoStreamTelemetry,
+  type WebRtcStreamManagerDependencies,
+} from "./webrtcStreamQueries";
 
 function isDaemonSessionLive(sessionUuid: string): boolean {
   const sessions = defaultDaemonContext.sessionManager();
@@ -240,120 +139,6 @@ function endLease(input: {
     logger.info(message);
   }
   wakeStateWaiters(record);
-}
-
-interface WebRtcSubscriptionLookup {
-  streamId?: string;
-  leaseId?: string;
-  sessionUuid?: string;
-  allowEndedLease?: boolean;
-  existingLeaseOnly?: boolean;
-}
-
-/**
- * Records that count as active for an unaddressed lookup. A record whose initial
- * start failed is retired: it stays in `streams` only so its lease holders can
- * read the failure by `streamId`, and never competes with a live stream.
- */
-function unaddressedStreamCandidates(): WebRtcStreamRecord[] {
-  const all = [...streams.values()];
-  const active = all.filter((record) => !record.initialStartFailed);
-  return active.length > 0 ? active : all;
-}
-
-function addressedStreamRecord(streamId?: string): WebRtcStreamRecord | undefined {
-  if (streamId !== undefined) {
-    return streams.get(streamId);
-  }
-  const candidates = unaddressedStreamCandidates();
-  return candidates.length === 1 ? candidates[0] : undefined;
-}
-
-function leaseStreamRecord(input: WebRtcSubscriptionLookup): WebRtcStreamRecord | undefined {
-  if (input.leaseId === undefined) {
-    return undefined;
-  }
-  if (input.streamId !== undefined) {
-    return streams.get(input.streamId);
-  }
-  const leaseId = input.leaseId;
-  return [...streams.values()].find((record) => record.leases.has(leaseId));
-}
-
-function callerSubscriptionKind(input: WebRtcSubscriptionLookup): StreamSubscriptionKind {
-  // An ended lease on start is a fresh admission even if the caller holds other viewer leases.
-  if (input.allowEndedLease && input.leaseId && endedLeases.has(input.leaseId)) {
-    return "owner";
-  }
-  const record = addressedStreamRecord(input.streamId);
-  const held = [...(record?.leases.values() ?? [])].filter(
-    (lease) => lease.sessionUuid === input.sessionUuid,
-  );
-  return held.length > 0 && held.every((lease) => lease.kind === "viewer") ? "viewer" : "owner";
-}
-
-/** Existing lease kind wins, then all of the caller's addressed leases; never renews. */
-export function getWebRtcSubscriptionKind(
-  input: WebRtcSubscriptionLookup,
-): StreamSubscriptionKind | undefined {
-  pruneEndedLeases();
-  if (!input.allowEndedLease) {
-    assertLeaseNotEnded(input);
-  }
-  const record = leaseStreamRecord(input);
-  const leaseId = input.leaseId;
-  const lease = leaseId ? record?.leases.get(leaseId) : undefined;
-  if (record && leaseId && lease) {
-    assertLeaseAccess(record, leaseId, lease.sessionUuid, input.sessionUuid);
-    return lease.kind;
-  }
-  return input.existingLeaseOnly ? undefined : callerSubscriptionKind(input);
-}
-
-/** Snapshot of manager facts only; never renews a lease or trusts a wire target. */
-export function getWebRtcStreamControlContext(input: {
-  streamId?: string;
-  leaseId?: string;
-  sessionUuid?: string;
-  deviceId?: string;
-  overrides?: WebRtcStreamingOverrides;
-  compareParameters?: boolean;
-}):
-  | { streamId: string; deviceId: string; holdsLease: boolean; parametersMatch: boolean }
-  | undefined {
-  const record =
-    input.deviceId !== undefined
-      ? activeStreamForDevice(input.deviceId)
-      : (leaseStreamRecord(input) ?? addressedStreamRecord(input.streamId));
-  if (!record) {
-    return undefined;
-  }
-  const holdsLease = [...record.leases].some(
-    ([leaseId, lease]) =>
-      lease.sessionUuid === input.sessionUuid &&
-      lease.expiresAt > dependencies.timer.now() &&
-      (input.leaseId === undefined || leaseId === input.leaseId),
-  );
-  return {
-    streamId: record.streamId,
-    deviceId: record.device.deviceId,
-    holdsLease,
-    parametersMatch:
-      !input.compareParameters || differingConfigKeys(record, input.overrides).length === 0,
-  };
-}
-
-function differingConfigKeys(
-  record: WebRtcStreamRecord,
-  overrides?: WebRtcStreamingOverrides,
-): Array<keyof WebRtcStreamRecord["config"]> {
-  const requested = resolveWebRtcStreamingConfig(overrides);
-  const keys = Object.keys(record.config) as Array<keyof typeof requested>;
-  return keys.filter((key) => !isDeepStrictEqual(record.config[key], requested[key]));
-}
-
-export function getWebRtcStreamDeviceIds(): string[] {
-  return [...new Set([...streams.values()].map((record) => record.device.deviceId))];
 }
 /**
  * Reconnect if a connected stream produces no frames for this long. Covers an
@@ -494,15 +279,6 @@ export function resetWebRtcStreamManager(): void {
   dependencies = { ...defaultDependencies };
 }
 
-function activeStreamForDevice(deviceId: string): WebRtcStreamRecord | undefined {
-  for (const record of streams.values()) {
-    if (record.device.deviceId === deviceId && !record.initialStartFailed) {
-      return record;
-    }
-  }
-  return undefined;
-}
-
 /** Run an action against the current record for a stream id, if it still exists. */
 async function withRecord(
   streamId: string,
@@ -512,43 +288,6 @@ async function withRecord(
   if (record) {
     await action(record);
   }
-}
-
-function leaseExpiryAt(record: WebRtcStreamRecord, leaseId: string): string | undefined {
-  const lease = record.leases.get(leaseId);
-  if (!lease) {
-    return undefined;
-  }
-  return new Date(
-    dependencies.now().getTime() + Math.max(0, lease.expiresAt - dependencies.timer.now()),
-  ).toISOString();
-}
-
-/** Descriptor for a record, including the manager-owned capture-source state. */
-function describeRecord(record: WebRtcStreamRecord, leaseId?: string): WebRtcStreamDescriptor {
-  const descriptor = record.publisher.getDescriptor();
-  const sourceTelemetry = record.source?.getTelemetry?.() ?? record.sourceTelemetry;
-  const leaseExpiresAt = leaseId ? leaseExpiryAt(record, leaseId) : undefined;
-  return {
-    ...descriptor,
-    sourceStarted: record.sourceStarted,
-    readiness: {
-      ...descriptor.readiness,
-      ...sourceTelemetry,
-      captureSourceState: record.sourceState,
-      lastSourceError: record.lastSourceError,
-    },
-    frameMetrics: record.frameMetrics,
-    lifecycleState: record.lifecycleState,
-    failure: record.failure,
-    telemetry: record.telemetry,
-    fallback:
-      record.lifecycleState === "degraded" || record.lifecycleState === "failed"
-        ? { mode: "screenshots", reason: record.failure?.code ?? "capture_unavailable" }
-        : null,
-    lease: leaseId && leaseExpiresAt ? { id: leaseId, expiresAt: leaseExpiresAt } : null,
-    consumerCount: record.leases.size,
-  };
 }
 
 function scheduleLeaseExpiry(record: WebRtcStreamRecord): void {
@@ -694,24 +433,6 @@ function recordPublisherEvent(
   if (event === "ice_connected" && !record.sourceFailed) {
     setLifecycleState(record, "publishing");
   }
-}
-
-function publisherTimestampField(
-  event: WebRtcPublisherLifecycleEvent,
-): "sdpOffer" | "sdpAnswer" | "iceConnected" | "firstRtpSent" | undefined {
-  const fields: Partial<
-    Record<
-      WebRtcPublisherLifecycleEvent,
-      "sdpOffer" | "sdpAnswer" | "iceConnected" | "firstRtpSent"
-    >
-  > = {
-    sdp_offer_created: "sdpOffer",
-    ice_gathering_started: "sdpOffer",
-    whip_answer_received: "sdpAnswer",
-    ice_connected: "iceConnected",
-    first_rtp_sent: "firstRtpSent",
-  };
-  return fields[event];
 }
 
 function createStreamRecord(
@@ -1256,159 +977,38 @@ export function getWebRtcStreamDescriptor(
   return describeRecord(record, activeLeaseId);
 }
 
-function isReadinessSatisfied(
-  record: WebRtcStreamRecord,
-  readiness: "capture_ready" | "publishing",
-): boolean {
-  if (readiness === "publishing") {
-    return record.lifecycleState === "publishing";
-  }
-  return (
-    record.sourceStarted &&
-    (record.lifecycleState === "capture_ready" || record.lifecycleState === "publishing")
-  );
-}
-
-function stoppedReadinessDescriptor(
-  record: WebRtcStreamRecord,
-  streamId: string,
-  readiness: "capture_ready" | "publishing",
-  leaseId?: string,
-): WebRtcStreamDescriptor {
-  return {
-    ...describeRecord(record, leaseId),
-    state: "stopped",
-    failure: {
-      code: "stopped",
-      message: `WebRTC stream ${streamId} was stopped while waiting for ${readiness}.`,
-      at: dependencies.now().toISOString(),
-    },
-    fallback: null,
-  };
-}
-
-function readinessWaitDuration(remainingMs: number, hasLease: boolean): number {
-  return hasLease ? Math.min(remainingMs, WEBRTC_STREAM_LEASE_TTL_MS / 2) : remainingMs;
-}
-
-function waitForRecordStateChange(record: WebRtcStreamRecord, waitMs: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const timeout = dependencies.timer.setTimeout(() => {
-      record.stateWaiters.delete(wake);
-      resolve();
-    }, waitMs);
-    const wake = () => {
-      dependencies.timer.clearTimeout(timeout);
-      resolve();
-    };
-    record.stateWaiters.add(wake);
-  });
-}
-
-type ReadinessRecordResolution =
-  | { type: "active"; record: WebRtcStreamRecord }
-  | { type: "stopped"; descriptor: WebRtcStreamDescriptor };
-
-function resolveReadinessRecord(
-  streamId: string,
-  readiness: "capture_ready" | "publishing",
-  leaseId: string | undefined,
-  lastRecord: WebRtcStreamRecord | undefined,
-): ReadinessRecordResolution {
-  const record = streams.get(streamId);
-  if (record) {
-    return { type: "active", record };
-  }
-  if (lastRecord?.lifecycleState === "stopping") {
-    return {
-      type: "stopped",
-      descriptor: stoppedReadinessDescriptor(lastRecord, streamId, readiness, leaseId),
-    };
-  }
-  throw new ActionableError(`No active WebRTC stream with id ${streamId}.`);
-}
-
-/**
- * Wait for local capture or WHIP publishing without conflating the two phases.
- * A timeout is a request-scoped result, not a capture failure, so one caller
- * cannot degrade a stream that is still healthy for another consumer.
- */
-export async function waitForWebRtcStreamReadiness(
-  streamId: string,
-  readiness: "capture_ready" | "publishing",
-  timeoutMs: number = DEFAULT_STREAM_READY_TIMEOUT_MS,
-  leaseId?: string,
-  sessionUuid?: string,
-): Promise<WebRtcStreamDescriptor> {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new ActionableError(
-      "WebRTC stream readiness timeout must be a positive number of milliseconds.",
-    );
-  }
-  const deadline = dependencies.timer.now() + timeoutMs;
-  let activeLeaseId = leaseId;
-  let lastRecord: WebRtcStreamRecord | undefined;
-
-  for (;;) {
-    assertLeaseNotEnded({ streamId, leaseId: activeLeaseId });
-    const resolved = resolveReadinessRecord(streamId, readiness, activeLeaseId, lastRecord);
-    if (resolved.type === "stopped") {
-      return resolved.descriptor;
-    }
-    const record = resolved.record;
-    lastRecord = record;
-    if (activeLeaseId !== undefined) {
-      activeLeaseId = acquireLease(record, { requestedLeaseId: activeLeaseId, sessionUuid });
-    }
-    if (isReadinessSatisfied(record, readiness)) {
-      return describeRecord(record, activeLeaseId);
-    }
-    if (record.lifecycleState === "degraded" || record.lifecycleState === "failed") {
-      return describeRecord(record, activeLeaseId);
-    }
-    const remainingMs = deadline - dependencies.timer.now();
-    if (remainingMs <= 0) {
-      return readinessTimeoutDescriptor(record, readiness, activeLeaseId);
-    }
-    await waitForRecordStateChange(
-      record,
-      readinessWaitDuration(remainingMs, Boolean(activeLeaseId)),
-    );
-  }
-}
-
-function readinessTimeoutDescriptor(
-  record: WebRtcStreamRecord,
-  readiness: "capture_ready" | "publishing",
-  leaseId?: string,
-): WebRtcStreamDescriptor {
-  const code = readiness === "capture_ready" ? "capture_ready_timeout" : "publishing_timeout";
-  return {
-    ...describeRecord(record, leaseId),
-    failure: {
-      code,
-      message: `Timed out waiting for WebRTC stream ${record.streamId} to reach ${readiness}.`,
-      at: dependencies.now().toISOString(),
-    },
-    fallback: null,
-  };
-}
-
-function resolveStreamRecord(streamId?: string): WebRtcStreamRecord {
-  if (streamId) {
-    const record = streams.get(streamId);
-    if (!record) {
-      throw new ActionableError(`No active WebRTC stream with id ${streamId}.`);
-    }
-    return record;
-  }
-
-  const candidates = unaddressedStreamCandidates();
-  if (candidates.length === 0) {
-    throw new ActionableError("No active WebRTC streams. Provide a streamId.");
-  }
-  if (candidates.length > 1) {
-    throw new ActionableError("Multiple active WebRTC streams. Provide a streamId.");
-  }
-  return candidates[0];
-}
+const queries = new WebRtcStreamQueries({
+  get dependencies() {
+    return dependencies;
+  },
+  get streams() {
+    return streams;
+  },
+  get endedLeases() {
+    return endedLeases;
+  },
+  pruneEndedLeases,
+  assertLeaseNotEnded,
+  assertLeaseAccess,
+  acquireLease,
+  get DEFAULT_STREAM_READY_TIMEOUT_MS() {
+    return DEFAULT_STREAM_READY_TIMEOUT_MS;
+  },
+  get WEBRTC_STREAM_LEASE_TTL_MS() {
+    return WEBRTC_STREAM_LEASE_TTL_MS;
+  },
+});
+export const {
+  getWebRtcStreamControlContext,
+  getWebRtcStreamDeviceIds,
+  getWebRtcSubscriptionKind,
+  waitForWebRtcStreamReadiness,
+} = queries;
+const {
+  leaseStreamRecord,
+  resolveStreamRecord,
+  describeRecord,
+  activeStreamForDevice,
+  publisherTimestampField,
+  differingConfigKeys,
+} = queries;

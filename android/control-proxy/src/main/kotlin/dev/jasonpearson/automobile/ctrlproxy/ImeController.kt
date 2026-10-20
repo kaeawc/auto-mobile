@@ -103,15 +103,7 @@ internal class ImeController(
     val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
     if (state?.cancelled?.get() == true) {
       host.launchRequestScope(requestId) {
-        broadcastCommitTextResult(
-          CommitTextFrameResult(
-            requestId = requestId,
-            success = false,
-            error = "IME commit cancelled",
-            totalTimeMs = 0L,
-            partialApplication = false,
-          ),
-        )
+        broadcastFailedCommit(requestId, "IME commit cancelled", 0L)
       }
       return
     }
@@ -120,46 +112,22 @@ internal class ImeController(
         state?.finished?.complete(result)
         if (state?.cancelled?.get() == false) imeCommitStates.remove(requestId, state)
       }
-      // `ime set` can return before Android creates the InputMethodService. Give activation a
-      // bounded window; the IME separately waits for its editor binding.
-      val ime =
-        awaitImeServiceReady(
-          nowMs = uptimeMillis,
-          delayMs = {
-            pause(minOf(it, requestDeadlineMs - uptimeMillis()).coerceAtLeast(0))
-          },
-          probe = {
-            host.currentIme()?.takeIf {
-              uptimeMillis() < requestDeadlineMs
-            }
-          },
-          isCancelled = {
-            state?.cancelled?.get() == true || uptimeMillis() >= requestDeadlineMs
-          },
-        )
+      val ime = awaitCommitService(state, requestDeadlineMs)
       if (state?.cancelled?.get() == true) {
         finish(ImeCommitResult(success = false, error = null))
-        broadcastCommitTextResult(
-          CommitTextFrameResult(
-            requestId = requestId,
-            success = false,
-            error = "IME commit cancelled",
-            totalTimeMs = timeProvider.currentTimeMillis() - start,
-            partialApplication = false,
-          ),
+        broadcastFailedCommit(
+          requestId,
+          "IME commit cancelled",
+          timeProvider.currentTimeMillis() - start,
         )
         return@launchRequestScope
       }
       if (ime == null) {
         finish(ImeCommitResult(success = false, error = null))
-        broadcastCommitTextResult(
-          CommitTextFrameResult(
-            requestId = requestId,
-            success = false,
-            error = "IME service did not start within timeout",
-            totalTimeMs = timeProvider.currentTimeMillis() - start,
-            partialApplication = false,
-          ),
+        broadcastFailedCommit(
+          requestId,
+          "IME service did not start within timeout",
+          timeProvider.currentTimeMillis() - start,
         )
         return@launchRequestScope
       }
@@ -177,22 +145,25 @@ internal class ImeController(
         finish(result)
         host.launchRequestScope(requestId) {
           broadcastCommitTextResult(
-            CommitTextFrameResult(
-              requestId = requestId,
-              success = result.success,
-              error = result.error,
-              totalTimeMs = timeProvider.currentTimeMillis() - start,
-              partialApplication = result.partialApplication,
-              committedUnits = result.committedUnits,
-              insertedText = result.insertedText,
-              trace = if (trace) result.trace else null,
-              editorConsumed = result.editorConsumed,
-            ),
+            commitResultFrame(requestId, result, timeProvider.currentTimeMillis() - start, trace),
           )
         }
       }
     }
   }
+
+  private suspend fun broadcastFailedCommit(requestId: String?, error: String, totalTimeMs: Long) {
+    broadcastCommitTextResult(failedCommitFrame(requestId, error, totalTimeMs))
+  }
+
+  private suspend fun awaitCommitService(state: ImeCommitState?, requestDeadlineMs: Long) =
+    // `ime set` may complete before the service binds its editor.
+    awaitImeServiceReady(
+      nowMs = uptimeMillis,
+      delayMs = { pause(minOf(it, requestDeadlineMs - uptimeMillis()).coerceAtLeast(0)) },
+      probe = { host.currentIme()?.takeIf { uptimeMillis() < requestDeadlineMs } },
+      isCancelled = { state?.cancelled?.get() == true || uptimeMillis() >= requestDeadlineMs },
+    )
 
   suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {
     val tombstone =
@@ -368,3 +339,34 @@ internal class ImeController(
     }
   }
 }
+
+private fun commitResultFrame(
+  requestId: String?,
+  result: ImeCommitResult,
+  totalTimeMs: Long,
+  trace: Boolean,
+): CommitTextFrameResult =
+  CommitTextFrameResult(
+    requestId = requestId,
+    success = result.success,
+    error = result.error,
+    totalTimeMs = totalTimeMs,
+    partialApplication = result.partialApplication,
+    committedUnits = result.committedUnits,
+    insertedText = result.insertedText,
+    trace = if (trace) result.trace else null,
+    editorConsumed = result.editorConsumed,
+  )
+
+private fun failedCommitFrame(
+  requestId: String?,
+  error: String,
+  totalTimeMs: Long,
+): CommitTextFrameResult =
+  CommitTextFrameResult(
+    requestId = requestId,
+    success = false,
+    error = error,
+    totalTimeMs = totalTimeMs,
+    partialApplication = false,
+  )

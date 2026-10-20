@@ -182,7 +182,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
       const firstStop = spyOn(first, "stop").mockImplementation(async () => {
         await new Promise<void>(() => {});
       });
-      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(() => {});
+      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(async () => {});
       const secondStop = spyOn(second, "stop").mockResolvedValue();
       const shutdown = IOSCtrlProxyManager.shutdownAll(timer);
 
@@ -226,6 +226,9 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
               return remoteStart.promise;
             },
             stop: async ({ pid }: { pid: number }) => {
+              if (pid === undefined) {
+                throw new Error("Expected a runner PID");
+              }
               stoppedPids.push(pid);
               if (stoppedPids.length === 1) {
                 if (firstStopFailure === "rejects") {
@@ -288,6 +291,9 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
           return remoteStart.promise;
         },
         stop: async ({ pid }) => {
+          if (pid === undefined) {
+            throw new Error("Expected a runner PID");
+          }
           stoppedPids.push(pid);
           // Admission cleanup (the first stop) never settles; the shutdown force-stop does.
           return stoppedPids.length === 1 ? new Promise<never>(() => {}) : { success: true };

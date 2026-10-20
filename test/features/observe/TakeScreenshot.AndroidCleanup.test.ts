@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   TakeScreenshot,
   type ScreenshotOptions,
@@ -237,7 +237,7 @@ function filePullHarness(
     },
     { timer },
   );
-  const execute = spyOn(adb, "execute");
+  const execute = executeSpy;
   const fileSystem = new FakeFileSystem();
   const finalPath = "/screenshots/result.png";
   fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
@@ -392,4 +392,12 @@ describe("Android file-pull screenshot cleanup with ambient cancellation", () =>
       }
     },
   );
+});
+
+let executeSpy: ReturnType<typeof spyOn<typeof AdbClient.prototype, "execute">>;
+beforeEach(() => {
+  executeSpy = spyOn(AdbClient.prototype, "execute");
+});
+afterEach(() => {
+  executeSpy.mockRestore();
 });

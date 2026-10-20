@@ -1,7 +1,7 @@
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { buildObserveResult } from "../../helpers/observeFixture";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -13,6 +13,8 @@ import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeVisionAnalyzer } from "../../fakes/FakeVisionAnalyzer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import type { VisionFallbackConfig } from "../../../src/vision/VisionTypes";
+
+afterEach(() => mock.restore());
 
 const enabledVisionConfig: VisionFallbackConfig = {
   enabled: true,

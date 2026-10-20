@@ -557,7 +557,7 @@ describe("capacity gate boot target and external devices (#11282)", () => {
     expect((error as BootCapacityExhaustedError).details.externalDevices?.sort()).toEqual(
       [IOS27, IOS18].sort(),
     );
-    expect((error as Error).message).toContain("not started by AutoMobile");
+    expect((error as Error).message).toContain("have no AutoMobile owner");
   });
 
   test("simulators this gate started are not named external", async () => {

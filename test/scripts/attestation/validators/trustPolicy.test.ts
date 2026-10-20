@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../../src/utils/logger";
 import {
   decideAttestation,
@@ -10,12 +10,12 @@ import {
 import { fixture, NOW } from "./helpers";
 
 afterEach(() => {
-  warn?.mockRestore();
+  warn.mockRestore();
 });
 let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
-function suppressWarnings() {
+beforeEach(() => {
   warn = spyOn(logger, "warn").mockImplementation(() => {});
-}
+});
 
 test("defaults are fresh independent policy objects", () => {
   const first = defaultPolicy();
@@ -155,7 +155,6 @@ test("all independent failures are collected without duplicate codes", () => {
 });
 
 test.each(["verifier", "registry", "hostile-error"])("never throws when %s throws", (seam) => {
-  suppressWarnings();
   const f = fixture();
   const failure =
     seam === "hostile-error"
@@ -280,7 +279,6 @@ test("a getter-free proxy is copied before validation and verification", () => {
 });
 
 test("a failed snapshot read is malformed and never reaches the verifier", () => {
-  suppressWarnings();
   const f = fixture();
   f.envelope.payload.environment.toolVersions = new Proxy(
     f.envelope.payload.environment.toolVersions,
@@ -454,7 +452,6 @@ test("accessors are malformed without evaluating the getter", () => {
 });
 
 test("a throwing proxy still returns a typed failure", () => {
-  suppressWarnings();
   const raw = new Proxy(
     {},
     {

@@ -3064,6 +3064,9 @@ jobs:
           swift build -c release 2>&1
           echo "build took ${SECONDS}s"
 
+      - name: "Build AutoMobilePrototype library and embed consumer"
+        run: bash scripts/ios/prototype-library-build.sh
+
       # #11580: removing the isolated home removes only the cache symlink;
       # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.
       - name: "Remove isolated root SPM home"

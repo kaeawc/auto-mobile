@@ -173,6 +173,23 @@ below are the defaults; the constants live in
   with `device_owned_by_other_session`. A successful restore moves ownership, so
   the previous connection no longer owns the session.
 
+After a daemon restart, managed execution calls receive `binding_ownership_unconfirmed`
+while the daemon reclaims the binding. Its `retryAfterMs` starts at 1,000 ms, increases
+by 1,000 ms per complete second since the first claim attempt, and caps at 5,000 ms
+(without jitter). Retries stop once both 60 s on the daemon's timer since the first
+attempt and at least three attempts have elapsed; recovery and waiting for the first
+shared registry turn do not consume that budget. The existing ownership-loss path
+then releases the session and calls receive
+`session_ownership_lost`, `retryable: false`, `nextAction: "acquire_new_session"`.
+`scope_not_valid`, `binding_missing`, and `binding_in_use` claim refusals lose
+ownership immediately. The shared registry result type also includes the commit-only
+`device_assigned_elsewhere` refusal, which is defensively treated as loss.
+`binding_not_ready`, `stale_binding`, and registry contention/deadline failures retry
+within the same bound. A confirmed claim wins even when it completes at or after
+the bound: the bound stops retries and never overrides proof of ownership.
+A retained session that is no longer live stops retrying, except during an active
+release hold. A synchronous registry write can delay deadline delivery until it returns.
+
 A managed session released while binding ownership is unconfirmed holds device teardown for
 up to 1.9 s on the daemon’s timer: two shared turns at their worst case
 (700 ms attempt bound + the registry’s 250 ms busy timeout each), covering the turn
@@ -970,6 +987,35 @@ this way. `listDevices` reports `capacity` per gated platform as
 `{ limit, booted, inFlight }`. See
 [environment variables](environment-variables.md#boot-capacity) for the opt-out
 and the per-platform overrides.
+
+For iOS `capacity_exhausted` refusals, `externalDevices` lists occupying simulator
+UDIDs with no known AutoMobile owner. `heldDevices` separately lists occupying
+UDIDs owned by AutoMobile admissions, live sessions or persisted broker bindings
+and journals, including after a daemon restart. Each field is an array of strings
+and is omitted when empty. Both groups count toward the same limit. A held device
+is not a stray simulator to shut down; release its session or binding first. Warm
+simulator hints exclude live-session and broker-held devices. Ownership only affects
+these labels and hints, never the capacity decision. If the broker registry cannot
+be read, AutoMobile logs a warning and uses its last good snapshot plus current
+in-memory ownership (or just in-memory ownership if there is no snapshot). A boot
+below the limit still proceeds. At the limit, the refusal still reports
+`capacity_exhausted`: unclassifiable occupying UDIDs appear in `externalDevices`,
+and the message states that ownership could not be read and those devices may
+also be held by AutoMobile. A failed simulator listing still returns
+`discovery_incomplete` because the occupying count is unknown. The `listDevices`
+capacity block does not read ownership.
+
+The reader covers this daemon's live sessions and the host-wide broker registry.
+Simulators held by another daemon on the same host (for example, a private daemon
+without bindings), and pool assignments still being set up, are not covered and
+still appear as external.
+
+The same classification applies to a binding's pre-create capacity check and to
+the boot-slot reservation made before replacing its device. A replacement's old
+device is excluded from the reservation's count; other held simulators still
+count and appear in `heldDevices`. Both arrays survive binding reconciliation,
+acquisition results and provisioning error payloads, including socket and MCP
+responses.
 
 ## Per-session settings
 

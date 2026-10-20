@@ -77,6 +77,11 @@ export interface ProvisionDeviceArgs {
   __mcpLiveDeadlineKey?: string;
 }
 
+/** Only in-process binding reconciliation may retain a created simulator for readiness retry. */
+export interface InternalProvisionDeviceArgs extends ProvisionDeviceArgs {
+  rollbackOnRetryableReadiness?: boolean;
+}
+
 export interface KillDeviceArgs {
   device: BootedDevice;
   /**

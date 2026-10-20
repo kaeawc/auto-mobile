@@ -1,0 +1,96 @@
+import { describe, expect, test } from "bun:test";
+import {
+  cleanupDaemonFiles,
+  cleanupDaemonFilesSync,
+  type DaemonCleanupFileSystem,
+} from "../../src/daemon/daemonFiles";
+import type { PidFileData } from "../../src/daemon/types";
+
+class CleanupFiles implements DaemonCleanupFileSystem {
+  readonly paths = new Map([
+    ["control.sock", { dev: 1, ino: 1 }],
+    ["aux.sock", { dev: 1, ino: 2 }],
+    ["owner.pid", { dev: 1, ino: 3 }],
+  ]);
+  owner = 100;
+  failControl = false;
+  onAuxUnlink = () => {};
+  exists = (path: string) => this.paths.has(path);
+  stat = (path: string) => {
+    const identity = this.paths.get(path);
+    if (!identity) {
+      throw new Error("absent");
+    }
+    return identity;
+  };
+  readPid = (): PidFileData => ({
+    pid: this.owner,
+    socketPath: "control.sock",
+    port: 3000,
+    startedAt: 1,
+    version: "test",
+  });
+  persistedOwner: PidFileData | null = null;
+  persistOwner = (owner: PidFileData | null) => {
+    this.persistedOwner = owner;
+    this.owner = 200;
+  };
+  unlinkSync = (path: string) => {
+    if (path === "control.sock" && this.failControl) {
+      throw new Error("EACCES");
+    }
+    this.paths.delete(path);
+    if (path === "aux.sock") {
+      this.onAuxUnlink();
+    }
+  };
+  unlink = async (path: string) => this.unlinkSync(path);
+}
+
+const options = {
+  pidFilePath: "owner.pid",
+  controlSocketPath: "control.sock",
+  socketPaths: ["control.sock", "aux.sock"],
+  expectedPid: 100,
+  socketFileIdentities: new Map([["control.sock", { dev: 1, ino: 1 }]]),
+};
+
+describe("daemon cleanup handoff", () => {
+  for (const synchronous of [false, true]) {
+    const cleanup = (files: CleanupFiles) =>
+      synchronous ? cleanupDaemonFilesSync(options, files) : cleanupDaemonFiles(options, files);
+
+    test(`preserves a successor PID published during aux unlink (sync=${synchronous})`, async () => {
+      const files = new CleanupFiles();
+      files.onAuxUnlink = () => {
+        files.owner = 200;
+      };
+      expect(await cleanup(files)).toBe(false);
+      expect(files.exists("owner.pid")).toBe(true);
+      expect(files.owner).toBe(200);
+    });
+
+    test(`persists only the validated owner and protects a subsequent handoff (sync=${synchronous})`, async () => {
+      const files = new CleanupFiles();
+      expect(await cleanup(files)).toBe(false);
+      expect(files.persistedOwner?.pid).toBe(100);
+      expect(files.exists("owner.pid")).toBe(true);
+      expect(files.owner).toBe(200);
+    });
+
+    test(`preserves a replaced control socket (sync=${synchronous})`, async () => {
+      const files = new CleanupFiles();
+      files.paths.set("control.sock", { dev: 1, ino: 9 });
+      await cleanup(files);
+      expect(files.stat("control.sock").ino).toBe(9);
+    });
+
+    test(`keeps PID when our control socket cannot be removed (sync=${synchronous})`, async () => {
+      const files = new CleanupFiles();
+      files.failControl = true;
+      expect(await cleanup(files)).toBe(false);
+      expect(files.exists("owner.pid")).toBe(true);
+      expect(files.exists("control.sock")).toBe(true);
+    });
+  }
+});

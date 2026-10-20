@@ -1,5 +1,6 @@
 import { countSessionAdmissions } from "./sqliteAdmissions";
 import { SessionRequestOwnerMismatchError } from "./SessionRequestOwnerMismatchError";
+import { SessionBrokerInvariantError } from "./SessionBrokerInvariantError";
 import type { Kysely, Selectable, Transaction } from "kysely";
 import {
   readExport,
@@ -113,7 +114,7 @@ function ownerIdentity(owner: BindingProcessIdentity): BindingProcessIdentity {
 
 function requireValue<T>(value: T | undefined | null, message: string): T {
   if (value === undefined || value === null) {
-    throw new ActionableError(message);
+    throw new SessionBrokerInvariantError(message);
   }
   return value;
 }
@@ -500,7 +501,9 @@ export class SqliteSessionBrokerStore {
       }
       const resource = await this.ownedResource(trx, request);
       if (request.state !== "releasing" || resource.state !== "resetting") {
-        throw new ActionableError("Only a joined, resetting session can return a clean device");
+        throw new SessionBrokerInvariantError(
+          "Only a joined, resetting session can return a clean device",
+        );
       }
       const binding = await trx
         .selectFrom("slot_assignments")
@@ -515,7 +518,7 @@ export class SqliteSessionBrokerStore {
         binding.exec_session_uuid ||
         journal
       ) {
-        throw new ActionableError(
+        throw new SessionBrokerInvariantError(
           "Physical device still has execution or journal work; it cannot enter the idle pool",
         );
       }
@@ -972,7 +975,9 @@ export class SqliteSessionBrokerStore {
       "Request resource disappeared",
     );
     if (resource.requestId !== request.requestId) {
-      throw new ActionableError("Session request no longer owns this device reservation");
+      throw new SessionBrokerInvariantError(
+        "Session request no longer owns this device reservation",
+      );
     }
     return resource;
   }

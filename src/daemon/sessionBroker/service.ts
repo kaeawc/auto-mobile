@@ -8,6 +8,7 @@ import {
   listDevices,
   listInstalledSystemImages,
 } from "../../utils/android-cmdline-tools/avdmanager";
+import { bootAdmissionServices } from "../../devices/bootAdmissionServices";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -61,6 +62,8 @@ export function sessionBrokerHostLock(
 }
 
 export interface OpenSessionBrokerServiceOptions {
+  /** Daemon startup starts the loop explicitly after binding its control socket. */
+  deferStart?: boolean;
   config: SessionBrokerHostConfig;
   registry: SqliteBindingRegistry;
   acquisition: Pick<BrokerDeviceAcquisition, "acquire">;
@@ -121,6 +124,7 @@ export async function openSessionBrokerService(
     const reset = options.config.reuseCleanDevices ? nativeIosBaselineReset() : undefined;
     const devices = new ManagedDevicePort({
       scope: SESSION_BROKER_SCOPE,
+      timer: options.timer,
       brokerDeviceAcquisition: options.acquisition,
       brokerExecutionRelease: options.release,
       registry: options.registry,
@@ -135,6 +139,7 @@ export async function openSessionBrokerService(
     const broker = new SessionBroker({
       store,
       devices,
+      timer: options.timer,
       owner: options.owner,
       limits: options.config.limits,
       catalog: options.catalog ?? nativeCatalogReader(options.config),
@@ -150,9 +155,11 @@ export async function openSessionBrokerService(
       sessionDisposition: options.sessionDisposition,
       reuseCleanDevices: options.config.reuseCleanDevices,
     });
-    await broker.recover();
+    await broker.recoverReceipts();
     const service = new SessionBrokerService(broker, scopeKey, lock, options.timer);
-    service.start();
+    if (!options.deferStart) {
+      service.start();
+    }
     return service;
   } catch (error) {
     lock.release();
@@ -163,6 +170,7 @@ export async function openSessionBrokerService(
 function nativeIosBaselineReset(): IosBaselineReset {
   return new IosBaselineReset({
     simctl: new SimCtlClient(null),
+    iosBootInstrumentation: bootAdmissionServices.iosBootInstrumentation(),
     stopDevice: async (device) => {
       // The ordinary lifecycle handler joins device controllers and invalidates caches before
       // erasure. A raw simctl shutdown would skip that provider bookkeeping.
@@ -262,6 +270,9 @@ export class SessionBrokerService {
   ) {}
 
   start(): void {
+    if (this.stopped) {
+      return;
+    }
     this.running ??= this.loop();
   }
 
@@ -287,20 +298,28 @@ export class SessionBrokerService {
   }
 
   private async loop(): Promise<void> {
+    let firstPass = true;
     while (!this.stopped) {
-      await this.wait();
+      if (!firstPass) {
+        await this.wait();
+      }
       if (this.stopped) {
         return;
       }
       try {
-        await this.broker.recover();
+        await this.broker.recoverReceipts();
+        await this.broker.recoverCleanup();
       } catch (error) {
         logger.warn(`Session broker recovery remains pending: ${errorMessage(error)}`);
       }
       if (this.stopped) {
         return;
       }
-      await this.pruneIfDue();
+      // Recovery is urgent at bind; retention keeps its existing delayed first pass.
+      if (!firstPass) {
+        await this.pruneIfDue();
+      }
+      firstPass = false;
     }
   }
 

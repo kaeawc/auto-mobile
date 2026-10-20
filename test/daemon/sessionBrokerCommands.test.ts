@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import type { DaemonMethodCallOptions } from "../../src/daemon/client";
 import {
   daemonCommandArgumentError,
@@ -21,6 +21,8 @@ import {
 import { SESSION_BROKER_RETRY_AFTER_MS } from "../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import { describeUnknownError } from "../../src/utils/describeUnknownError";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+
+afterEach(() => mock.restore());
 
 const REQUEST_ID = "python-harness-attempt-1";
 const SESSION_UUID = "f4e8bd2a-991c-4c97-a530-b4d687a54475";

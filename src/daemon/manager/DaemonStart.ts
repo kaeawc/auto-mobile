@@ -88,7 +88,7 @@ export interface DaemonStartHost {
       logFd: number;
       logPath: string;
     },
-    initial: { command: string; args: string[] },
+    initial: DaemonLaunchCommand,
     startDeadline: number,
     recoverySignal: AbortSignal | undefined,
   ): Promise<void>;
@@ -416,10 +416,7 @@ export class DaemonStart {
     // Resolve the current binary so the daemon uses the same version.
     // process.argv[1] is the entry script (e.g. dist/src/index.js).
     // Falls back to bunx to avoid requiring a global install.
-    const { command: autoMobileCmd, args } = this.host.withDaemonOptions(
-      this.host.resolveLaunchCommand(),
-      options,
-    );
+    const launchCommand = this.host.withDaemonOptions(this.host.resolveLaunchCommand(), options);
 
     // Redirect the detached daemon's stdout/stderr into the configured logs dir
     // (`~/.auto-mobile/logs` by default) rather than an ephemeral
@@ -457,7 +454,7 @@ export class DaemonStart {
     try {
       await this.host.launchWithExtractionRetry(
         { options, childEnv, logSink, capturesLaunchOutput, logFd, logPath },
-        { command: autoMobileCmd, args },
+        launchCommand,
         startDeadline,
         recoverySignal,
       );

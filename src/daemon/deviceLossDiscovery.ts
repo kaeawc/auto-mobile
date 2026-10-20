@@ -1,6 +1,10 @@
-import { discoverySourceFor } from "../utils/discoverySource";
+import { didSourceSucceedForDevice, discoverySourceFor } from "../utils/discoverySource";
 import type { BootedDevice } from "../models";
-import type { BootedDeviceDiscovery, MultiPlatformDeviceManager } from "../devices/deviceUtils";
+import type {
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+  MultiPlatformDeviceManager,
+} from "../devices/deviceUtils";
 import { transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import type { Session } from "./sessionManager";
 import {
@@ -72,16 +76,50 @@ export async function discoverAndReconcile(
     bypassAndroidDeviceListCache?: boolean;
   },
 ) {
-  const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+  const trackedDevices = [
+    ...devicePool.getAllDevices().map((device) => ({ platform: device.platform, id: device.id })),
+    ...heldDevices.map((device) => ({ platform: device.platform, id: device.assignedDevice })),
+  ];
+  const options = {
     bypassAndroidDeviceListCache,
     skipAndroidProfileEnrichment: true,
     // An unpooled held device still needs liveness evidence from its own source.
-    skipPhysicalIosDiscovery: ![
-      ...devicePool.getAllDevices().map((device) => ({ platform: device.platform, id: device.id })),
-      ...heldDevices.map((device) => ({ platform: device.platform, id: device.assignedDevice })),
-    ].some((device) => discoverySourceFor(device.platform, device.id) === "ios-physical"),
-  });
-  discovery.devices = await mapMonitorAndroidDiscovery(devicePool, discovery.devices);
+    skipPhysicalIosDiscovery: !trackedDevices.some(
+      (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+    ),
+  };
+  const read = async (readOptions: BootedDeviceDiscoveryOptions) => {
+    const observation = await deviceManager.getBootedDevicesDetailed(platform, readOptions);
+    observation.devices = await mapMonitorAndroidDiscovery(devicePool, observation.devices);
+    return observation;
+  };
+  let discovery = await read(options);
+  const present = new Set(discovery.devices.map((device) => device.deviceId));
+  const missingDevices = trackedDevices.filter((device) => !present.has(device.id));
+  if (
+    !planActive &&
+    missingDevices.some(
+      (device) =>
+        didSourceSucceedForDevice(discovery, device.platform, device.id) &&
+        (device.platform === "ios" || !bypassAndroidDeviceListCache),
+    )
+  ) {
+    // Plan-time misses are capped below confirmation; its own loss check already reads fresh.
+    // Otherwise only the fresh confirmation reaches reconciliation and miss counting. Healthy/
+    // idle sweeps keep the cheap cached path; a failed confirmation supplies no absence evidence.
+    discovery = await read({
+      ...options,
+      bypassAndroidDeviceListCache:
+        bypassAndroidDeviceListCache ||
+        missingDevices.some((device) => device.platform === "android"),
+      bypassIosDeviceListCache: missingDevices.some(
+        (device) => discoverySourceFor(device.platform, device.id) === "ios-simulator",
+      ),
+      bypassPhysicalIosDeviceListCache: missingDevices.some(
+        (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
+      ),
+    });
+  }
   // Reconciliation can quarantine identity and cancel in-flight work. During
   // allocation, discovery supplies only presence evidence for miss counting.
   if (!planActive) {

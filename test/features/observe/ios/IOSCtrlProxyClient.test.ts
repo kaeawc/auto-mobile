@@ -1090,6 +1090,15 @@ describe("IOSCtrlProxyClient", function () {
         );
         await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
 
+        // Capability waiters settle independently; wait for the resulting sync frames.
+        await drainUntil(
+          () =>
+            socket.sentMessages.some((message) => {
+              const frame: { type?: string } = JSON.parse(message);
+              return frame.type === "set_network_error_simulation";
+            }),
+          { description: "SDK-backed network state sync" },
+        );
         const sync = socket.sentMessages.map((message) => JSON.parse(message));
         expect(sync).toContainEqual({
           type: "set_network_error_simulation",
@@ -1159,6 +1168,15 @@ describe("IOSCtrlProxyClient", function () {
         );
         await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
 
+        // Capability waiters settle independently; wait for the resulting sync frames.
+        await drainUntil(
+          () =>
+            socket.sentMessages.some((message) => {
+              const frame: { type?: string } = JSON.parse(message);
+              return frame.type === "set_network_error_simulation";
+            }),
+          { description: "SDK-backed network state sync" },
+        );
         const sync = socket.sentMessages.map((message) => JSON.parse(message));
         expect(sync).toContainEqual({ type: "set_network_mock_rules", rules: [] });
         expect(sync).toContainEqual({ type: "set_network_error_simulation", enabled: false });

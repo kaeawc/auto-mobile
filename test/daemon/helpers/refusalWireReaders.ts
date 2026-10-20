@@ -18,6 +18,7 @@ export interface RefusalFields {
   retryAfterMs?: number;
   recovering?: boolean;
   externalDevices?: string[];
+  heldDevices?: string[];
 }
 
 export interface Expectations {
@@ -56,6 +57,7 @@ export interface WirePayload {
   retryAfterMs?: number;
   recovering?: boolean;
   externalDevices?: string[];
+  heldDevices?: string[];
   code?: string;
   retryable?: boolean;
   nextAction?: string;
@@ -242,6 +244,7 @@ export function readWirePayload(value: unknown): WirePayload {
     retryAfterMs: optionalNumber(record, "retryAfterMs", "wire payload"),
     recovering: optionalBoolean(record, "recovering", "wire payload"),
     externalDevices: optionalStringArray(record, "externalDevices", "wire payload"),
+    heldDevices: optionalStringArray(record, "heldDevices", "wire payload"),
     code: optionalString(record, "code", "wire payload"),
     retryable: optionalBoolean(record, "retryable", "wire payload"),
     nextAction: optionalString(record, "nextAction", "wire payload"),
@@ -279,12 +282,14 @@ function readFieldRecord(record: Record<string, unknown>, label: string) {
   const retryAfterMs = optionalNumber(record, "retryAfterMs", label);
   const recovering = optionalBoolean(record, "recovering", label);
   const externalDevices = optionalStringArray(record, "externalDevices", label);
+  const heldDevices = optionalStringArray(record, "heldDevices", label);
   return {
     ...(code === undefined ? {} : { code }),
     acquireNewSession: requireBoolean(record, "acquireNewSession", label),
     ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
     ...(recovering === undefined ? {} : { recovering }),
     ...(externalDevices === undefined ? {} : { externalDevices }),
+    ...(heldDevices === undefined ? {} : { heldDevices }),
   };
 }
 
@@ -295,6 +300,7 @@ const FIELD_KEYS = [
   "retryAfterMs",
   "recovering",
   "externalDevices",
+  "heldDevices",
 ] as const;
 
 function readRefusalFields(value: unknown, label: string): RefusalFields {

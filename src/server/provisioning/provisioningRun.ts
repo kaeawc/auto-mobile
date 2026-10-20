@@ -1,3 +1,4 @@
+import { combineAbortSignals } from "../../utils/AbortContext";
 import { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice } from "../../models";
@@ -250,6 +251,8 @@ async function runProvisionDeviceLifecycle(
       provisioned,
       {
         creationStarted: creationStarted,
+        retainCreatedForRetry: settlementState.retainCreatedForRetry,
+        signal: combineAbortSignals(signal, lifecycleLease?.signal),
         takeLifecycleLease: () => {
           const rollbackLease = lifecycleLease;
           lifecycleLease = undefined;

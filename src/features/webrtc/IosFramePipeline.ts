@@ -16,7 +16,7 @@ import type {
   IosH264EncoderProcess,
   IosH264FrameMetrics,
   IosH264SourceOptions,
-} from "./IosH264Source";
+} from "./IosH264SourceConfig";
 import { H264AnnexBParser, isKeyFrameNal, NAL_TYPE_IDR } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { capToQualityPreset, qualityPresetBitrateBps } from "./qualityPresets";

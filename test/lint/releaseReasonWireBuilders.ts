@@ -3,7 +3,7 @@ import {
   Visitor,
   type Expression,
   type ObjectExpression,
-  type Property,
+  type ObjectProperty,
 } from "oxc-parser";
 
 export interface ReleaseReasonSerialisation {
@@ -111,7 +111,7 @@ function unwrap(expression: Expression): Expression {
   }
 }
 
-function keyName(property: Property): string | undefined {
+function keyName(property: Pick<ObjectProperty, "key" | "computed">): string | undefined {
   if (!property.computed && property.key.type === "Identifier") {
     return property.key.name;
   }
@@ -309,7 +309,7 @@ export function scanReleaseReasonSerialisations(
           ? [element]
           : branchObjects.flatMap((branch) =>
               branch.properties.filter(
-                (property): property is Property => property.type === "Property",
+                (property): property is ObjectProperty => property.type === "Property",
               ),
             );
       for (const property of properties) {

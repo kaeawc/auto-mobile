@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -234,8 +235,8 @@ describe("ClearText Android ADB fallback", () => {
     signal?: AbortSignal,
   ) => {
     const clearText = new ClearText(device, fakeAdb, undefined, new FakeTimer());
-    observedSpy = spyOn(clearText, "observedInteraction").mockImplementation(async (fn) =>
-      fn(observeResult),
+    observedSpy = spyOn(clearText, "observedInteraction").mockImplementation(
+      runBlockWith(() => observeResult),
     );
     refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
       focusedFieldObserve(""),

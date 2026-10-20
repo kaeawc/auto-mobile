@@ -32,7 +32,7 @@ export function daemonHeartbeatHandler(
       state,
     );
     if (!response.success) {
-      throw daemonResponseError({ id: method, type: "daemon_response", ...response });
+      throw daemonResponseError({ id: method, type: "mcp_response", ...response });
     }
     return response.result;
   };

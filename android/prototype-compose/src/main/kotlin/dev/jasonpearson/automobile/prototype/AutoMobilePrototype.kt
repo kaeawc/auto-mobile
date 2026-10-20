@@ -86,6 +86,7 @@ internal class EmbeddedPrototypeEnvironment(
   val clock: () -> Long = System::currentTimeMillis,
   val scope: CoroutineScope? = null,
   val requestId: () -> String = { UUID.randomUUID().toString() },
+  val host: EmbeddedPrototypeHost? = null,
 )
 
 internal val LocalEmbeddedPrototypeEnvironment = compositionLocalOf {
@@ -134,8 +135,9 @@ private fun EmbeddedPrototype(
   val environment = LocalEmbeddedPrototypeEnvironment.current
   val compositionScope = rememberCoroutineScope()
   val scope = environment.scope ?: compositionScope
+  val host = environment.host
   val latestCallbacks by rememberUpdatedState(callbacks)
-  val interactions = remember { Mutex() }
+  val interactions = remember(environment) { environment.host?.interactions ?: Mutex() }
   // One lock also orders the old session's dispose flush before a replacement restores storage.
   val owner =
     remember(input, environment) { EmbeddedOwner(input.assets, interactions, environment.io) }
@@ -151,11 +153,13 @@ private fun EmbeddedPrototype(
           context.cacheDir,
         ),
       ) {
+        environment.host?.eventSink?.send(it)
         latestCallbacks.send(it)
       }
     }
   }
-  EmbeddedLifetime(owner, lifecycle, scope, interactions)
+  if (host == null) EmbeddedLifetime(owner, lifecycle, scope, interactions)
+  else EmbeddedHostLifetime(owner, host)
   val session = owner.session
   if (session != null) {
     val active by session.runtime.snapshots.collectAsState()
@@ -165,10 +169,25 @@ private fun EmbeddedPrototype(
       }
     }
     PrototypeRuntimeContent(session.runtime, session.images, session.fonts) {
-      interactions.withLock { session.runtime.handle(it) }
+      if (host == null) interactions.withLock { session.runtime.handle(it) }
+      else host.onInteraction(it, session.runtime)
     }
   }
   owner.error?.let { onError(it) }
+}
+
+@Composable
+private fun EmbeddedHostLifetime(owner: EmbeddedOwner, host: EmbeddedPrototypeHost) {
+  // The host performs its own flush before reload and on stop, and closes on destroy. Only the
+  // composition's temporary assets belong to this disposal path.
+  DisposableEffect(owner) {
+    onDispose {
+      owner.session?.runtime?.close()
+      host.flushScope.launch {
+        withContext(NonCancellable) { host.interactions.withLock { owner.releaseAssets() } }
+      }
+    }
+  }
 }
 
 @Composable
@@ -217,7 +236,8 @@ private class EmbeddedOwner(
   var error by mutableStateOf<PrototypeLoadError?>(null)
   private val source = EmbeddedPrototypeAssets(assets)
 
-  suspend fun open(config: EmbeddedConfiguration, event: (PrototypeEvent) -> Unit) {
+  suspend fun open(config: EmbeddedConfiguration, event: suspend (PrototypeEvent) -> Unit) {
+    if (config.environment.host?.isCurrent?.invoke() == false) return
     try {
       createSession(config, event)
     } catch (error: CancellationException) {
@@ -234,13 +254,14 @@ private class EmbeddedOwner(
 
   private suspend fun createSession(
     config: EmbeddedConfiguration,
-    event: (PrototypeEvent) -> Unit,
+    event: suspend (PrototypeEvent) -> Unit,
   ) {
     val opened =
       PrototypeStoragePersistence(
           config.storage.adapt(),
           CoroutinePrototypeScheduler(config.scope),
           io,
+          registry = config.environment.host?.storageRegistry,
         )
         .prepare(config.spec) {
           PrototypeSpecValidator.validate(Json.encodeToString(it)) is
@@ -254,13 +275,17 @@ private class EmbeddedOwner(
         opened.spec,
         sink = { event(it) },
         clock = config.environment.clock,
-        nextSequence = { ++sequence },
+        nextSequence = {
+          config.environment.host?.nextSequence?.invoke(opened.spec.id) ?: ++sequence
+        },
+        requestDismiss = config.environment.host?.requestDismiss ?: { true },
         storage = opened.session,
         httpClients = config.network.clients(),
         requestScope = config.scope,
         exclusively = { block -> interactions.withLock { block() } },
         newRequestId = config.environment.requestId,
       )
+    config.environment.host?.onRuntime?.invoke(runtime)
     session =
       EmbeddedSession(
         runtime,
@@ -274,7 +299,9 @@ private class EmbeddedOwner(
       session?.runtime?.flushStorage()
     } finally {
       session?.runtime?.close()
-      withContext(io) { source.close() }
+      releaseAssets()
     }
   }
+
+  suspend fun releaseAssets() = withContext(io) { source.close() }
 }

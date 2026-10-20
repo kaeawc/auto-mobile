@@ -45,13 +45,15 @@ internal suspend fun awaitInsertTextMutation(
 
 /** Plans a text insertion from the selection reported by an editable accessibility node. */
 internal fun planInsertText(
-  currentText: String?,
-  isShowingHintText: Boolean,
-  selectionStart: Int,
-  selectionEnd: Int,
+  snapshot: InsertTextSnapshot,
   textToInsert: String,
   remembered: RememberedCaret? = null,
 ): InsertTextPlan {
+  val currentText = snapshot.text
+  val isShowingHintText = snapshot.isShowingHintText
+  val selectionStart = snapshot.selectionStart
+  val selectionEnd = snapshot.selectionEnd
+
   val text = if (isShowingHintText) "" else currentText.orEmpty()
   val hasMatchingRememberedCaret =
     remembered != null &&

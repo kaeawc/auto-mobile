@@ -13,7 +13,9 @@ class ImeCommitDriverTest {
   fun `key event delivery sends units without committing text`() {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
     var result: ImeCommitResult? = null
-    driver(sink).commit("Ab!", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+    driver(sink).commit(
+      ImeCommitRequest("Ab!", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS),
+    ) {
       result = it
     }
 
@@ -28,7 +30,9 @@ class ImeCommitDriverTest {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
     sink.supportedKeyUnits = { units -> units.none { it == "😀" } }
     var result: ImeCommitResult? = null
-    driver(sink).commit("a😀", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+    driver(sink).commit(
+      ImeCommitRequest("a😀", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS),
+    ) {
       result = it
     }
 
@@ -46,10 +50,12 @@ class ImeCommitDriverTest {
     sink.afterKeyUnit = { cancelled = true }
     var result: ImeCommitResult? = null
     driver(sink).commit(
-      "ab",
-      PRIOR_IME_ID,
-      isCancelled = { cancelled },
-      delivery = ImeTextDelivery.KEY_EVENTS,
+      ImeCommitRequest(
+        "ab",
+        PRIOR_IME_ID,
+        isCancelled = { cancelled },
+        delivery = ImeTextDelivery.KEY_EVENTS,
+      ),
     ) {
       result = it
     }
@@ -66,7 +72,7 @@ class ImeCommitDriverTest {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
     sink.readText = { _, _ -> "`a`" }
     val driver = driver(sink)
-    driver.commit("`a` after", PRIOR_IME_ID) { result ->
+    driver.commit(ImeCommitRequest("`a` after", PRIOR_IME_ID)) { result ->
       sink.events.add("complete")
       assertTrue(result.partialApplication)
       assertEquals(3, result.committedUnits)
@@ -85,7 +91,9 @@ class ImeCommitDriverTest {
     sink.readText = { _, _ -> "`a`" }
     val driver = driver(sink)
     var result: ImeCommitResult? = null
-    driver.commit("`a` after", PRIOR_IME_ID) { result = it }
+    driver.commit(ImeCommitRequest("`a` after", PRIOR_IME_ID)) {
+      result = it
+    }
 
     driver.cancel()
 
@@ -221,7 +229,7 @@ class ImeCommitDriverTest {
     sink.afterCommit = { cancelled = true }
     var result: ImeCommitResult? = null
 
-    driver(sink).commit("😀after", PRIOR_IME_ID, isCancelled = { cancelled }) {
+    driver(sink).commit(ImeCommitRequest("😀after", PRIOR_IME_ID, isCancelled = { cancelled })) {
       result = it
     }
 
@@ -238,7 +246,7 @@ class ImeCommitDriverTest {
     sink.advanceClockOnDrain = true
     var result: ImeCommitResult? = null
 
-    driver(sink).commit("👩‍👩‍👧‍👦next", PRIOR_IME_ID, deadlineMs = 10L) {
+    driver(sink).commit(ImeCommitRequest("👩‍👩‍👧‍👦next", PRIOR_IME_ID), deadlineMs = 10L) {
       result = it
     }
 
@@ -254,7 +262,9 @@ class ImeCommitDriverTest {
     sink.readText = { _, call -> if (call <= 2) "`a`" else "abc" }
     var result: ImeCommitResult? = null
 
-    driver(sink).commit("`a` `b`", PRIOR_IME_ID) { result = it }
+    driver(sink).commit(ImeCommitRequest("`a` `b`", PRIOR_IME_ID)) {
+      result = it
+    }
 
     sink.runUntil { sink.readSizes.isNotEmpty() }
     assertEquals("`a`", sink.committedChars.joinToString(""))
@@ -288,7 +298,9 @@ class ImeCommitDriverTest {
     sink.readText = { _, call -> if (call == 1) "bc`" else "xyz12" }
     var result: ImeCommitResult? = null
 
-    driver(sink).commit("`abc``b`", PRIOR_IME_ID) { result = it }
+    driver(sink).commit(ImeCommitRequest("`abc``b`", PRIOR_IME_ID)) {
+      result = it
+    }
 
     sink.runUntil { sink.readSizes.isNotEmpty() }
     assertNull(result)
@@ -305,7 +317,9 @@ class ImeCommitDriverTest {
     sink.readText = { _, _ -> "abc" }
     var result: ImeCommitResult? = null
 
-    driver(sink).commit("`abc``b`", PRIOR_IME_ID) { result = it }
+    driver(sink).commit(ImeCommitRequest("`abc``b`", PRIOR_IME_ID)) {
+      result = it
+    }
 
     sink.drain()
     assertTrue(result!!.success)
@@ -349,8 +363,7 @@ class ImeCommitDriverTest {
     var result: ImeCommitResult? = null
 
     driver(sink).commit(
-      "`a``b``c``d``e``f``g``h``i` tail",
-      PRIOR_IME_ID,
+      ImeCommitRequest("`a``b``c``d``e``f``g``h``i` tail", PRIOR_IME_ID),
       deadlineMs = 4_000L,
     ) {
       result = it
@@ -369,7 +382,9 @@ class ImeCommitDriverTest {
       sink.readText = { _, _ -> span }
       var result: ImeCommitResult? = null
 
-      driver(sink).commit("$span tail", PRIOR_IME_ID) { result = it }
+      driver(sink).commit(ImeCommitRequest("$span tail", PRIOR_IME_ID)) {
+        result = it
+      }
 
       sink.runUntil { sink.readSizes.isNotEmpty() }
       assertEquals(span, sink.committedChars.joinToString(""))
@@ -518,7 +533,9 @@ class ImeCommitDriverTest {
   fun `transient sync loss after every key event reports success once the barrier re-syncs`() {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSyncCalls = 1)
     var result: ImeCommitResult? = null
-    driver(sink).commit("ab", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+    driver(sink).commit(
+      ImeCommitRequest("ab", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS),
+    ) {
       result = it
     }
     assertNull(result)
@@ -553,10 +570,8 @@ class ImeCommitDriverTest {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSyncCalls = 1)
     var result: ImeCommitResult? = null
     driver(sink).commit(
-      "ab",
-      PRIOR_IME_ID,
+      ImeCommitRequest("ab", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS),
       deadlineMs = ImeCommitDriver.SYNC_RETRY_RESERVE_MS,
-      delivery = ImeTextDelivery.KEY_EVENTS,
     ) {
       result = it
     }
@@ -575,10 +590,12 @@ class ImeCommitDriverTest {
     sink.afterKeyUnit = { if (sink.sentKeyUnits.size == 2) cancelled = true }
     var result: ImeCommitResult? = null
     driver(sink).commit(
-      "ab",
-      PRIOR_IME_ID,
-      isCancelled = { cancelled },
-      delivery = ImeTextDelivery.KEY_EVENTS,
+      ImeCommitRequest(
+        "ab",
+        PRIOR_IME_ID,
+        isCancelled = { cancelled },
+        delivery = ImeTextDelivery.KEY_EVENTS,
+      ),
     ) {
       result = it
     }
@@ -595,8 +612,7 @@ class ImeCommitDriverTest {
     val results = mutableListOf<ImeCommitResult>()
 
     driver.commit(
-      "`a` after",
-      PRIOR_IME_ID,
+      ImeCommitRequest("`a` after", PRIOR_IME_ID),
       deadlineMs = sink.nowMs() + CtrlProxyIme.commitTimeoutMs(24_500L, 9),
     ) {
       results.add(it)
@@ -619,7 +635,7 @@ class ImeCommitDriverTest {
     sink.readText = { _, _ -> "`a`" }
     val results = mutableListOf<ImeCommitResult>()
 
-    driver(sink).commit("`a` after", PRIOR_IME_ID, deadlineMs = 10L) {
+    driver(sink).commit(ImeCommitRequest("`a` after", PRIOR_IME_ID), deadlineMs = 10L) {
       results.add(it)
     }
     sink.runUntil { sink.readSizes.isNotEmpty() }
@@ -640,7 +656,7 @@ class ImeCommitDriverTest {
     sink.readText = { _, _ -> "`a`" }
     var cancelled = false
     var result: ImeCommitResult? = null
-    driver(sink).commit("`a` after", PRIOR_IME_ID, isCancelled = { cancelled }) {
+    driver(sink).commit(ImeCommitRequest("`a` after", PRIOR_IME_ID, isCancelled = { cancelled })) {
       result = it
     }
 
@@ -659,7 +675,7 @@ class ImeCommitDriverTest {
   fun `pre-cancelled request never mutates the editor`() {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
     var result: ImeCommitResult? = null
-    driver(sink).commit("late text", PRIOR_IME_ID, isCancelled = { true }) {
+    driver(sink).commit(ImeCommitRequest("late text", PRIOR_IME_ID, isCancelled = { true })) {
       result = it
     }
 
@@ -672,7 +688,9 @@ class ImeCommitDriverTest {
   fun `realistic typing yields at non-word graphemes while letter and digit runs stay synchronous`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     var result: ImeCommitResult? = null
-    driver(sink).commit("a1é!😀b", null) { result = it }
+    driver(sink).commit(ImeCommitRequest("a1é!😀b", null)) {
+      result = it
+    }
     assertEquals(listOf("a", "1", "é", "!"), sink.committedChars)
     assertNull(result)
     sink.step()
@@ -690,7 +708,9 @@ class ImeCommitDriverTest {
       val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
       sink.readText = { _, call -> if (call == 1) marker else "" }
       var result: ImeCommitResult? = null
-      driver(sink).commit(marker + "body", null) { result = it }
+      driver(sink).commit(ImeCommitRequest(marker + "body", null)) {
+        result = it
+      }
       sink.runUntil { sink.readSizes.size == 1 }
       assertEquals(marker, sink.committedChars.joinToString(""))
       assertEquals(40L, sink.delays.last())
@@ -707,7 +727,9 @@ class ImeCommitDriverTest {
   fun `line start state resets at newline and survives inline segment boundaries`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.readText = { _, _ -> "converted" }
-    assertTrue(commit(sink, "*bold*\n> body", null).success)
+    assertTrue(
+      commit(sink, "*bold*\n> body", null).success,
+    )
     assertEquals(1, sink.delays.count { it == 150L })
     assertEquals("*bold*\n> body", sink.committedChars.joinToString(""))
   }
@@ -715,10 +737,14 @@ class ImeCommitDriverTest {
   @Test
   fun `realistic typing lets a completed mention settle before the next formatted segment`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
-    assertTrue(commit(sink, "@person.name *bold*", null).success)
+    assertTrue(
+      commit(sink, "@person.name *bold*", null).success,
+    )
     assertEquals(listOf(45L, 45L, 400L, 45L), sink.delays)
     val terminal = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
-    assertTrue(commit(terminal, "@person ", null).success)
+    assertTrue(
+      commit(terminal, "@person ", null).success,
+    )
     assertEquals(listOf(45L), terminal.delays)
   }
 
@@ -728,7 +754,9 @@ class ImeCommitDriverTest {
     sink.advanceClockOnDrain = true
     sink.readText = { _, _ -> "" }
     var result: ImeCommitResult? = null
-    driver(sink).commit("> @person tail!", null, deadlineMs = 1L) { result = it }
+    driver(sink).commit(ImeCommitRequest("> @person tail!", null), deadlineMs = 1L) {
+      result = it
+    }
     sink.drain()
     assertTrue(result!!.success)
     assertEquals(685L, sink.clockMs)
@@ -738,7 +766,9 @@ class ImeCommitDriverTest {
   fun `realistic typing waits for an unconverted line shortcut only to the bounded ceiling`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.readText = { _, _ -> null }
-    assertTrue(commit(sink, "> body", null).success)
+    assertTrue(
+      commit(sink, "> body", null).success,
+    )
     assertEquals(12, sink.readSizes.size)
     assertEquals(11, sink.delays.count { it == 40L })
     assertEquals(150L, sink.delays.last())
@@ -752,7 +782,10 @@ class ImeCommitDriverTest {
       var cancelled = false
       val results = mutableListOf<ImeCommitResult>()
       val driver = driver(sink)
-      driver.commit("> body", PRIOR_IME_ID, deadlineMs = 1L, isCancelled = { cancelled }) {
+      driver.commit(
+        ImeCommitRequest("> body", PRIOR_IME_ID, isCancelled = { cancelled }),
+        deadlineMs = 1L,
+      ) {
         results.add(it)
       }
       sink.runUntil { sink.readSizes.isNotEmpty() }
@@ -773,7 +806,9 @@ class ImeCommitDriverTest {
   @Test
   fun `long word run does not recurse per grapheme`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
-    assertTrue(commit(sink, "a".repeat(20_000), null).success)
+    assertTrue(
+      commit(sink, "a".repeat(20_000), null).success,
+    )
     assertEquals(20_000, sink.committedChars.size)
   }
 
@@ -783,47 +818,55 @@ class ImeCommitDriverTest {
     for (postDispatch in listOf(false, true)) {
       assertEquals(
         ImeCommitDriver.Reconciliation.Resume(1),
-        ImeCommitDriver.reconcileDecision(postDispatch, false, "", "a", units),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(postDispatch, false, "", "a", units),
+        ),
       )
       assertEquals(
         if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("")
         else ImeCommitDriver.Reconciliation.Consumed(0),
-        ImeCommitDriver.reconcileDecision(postDispatch, true, "", "", units),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(postDispatch, true, "", "", units),
+        ),
       )
       assertEquals(
         if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("ab")
         else ImeCommitDriver.Reconciliation.Continue,
-        ImeCommitDriver.reconcileDecision(postDispatch, false, "", "ab", units),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(postDispatch, false, "", "ab", units),
+        ),
       )
     }
     for (restart in listOf(false, true)) {
       assertEquals(
         if (restart) ImeCommitDriver.Reconciliation.Consumed(0)
         else ImeCommitDriver.Reconciliation.Fail(NONE_APPLIED_ERROR, ""),
-        ImeCommitDriver.reconcileDecision(false, restart, "", "", units),
+        ImeCommitDriver.reconcileDecision(ImeReconciliationState(false, restart, "", "", units)),
       )
       assertEquals(
         ImeCommitDriver.Reconciliation.Succeed(""),
-        ImeCommitDriver.reconcileDecision(true, restart, "", "", units),
+        ImeCommitDriver.reconcileDecision(ImeReconciliationState(true, restart, "", "", units)),
       )
       assertEquals(
         if (restart) ImeCommitDriver.Reconciliation.Continue
         else ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", null),
-        ImeCommitDriver.reconcileDecision(false, restart, null, null, units),
+        ImeCommitDriver.reconcileDecision(
+          ImeReconciliationState(false, restart, null, null, units),
+        ),
       )
       assertEquals(
         if (restart) ImeCommitDriver.Reconciliation.Continue
         else ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", "AB"),
-        ImeCommitDriver.reconcileDecision(false, restart, "", "AB", units),
+        ImeCommitDriver.reconcileDecision(ImeReconciliationState(false, restart, "", "AB", units)),
       )
     }
     assertEquals(
       ImeCommitDriver.Reconciliation.Succeed(null),
-      ImeCommitDriver.reconcileDecision(true, false, null, null, units),
+      ImeCommitDriver.reconcileDecision(ImeReconciliationState(true, false, null, null, units)),
     )
     assertEquals(
       ImeCommitDriver.Reconciliation.Succeed("AB"),
-      ImeCommitDriver.reconcileDecision(true, false, "", "AB", units),
+      ImeCommitDriver.reconcileDecision(ImeReconciliationState(true, false, "", "AB", units)),
     )
   }
 
@@ -841,35 +884,21 @@ class ImeCommitDriverTest {
               else -> ImeCommitDriver.Reconciliation.DropRejected(1)
             },
             ImeCommitDriver.reconcileDecision(
-              postDispatch,
-              restart,
-              "",
-              "a",
-              listOf("a", "\n"),
-              lastResume,
+              ImeReconciliationState(postDispatch, restart, "", "a", listOf("a", "\n"), lastResume),
             ),
           )
         }
         assertEquals(
           ImeCommitDriver.Reconciliation.Resume(1),
           ImeCommitDriver.reconcileDecision(
-            postDispatch,
-            restart,
-            "",
-            "a",
-            listOf("a", "\n", "b"),
+            ImeReconciliationState(postDispatch, restart, "", "a", listOf("a", "\n", "b")),
           ),
         )
         assertEquals(
           if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("a")
           else ImeCommitDriver.Reconciliation.DropRejected(1),
           ImeCommitDriver.reconcileDecision(
-            postDispatch,
-            restart,
-            "",
-            "a",
-            listOf("a", "\n", "b"),
-            1,
+            ImeReconciliationState(postDispatch, restart, "", "a", listOf("a", "\n", "b"), 1),
           ),
         )
       }
@@ -883,19 +912,16 @@ class ImeCommitDriverTest {
       for (restart in listOf(false, true)) {
         assertEquals(
           ImeCommitDriver.Reconciliation.Resume(2),
-          ImeCommitDriver.reconcileDecision(postDispatch, restart, "", "ab", units, 1),
+          ImeCommitDriver.reconcileDecision(
+            ImeReconciliationState(postDispatch, restart, "", "ab", units, 1),
+          ),
         )
         for (lastResume in listOf(2, 3)) {
           assertEquals(
             if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("ab")
             else ImeCommitDriver.Reconciliation.DropRejected(2),
             ImeCommitDriver.reconcileDecision(
-              postDispatch,
-              restart,
-              "",
-              "ab",
-              units,
-              lastResume,
+              ImeReconciliationState(postDispatch, restart, "", "ab", units, lastResume),
             ),
           )
         }
@@ -1353,7 +1379,9 @@ class ImeCommitDriverTest {
       for (failAt in listOf(null, 2)) {
         val sink = FakeImeCommitSink(inputType, failAtCommitIndex = failAt)
         sink.editorText = ""
-        assertNull(commit(sink, "secret", PRIOR_IME_ID).insertedText)
+        assertNull(
+          commit(sink, "secret", PRIOR_IME_ID).insertedText,
+        )
         assertTrue(sink.editorReads > 0)
       }
     }
@@ -1364,7 +1392,11 @@ class ImeCommitDriverTest {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.advanceClockOnDrain = true
     var result: ImeCommitResult? = null
-    driver(sink).commit("@person tail", PRIOR_IME_ID, deadlineMs = 1L, hardDeadlineMs = 100L) {
+    driver(sink).commit(
+      ImeCommitRequest("@person tail", PRIOR_IME_ID),
+      deadlineMs = 1L,
+      hardDeadlineMs = 100L,
+    ) {
       result = it
     }
     sink.drain()
@@ -1432,7 +1464,9 @@ class ImeCommitDriverTest {
       sink.stale = true
     }
     var result: ImeCommitResult? = null
-    driver(sink).commit("line one", PRIOR_IME_ID, hardDeadlineMs = 100L) { result = it }
+    driver(sink).commit(ImeCommitRequest("line one", PRIOR_IME_ID), hardDeadlineMs = 100L) {
+      result = it
+    }
     sink.drain()
     assertFalse(requireNotNull(result).success)
     assertEquals(100L, sink.clockMs)
@@ -1484,7 +1518,9 @@ class ImeCommitDriverTest {
     sink.editorText = ""
     sink.afterSync = { sink.clockMs = 2_099L }
     var result: ImeCommitResult? = null
-    driver(sink).commit("hello", PRIOR_IME_ID, hardDeadlineMs = 100L) { result = it }
+    driver(sink).commit(ImeCommitRequest("hello", PRIOR_IME_ID), hardDeadlineMs = 100L) {
+      result = it
+    }
     assertEquals("IME commit deadline exceeded", result?.error)
     assertEquals(1, sink.syncCalls)
     assertEquals(1, sink.editorReads)
@@ -1522,7 +1558,9 @@ class ImeCommitDriverTest {
 
   private fun commit(sink: FakeImeCommitSink, text: String, priorImeId: String?): ImeCommitResult {
     var result: ImeCommitResult? = null
-    driver(sink).commit(text, priorImeId) { result = it }
+    driver(sink).commit(ImeCommitRequest(text, priorImeId)) {
+      result = it
+    }
     sink.drain()
     return requireNotNull(result)
   }

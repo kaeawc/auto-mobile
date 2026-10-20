@@ -475,12 +475,9 @@ internal class TextInputController(
             ?.caret
         val plan =
           planInsertText(
-            liveSnapshot.text,
-            liveSnapshot.isShowingHintText,
-            liveSnapshot.selectionStart,
-            liveSnapshot.selectionEnd,
-            text,
-            caret,
+            liveSnapshot,
+            textToInsert = text,
+            remembered = caret,
           )
         if (!plan.usedRememberedCaret) rememberedInsert = null
         val precedingWarning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" ")
@@ -496,15 +493,17 @@ internal class TextInputController(
         if (remembered != null && snapshot != null && rememberedTextMatched == false) {
           val matched =
             awaitPrecedingInput(
-              expectedSuffix = "",
+              PrecedingInputExpectation(
+                expectedSuffix = "",
+                matches = { s ->
+                  nodeKey() == remembered.first &&
+                    !s.isShowingHintText &&
+                    s.text.orEmpty() == remembered.second.caret.text
+                },
+              ),
               readSnapshot = { readFreshSnapshot().also { snapshot = it } },
               nowMs = { uptimeMillis() },
               pause = pause,
-              matches = { s ->
-                nodeKey() == remembered.first &&
-                  !s.isShowingHintText &&
-                  s.text.orEmpty() == remembered.second.caret.text
-              },
             )
           if (!matched) {
             rememberedInsert = null
@@ -519,8 +518,10 @@ internal class TextInputController(
         if (snapshot != null && shouldWaitForPrecedingInput(expectedSuffix)) {
           val observed =
             awaitPrecedingInput(
-              expectedSuffix = requireNotNull(expectedSuffix),
-              baseline = precedingState,
+              PrecedingInputExpectation(
+                expectedSuffix = requireNotNull(expectedSuffix),
+                baseline = precedingState,
+              ),
               readSnapshot = { readFreshSnapshot().also { snapshot = it } },
               nowMs = { uptimeMillis() },
               pause = pause,

@@ -42,13 +42,13 @@ class GestureStreamSessionTest {
   @Test
   fun `router forwards the start display through queued continuations`() {
     val h = RouterHarness()
-    h.router.start("start", "g", 1f, 2f, 7)
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0, 7))
     h.drain()
     h.router.move("move", "g", 3f, 4f)
     h.drain()
     val dispatcher = h.dispatchers.single()
     dispatcher.completeLast()
-    h.router.end("end", "g", 5f, 6f, false)
+    h.router.end(RequestGestureEnd("end", "g", 5.0, 6.0, false))
     h.drain()
     dispatcher.completeLast()
     dispatcher.completeLast()
@@ -249,7 +249,7 @@ class GestureStreamSessionTest {
   fun `owner disconnect lifts a parked gesture once on the gesture thread and clears state`() {
     val h = RouterHarness()
     val owner = owner()
-    h.router.start("start", "g", 1f, 2f, 7, owner)
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0, 7), owner = owner)
     h.drain()
     val dispatcher = h.dispatchers.single()
     dispatcher.completeLast() // press -> Wait
@@ -270,11 +270,11 @@ class GestureStreamSessionTest {
 
     // Removal is immediate, without depending on a framework callback. An old callback must not
     // remove a replacement stream that reuses the wire id.
-    h.router.start("replacement", "g", 3f, 4f, owner = owner())
+    h.router.start(RequestGestureStart("replacement", "g", 3.0, 4.0), owner = owner())
     h.drain()
     assertEquals(2, h.dispatchers.size)
     dispatcher.completeLast()
-    h.router.end("replacement-end", "g", 3f, 4f, false)
+    h.router.end(RequestGestureEnd("replacement-end", "g", 3.0, 4.0, false))
     h.drain()
     assertEquals(1, h.pendingEndCount())
     assertEquals(0, h.terminalFailureCount())
@@ -284,8 +284,8 @@ class GestureStreamSessionTest {
   fun `disconnect releases both gestures belonging to one owner`() {
     val h = RouterHarness()
     val client = owner()
-    h.router.start("start-first", "first", 1f, 2f, owner = client)
-    h.router.start("start-second", "second", 3f, 4f, owner = client)
+    h.router.start(RequestGestureStart("start-first", "first", 1.0, 2.0), owner = client)
+    h.router.start(RequestGestureStart("start-second", "second", 3.0, 4.0), owner = client)
     h.drain()
     h.dispatchers.forEach { it.completeLast() }
 
@@ -310,7 +310,7 @@ class GestureStreamSessionTest {
   @Test
   fun `disconnect leaves an unowned gesture movable and endable`() {
     val h = RouterHarness()
-    h.router.start("start", "g", 1f, 2f)
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0))
     h.drain()
     val dispatcher = h.dispatchers.single()
     dispatcher.completeLast()
@@ -324,7 +324,7 @@ class GestureStreamSessionTest {
     assertEquals(GesturePoint(3f, 4f), dispatcher.dispatched.last().to)
     assertTrue(dispatcher.dispatched.last().willContinue)
     dispatcher.completeLast()
-    h.router.end("end", "g", 5f, 6f, false)
+    h.router.end(RequestGestureEnd("end", "g", 5.0, 6.0, false))
     h.drain()
     dispatcher.completeLast()
     assertEquals(1, dispatcher.dispatched.count { !it.willContinue })
@@ -340,11 +340,11 @@ class GestureStreamSessionTest {
     for (releaseFinished in listOf(false, true)) {
       val h = RouterHarness()
       val client = owner()
-      h.router.start("start", "g", 1f, 2f, owner = client)
+      h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = client)
       h.drain()
       val dispatcher = h.dispatchers.single()
       dispatcher.completeLast()
-      h.router.end("end", "g", 3f, 4f, false, requester = client)
+      h.router.end(RequestGestureEnd("end", "g", 3.0, 4.0, false), requester = client)
       h.drain()
       assertEquals(1, h.pendingEndCount())
       h.router.cancelOwnedBy(client)
@@ -375,14 +375,17 @@ class GestureStreamSessionTest {
     val client = owner()
     val other = owner(2)
     val disconnected = owner(3)
-    h.router.start("start", "g", 1f, 2f, owner = client)
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = client)
     h.drain()
     val dispatcher = h.dispatchers.single()
     dispatcher.completeLast()
-    h.router.end("other-end", "g", 3f, 4f, false, requester = other)
-    h.router.end("owner-end", "g", 3f, 4f, false, requester = client)
-    h.router.end("unattributed-end", "g", 3f, 4f, false)
-    h.router.end("disconnected-end", "g", 3f, 4f, false, requester = disconnected)
+    h.router.end(RequestGestureEnd("other-end", "g", 3.0, 4.0, false), requester = other)
+    h.router.end(RequestGestureEnd("owner-end", "g", 3.0, 4.0, false), requester = client)
+    h.router.end(RequestGestureEnd("unattributed-end", "g", 3.0, 4.0, false))
+    h.router.end(
+      RequestGestureEnd("disconnected-end", "g", 3.0, 4.0, false),
+      requester = disconnected,
+    )
     h.drain()
     assertEquals(4, h.pendingEndCount())
     client.isConnected = false
@@ -414,11 +417,11 @@ class GestureStreamSessionTest {
   fun `another client's pending end receives the session result without disconnect`() {
     for (success in listOf(true, false)) {
       val h = RouterHarness()
-      h.router.start("start", "g", 1f, 2f, owner = owner())
+      h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = owner())
       h.drain()
       val dispatcher = h.dispatchers.single()
       dispatcher.completeLast()
-      h.router.end("other-end", "g", 3f, 4f, false, requester = owner(2))
+      h.router.end(RequestGestureEnd("other-end", "g", 3.0, 4.0, false), requester = owner(2))
       h.drain()
       assertEquals(1, h.pendingEndCount())
       val failure = if (success) null else "lift failed"
@@ -442,7 +445,7 @@ class GestureStreamSessionTest {
   @Test
   fun `disconnect leaves another owner's parked gesture untouched`() {
     val h = RouterHarness()
-    h.router.start("start", "g", 1f, 2f, owner = owner())
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = owner())
     h.drain()
     val dispatcher = h.dispatchers.single()
     dispatcher.completeLast()
@@ -460,11 +463,11 @@ class GestureStreamSessionTest {
     for (endDispatched in listOf(false, true)) {
       val h = RouterHarness()
       val owner = owner()
-      h.router.start("start", "g", 1f, 2f, owner = owner)
+      h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = owner)
       h.drain()
       val dispatcher = h.dispatchers.single()
       dispatcher.completeLast()
-      h.router.end("end", "g", 3f, 4f, false, requester = owner)
+      h.router.end(RequestGestureEnd("end", "g", 3.0, 4.0, false), requester = owner)
       if (endDispatched) h.drain()
       h.router.cancelOwnedBy(owner)
       h.drain()
@@ -484,7 +487,7 @@ class GestureStreamSessionTest {
     for (failure in listOf("failure", "rejection", "exception", "build")) {
       val h = RouterHarness()
       val owner = owner()
-      h.router.start("start", "g", 1f, 2f, owner = owner)
+      h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = owner)
       h.drain()
       val dispatcher = h.dispatchers.single()
       dispatcher.completeLast()
@@ -506,7 +509,7 @@ class GestureStreamSessionTest {
       assertTrue(h.warnings.single().contains("release failed"))
       assertEquals(listOf(Ack("start", true, null)), h.acks)
       assertEquals(0, h.terminalFailureCount())
-      h.router.start("replacement", "g", 3f, 4f, owner = owner())
+      h.router.start(RequestGestureStart("replacement", "g", 3.0, 4.0), owner = owner())
       h.drain()
       assertEquals(2, h.dispatchers.size)
     }
@@ -516,7 +519,7 @@ class GestureStreamSessionTest {
   fun `disconnect during a stroke ignores its stale callbacks and warns if the lift fails`() {
     val h = RouterHarness()
     val client = owner()
-    h.router.start("start", "g", 1f, 2f, owner = client)
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = client)
     h.drain()
     val dispatcher = h.dispatchers.single()
     val press = dispatcher.calls.single()
@@ -541,7 +544,7 @@ class GestureStreamSessionTest {
     val owner = owner()
     owner.isConnected = false
     h.router.cancelOwnedBy(owner)
-    h.router.start("start", "g", 1f, 2f, owner = owner)
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = owner)
     h.drain()
     assertTrue(h.dispatchers.isEmpty())
     assertTrue(h.acks.isEmpty())
@@ -568,19 +571,23 @@ class GestureStreamSessionTest {
             when (request) {
               is RequestGestureStart ->
                 h.router.start(
-                  request.requestId,
-                  request.gestureId,
-                  request.x.toFloat(),
-                  request.y.toFloat(),
+                  RequestGestureStart(
+                    request.requestId,
+                    request.gestureId,
+                    request.x.toFloat().toDouble(),
+                    request.y.toFloat().toDouble(),
+                  ),
                   owner = CommandOriginContext.currentClient(),
                 )
               is RequestGestureEnd ->
                 h.router.end(
-                  request.requestId,
-                  request.gestureId,
-                  request.x.toFloat(),
-                  request.y.toFloat(),
-                  request.cancel,
+                  RequestGestureEnd(
+                    request.requestId,
+                    request.gestureId,
+                    request.x.toFloat().toDouble(),
+                    request.y.toFloat().toDouble(),
+                    request.cancel,
+                  ),
                 )
               else -> error("Unexpected request")
             }
@@ -617,7 +624,7 @@ class GestureStreamSessionTest {
       assertEquals(strokes.dispatched.last().from, strokes.dispatched.last().to)
       assertEquals(listOf(Ack("start", true, null)), h.acks)
       assertEquals(0, h.pendingEndCount())
-      h.router.start("replacement", "g", 3f, 4f, owner = owner())
+      h.router.start(RequestGestureStart("replacement", "g", 3.0, 4.0), owner = owner())
       h.drain()
       assertEquals(2, h.dispatchers.size)
     }
@@ -627,11 +634,11 @@ class GestureStreamSessionTest {
   fun `disconnect before the posted session start dispatches no pointer`() {
     val h = RouterHarness()
     val client = owner()
-    h.router.start("start", "g", 1f, 2f, owner = client)
+    h.router.start(RequestGestureStart("start", "g", 1.0, 2.0), owner = client)
     h.router.cancelOwnedBy(client)
     h.drain()
     assertTrue(h.dispatchers.single().dispatched.isEmpty())
-    h.router.start("replacement", "g", 3f, 4f, owner = owner())
+    h.router.start(RequestGestureStart("replacement", "g", 3.0, 4.0), owner = owner())
     h.drain()
     assertEquals(2, h.dispatchers.size)
   }
@@ -994,13 +1001,13 @@ class GestureStreamSessionTest {
   @Test
   fun `end queued before a failure gets the actual result exactly once`() {
     val h = RouterHarness()
-    h.router.start("start", "g1", 1f, 2f)
+    h.router.start(RequestGestureStart("start", "g1", 1.0, 2.0))
     h.drain()
     assertEquals(listOf(Ack("start", true, null)), h.acks)
 
     // The end was received on IO, but its routing work has not run yet. The gesture callback
     // releases and finishes first on the gesture thread; the queued end must consume that result.
-    h.router.end("end", "g1", 3f, 4f, cancel = false)
+    h.router.end(RequestGestureEnd("end", "g1", 3.0, 4.0, cancel = false))
     h.dispatchers.single().failLast("dispatch cancelled")
     assertEquals(1, h.acks.size)
     h.dispatchers.single().completeLast() // release -> terminal result before the queued end
@@ -1017,12 +1024,12 @@ class GestureStreamSessionTest {
   @Test
   fun `end strictly after a finished session receives its failure`() {
     val h = RouterHarness()
-    h.router.start("start", "g1", 1f, 2f)
+    h.router.start(RequestGestureStart("start", "g1", 1.0, 2.0))
     h.drain()
     h.dispatchers.single().failLast("framework cancelled")
     h.dispatchers.single().completeLast() // release -> terminal failure retained for a late end
-    h.router.end("end", "g1", 3f, 4f, cancel = false)
-    h.router.end("late-end", "g1", 3f, 4f, cancel = false)
+    h.router.end(RequestGestureEnd("end", "g1", 3.0, 4.0, cancel = false))
+    h.router.end(RequestGestureEnd("late-end", "g1", 3.0, 4.0, cancel = false))
     h.drain()
 
     assertEquals(
@@ -1041,15 +1048,15 @@ class GestureStreamSessionTest {
   fun `unclaimed failures evict the oldest after sixteen entries`() {
     val h = RouterHarness()
     repeat(17) { index ->
-      h.router.start("start-$index", "g$index", 1f, 2f)
+      h.router.start(RequestGestureStart("start-$index", "g$index", 1.0, 2.0))
       h.drain()
       h.dispatchers.last().failLast("failure $index")
       h.dispatchers.last().completeLast() // release -> retain the unclaimed terminal failure
     }
     assertEquals(16, h.terminalFailureCount())
 
-    h.router.end("evicted", "g0", 3f, 4f, cancel = false)
-    h.router.end("recent", "g16", 3f, 4f, cancel = false)
+    h.router.end(RequestGestureEnd("evicted", "g0", 3.0, 4.0, cancel = false))
+    h.router.end(RequestGestureEnd("recent", "g16", 3.0, 4.0, cancel = false))
     h.drain()
 
     assertEquals(Ack("evicted", true, null), h.acks.last { it.requestId == "evicted" })
@@ -1060,9 +1067,9 @@ class GestureStreamSessionTest {
   @Test
   fun `end registered before a failure receives one correlated failure`() {
     val h = RouterHarness()
-    h.router.start("start", "g1", 1f, 2f)
+    h.router.start(RequestGestureStart("start", "g1", 1.0, 2.0))
     h.drain()
-    h.router.end("end", "g1", 3f, 4f, cancel = false)
+    h.router.end(RequestGestureEnd("end", "g1", 3.0, 4.0, cancel = false))
     h.drain()
     assertEquals(1, h.pendingEndCount())
 
@@ -1079,10 +1086,10 @@ class GestureStreamSessionTest {
   fun `queued start and ends give each waiter one result and leave no pending ids`() {
     val h = RouterHarness()
     // Simulate WebSocket calls from two producers before the gesture thread drains its queue.
-    h.router.start("start", "g1", 1f, 2f)
-    h.router.start("duplicate", "g1", 1f, 2f)
-    h.router.end("end-1", "g1", 3f, 4f, cancel = false)
-    h.router.end("end-2", "g1", 3f, 4f, cancel = false)
+    h.router.start(RequestGestureStart("start", "g1", 1.0, 2.0))
+    h.router.start(RequestGestureStart("duplicate", "g1", 1.0, 2.0))
+    h.router.end(RequestGestureEnd("end-1", "g1", 3.0, 4.0, cancel = false))
+    h.router.end(RequestGestureEnd("end-2", "g1", 3.0, 4.0, cancel = false))
     h.drain()
     assertEquals(2, h.pendingEndCount())
 
@@ -1102,7 +1109,7 @@ class GestureStreamSessionTest {
     assertEquals(0, h.pendingEndCount())
 
     // Reusing the id must not replay an old end request.
-    h.router.start("next", "g1", 5f, 6f)
+    h.router.start(RequestGestureStart("next", "g1", 5.0, 6.0))
     h.drain()
     h.dispatchers.last().failLast("second gesture failed")
     h.dispatchers.last().completeLast() // release -> fail only the new gesture
@@ -1113,15 +1120,15 @@ class GestureStreamSessionTest {
   @Test
   fun `close lifts every active stroke before its callback and clears state`() {
     val h = RouterHarness()
-    h.router.start("start", "g1", 1f, 2f)
-    h.router.start("other-start", "g2", 5f, 6f)
+    h.router.start(RequestGestureStart("start", "g1", 1.0, 2.0))
+    h.router.start(RequestGestureStart("other-start", "g2", 5.0, 6.0))
     h.drain()
-    h.router.end("end", "g1", 3f, 4f, cancel = false)
+    h.router.end(RequestGestureEnd("end", "g1", 3.0, 4.0, cancel = false))
     h.drain()
     assertEquals(1, h.pendingEndCount())
 
     // Retain an unrelated terminal failure to verify teardown removes it.
-    h.router.start("failed-start", "failed", 1f, 2f)
+    h.router.start(RequestGestureStart("failed-start", "failed", 1.0, 2.0))
     h.drain()
     h.dispatchers.last().failLast("dispatch refused")
     h.dispatchers.last().completeLast() // release -> retain the unrelated terminal failure
@@ -1149,9 +1156,9 @@ class GestureStreamSessionTest {
   @Test
   fun `close answers each pending end once and ignores later requests`() {
     val h = RouterHarness()
-    h.router.start("start", "g1", 1f, 2f)
-    h.router.end("end-1", "g1", 3f, 4f, cancel = false)
-    h.router.end("end-2", "g1", 3f, 4f, cancel = false)
+    h.router.start(RequestGestureStart("start", "g1", 1.0, 2.0))
+    h.router.end(RequestGestureEnd("end-1", "g1", 3.0, 4.0, cancel = false))
+    h.router.end(RequestGestureEnd("end-2", "g1", 3.0, 4.0, cancel = false))
     h.drain()
 
     var closeCount = 0
@@ -1159,9 +1166,9 @@ class GestureStreamSessionTest {
     h.drain()
     h.dispatchers.single().completeLast() // late lift callback cannot ack either end again
     h.router.close { closeCount++ }
-    h.router.start("late-start", "g2", 1f, 2f)
+    h.router.start(RequestGestureStart("late-start", "g2", 1.0, 2.0))
     h.router.move("late-move", "g1", 2f, 3f)
-    h.router.end("late-end", "g1", 2f, 3f, cancel = true)
+    h.router.end(RequestGestureEnd("late-end", "g1", 2.0, 3.0, cancel = true))
     h.drain()
 
     assertEquals(2, closeCount)
@@ -1179,13 +1186,13 @@ class GestureStreamSessionTest {
     val a = owner(1)
     val b = owner(2)
     val c = owner(3)
-    h.router.start("start-a", "ga", 1f, 2f, owner = a)
-    h.router.start("start-b", "gb", 3f, 4f, owner = b)
+    h.router.start(RequestGestureStart("start-a", "ga", 1.0, 2.0), owner = a)
+    h.router.start(RequestGestureStart("start-b", "gb", 3.0, 4.0), owner = b)
     h.drain()
     h.dispatchers.forEach { it.completeLast() }
     // c ends b's gesture; a ends its own. Only a disconnects.
-    h.router.end("c-end-b", "gb", 5f, 6f, cancel = false, requester = c)
-    h.router.end("a-end-a", "ga", 5f, 6f, cancel = false, requester = a)
+    h.router.end(RequestGestureEnd("c-end-b", "gb", 5.0, 6.0, cancel = false), requester = c)
+    h.router.end(RequestGestureEnd("a-end-a", "ga", 5.0, 6.0, cancel = false), requester = a)
     h.drain()
     assertEquals(2, h.pendingEndCount())
     a.isConnected = false

@@ -286,8 +286,16 @@ class PinchGeometryTest {
   @Test
   fun `path fractions zero and one equal the endpoint geometry`() {
     val p = computePinchPoints(540.0, 960.0, 100.0, 300.0, 45f)
-    val start = computePinchFingerPositions(540.0, 960.0, 100.0, 300.0, 45f, 0.0)
-    val end = computePinchFingerPositions(540.0, 960.0, 100.0, 300.0, 45f, 1.0)
+    val start =
+      computePinchFingerPositions(
+        PinchStrokeGeometry(540.0, 960.0, 100.0, 300.0, 45f),
+        fraction = 0.0,
+      )
+    val end =
+      computePinchFingerPositions(
+        PinchStrokeGeometry(540.0, 960.0, 100.0, 300.0, 45f),
+        fraction = 1.0,
+      )
     assertEquals(p.startX1, start.x1, delta)
     assertEquals(p.startY1, start.y1, delta)
     assertEquals(p.startX2, start.x2, delta)
@@ -370,12 +378,14 @@ class PinchGeometryTest {
     for (v in pathVectors) {
       val p =
         computePinchFingerPositions(
-          v.centerX,
-          v.centerY,
-          v.distanceStart,
-          v.distanceEnd,
-          v.rotationDegrees,
-          v.fraction,
+          PinchStrokeGeometry(
+            v.centerX,
+            v.centerY,
+            v.distanceStart,
+            v.distanceEnd,
+            v.rotationDegrees,
+          ),
+          fraction = v.fraction,
         )
       val actual = sortedPoints(listOf(p.x1 to p.y1, p.x2 to p.y2))
       val expected = sortedPoints(v.expected)

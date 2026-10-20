@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { IncomingHttpHeaders } from "node:http";
 import {
   DAEMON_RELEASED_SESSION_HEADER,
@@ -12,6 +12,7 @@ import {
   type McpForwardRequestContext,
 } from "../../src/daemon/statelessMcpServerFactory";
 import {
+  isolateMcpServerFactoryForTesting,
   registerMcpServerFactory,
   type McpServerFactoryOptions,
 } from "../../src/daemon/mcpServerFactoryPort";
@@ -27,6 +28,12 @@ describe("daemon MCP factory port", () => {
   beforeAll(() => {
     server = createSdkMcpServer({ name: "factory-port-test", version: "1.0.0" }, {});
   });
+  // Another file sharing the process may have loaded src/server, which registers the real factory.
+  let restoreFactory: () => void;
+  beforeEach(() => {
+    restoreFactory = isolateMcpServerFactoryForTesting();
+  });
+  afterEach(() => restoreFactory());
 
   test("fails clearly before registration and resource refresh is safe", async () => {
     expect(() =>

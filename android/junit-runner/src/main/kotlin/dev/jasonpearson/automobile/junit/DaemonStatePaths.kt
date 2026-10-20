@@ -12,7 +12,14 @@ internal enum class DaemonStateFile(
 ) {
   SOCKET("sock", "AUTOMOBILE_DAEMON_SOCKET_PATH", "AUTO_MOBILE_DAEMON_SOCKET_PATH"),
   PID("pid", "AUTOMOBILE_DAEMON_PID_FILE_PATH", "AUTO_MOBILE_DAEMON_PID_FILE_PATH"),
+  TOKEN("token", "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH", "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH"),
 }
+
+/** Platform settings for token discovery, shared by the path resolver and file reader. */
+internal data class DaemonTokenPlatform(
+  val windows: Boolean = System.getProperty("os.name", "").startsWith("Windows", ignoreCase = true),
+  val tempDir: String = System.getProperty("java.io.tmpdir", "."),
+)
 
 /**
  * Port of `resolveDaemonStatePath` (`src/daemon/constants.ts`): an explicit
@@ -33,10 +40,16 @@ internal object DaemonStatePaths {
     userId: () -> String,
     envProvider: (String) -> String? = System::getenv,
     userDir: String = System.getProperty("user.dir", "."),
+    tokenPlatform: DaemonTokenPlatform = DaemonTokenPlatform(),
   ): String {
     val override =
       (envProvider(file.overrideEnv) ?: envProvider(file.legacyOverrideEnv))?.trim().orEmpty()
     if (override.isNotEmpty()) return resolveFromDaemonLaunchCwd(override, envProvider, userDir)
+    if (file == DaemonStateFile.TOKEN && tokenPlatform.windows) {
+      val base = envProvider("LOCALAPPDATA")?.takeIf { it.isNotBlank() } ?: tokenPlatform.tempDir
+      val suffix = isolationSuffix(envProvider, userDir)
+      return Path.of(base, "auto-mobile", "daemon$suffix.token").toString()
+    }
     return "/tmp/auto-mobile-daemon-${userId()}${isolationSuffix(envProvider, userDir)}.${file.extension}"
   }
 

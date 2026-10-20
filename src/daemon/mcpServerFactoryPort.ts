@@ -47,7 +47,7 @@ export interface McpServerFactory {
   refreshMcpResourceList(): Promise<void>;
 }
 
-let factory: McpServerFactory = {
+const unregisteredFactory: McpServerFactory = {
   createMcpServer: () => {
     throw new ActionableError(
       "The MCP server factory is not registered. Load src/server before serving daemon MCP requests.",
@@ -56,6 +56,13 @@ let factory: McpServerFactory = {
   // Daemon discovery may run without a server or resource registry.
   refreshMcpResourceList: async () => {},
 };
+
+let factory: McpServerFactory = unregisteredFactory;
+
+/** Puts the unregistered default back for one test; the returned function restores the prior port. */
+export function isolateMcpServerFactoryForTesting(): () => void {
+  return registerMcpServerFactory(unregisteredFactory);
+}
 
 /** Installed by src/server at module load; tests can replace and restore the whole port. */
 export function registerMcpServerFactory(next: McpServerFactory): () => void {

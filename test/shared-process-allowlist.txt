@@ -336,6 +336,7 @@ test/daemon/proxyToolErrorCodeClassification.test.ts
 test/daemon/queueTimeoutFrameRetryable.test.ts
 test/daemon/readEndReleaseRearmScenario.test.ts
 test/daemon/readOnlyBindingRegistry.test.ts
+test/daemon/readiness/implicitAutoStartExclusion.test.ts
 test/daemon/recordingCleanupPorts.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusedRoutingCallExtendsIdle.test.ts
@@ -804,6 +805,7 @@ test/features/iosSimFleet/capacityCheckFreshListing.test.ts
 test/features/iosSimFleet/capacityCheckSampleBounds.test.ts
 test/features/iosSimFleet/capacityHostSnapshotFailure.test.ts
 test/features/iosSimFleet/failedBootUdidExternal.test.ts
+test/features/iosSimFleet/inFlightBootRssSizing.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts

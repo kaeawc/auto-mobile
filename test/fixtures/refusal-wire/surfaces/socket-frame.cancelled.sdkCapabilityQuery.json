@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "cancelled.sdkCapabilityQuery",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "SDK capability query cancelled",
+    "code": "cancelled",
+    "retryable": true
+  }
+}

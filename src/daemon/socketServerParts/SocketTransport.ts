@@ -89,6 +89,7 @@ type Callbacks = Pick<
   | "frameDeviceId"
   | "handleRequest"
   | "abortMcpRequests"
+  | "forgetSocketDiscovery"
   | "clearBoundMcpClientKey"
   | "releaseDevicePoolMcpSessionBindings"
   | "forgetLateSessionToolBindings"
@@ -373,6 +374,7 @@ export class SocketTransport {
       return;
     }
     this.callbacks.abortMcpRequests(sessionId);
+    this.callbacks.forgetSocketDiscovery(sessionId);
     this.callbacks.trackRequestHandler(
       executionTracker
         .cancelSessionExecutions(sessionId, "socket_disconnect")

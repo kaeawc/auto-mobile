@@ -125,6 +125,10 @@ export class McpExecution {
   private get callbacks(): Callbacks {
     return this.resolveCallbacks();
   }
+
+  forgetSocketDiscovery(socketSessionId: string): void {
+    this.discoveryCache.forgetSocket(socketSessionId);
+  }
   /**
    * Reject an inbound request whose declared version/build identity does not match
    * this daemon (#2744). Returns an error response to short-circuit the request, or

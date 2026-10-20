@@ -170,6 +170,7 @@ export function serializeControlFrame(frame: DaemonResponse | DaemonNotification
 }
 
 interface Entry {
+  readonly socketSessionId: string;
   readonly generation: number;
   readonly result: object;
 }
@@ -185,6 +186,14 @@ export class ControlDiscoveryCache {
   constructor(private readonly refreshResources: () => Promise<void>) {}
   // Bound retention across disconnected/churning scopes; eviction only makes the next read cold.
   private static readonly MAX_ENTRIES = 128;
+
+  forgetSocket(socketSessionId: string): void {
+    for (const [key, entry] of this.entries) {
+      if (entry.socketSessionId === socketSessionId) {
+        this.entries.delete(key);
+      }
+    }
+  }
 
   async read(context: McpForwardContext, load: () => Promise<unknown>): Promise<unknown> {
     const kind: ListChangedKind | undefined =
@@ -223,11 +232,17 @@ export class ControlDiscoveryCache {
     this.entries.delete(key);
     const result = await load();
     context.signal?.throwIfAborted();
-    this.retain(kind, key, generation, result);
+    this.retain(kind, key, generation, result, context.socketSessionId);
     return result;
   }
 
-  private retain(kind: ListChangedKind, key: string, generation: number, result: unknown): void {
+  private retain(
+    kind: ListChangedKind,
+    key: string,
+    generation: number,
+    result: unknown,
+    socketSessionId: string,
+  ): void {
     // A notification during the await fences out this fill. Never retain errors or old epochs.
     if (
       generation !== ListChangedBroadcaster.generation(kind) ||
@@ -237,7 +252,7 @@ export class ControlDiscoveryCache {
       return;
     }
     serializedLists.set(result, JSON.stringify(result));
-    this.entries.set(key, { generation, result });
+    this.entries.set(key, { generation, result, socketSessionId });
     if (this.entries.size > ControlDiscoveryCache.MAX_ENTRIES) {
       const oldest = this.entries.keys().next().value;
       if (oldest !== undefined) {

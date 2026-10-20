@@ -22,9 +22,17 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
+import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
+import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 
-function harness(options: { resourceRefresh?: boolean } = {}) {
+function harness(
+  options: { resourceRefresh?: boolean; refreshResources?: () => Promise<void> } = {},
+) {
   const timer = new FakeTimer();
+  // Server-registration suites can leave device-discovery refreshers on the shared registry.
+  // Use the same test-owned freshness hook for cold loopback reads and warm cache hits.
+  const refreshResources = options.refreshResources ?? (async () => {});
   const server = createHarnessServer("unused", undefined, timer, null, {
     enforce: false,
     mcpDispatcher:
@@ -32,7 +40,7 @@ function harness(options: { resourceRefresh?: boolean } = {}) {
         ? unreachableMcpDispatcher
         : {
             ...unreachableMcpDispatcher,
-            refreshResources: () => ResourceRegistry.refreshBeforeList(),
+            refreshResources,
           },
   });
   let trips = 0;
@@ -58,7 +66,7 @@ function harness(options: { resourceRefresh?: boolean } = {}) {
         return result;
       },
       listResources: async () => {
-        await ResourceRegistry.refreshBeforeList();
+        await refreshResources();
         return { resources: ResourceRegistry.getResourceDefinitions() };
       },
     });
@@ -168,6 +176,85 @@ describe("control socket discovery cache", () => {
     expect(changed).not.toEqual(first);
     expect(await h.server.forwardRequest(h.context())).toEqual(changed);
     expect(h.trips()).toBe(2);
+  });
+
+  test("flag initialization invalidates a list cached with default flag values without notifying", async () => {
+    const h = harness();
+    const repository = new FakeFeatureFlagRepository();
+    await repository.upsertFlag("debug", true);
+    const service = new FeatureFlagService(repository, new FakeFeatureFlagApplier(), [
+      { key: "debug", label: "Debug", description: "debug", defaultValue: false },
+    ]);
+    let trips = 0;
+    h.server.mcpClientFactory = async () => {
+      trips++;
+      return new StubMcpClient({
+        listTools: async () => ({
+          tools: service.isEnabled("debug")
+            ? [{ name: "debugTool", inputSchema: { type: "object" } }]
+            : [],
+        }),
+      });
+    };
+    const notifications: string[] = [];
+    const unsubscribe = ListChangedBroadcaster.subscribe((kind) => notifications.push(kind));
+    try {
+      expect(await h.server.forwardRequest(h.context())).toEqual({ tools: [] });
+      await service.initialize();
+      const initialized = await h.server.forwardRequest(h.context());
+      expect(initialized).toMatchObject({ tools: [{ name: "debugTool" }] });
+      expect(await h.server.forwardRequest(h.context())).toEqual(initialized);
+      await service.initialize();
+      expect(await h.server.forwardRequest(h.context())).toEqual(initialized);
+      expect(trips).toBe(2);
+      expect(notifications).toEqual([]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test("disconnect evicts only the owning socket's discovery scopes", async () => {
+    let refreshes = 0;
+    const h = harness({
+      refreshResources: async () => {
+        refreshes++;
+      },
+    });
+    const socket = new FakeSocket();
+    h.server.allowRequests();
+    h.server.connect(socket);
+    const [socketSessionId] = h.server.sessionIds;
+    const tools = h.context({ socketSessionId });
+    const profile = h.context({
+      socketSessionId,
+      route: { ...tools.route, toolSelectionProfileUuid: "profile" },
+    });
+    const resources = h.context({
+      socketSessionId,
+      request: { id: "resources", type: "mcp_request", method: "resources/list", params: {} },
+    });
+    const other = h.context({ socketSessionId: "other" });
+    for (const context of [tools, profile, resources, other]) {
+      await h.server.forwardRequest(context);
+    }
+    expect(h.trips()).toBe(4);
+    expect(refreshes).toBe(1);
+    // A stale close for another socket must not evict the live incarnation's entries.
+    h.server.releaseSocket(socketSessionId, new FakeSocket());
+    await h.server.forwardRequest(tools);
+    await h.server.forwardRequest(resources);
+    expect(h.trips()).toBe(4);
+    expect(refreshes).toBe(2);
+    socket.emit("close", false);
+    await h.server.settleActiveRequestHandlers();
+    expect(refreshes).toBe(2);
+    await h.server.forwardRequest(other);
+    expect(h.trips()).toBe(4);
+    for (const context of [tools, profile, resources]) {
+      await h.server.forwardRequest(context);
+    }
+    expect(h.trips()).toBe(7);
+    expect(refreshes).toBe(3);
   });
 
   test.each(["enable-toggle", "acquisition"])(
@@ -339,13 +426,14 @@ describe("control socket discovery cache", () => {
   });
 
   test("resources/list preserves per-request refreshers and observes registration changes without a broadcast", async () => {
-    const h = harness();
     let refreshes = 0;
+    const h = harness({
+      refreshResources: async () => {
+        refreshes++;
+      },
+    });
     const uri = "automobile:iss13550-cache";
     const snapshot = ResourceRegistry.snapshotForTesting();
-    const refresh = spyOn(ResourceRegistry, "refreshBeforeList").mockImplementation(async () => {
-      refreshes++;
-    });
     const context = h.context({
       request: { id: "resources", type: "mcp_request", method: "resources/list", params: {} },
     });
@@ -366,22 +454,22 @@ describe("control socket discovery cache", () => {
       expect(h.trips()).toBe(3);
     } finally {
       ResourceRegistry.restoreForTesting(snapshot);
-      refresh.mockRestore();
     }
   });
 
   test("a refresher that discovers a resource invalidates a warm resource list", async () => {
-    const h = harness();
     const snapshot = ResourceRegistry.snapshotForTesting();
     const uri = "automobile:iss13550-refresh";
     let changed = false;
-    const refresh = spyOn(ResourceRegistry, "refreshBeforeList").mockImplementation(async () => {
-      if (changed && !ResourceRegistry.getResource(uri)) {
-        ResourceRegistry.register(uri, "refreshed", "refreshed", "text/plain", async () => ({
-          uri,
-          text: "ok",
-        }));
-      }
+    const h = harness({
+      refreshResources: async () => {
+        if (changed && !ResourceRegistry.getResource(uri)) {
+          ResourceRegistry.register(uri, "refreshed", "refreshed", "text/plain", async () => ({
+            uri,
+            text: "ok",
+          }));
+        }
+      },
     });
     const context = h.context({
       request: { id: "resources", type: "mcp_request", method: "resources/list", params: {} },
@@ -396,7 +484,6 @@ describe("control socket discovery cache", () => {
       expect(await h.server.forwardRequest(context)).toEqual(fresh);
       expect(h.trips()).toBe(2);
     } finally {
-      refresh.mockRestore();
       ResourceRegistry.restoreForTesting(snapshot);
     }
   });
@@ -415,20 +502,15 @@ describe("control socket discovery cache", () => {
 
   test("a custom dispatcher without a resource freshness hook keeps resources on the loopback path", async () => {
     const h = harness({ resourceRefresh: false });
-    const refresh = spyOn(ResourceRegistry, "refreshBeforeList").mockResolvedValue(undefined);
-    try {
-      await h.server.forwardRequest(h.context());
-      await h.server.forwardRequest(h.context());
-      expect(h.trips()).toBe(1);
-      const context = h.context({
-        request: { id: "resources", type: "mcp_request", method: "resources/list", params: {} },
-      });
-      await h.server.forwardRequest(context);
-      await h.server.forwardRequest(context);
-      expect(h.trips()).toBe(3);
-    } finally {
-      refresh.mockRestore();
-    }
+    await h.server.forwardRequest(h.context());
+    await h.server.forwardRequest(h.context());
+    expect(h.trips()).toBe(1);
+    const context = h.context({
+      request: { id: "resources", type: "mcp_request", method: "resources/list", params: {} },
+    });
+    await h.server.forwardRequest(context);
+    await h.server.forwardRequest(context);
+    expect(h.trips()).toBe(3);
   });
 
   test("failed, aborted and expired requests never become cache successes", async () => {

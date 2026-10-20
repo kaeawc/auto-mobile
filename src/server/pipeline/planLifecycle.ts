@@ -6,6 +6,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { type SessionManager } from "../../daemon/sessionManager";
 import { defaultDaemonContext, type DevicePoolWrites } from "../../daemon/daemonContext";
 import { releasePlanSessionAndDevice } from "../../daemon/releaseSessionAndDevice";
+import { ListChangedBroadcaster } from "../../daemon/listChangedBroadcast";
 import {
   type AppCleanupConfig,
   type AppCleanupStep,
@@ -445,6 +446,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       try {
         sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
         await sessionToolSelectionService?.deleteSession?.(releasedUuid);
+        ListChangedBroadcaster.invalidate("tools");
       } catch (bindingError) {
         logger.warn(
           `[PlanLifecycle] Failed to clear the tool binding of released session ${releasedUuid}`,

@@ -21,7 +21,10 @@ interface DemandProbeDependencies {
     DeviceDataStreamSocketServer,
     "hasSubscriberForDevice"
   > | null;
-  getTelemetryPushServer: () => Pick<TelemetryPushSocketServer, "getSubscriberCount"> | null;
+  getTelemetryPushServer: () => Pick<
+    TelemetryPushSocketServer,
+    "hasSubscriberForPerformanceTelemetry"
+  > | null;
 }
 
 /** Read only current subscriber demand; registration alone is not a consumer. */
@@ -35,10 +38,11 @@ export function createDaemonPerformanceDemandProbe(
     ...deps,
   };
   return {
-    hasDemand: (deviceId, packageName) =>
+    hasDemand: (deviceId, packageName, platform) =>
       (getters.getPerformancePushServer()?.hasSubscriberForDevice(deviceId, packageName) ??
         false) ||
-      (getters.getDeviceDataStreamServer()?.hasSubscriberForDevice(deviceId) ?? false) ||
-      (getters.getTelemetryPushServer()?.getSubscriberCount() ?? 0) > 0,
+      (platform === "android" &&
+        (getters.getDeviceDataStreamServer()?.hasSubscriberForDevice(deviceId) ?? false)) ||
+      (getters.getTelemetryPushServer()?.hasSubscriberForPerformanceTelemetry(deviceId) ?? false),
   };
 }

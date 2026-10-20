@@ -58,6 +58,36 @@ export function isAdbDeviceOfflineError(error: unknown): boolean {
   return /\bdevice(?:\s+is)?\s+offline\b/i.test(errorMessage(error));
 }
 
+/** Match only complete adb stderr diagnostics, never argv or remote stdout. */
+export function isAdbPostDispatchTransportError(
+  stderr: string,
+  exitCode: number | undefined,
+  expectedDeviceId: string,
+  expectedTransportId?: string,
+): boolean {
+  const lines = stderr
+    .trim()
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+  if (lines.length === 0) {
+    // adb shell uses 255 for a lost transport without a diagnostic as well.
+    return exitCode === 255;
+  }
+  return lines.every((line) => {
+    let diagnostic = line.trim().replace(/^adb:\s*/i, "");
+    const device = diagnostic.match(/^device\s+'([^']+)'\s*:\s*/i);
+    if (device) {
+      if (device[1] !== expectedDeviceId && device[1] !== expectedTransportId) {
+        return false;
+      }
+      diagnostic = diagnostic.slice(device[0].length);
+    }
+    return /^(?:(?:error:\s*)?(?:connection terminated|protocol fault)\b[^\r\n]*|error:\s*closed)$/i.test(
+      diagnostic,
+    );
+  });
+}
+
 export function notifyAdbMissingDevice(deviceId: string, error: unknown): void {
   const message = errorMessage(error);
   for (const listener of missingDeviceListeners) {

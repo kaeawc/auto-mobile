@@ -20,6 +20,12 @@ const rejected = (operation: Promise<unknown>): Promise<unknown> =>
     (error: unknown) => error,
   );
 
+// Captured post-dispatch wording: https://github.com/kaeawc/auto-mobile/issues/13822.
+const postDispatchLoss = (stderr = "connection terminated: read failed", code = 1) =>
+  new Error("Command failed: adb -s emulator-5554 shell am start", {
+    cause: Object.assign(new Error("Command failed: adb"), { stderr: Buffer.from(stderr), code }),
+  });
+
 function harness(
   failures = Infinity,
   error = missing(),
@@ -243,5 +249,125 @@ describe("ADB pre-dispatch transport recovery", () => {
     expect(findDeviceTransportUnavailable(wrapped)).toBeUndefined();
     wrapped.cause = wrapped;
     expect(findDeviceTransportUnavailable(wrapped)).toBeUndefined();
+  });
+});
+
+describe("ADB post-dispatch transport loss", () => {
+  test.each([false, true])("non-safe command dispatches once (noRetry=%s)", async (noRetry) => {
+    const original = postDispatchLoss();
+    const h = harness(Infinity, original);
+    const error = await rejected(
+      h.client.execute(
+        ["shell", "am start -a android.intent.action.VIEW -d 'myapp://single-use'"],
+        {
+          noRetry,
+        },
+      ),
+    );
+    expect(error).toBeInstanceOf(AdbDeviceTransportUnavailableError);
+    expect(error).toMatchObject({
+      code: "device_transport_unavailable",
+      retryable: true,
+      retryAfterMs: 1000,
+      dispatched: "unknown",
+      cause: original,
+    });
+    expect(String(error)).toContain("may already have run");
+    expect(String(error)).toContain("Observe before reissuing a non-idempotent command");
+    expect(h.calls()).toBe(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("safe reads retain general retries and can recover", async () => {
+    const h = harness(2, postDispatchLoss());
+    expect((await h.client.execute(["shell", "getprop foo"])).stdout).toBe("recovered");
+    expect(h.calls()).toBe(3);
+    expect(h.timer.getSleepHistory()).toEqual([200, 500]);
+  });
+
+  test("safe read exhaustion is typed with unknown dispatch", async () => {
+    const h = harness(Infinity, postDispatchLoss());
+    expect(await rejected(h.client.execute(["shell", "getprop foo"]))).toMatchObject({
+      code: "device_transport_unavailable",
+      retryable: true,
+      dispatched: "unknown",
+    });
+    expect(h.calls()).toBe(4);
+    expect(h.timer.getSleepHistory()).toEqual([200, 500, 1000]);
+  });
+
+  test("unknown dispatch cannot inherit pre-dispatch retry permission from message text", async () => {
+    const original = Object.assign(new Error("cannot connect to adb"), { code: 255, stderr: "" });
+    const h = harness(Infinity, original);
+    expect(await rejected(h.client.execute(["shell", "input tap 1 2"]))).toMatchObject({
+      code: "device_transport_unavailable",
+      dispatched: "unknown",
+    });
+    expect(h.calls()).toBe(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test.each(["error: closed", "protocol fault", ""])(
+    "types transport stderr %s with exit 255",
+    async (stderr) => {
+      const h = harness(Infinity, postDispatchLoss(stderr, 255));
+      expect(await rejected(h.client.execute(["shell", "input tap 1 2"]))).toMatchObject({
+        dispatched: "unknown",
+        retryable: true,
+      });
+      expect(h.calls()).toBe(1);
+    },
+  );
+
+  test.each([
+    Object.assign(
+      new Error("Command failed: adb shell echo 'connection terminated: read failed'"),
+      { code: 1 },
+    ),
+    Object.assign(new Error("Command failed: adb shell"), {
+      stdout: "error: closed",
+      stderr: "remote command failed",
+      code: 255,
+    }),
+    Object.assign(new Error("connection terminated: read failed"), { code: 1 }),
+    postDispatchLoss("adb: device 'emulator-5556': error: closed", 255),
+  ])("ignores argv, stdout, standalone messages and other serials", async (original) => {
+    const h = harness(Infinity, original);
+    expect(await rejected(h.client.execute(["shell", "input tap 1 2"]))).toBe(original);
+    expect(h.calls()).toBe(1);
+  });
+
+  test("a client without a selected device cannot attribute the transport failure", async () => {
+    const original = postDispatchLoss();
+    const h = harness(Infinity, original, null);
+    expect(await rejected(h.client.execute(["shell", "input tap 1 2"]))).toBe(original);
+    expect(h.calls()).toBe(1);
+  });
+
+  test.each([false, true])("confirmed loss wins over unknown dispatch (safe=%s)", async (safe) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const controller = new AbortController();
+    const lost = new DeviceLostError(device.deviceId, "confirmed loss");
+    let calls = 0;
+    const client = new AdbClient(
+      device,
+      async () => {
+        calls++;
+        rememberDeviceLossAbort(controller.signal, lost);
+        controller.abort();
+        throw postDispatchLoss();
+      },
+      { timer, retryExecutor: new DefaultRetryExecutor(timer) },
+    );
+    expect(
+      await rejected(
+        client.execute(["shell", safe ? "getprop foo" : "input tap 1 2"], {
+          signal: controller.signal,
+        }),
+      ),
+    ).toBe(lost);
+    expect(calls).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 });

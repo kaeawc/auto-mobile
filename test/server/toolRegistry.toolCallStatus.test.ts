@@ -62,19 +62,24 @@ describe("ToolRegistry tool call status", () => {
       }),
     ]);
   });
-  test("records a wrapped transport refusal as device_transport_unavailable", async () => {
-    const typed = new AdbDeviceTransportUnavailableError(
-      "emulator-5554",
-      new Error("adb: device 'emulator-5554' not found"),
-    );
-    const { call, records } = setup(async () => {
-      throw new Error("Failed to launch app", { cause: typed });
-    });
-    await expect(call()).rejects.toBe(typed);
-    expect(records).toEqual([
-      expect.objectContaining({ status: "failure", errorType: "device_transport_unavailable" }),
-    ]);
-  });
+  test.each([false, "unknown"] as const)(
+    "preserves a wrapped transport error with dispatch %s",
+    async (dispatched) => {
+      const typed = new AdbDeviceTransportUnavailableError(
+        "emulator-5554",
+        new Error("adb: device 'emulator-5554' not found"),
+        1000,
+        dispatched,
+      );
+      const { call, records } = setup(async () => {
+        throw new Error("Failed to launch app", { cause: typed });
+      });
+      await expect(call()).rejects.toBe(typed);
+      expect(records).toEqual([
+        expect.objectContaining({ status: "failure", errorType: "device_transport_unavailable" }),
+      ]);
+    },
+  );
   test("records MCP error text", async () => {
     const response = { isError: true, content: [{ type: "text", text: "Cannot tap\n target" }] };
     const { call, records } = setup(async () => response);

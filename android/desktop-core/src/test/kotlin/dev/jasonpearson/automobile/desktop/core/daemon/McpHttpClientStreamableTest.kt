@@ -293,6 +293,7 @@ class McpHttpClientStreamableTest {
         McpHttpClient(
           dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
             endpoint = "http://localhost/mcp",
+            tokenProvider = DaemonHttpTokenProvider { null },
             requestSender = sender,
           ),
         )
@@ -300,6 +301,7 @@ class McpHttpClientStreamableTest {
         McpHttpClient(
           dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
             endpoint = "http://localhost/mcp",
+            tokenProvider = DaemonHttpTokenProvider { null },
             requestSender = sender,
             mcpSessionKey = mcpSessionKey,
           ),

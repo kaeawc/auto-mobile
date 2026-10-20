@@ -1,3 +1,4 @@
+import { FileDaemonHttpTokenStore, type DaemonHttpTokenStore } from "./daemonHttpToken";
 import { createServer as createHttpServer } from "http";
 import type { HttpListener } from "./daemonHttpIngress";
 import { DeviceReadiness } from "./readiness/DeviceReadiness";
@@ -56,6 +57,8 @@ export interface DaemonDependencies {
   recoveryPolicyEnvironment?: NodeJS.ProcessEnv;
   managedAdbServerShutdown?: ManagedAdbServerShutdown;
   toolSelectionProfileProvenanceLoader?: ToolSelectionProfileProvenanceLoader;
+  httpToken?: string;
+  httpTokenStore?: DaemonHttpTokenStore;
   httpServerFactory?: () => HttpListener;
   processBirthTime?: DaemonProcessBirthTimeProvider;
   processGenerationToken?: DaemonProcessGenerationTokenProvider;
@@ -127,6 +130,8 @@ function resolveFactories(dependencies: DaemonDependencies) {
     managedAdbServerShutdown: dependencies.managedAdbServerShutdown ?? stopManagedAdbServer,
     toolSelectionProfileProvenanceLoader:
       dependencies.toolSelectionProfileProvenanceLoader ?? defaultToolSelectionProfileRegistry,
+    httpToken: dependencies.httpToken ?? "",
+    httpTokenStore: dependencies.httpTokenStore ?? new FileDaemonHttpTokenStore(),
     httpServerFactory: dependencies.httpServerFactory ?? (() => createHttpServer()),
     avdManagerFactory: dependencies.avdManagerFactory ?? (() => new AvdManagerService()),
     iosDeviceVerifier: dependencies.iosDeviceVerifier ?? (() => DeviceReadiness.getInstance()),

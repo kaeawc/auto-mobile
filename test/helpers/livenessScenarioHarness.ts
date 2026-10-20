@@ -252,7 +252,6 @@ const HOST_TOUCHING_DAEMON_METHODS = [
   "writeEarlyOwnerRecord",
   "writePidFile",
   "persistPidFileData",
-  "startHttpIngress",
   "bindControlSocket",
   "startServicesAfterSocketBind",
   "startAuxiliarySocket",
@@ -752,6 +751,8 @@ export class LivenessScenario {
         });
       },
       startHttpIngress: async () => void steps.push("startHttpIngress"),
+      prepareHttpToken: () => void steps.push("prepareHttpToken"),
+      publishHttpToken: () => void steps.push("publishHttpToken"),
       sweepStaleAppearanceConfigs: async () => void steps.push("sweepStaleAppearanceConfigs"),
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {

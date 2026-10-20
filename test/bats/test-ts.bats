@@ -74,6 +74,9 @@ setup() {
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
   unset RUNNER_OS AUTOMOBILE_TEST_TIMEOUT_MS AUTOMOBILE_UNIT_TEST_WORKERS \
     AUTOMOBILE_INTEGRATION_TEST_WORKERS AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE
+  # Host load limits must not override the defaults asserted by stubbed lanes.
+  # Tests that exercise retries or wall budgets set their own values explicitly.
+  unset AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   # Chunking and shared-process knobs are lane tuning that a caller shell (CI job env,
   # orchestrator) may export; every test that depends on them sets them explicitly.
   unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \

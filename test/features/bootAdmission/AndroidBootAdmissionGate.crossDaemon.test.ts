@@ -461,17 +461,29 @@ test("provisioning failure cannot release the boot's consumed peer admission", a
   expect(host.records.size).toBe(0);
 });
 
-test("failure to clear the deleted identity fails closed before replacement provisioning", async () => {
-  const { source, gates, registries } = setup("1");
+test("registry clear failure keeps the replacement reservation usable and counted", async () => {
+  const { source, gates, registries, host } = setup("1");
   source.emulatorSerials = ["OLD"];
   const replacement = await gates[0].reserveBoot({ replacingDeviceId: "OLD", timeoutMs: 1000 });
   source.emulatorSerials = [];
   registries[0].failWrites = true;
-  expect(() => replacement.markReplacedDeviceGone()).toThrow(
-    AndroidBootedDeviceDiscoveryIncompleteError,
-  );
+  expect(() => replacement.markReplacedDeviceGone()).not.toThrow();
+  expect([...host.records.values()][0].deviceId).toBe("OLD");
+  for (const gate of gates) {
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 0, inFlight: 1 });
+    exhausted(await rejected(gate.admit(request)));
+  }
+  // Serial reuse cannot hide the rebound local slot even while the peer record is stale.
+  source.emulatorSerials = ["OLD"];
+  expect(await gates[0].describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  source.emulatorSerials = [];
+  const admission = await replacement.run(() => gates[0].admit(request));
+  replacement.release();
   expect((await gates[0].describeCapacity()).inFlight).toBe(1);
   registries[0].failWrites = false;
-  replacement.markReplacedDeviceGone();
-  replacement.release();
+  admission.handOff("NEW");
+  expect([...host.records.values()][0]).toMatchObject({ deviceId: "NEW", replacement: false });
+  admission.release();
+  expect((await gates[0].describeCapacity()).inFlight).toBe(0);
+  expect(host.records.size).toBe(0);
 });

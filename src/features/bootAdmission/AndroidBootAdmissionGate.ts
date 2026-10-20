@@ -238,12 +238,15 @@ export class AndroidBootAdmissionGate
       admission,
       markReplacedDeviceGone: () => {
         ledgerAdmission.bind();
-        // This write must succeed before provisioning: retaining the old serial could hide the
-        // reservation from peers once an unrelated emulator reuses that serial.
+        // The local slot is already rebound. A failed peer update must not abort replacement
+        // after verified deletion; keep the reservation held through the boot.
         try {
           published?.clearDeviceId();
         } catch (error) {
-          throw this.registryFailure(error);
+          logger.warn(
+            `[BootAdmission] Failed to clear replaced device '${replacingDeviceId}' from the host registry; continuing replacement with the reservation held. The stale record keeps the replaced device id until boot hand-off; peers may undercount only if that serial is reused: ${errorMessage(error)}`,
+            error,
+          );
         }
       },
       bind: () => ledgerAdmission.bind(),

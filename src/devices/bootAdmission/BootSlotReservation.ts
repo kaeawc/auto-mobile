@@ -4,7 +4,11 @@ import { ActionableError } from "../../models/ActionableError";
 /** A slot held before destructive replacement; consumption transfers it to the boot lifecycle. */
 export interface BootSlotReservation {
   run<T>(operation: () => Promise<T>): Promise<T>;
-  /** After verified deletion, forget the old identity so serial reuse cannot hide this slot. */
+  /**
+   * After verified deletion, rebind the local slot and best-effort clear the old peer identity.
+   * Registry-clear failures must not throw or abort replacement: retain the slot for boot.
+   * A stale peer record keeps the old id until hand-off and may undercount if its serial is reused.
+   */
   markReplacedDeviceGone(): void;
   /** Idempotent. Releases an unconsumed slot; the boot owns a consumed slot. */
   release(): void;

@@ -19,6 +19,10 @@ import { FakeFleetHostSource } from "../../../fakes/FakeFleetHostSource";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import {
+  FakeHostBootAdmissionRegistry,
+  SharedBootAdmissionHostState,
+} from "../../../fakes/FakeHostBootAdmissionRegistry";
 import { drainMicrotasks, drainUntil } from "../../../helpers/fakeTimerStepping";
 import {
   FakeClaims,
@@ -31,6 +35,8 @@ import {
 async function setup(platform: Platform) {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer);
+  const host = new SharedBootAdmissionHostState();
+  const hostRegistry = new FakeHostBootAdmissionRegistry(host, 100, timer);
   const inventory = new FakeInventory();
   const provisioner = new FakeProvisioner(inventory);
   const deleter = new FakeDeleter(inventory);
@@ -50,6 +56,7 @@ async function setup(platform: Platform) {
     platform === "android"
       ? new AndroidBootAdmissionGate(androidSource, timer, {
           env: { AUTOMOBILE_ANDROID_MAX_BOOTED: "2" },
+          hostRegistry,
         })
       : new IosSimCapacityGate(
           new IosSimFleetCostCollector(iosSource, new InMemoryBootDurationHistory(), timer),
@@ -151,6 +158,8 @@ async function setup(platform: Platform) {
   return {
     timer,
     registry,
+    host,
+    hostRegistry,
     inventory,
     provisioner,
     deleter,
@@ -352,4 +361,48 @@ test("unmatched Android runtime lookup grants no replacement credit", async () =
     failure: { code: "capacity_exhausted", capacity: { booted: 2 } },
   });
   expect(h.deleter.calls).toHaveLength(0);
+});
+
+test("registry clear failure still boots replacement with the consumed reservation and assigns a device", async () => {
+  const h = await setup("android");
+  if (!(h.gate instanceof AndroidBootAdmissionGate)) {
+    throw new Error("expected Android gate");
+  }
+  const gate = h.gate;
+  h.deleter.afterDelete = async () => {
+    h.setBooted(["OTHER"]);
+    h.hostRegistry.failWrites = true;
+  };
+  let release = () => {};
+  let booted = false;
+  h.provisioner.beforeCreate = async () => {
+    expect([...h.host.records.values()][0].deviceId).toBe("emulator-5554");
+    expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+    await gate.assertCapacityAvailable();
+    // At the limit, this can only succeed by consuming the replacement reservation.
+    const admission = await gate.admit({ avdName: "REPLACEMENT", timeoutMs: 60_000 });
+    h.hostRegistry.failWrites = false;
+    admission.handOff("REPLACEMENT");
+    release = admission.release;
+    booted = true;
+  };
+  const result = await h.reconciler.reconcile(h.request);
+  expect(result.outcome).toBe("ready");
+  expect(booted).toBe(true);
+  if (result.outcome === "ready") {
+    expect(result.disposition).toBe("replaced");
+    expect((await h.registry.getAssignment(h.request.key))?.stableDeviceId).toBe(
+      result.device.stableId,
+    );
+    expect(h.inventory.has(result.device.stableId)).toBe(true);
+  }
+  // The reconciler released its reservation; the consumed slot still belongs to the boot.
+  expect(await gate.describeCapacity()).toMatchObject({ booted: 1, inFlight: 1 });
+  expect([...h.host.records.values()][0]).toMatchObject({
+    deviceId: "REPLACEMENT",
+    replacement: false,
+  });
+  release();
+  expect((await gate.describeCapacity()).inFlight).toBe(0);
+  expect(h.host.records.size).toBe(0);
 });

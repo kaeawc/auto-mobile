@@ -810,7 +810,7 @@ does not spend an attempt either way.
 
 ### Ambient Android and OS variables
 
-Not AutoMobile-specific; read to locate the Android emulator and the default SDK locations.
+Not AutoMobile-specific; used for platform toolchains and host configuration.
 
 | Variable                                                                     | Use                                                                                                                                                                                                                          | Default          |
 | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
@@ -819,6 +819,7 @@ Not AutoMobile-specific; read to locate the Android emulator and the default SDK
 | `USERPROFILE`                                                                | Windows home directory, consulted when `HOME` is unset or empty.                                                                                                                                                             | unset            |
 | `PATH`                                                                       | Executable search path; only reported in emulator-not-found diagnostics.                                                                                                                                                     | unset            |
 | `JAVA_HOME`                                                                  | Java installation root checked by `doctor`.                                                                                                                                                                                  | unset            |
+| `DEVELOPER_DIR`                                                              | Xcode developer directory or Xcode.app used for simulator profile cache invalidation. Defaults to the `xcode-select` filesystem link; unreadable selection/version metadata falls back to live lookups.                      | unset            |
 | `DISPLAY`, `WAYLAND_DISPLAY`                                                 | Linux display servers; when neither is set (or both blank) emulator launches default to `-no-window`.                                                                                                                        | unset            |
 | `USER`, `LOGNAME`                                                            | POSIX account name (`USER` first) used to find the running emulator's advertisement directory.                                                                                                                               | unset            |
 | `XDG_RUNTIME_DIR`                                                            | Linux per-user runtime directory searched for running emulator advertisements.                                                                                                                                               | unset            |

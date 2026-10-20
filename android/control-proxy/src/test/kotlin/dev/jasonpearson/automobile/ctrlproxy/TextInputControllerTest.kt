@@ -574,6 +574,7 @@ class TextInputControllerTest {
   }
 
   @Test
+  @Config(sdk = [24, 29])
   fun `done falls back to KEYCODE_ENTER before API 30`() = runTest {
     val h = harness(sdkInt = 29)
     h.host.focused = FakeField("abc")

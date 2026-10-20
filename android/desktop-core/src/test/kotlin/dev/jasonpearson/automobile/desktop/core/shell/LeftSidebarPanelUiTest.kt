@@ -61,22 +61,24 @@ class LeftSidebarPanelUiTest {
     val (mode, process, onModeChanged, onRetry, onSelect, onKill, onSettings, onApp) = spec
     MaterialTheme {
       LeftSidebarPanel(
-        dataSourceMode = mode,
-        onDataSourceModeChanged = onModeChanged,
-        onDeviceSelected = onSelect,
-        onProcessConnected = { error("Host-owned connection must not be overwritten") },
-        connectedProcess = process,
-        activeDeviceId = "pixel-runtime",
-        suppressAutoSelect = true,
-        bootedDevices = devices,
-        onRetryDetection = onRetry,
-        onKillDevice = onKill,
-        onOpenSettings = onSettings,
-        installedApps = listOf(InstalledApp("dev.example.app", "Example", false)),
-        selectedAppId = "dev.example.app",
-        onAppSelected = onApp,
-        daemonStatusProvider = { null },
-        modifier = Modifier.width(320.dp),
+        LeftSidebarOptions(
+          dataSourceMode = mode,
+          onDataSourceModeChanged = onModeChanged,
+          onDeviceSelected = onSelect,
+          onProcessConnected = { error("Host-owned connection must not be overwritten") },
+          connectedProcess = process,
+          activeDeviceId = "pixel-runtime",
+          suppressAutoSelect = true,
+          bootedDevices = devices,
+          onRetryDetection = onRetry,
+          onKillDevice = onKill,
+          onOpenSettings = onSettings,
+          installedApps = listOf(InstalledApp("dev.example.app", "Example", false)),
+          selectedAppId = "dev.example.app",
+          onAppSelected = onApp,
+          daemonStatusProvider = { null },
+          modifier = Modifier.width(320.dp),
+        ),
       )
     }
   }

@@ -72,41 +72,51 @@ fun HorizontalTabBar(
         val isSelected = tab.id == selectedTabId
         val showText = index < tabsWithText
 
-        Box(
-          modifier =
-            Modifier.background(
-                if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
-                RoundedCornerShape(6.dp),
-              )
-              .clickable {
-                // Toggle selection - clicking selected tab deselects it
-                onTabSelected(if (isSelected) null else tab.id)
-              }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = if (showText) 12.dp else 8.dp, vertical = 6.dp),
-        ) {
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Icon(
-              imageVector = tab.icon,
-              contentDescription = tab.title,
-              modifier = Modifier.size(14.dp),
-              tint = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-            )
-            if (showText) {
-              Text(
-                tab.title,
-                fontSize = 11.sp,
-                maxLines = 1,
-                softWrap = false,
-                color =
-                  if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-              )
-            }
-          }
+        HorizontalTabItem(tab, isSelected, showText) {
+          // Toggle selection - clicking selected tab deselects it.
+          onTabSelected(if (isSelected) null else tab.id)
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun HorizontalTabItem(
+  tab: HorizontalTab,
+  isSelected: Boolean,
+  showText: Boolean,
+  onClick: () -> Unit,
+) {
+  val colors = SharedTheme.globalColors
+  Box(
+    modifier =
+      Modifier.background(
+          if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
+          RoundedCornerShape(6.dp),
+        )
+        .clickable(onClick = onClick)
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = if (showText) 12.dp else 8.dp, vertical = 6.dp),
+  ) {
+    Row(
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(
+        imageVector = tab.icon,
+        contentDescription = tab.title,
+        modifier = Modifier.size(14.dp),
+        tint = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+      )
+      if (showText) {
+        Text(
+          tab.title,
+          fontSize = 11.sp,
+          maxLines = 1,
+          softWrap = false,
+          color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+        )
       }
     }
   }

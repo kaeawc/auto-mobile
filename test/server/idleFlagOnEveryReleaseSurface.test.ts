@@ -212,7 +212,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "plan base end fields",
-    builders: ["src/server/planExecutionOrchestrator.ts#planBaseEndFields"],
+    builders: ["src/server/planExecutionRecords.ts#planBaseEndFields"],
     reasonKey: "reason",
     holder: (reason) => {
       const ended = new TerminalSessionError(SESSION, snapshot(reason));
@@ -239,7 +239,7 @@ const surfaces: Surface[] = [
   {
     name: "terminal registration refusal",
     builders: [
-      "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
+      "src/daemon/daemonRequestHandlersParts/registration.ts#terminalSessionRegistrationRefusal",
       "src/daemon/types.ts#releasedSessionNotFoundFields",
     ],
     reasonKey: "reason",

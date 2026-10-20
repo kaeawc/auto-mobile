@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.core.net.toUri
 
 /**
  * Utility class for managing deep link URLs within the AutoMobile Playground app. Provides methods
@@ -307,7 +308,7 @@ object DeepLinkManager {
     Log.d(TAG, "Context package name: ${context.packageName}")
 
     val intent =
-      Intent(Intent.ACTION_VIEW, Uri.parse(deepLinkUrl)).apply {
+      Intent(Intent.ACTION_VIEW, deepLinkUrl.toUri()).apply {
         setPackage(context.packageName)
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
       }

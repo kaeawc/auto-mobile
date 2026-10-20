@@ -17,7 +17,7 @@ export interface ReleaseReasonSerialisation {
 export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload",
   "src/server/proxyServer.ts#brokerSessionEndedPayload",
-  "src/server/planExecutionOrchestrator.ts#planBaseEndFields",
+  "src/server/planExecutionRecords.ts#planBaseEndFields",
   "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
   "src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails",
   "src/daemon/types.ts#releasedSessionNotFoundFields",
@@ -26,7 +26,7 @@ export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/socketServer/notificationFanOut.ts#broadcastSessionReleased",
   "src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession",
   "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
-  "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
+  "src/daemon/daemonRequestHandlersParts/registration.ts#terminalSessionRegistrationRefusal",
 ];
 export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, string]> = [
   [
@@ -55,7 +55,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Parses the nested incoming release snapshot; its idle flag belongs to the containing refusal.",
   ],
   [
-    "src/daemon/daemonRequestHandlers.ts#persistedTerminalRelease",
+    "src/daemon/daemonRequestHandlersParts/registration.ts#persistedTerminalRelease",
     "Returns an in-memory persisted-release lookup for registration admission, not a wire answer.",
   ],
   [

@@ -13,8 +13,8 @@ import org.junit.Test
  * Behavioral coverage for the `ACTION_EXTRACT_HIERARCHY` error-frame emission (PR #3126,
  * issue #3089), the runner-side follow-up requested in issue #3131. The daemon side is covered by
  * `test/features/observe/CtrlProxyClient.test.ts`; before this test the runner side was covered
- * only structurally (`BroadcastGuardAdoptionTest`) and by compilation — nothing asserted the actual
- * `ErrorResponse(requestId = uuid)` frame content on each failure branch.
+ * only structurally (`BroadcastGuardAdoptionTestSourceTest`) and by compilation — nothing asserted
+ * the actual `ErrorResponse(requestId = uuid)` frame content on each failure branch.
  *
  * `handleCommand` is a private `AccessibilityService` method, so rather than stand up a Robolectric
  * harness the failure-decision + frame-construction was extracted into the pure

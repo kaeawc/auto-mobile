@@ -217,46 +217,49 @@ internal class NodeActionController(
     Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
     perfProvider.serial("performAction")
 
-    try {
-      if (effectiveSelector == null && resourceId.isNullOrEmpty()) {
+    NodeActionOperation(requestId, action, startTime)
+      .run(
+        NodeActionTarget(effectiveSelector, resourceId, targetDescription),
+      )
+  }
+
+  private inner class NodeActionOperation(
+    private val requestId: String?,
+    private val action: String,
+    private val startTime: Long,
+  ) {
+    suspend fun run(target: NodeActionTarget) {
+      try {
+        perform(target)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: IllegalArgumentException) {
+        reportFailure(e)
+      } catch (e: IllegalStateException) {
+        reportFailure(e)
+      } catch (e: SecurityException) {
+        reportFailure(e)
+      }
+    }
+
+    private suspend fun perform(target: NodeActionTarget) {
+      if (target.selector == null && target.resourceId.isNullOrEmpty()) {
         perfProvider.end()
         val errorTime = timeProvider.currentTimeMillis()
         val error = "A resource-id or stable node selector is required for accessibility actions"
-        Log.w(TAG, error)
-        host.launchRequestScope(requestId) {
-          host.sendActionResult(
-            NodeActionResult(
-              requestId = requestId,
-              action = action,
-              success = false,
-              error = error,
-              totalTimeMs = errorTime - startTime,
-            ),
-          )
-        }
+        reportMissing(error, errorTime)
         return
       }
 
       perfProvider.startOperation("findNode")
-      val targetNode = findActionNode(effectiveSelector, resourceId)
+      val targetNode = findActionNode(target.selector, target.resourceId)
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
         perfProvider.end()
         val errorTime = timeProvider.currentTimeMillis()
-        val error = "Element not found with $targetDescription"
-        Log.w(TAG, error)
-        host.launchRequestScope(requestId) {
-          host.sendActionResult(
-            NodeActionResult(
-              requestId = requestId,
-              action = action,
-              success = false,
-              error = error,
-              totalTimeMs = errorTime - startTime,
-            ),
-          )
-        }
+        val error = "Element not found with ${target.description}"
+        reportMissing(error, errorTime)
         return
       }
 
@@ -287,9 +290,9 @@ internal class NodeActionController(
           alreadySatisfied = alreadySatisfied,
         ),
       )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: IllegalArgumentException) {
+    }
+
+    private suspend fun reportFailure(e: Exception) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing action", e)
@@ -302,32 +305,21 @@ internal class NodeActionController(
           totalTimeMs = errorTime - startTime,
         ),
       )
-    } catch (e: IllegalStateException) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing action", e)
-      host.sendActionResult(
-        NodeActionResult(
-          requestId = requestId,
-          action = action,
-          success = false,
-          error = e.message,
-          totalTimeMs = errorTime - startTime,
-        ),
-      )
-    } catch (e: SecurityException) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing action", e)
-      host.sendActionResult(
-        NodeActionResult(
-          requestId = requestId,
-          action = action,
-          success = false,
-          error = e.message,
-          totalTimeMs = errorTime - startTime,
-        ),
-      )
+    }
+
+    private fun reportMissing(error: String, errorTime: Long) {
+      Log.w(TAG, error)
+      host.launchRequestScope(requestId) {
+        host.sendActionResult(
+          NodeActionResult(
+            requestId = requestId,
+            action = action,
+            success = false,
+            error = error,
+            totalTimeMs = errorTime - startTime,
+          ),
+        )
+      }
     }
   }
 }
@@ -364,3 +356,9 @@ private fun accessibilityLinkError(text: String, occurrence: Int): String? =
       "Link text must be non-blank and occurrence must be non-negative"
     else -> null
   }
+
+private data class NodeActionTarget(
+  val selector: NodeSelector?,
+  val resourceId: String?,
+  val description: String,
+)

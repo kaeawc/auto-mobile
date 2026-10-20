@@ -96,7 +96,12 @@ describe("device pool ports", () => {
 
   // Parsing is captured once, outside the per-test budget.
   beforeAll(() => {
-    const sources = readdirSync(DAEMON_DIR)
+    const sources = [
+      ...readdirSync(DAEMON_DIR),
+      ...readdirSync(path.join(DAEMON_DIR, "daemonRequestHandlersParts")).map((name) =>
+        path.join("daemonRequestHandlersParts", name),
+      ),
+    ]
       .filter((name) => name.endsWith(".ts"))
       .map((name): [string, string] => [name, readFileSync(path.join(DAEMON_DIR, name), "utf8")]);
     sourceCount = sources.length;

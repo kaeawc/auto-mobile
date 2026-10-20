@@ -156,6 +156,14 @@
         "acquireNewSession": false
       }
     },
+    "socket-frame.cancelled.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "cancelled",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
     "socket-frame.timeout.sdkCapabilityQuery": {
       "expected": "retry",
       "fields": {

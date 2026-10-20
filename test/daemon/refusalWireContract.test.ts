@@ -1291,7 +1291,7 @@ describe("refusal wire contract", () => {
     });
   });
 
-  test.each(["timeout", "not_connected", "sdk_capability_query_failed"] as const)(
+  test.each(["cancelled", "timeout", "not_connected", "sdk_capability_query_failed"] as const)(
     "SDK capability query %s carries code and retryable on every wire",
     (code) => {
       const error = new sdkCapabilityQuery.SdkCapabilityQueryError(code, "SDK probe failed");

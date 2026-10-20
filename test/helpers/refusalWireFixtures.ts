@@ -400,6 +400,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget")),
   ],
   [
+    "cancelled.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled")),
+  ],
+  [
     "timeout.sdkCapabilityQuery",
     "SdkCapabilityQueryError via shapeToolCallError",
     () => shaped(new SdkCapabilityQueryError("timeout", "SDK capability query timed out")),
@@ -932,6 +937,10 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     () => new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget"),
   ],
   [
+    "cancelled.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled"),
+  ],
+  [
     "timeout.sdkCapabilityQuery",
     () => new SdkCapabilityQueryError("timeout", "SDK capability query timed out"),
   ],
@@ -1160,6 +1169,7 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "daemon_restart_deferred",
   "viewer_read_only",
   "target_identity_unresolved",
+  "cancelled",
   "timeout",
   "not_connected",
   "sdk_capability_query_failed",

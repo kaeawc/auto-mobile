@@ -68,6 +68,14 @@
         "acquireNewSession": false
       }
     },
+    "cancelled.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "cancelled",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
     "timeout.sdkCapabilityQuery": {
       "expected": "retry",
       "fields": {

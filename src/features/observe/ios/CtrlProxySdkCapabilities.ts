@@ -189,6 +189,7 @@ export class CtrlProxySdkCapabilities {
     promise: Promise<SdkCapabilityProbeResult>,
     options: SdkCapabilityQueryOptions,
   ): Promise<SdkCapabilityProbeResult> {
+    let failure: unknown;
     try {
       if (options.deadlineMs !== undefined && options.deadlineMs <= this.host.timer.now()) {
         throw new SdkCapabilityQueryError(
@@ -214,19 +215,24 @@ export class CtrlProxySdkCapabilities {
       if (error instanceof SdkCapabilityProbeSupersededError) {
         throw error;
       }
-      if (error instanceof SdkCapabilityQueryError) {
-        logger.debug("[IOSCtrlProxyClient] SDK capability waiter deadline expired", error);
-        return { status: "unknown", error };
-      }
-      // Caller cancellation is expected and does not invalidate the shared result.
-      logger.debug("[IOSCtrlProxyClient] SDK capability waiter cancelled", error);
-      return {
-        status: "unknown",
-        error: new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled", {
-          cause: error,
-        }),
-      };
+      // Caller deadlines/cancellation end only this waiter; the shared probe stays valid.
+      logger.debug(
+        error instanceof SdkCapabilityQueryError
+          ? "[IOSCtrlProxyClient] SDK capability waiter deadline expired"
+          : "[IOSCtrlProxyClient] SDK capability waiter cancelled",
+        error,
+      );
+      failure = error;
     }
+    if (failure instanceof SdkCapabilityQueryError) {
+      return { status: "unknown", error: failure };
+    }
+    return {
+      status: "unknown",
+      error: new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled", {
+        cause: failure,
+      }),
+    };
   }
 
   async requestSdkCapabilities(
@@ -311,6 +317,7 @@ export class CtrlProxySdkCapabilities {
       );
     const controller = new AbortController();
     const abortSignal = combineAbortSignals(options.abortSignal, controller.signal);
+    let failure: unknown;
     try {
       if (timeoutMs <= 0) {
         throw timeoutError();
@@ -369,36 +376,44 @@ export class CtrlProxySdkCapabilities {
         },
       );
     } catch (error) {
+      failure = error;
       if (options.abortSignal?.aborted) {
         // No caller still needs this request, or a direct caller cancelled it.
         logger.debug("[IOSCtrlProxyClient] SDK capability query cancelled", error);
-        return {
-          success: false,
-          totalTimeMs: 0,
-          probeError: new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled", {
-            cause: error,
-          }),
-        };
+      } else {
+        logger.warn(
+          error instanceof SdkCapabilityQueryError
+            ? "[IOSCtrlProxyClient] SDK capability query failed"
+            : `[IOSCtrlProxyClient] SDK capability query failed: ${errorMessage(error)}`,
+          error,
+        );
       }
-      if (error instanceof SdkCapabilityQueryError) {
-        logger.warn("[IOSCtrlProxyClient] SDK capability query failed", error);
-        return { success: false, totalTimeMs: timeoutMs, probeError: error };
-      }
-      // Socket loss/send failures reject the request rather than using a fallback builder.
-      const message = errorMessage(error);
-      logger.warn(`[IOSCtrlProxyClient] SDK capability query failed: ${message}`, error);
+    }
+    if (options.abortSignal?.aborted) {
       return {
         success: false,
         totalTimeMs: 0,
-        probeError: new SdkCapabilityQueryError(
-          message === WEBSOCKET_NOT_CONNECTED_MESSAGE || message === "WebSocket connection closed"
-            ? "not_connected"
-            : "sdk_capability_query_failed",
-          `SDK capability query failed: ${message}`,
-          { cause: error },
-        ),
+        probeError: new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled", {
+          cause: failure,
+        }),
       };
     }
+    if (failure instanceof SdkCapabilityQueryError) {
+      return { success: false, totalTimeMs: timeoutMs, probeError: failure };
+    }
+    // Socket loss/send failures reject the request rather than using a fallback builder.
+    const message = errorMessage(failure);
+    return {
+      success: false,
+      totalTimeMs: 0,
+      probeError: new SdkCapabilityQueryError(
+        message === WEBSOCKET_NOT_CONNECTED_MESSAGE || message === "WebSocket connection closed"
+          ? "not_connected"
+          : "sdk_capability_query_failed",
+        `SDK capability query failed: ${message}`,
+        { cause: failure },
+      ),
+    };
   }
 
   async refreshSdkCapabilitiesAndSync(

@@ -116,8 +116,11 @@ describe("SDK capability transport uncertainty", () => {
         deadlineMs: h.timer.now() + 1000,
       });
       try {
-        if (boundary === "abort") controller.abort();
-        else h.timer.advanceTime(100);
+        if (boundary === "abort") {
+          controller.abort();
+        } else {
+          h.timer.advanceTime(100);
+        }
         expect(await ownerResult).toMatchObject({
           code: boundary === "abort" ? "cancelled" : "timeout",
         });

@@ -2,6 +2,7 @@ import { currentBindingReconciler } from "../../daemon/sessionBroker/provisionin
 import type { InternalProvisionDeviceArgs } from "../../features/deviceLifecycle/core/contracts";
 import { toProvisionDeviceError } from "./provisioningErrors";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { consumeVerifiedBootCapacity } from "../../devices/bootAdmission/VerifiedBootCapacity";
 import type { DeviceResourceConfigurationResult } from "../../models/DeviceResourceConfiguration";
 import { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { BootedDevice, Platform } from "../../models";
@@ -95,8 +96,12 @@ export async function provisionExactDevice(
             // A device created only to be refused at boot would then be deleted (#11236).
             ...(args.boot
               ? {
-                  assertCapacityBeforeCreate: async (capacitySignal?: AbortSignal) =>
-                    await checkBootCapacity(args.device.platform, capacitySignal),
+                  assertCapacityBeforeCreate: async (capacitySignal?: AbortSignal) => {
+                    capacitySignal?.throwIfAborted();
+                    if (!consumeVerifiedBootCapacity(args.device)) {
+                      await checkBootCapacity(args.device.platform, capacitySignal);
+                    }
+                  },
                 }
               : {}),
             lifecycleLease,

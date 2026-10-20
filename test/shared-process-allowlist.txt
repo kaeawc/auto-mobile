@@ -287,6 +287,7 @@ test/daemon/passiveWorkPolicy.test.ts
 test/daemon/perSourceIosLiveness.test.ts
 test/daemon/performancePushSocketServerCharacterization.test.ts
 test/daemon/performanceStreamSocketServerCharacterization.test.ts
+test/daemon/planDeviceLossMonitor.ios.test.ts
 test/daemon/planLabelRegistry.test.ts
 test/daemon/poolCapacityError.test.ts
 test/daemon/poolOwnershipConcurrency.property.test.ts
@@ -918,6 +919,7 @@ test/features/observe/AndroidCtrlProxyClientSendCommand.test.ts
 test/features/observe/AndroidCtrlProxyClientSettingsSendCommand.test.ts
 test/features/observe/AndroidCtrlProxyRequestSettlement.test.ts
 test/features/observe/AndroidMultiDisplayActivity.test.ts
+test/features/observe/AwaitIdle.quietTree.test.ts
 test/features/observe/AwaitIdle.test.ts
 test/features/observe/ConditionPredicates.test.ts
 test/features/observe/ConditionResolver.test.ts
@@ -1759,6 +1761,7 @@ test/server/prototypeWindowOptions.test.ts
 test/server/provisionCancellationOutcomes.test.ts
 test/server/provisionDevice.property.test.ts
 test/server/provisionDeviceRecoveryEvidence.test.ts
+test/server/provisioning/verifiedBootCapacity.test.ts
 test/server/proxyServer.resources.characterization.test.ts
 test/server/proxyServerProgress.test.ts
 test/server/proxyTasksRelay.test.ts

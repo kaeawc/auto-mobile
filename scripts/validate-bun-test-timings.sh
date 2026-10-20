@@ -206,7 +206,10 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
     esac
   done
 
-  if [[ "$affects_unit_tests" == "true" ]]; then
+  # Instrumented reports screen the complete merged suite, even for a docs-only
+  # merge. Their durations never decide failure: offenders run below using the
+  # uninstrumented canonical unit command and its isolated median.
+  if [[ "$affects_unit_tests" == true || "${BUN_TEST_TIMING_REPORTS_INSTRUMENTED:-false}" == true ]]; then
     source_report_dir="${BUN_TEST_TIMING_REPORT_DIR:-}"
     if [[ -n "$source_report_dir" ]]; then
       has_source_report=false
@@ -291,6 +294,11 @@ max_slowdown="${BUN_TEST_TIMING_MAX_SLOWDOWN:-4}"
 infra_slowdown="${BUN_TEST_TIMING_INFRA_SLOWDOWN:-4}"
 require_positive_int BUN_TEST_TIMING_MAX_SLOWDOWN "$max_slowdown"
 require_positive_int BUN_TEST_TIMING_INFRA_SLOWDOWN "$infra_slowdown"
+if [[ "${BUN_TEST_TIMING_REPORTS_INSTRUMENTED:-false}" == true ]]; then
+  # Instrumentation is not runner contention. Screen at the unscaled 100ms
+  # threshold and fail closed if a plain recheck cannot verify every offender.
+  export BUN_TEST_TIMING_SLOWDOWN=1
+fi
 runner_slowdown="${BUN_TEST_TIMING_SLOWDOWN:-}"
 if [[ -z "$runner_slowdown" ]]; then
   if ! runner_slowdown="$(bun "$ROOT/scripts/lib/runner-calibration.ts" slowdown "$report_dir")"; then

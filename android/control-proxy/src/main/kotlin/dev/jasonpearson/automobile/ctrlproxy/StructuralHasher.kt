@@ -61,7 +61,7 @@ object StructuralHasher {
     hash = 31 * hash + element.rangeInfo.hashCode()
     hash = 31 * hash + element.inputType.hashCode()
     hash = 31 * hash + element.actions.hashCode()
-    hash = 31 * hash + element.extras.hashCode()
+    hash = 31 * hash + VolatileExtras.structuralHash(element.extras)
     hash = 31 * hash + element.fragment.hashCode()
 
     // NOTE: Intentionally EXCLUDING:

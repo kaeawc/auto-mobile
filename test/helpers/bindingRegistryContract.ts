@@ -975,9 +975,9 @@ export function describeBindingRegistryContract(
           throw new Error(`journal not opened: ${opened.kind}`);
         }
         const entry = {
-          platform: "ios",
+          platform: "ios" as const,
           stableDeviceId: name,
-          holder: "session_broker",
+          holder: "session_broker" as const,
           scopeKey: key.scopeKey,
           bindingIndex: 0,
           scopeState: null,

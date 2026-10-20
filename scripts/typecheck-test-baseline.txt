@@ -3,18 +3,12 @@
 # format: <file> <TScode> <count>
 scripts/benchmark-device-tools-fixture.ts TS2322 2
 scripts/check-mcp-sdk-boundary.ts TS2551 1
-scripts/check-sdkmanager-execution-boundary.ts TS2322 2
-scripts/check-sdkmanager-execution-boundary.ts TS2345 1
 scripts/ci/ciTimeToGreenReport.ts TS2322 1
 scripts/lib/tsImportDeps.ts TS2339 2
-scripts/manual-test/aux-socket.ts TS2322 2
-scripts/manual-test/aux-socket.ts TS2339 2
 scripts/manual-test/brokerDeviceScenarios.ts TS7022 1
 scripts/manual-test/brokerDeviceScenarios.ts TS7024 1
 scripts/manual-test/private-daemon.ts TS2345 1
 scripts/mcp-drive.ts TS2322 1
-test/cli/acquisitionSessionUuid.test.ts TS2322 1
-test/cli/acquisitionSessionUuid.test.ts TS2769 2
 test/cli/usageErrorInstalledSetups.test.ts TS2352 1
 test/contracts/AdbExecutorContract.ts TS2339 2
 test/contracts/DeviceManagerContract.ts TS18048 2
@@ -37,13 +31,9 @@ test/fakes/FakeAndroidInventoryLoad.ts TS2322 1
 test/fakes/FakeFailureRecorder.test.ts TS2741 1
 test/fakes/FakeFailuresStreamRepository.ts TS2741 1
 test/fakes/FakeIOSCtrlProxy.test.ts TS2345 1
-test/fakes/FakeNavigationGraphManager.test.ts TS2345 3
 test/features/action/ClearText.adbFallback.test.ts TS2322 1
 test/features/action/DragAndDrop.hierarchyLayer.test.ts TS2322 1
 test/features/action/DragAndDrop.nestedContainers.test.ts TS2322 1
-test/features/action/HandleIntentChooser.test.ts TS2322 1
-test/features/action/HandleIntentChooser.test.ts TS2339 1
-test/features/action/HandleIntentChooser.test.ts TS2353 1
 test/features/action/InputText.execute.test.ts TS2322 1
 test/features/action/IosSelectionScreenSize.test.ts TS2322 1
 test/features/action/OffscreenCheckSecondaryPanel.test.ts TS2322 1
@@ -60,8 +50,6 @@ test/features/action/SwipeOnElement.test.ts TS2739 1
 test/features/action/TapAnyDisplay.test.ts TS2322 2
 test/features/action/TapAnyElement.ios.test.ts TS2740 1
 test/features/action/TapElements.nestedContainers.test.ts TS2322 2
-test/features/action/TapOnElement.accessibilityLink.test.ts TS2322 3
-test/features/action/TapOnElement.accessibilityLink.test.ts TS2740 1
 test/features/action/TapOnElement.disabledElement.test.ts TS2322 1
 test/features/action/TapOnElement.ensureCheckedClockSkew.test.ts TS2769 1
 test/features/action/TapOnElement.extendedSelectors.test.ts TS2322 1
@@ -103,10 +91,7 @@ test/features/observe/android/AndroidCtrlProxyClientRequestSettlement.test.ts TS
 test/features/observe/android/ctrlProxyHierarchyAccessibilityFields.test.ts TS2769 1
 test/features/observe/android/screenshotHidePrototype.test.ts TS4104 1
 test/features/observe/ios/CtrlProxyStructure.test.ts TS2345 1
-test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts TS2345 3
 test/features/observe/ios/gesturePhaseDiagnostics.test.ts TS2322 1
-test/features/observe/nodeCleaners.property.test.ts TS2367 1
-test/features/observe/nodeCleaners.property.test.ts TS2769 2
 test/features/observe/output/IosChromeTapRefusalMarkers.test.ts TS2322 1
 test/features/record/ToolCallRecorderCoverage.test.ts TS18048 2
 test/features/video/FfmpegVideoProcessingBackend.integration.test.ts TS2352 1
@@ -115,8 +100,6 @@ test/features/video/FfmpegVideoProcessingBackend.test.ts TS2352 1
 test/features/video/FfmpegVideoProcessingBackendPostProcessBudget.test.ts TS2352 1
 test/features/video/HybridVideoCaptureBackend.test.ts TS2352 2
 test/features/video/PlatformVideoCaptureBackendDevicePid.test.ts TS2345 2
-test/features/webrtc/deviceCaptureRegistry.test.ts TS2345 2
-test/features/webrtc/deviceCaptureRegistry.test.ts TS2769 1
 test/features/webrtc/processSpawner.test.ts TS2769 1
 test/fixtures/hierarchyArbitraries.ts TS2322 1
 test/fixtures/iosProjectionFixture.ts TS2559 1
@@ -124,7 +107,6 @@ test/fixtures/iosProjectionFixture.ts TS2739 1
 test/fixtures/nestedClickableHierarchy.ts TS2353 1
 test/fixtures/observe/imeOcclusion.ts TS2353 2
 test/helpers/androidDisabledControlCapture.ts TS2741 1
-test/helpers/bindingRegistryContract.ts TS2769 3
 test/helpers/daemonHeartbeatHandler.ts TS2322 1
 test/helpers/deviceLikeAndroidHierarchy.ts TS2353 1
 test/helpers/directFrameRig.ts TS2345 1
@@ -132,11 +114,7 @@ test/helpers/fakeServerContext.ts TS2352 1
 test/helpers/planSessionHarness.ts TS2322 1
 test/helpers/planSessionHarness.ts TS2345 1
 test/helpers/prototypeSuspendedCapture.ts TS2352 1
-test/helpers/prototypeWindowCapture.ts TS2352 2
-test/helpers/prototypeWindowCapture.ts TS2741 1
 test/helpers/realBootGatesOverFakeFleet.ts TS2740 2
-test/helpers/refusalWireFixtures.ts TS2322 2
-test/helpers/refusalWireFixtures.ts TS2353 1
 test/helpers/restartStopHarness.ts TS2741 1
 test/helpers/sessionManagerSuite.ts TS2322 1
 test/helpers/sessionRowInvariantHarness.ts TS2345 2
@@ -145,13 +123,10 @@ test/helpers/tapAtCoordinate.ts TS2741 1
 test/helpers/touchNodeCaptures.ts TS2741 1
 test/helpers/warmedTests.ts TS2769 1
 test/integration/foldablePostureRoundTrip.integration.test.ts TS18048 1
-test/integration/sessionBrokerMultiClient.integration.test.ts TS2345 2
-test/integration/sessionBrokerMultiClient.integration.test.ts TS2769 1
 test/lint/envRegistry.test.ts TS2322 1
 test/lint/fakeHygiene.test.ts TS2339 2
 test/lint/livenessActivityClockSeparation.test.ts TS2345 1
 test/lint/moduleExportResolver.ts TS2305 1
-test/lint/recordHeartbeatCallers.ts TS2345 3
 test/lint/releaseReasonWireBuilders.test.ts TS2339 2
 test/lint/releaseReasonWireBuilders.ts TS2305 1
 test/lint/sessionClockOffsetProviderSingleRead.test.ts TS2345 1
@@ -164,9 +139,6 @@ test/parity/prototypeSpec.test.ts TS2769 2
 test/plan/PlanSchemaValidator.test.ts TS2769 2
 test/plan/planExecutorNestedLifecycle.test.ts TS2345 1
 test/plan/planExecutorNestedLifecycle.test.ts TS2769 1
-test/plan/planExecutorOptionalStep.test.ts TS2345 1
-test/plan/planExecutorOptionalStep.test.ts TS2353 1
-test/plan/planExecutorOptionalStep.test.ts TS2554 1
 test/plan/planExecutorParallelDeviceLoss.test.ts TS2769 1
 test/release/artifactCapabilities.test.ts TS2741 1
 test/scripts/attestation/gate/adapters.test.ts TS2345 1
@@ -179,9 +151,7 @@ test/scripts/benchmarkSettledScreenshotReliability.test.ts TS2769 1
 test/scripts/benchmarkThresholds.test.ts TS2769 2
 test/scripts/dbMigrationsSelfContained.test.ts TS7053 1
 test/scripts/iosIntegrationWorkflowChangeGuard.test.ts TS2339 1
-test/scripts/manualTestAdbHostQuery.test.ts TS2769 3
 test/scripts/manualTestAuxSocket.test.ts TS2769 1
-test/scripts/manualTestBrokerBatch.test.ts TS2769 3
 test/scripts/manualTestBrokerBatchOrchestrator.test.ts TS2345 1
 test/scripts/manualTestBrokerBatchOrchestrator.test.ts TS2769 1
 test/scripts/manualTestBrokerClientFiles.test.ts TS2769 1
@@ -196,6 +166,5 @@ test/scripts/manualTestProxySession.test.ts TS2769 1
 test/scripts/manualTestPythonHarnessGuard.test.ts TS2769 2
 test/scripts/qualificationRunCase.test.ts TS2339 2
 test/scripts/stress-harness-tap.test.ts TS2741 1
-test/shutdownCleanup.test.ts TS2769 3
 test/stress/memory-leak.stress.test.ts TS2722 2
 test/vision/ClaudeVisionClient.test.ts TS2769 1

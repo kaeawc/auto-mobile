@@ -2,7 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>TooManyFunctions:DatabaseInspectorProviderTest.kt:DatabaseInspectorProviderTest</ID>
-    <ID>TooManyFunctions:KeystoreStateHandlerTest.kt:KeystoreStateHandlerTest</ID>
   </CurrentIssues>
 </SmellBaseline>

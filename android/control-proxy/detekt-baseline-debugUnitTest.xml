@@ -9,11 +9,8 @@
     <ID>InjectDispatcher:PrototypeImeLiftTest.kt:PrototypeImeLiftTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest$Unconfined</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityTest.kt:SavedPrototypeActivityTest$Unconfined</ID>
-    <ID>LargeClass:BroadcastGuardAdoptionTest.kt:BroadcastGuardAdoptionTest</ID>
     <ID>LargeClass:CtrlProxyMessageHandlerTest.kt:CtrlProxyMessageHandlerTest</ID>
-    <ID>LargeClass:GestureStreamSessionTest.kt:GestureStreamSessionTest</ID>
     <ID>LargeClass:ImeCommitDriverTest.kt:ImeCommitDriverTest</ID>
-    <ID>LargeClass:LaunchCancellationRethrowTest.kt:LaunchCancellationRethrowTest</ID>
     <ID>LargeClass:PrototypeControllerTest.kt:PrototypeControllerTest</ID>
     <ID>LargeClass:PrototypeHostTest.kt:PrototypeHostTest</ID>
     <ID>LargeClass:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest</ID>
@@ -23,8 +20,6 @@
     <ID>LargeClass:SavedPrototypeStoreTest.kt:SavedPrototypeStoreTest</ID>
     <ID>LargeClass:StorageSubscriptionManagerTest.kt:StorageSubscriptionManagerTest</ID>
     <ID>LargeClass:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest</ID>
-    <ID>LargeClass:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest</ID>
-    <ID>LargeClass:WebSocketServerTest.kt:WebSocketServerTest</ID>
     <ID>LongMethod:PrototypeGestureTest.kt:PrototypeGestureTest$@Test fun `repeat binding carries all three lists through every gesture node variant`</ID>
     <ID>LongMethod:PrototypeMaterialComponentsTest.kt:PrototypeMaterialComponentsTest$@Test fun `each new node maps its role label and bound state`</ID>
     <ID>LongMethod:PrototypeMultiSurfaceTest.kt:PrototypeMultiSurfaceTest$@Test fun `metadata attributes two then three surfaces and survives middle dismissal`</ID>

@@ -94,6 +94,10 @@ async function runEnsureChecked(
     await timer.sleep(ADB_ROUND_TRIP_MS);
     return options.deviceClockUnavailable ? timer.now() : deviceNow();
   };
+  adb.getDeviceTimestampMsWithSource = async () => ({
+    timestampMs: await adb.getDeviceTimestampMs(),
+    source: options.deviceClockUnavailable ? "host" : "device-ms",
+  });
   adb.isScreenOn = async () => true;
   const selector = new FakeElementSelector(toggle("false"));
   const screen = new DeviceClockObserveScreen(deviceNow);

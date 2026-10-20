@@ -482,6 +482,7 @@ test/features/action/AndroidImeCatalog.test.ts
 test/features/action/AndroidLaunchActivity-transport.test.ts
 test/features/action/AppLifecycle.foregroundReadFailure.test.ts
 test/features/action/AppLifecycle.test.ts
+test/features/action/BaseVisualChange.actionClock.test.ts
 test/features/action/BaseVisualChange.cachedFreshness.test.ts
 test/features/action/BaseVisualChange.deviceLockWarning.test.ts
 test/features/action/CaptureSnapshot.test.ts
@@ -868,6 +869,7 @@ test/features/preferences/resolveAndroidPreferencesUser.test.ts
 test/features/prototype/PrototypeAdbReverseManager.test.ts
 test/features/prototype/PrototypeCommitGenerations.test.ts
 test/features/prototype/PrototypeEventBuffer.test.ts
+test/features/prototype/PrototypeHttpExecutor.egress.test.ts
 test/features/prototype/PrototypeHttpExecutor.test.ts
 test/features/prototype/PrototypeShownSpecs.test.ts
 test/features/prototype/PrototypeStatusStore.test.ts
@@ -895,6 +897,7 @@ test/features/prototype/prototypeChecks.test.ts
 test/features/prototype/prototypeComponents.test.ts
 test/features/prototype/prototypeDataActions.test.ts
 test/features/prototype/prototypeDataWriteRevision.test.ts
+test/features/prototype/prototypeEgressPolicy.test.ts
 test/features/prototype/prototypeEmitContext.test.ts
 test/features/prototype/prototypeFlowGrid.test.ts
 test/features/prototype/prototypeGateContainerCoverage.test.ts
@@ -906,6 +909,7 @@ test/features/prototype/prototypeMenus.test.ts
 test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeNodeContractParity.test.ts
 test/features/prototype/prototypePatch.test.ts
+test/features/prototype/prototypePinnedTransport.test.ts
 test/features/prototype/prototypePlatformNotes.test.ts
 test/features/prototype/prototypeRefresh.test.ts
 test/features/prototype/prototypeRepeat.test.ts
@@ -1642,7 +1646,6 @@ test/utils/float32ToJavaString.test.ts
 test/utils/foldableRecordingSpan.test.ts
 test/utils/foldableTapTarget.test.ts
 test/utils/formatStructuredToolError.test.ts
-test/utils/hierarchyFingerprint.property.test.ts
 test/utils/image-utils.test.ts
 test/utils/image/ImageTransformer.test.ts
 test/utils/image/backend/resolveImageBackend.property.test.ts

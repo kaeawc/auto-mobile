@@ -77,15 +77,17 @@ export function assignDuplicateIndexes(
     }
   }
   const selectionViewport = serverConfig.isRawElementSearchEnabled() ? undefined : viewport;
+  // Reuse the key-free search/ID namespace; retain `nodes` for ancestry indexes.
+  const searchedNodes = nodes?.filter((node) => !isImeKeyEntry(node));
   // A single exact source cannot produce multiple selectable targets. Count
   // potential exact matches once; uncertain/fallback selectors still resolve
   // over the complete capture so hidden promoted matches keep their slots.
-  const exactCounts = exactSelectorMatchCounts(nodes ?? []);
+  const exactCounts = exactSelectorMatchCounts(searchedNodes);
   for (const [elementId, group] of byElementId) {
     if (canSkipSelectorGroup(group, exactCounts.byId.get(elementId), nodes !== undefined)) {
       continue;
     }
-    indexSelectorGroup(group, { elementId }, selectionViewport, nodes);
+    indexSelectorGroup(group, { elementId }, selectionViewport, nodes, searchedNodes);
   }
   for (const [text, group] of byLabel) {
     if (
@@ -98,7 +100,7 @@ export function assignDuplicateIndexes(
     ) {
       continue;
     }
-    indexSelectorGroup(group, { text }, selectionViewport, nodes, true);
+    indexSelectorGroup(group, { text }, selectionViewport, nodes, searchedNodes, true);
   }
 }
 
@@ -115,13 +117,10 @@ function canSkipSelectorGroup(
 }
 
 /** Conservative raw-match counts, before promotion, visibility and copy dedup. */
-function exactSelectorMatchCounts(nodes: readonly SearchableEntry[]) {
+function exactSelectorMatchCounts(nodes: readonly SearchableEntry[] = []) {
   const byId = new Map<string, number>();
   const byText = new Map<string, number>();
   for (const node of nodes) {
-    if (isImeKeyEntry(node)) {
-      continue;
-    }
     for (const id of new Set([node.nativeId, node.nodeKey])) {
       if (id !== undefined) {
         byId.set(id, (byId.get(id) ?? 0) + 1);
@@ -145,13 +144,14 @@ function indexSelectorGroup(
   selector: ResolverSelector,
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
   nodes: readonly SearchableEntry[] | undefined,
+  searchedNodes: readonly SearchableEntry[] | undefined,
   labelOnly = false,
 ): void {
   const candidates = nodes
-    ? new ElementResolver().resolve({ id: "skeleton", nodes }, selector, {
+    ? new ElementResolver().resolve({ id: "skeleton", nodes, searchedNodes }, selector, {
         action: "tap",
         viewport,
-        excludeImeKeys: true,
+        excludeImeKeys: false,
       }).candidates
     : undefined;
   if ((candidates?.length ?? group.length) < 2) {

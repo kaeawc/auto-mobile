@@ -719,6 +719,7 @@ describe("tapOn display verification", () => {
     test(`ensureChecked floor is the tap time in the device clock with one device read (skew ${skewMs}ms, #9879)`, async () => {
       const h = harness(true, { checked: false });
       let deviceClockReads = 0;
+      h.executor.setDeviceTimestampSource("device-ms");
       h.executor.getDeviceTimestampMs = async () => {
         deviceClockReads++;
         return h.timer.now() + skewMs;

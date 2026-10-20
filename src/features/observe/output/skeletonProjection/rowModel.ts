@@ -1,6 +1,6 @@
 import type { Element } from "../../../../models/Element";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../../models/ObserveResult";
-import { toSearchable } from "../../../utility/SearchableNode";
+import { searchableNativeId } from "../../../utility/SearchableNode";
 import type { ElementProvenance } from "../elementProvenance";
 export type ObserveElements = NonNullable<ObserveResult["elements"]>;
 
@@ -16,7 +16,7 @@ export function nonEmptyString(value: unknown): string | undefined {
  * owners that do not enable `testTagsAsResourceId`.
  */
 export function deriveId(el: Element): string | undefined {
-  return toSearchable(el).elementId;
+  return searchableNativeId(el) ?? nonEmptyString(el["view-id"]);
 }
 
 /** Flatten an element's object bounds to the compact `[left, top, right, bottom]` tuple. */

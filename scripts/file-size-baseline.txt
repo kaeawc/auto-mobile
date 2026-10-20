@@ -5,5 +5,4 @@
 1693	src/features/observe/output/SkeletonProjection.ts
 1979	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
-1636	src/server/finalizeToolResponse.ts
 2185	src/server/videoRecordingManager.ts

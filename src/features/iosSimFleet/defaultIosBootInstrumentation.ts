@@ -6,12 +6,17 @@ import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { Timer } from "../../utils/SystemTimer";
 import { isBootCapacityGateEnabled } from "../bootAdmission/BootAdmissionGate";
 import { InMemoryBootDurationHistory, type BootDurationHistory } from "./BootDurationHistory";
-import { IosSimCapacityGate, type SimulatorCapacityGate } from "./CapacityGate";
+import {
+  IosSimCapacityGate,
+  type SimulatorCapacityGate,
+  type IosSimulatorOwnershipReader,
+} from "./CapacityGate";
 import { IosSimFleetCostCollector } from "./FleetCostCollector";
 import { CommandFleetHostSource } from "./FleetHostSource";
 import { FleetBootInstrumentation, type IosBootInstrumentation } from "./IosBootInstrumentation";
 
 export interface IosSimCapacityGateOptions {
+  ownership?: IosSimulatorOwnershipReader;
   simctl: Pick<SimCtl, "executeCommandArgs">;
   timer: Timer;
   history: BootDurationHistory;
@@ -45,7 +50,7 @@ export function createIosSimCapacityGate(
       timer,
     ),
     timer,
-    { env },
+    { env, ownership: options.ownership },
   );
 }
 

@@ -75,6 +75,7 @@ test/daemon/appearanceSyncOff.test.ts
 test/daemon/appearanceSyncSchedulerResilience.test.ts
 test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
+test/daemon/auxiliarySocketDegradation.test.ts
 test/daemon/boundSessionLossMessage.test.ts
 test/daemon/canonicalPixels.property.test.ts
 test/daemon/canonicalPixels.test.ts
@@ -95,6 +96,7 @@ test/daemon/connectionOwnership.test.ts
 test/daemon/crossDaemonCorruptClaim.test.ts
 test/daemon/crossDaemonSystemUiRecoveryClaim.test.ts
 test/daemon/daemonCapturedDisconnectArguments.test.ts
+test/daemon/daemonCleanupHandoff.test.ts
 test/daemon/daemonClientNotifications.test.ts
 test/daemon/daemonCommandRouting.test.ts
 test/daemon/daemonCompactMetadataReuse.test.ts
@@ -803,8 +805,10 @@ test/features/iosSimFleet/capacityCheckFreshListing.test.ts
 test/features/iosSimFleet/capacityCheckSampleBounds.test.ts
 test/features/iosSimFleet/capacityHostSnapshotFailure.test.ts
 test/features/iosSimFleet/failedBootUdidExternal.test.ts
+test/features/iosSimFleet/inFlightBootRssSizing.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
+test/features/iosSimFleet/iosSimulatorOwnership.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
 test/features/memory/MemoryMetricsCollector.test.ts
 test/features/navigation/DefaultPathOptimizer.test.ts

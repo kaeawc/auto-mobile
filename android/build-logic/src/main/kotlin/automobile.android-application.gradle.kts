@@ -45,6 +45,11 @@ extensions.configure<ApplicationExtension> {
     abortOnError = true
     warningsAsErrors = true
     checkDependencies = false
+    // These checks compare against what is published upstream today (newer Gradle/AGP/library
+    // versions, current target API), so their findings change over time and can never be
+    // baselined stably. Dependabot owns version freshness.
+    disable +=
+      setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable", "OldTargetApi")
   }
 
   compileOptions {

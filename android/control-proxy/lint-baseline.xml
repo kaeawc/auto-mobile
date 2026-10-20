@@ -23,83 +23,13 @@
             column="34"/>
     </issue>
 
-    <issue
-        id="AndroidGradlePluginVersion"
-        message="A newer version of Gradle than 9.8.1 is available: 9.8.2"
-        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-9.8.1-bin.zip"
-        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/wrapper/gradle-wrapper.properties"
-            line="3"
-            column="17"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of org.jetbrains.kotlin:kotlin-stdlib than 2.2.21 is available: 2.4.21"
-        errorLine1="build-kotlin-consumer = &quot;2.2.21&quot;           # Published runner/test-plan consumer floor"
-        errorLine2="                        ~~~~~~~~">
-        <location
-            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
-            line="17"
-            column="25"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.window:window than 1.5.0 is available: 1.5.1"
-        errorLine1="androidx-window = &quot;1.5.0&quot;"
-        errorLine2="                  ~~~~~~~">
-        <location
-            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
-            line="33"
-            column="19"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.navigation3:navigation3-runtime than 1.1.5 is available: 1.2.0"
-        errorLine1="navigation3 = &quot;1.1.5&quot;              # Used in playground app"
-        errorLine2="              ~~~~~~~">
-        <location
-            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
-            line="60"
-            column="15"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.navigation3:navigation3-ui than 1.1.5 is available: 1.2.0"
-        errorLine1="navigation3 = &quot;1.1.5&quot;              # Used in playground app"
-        errorLine2="              ~~~~~~~">
-        <location
-            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
-            line="60"
-            column="15"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of org.jetbrains.kotlinx:kotlinx-serialization-json than 1.11.0 is available: 1.12.0"
-        errorLine1="kotlinx-serialization-json = &quot;1.11.0&quot;"
-        errorLine2="                             ~~~~~~~~">
-        <location
-            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
-            line="64"
-            column="30"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of org.jetbrains.compose than 1.12.1 is available: 1.12.2"
-        errorLine1="compose-multiplatform = &quot;1.12.1&quot;"
-        errorLine2="                        ~~~~~~~~">
-        <location
-            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
-            line="77"
-            column="25"/>
-    </issue>
-
+    
+    
+    
+    
+    
+    
+    
     <issue
         id="ConfigurationScreenWidthHeight"
         message="Using Configuration.screenWidthDp instead of LocalWindowInfo.current.containerSize"

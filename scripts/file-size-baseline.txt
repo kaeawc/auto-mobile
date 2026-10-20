@@ -20,7 +20,6 @@
 2135	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1291	src/features/prototype/prototypeSpec.ts
-2365	src/features/systemTray/systemTrayHelpers.ts
 1399	src/features/utility/ElementResolver.ts
 1502	src/features/video/FfmpegVideoProcessingBackend.ts
 1516	src/features/webrtc/IosH264Source.ts
@@ -30,9 +29,7 @@
 1979	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 1636	src/server/finalizeToolResponse.ts
-2267	src/server/interactionTools.ts
 1323	src/server/planExecutionOrchestrator.ts
-2848	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
 2185	src/server/videoRecordingManager.ts
 1427	src/server/videoRecordingTools.ts

@@ -1,4 +1,5 @@
 import type { BootedDevice, DisplayRef, ObserveResult } from "../../models";
+import { actionClockSkewCache } from "../action/ActionClockSkewCache";
 import {
   POSTURE_PANEL_ROLES,
   panelKeyForFingerprint,
@@ -543,6 +544,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   }
 
   reset(deviceId: string): void {
+    actionClockSkewCache.invalidate(deviceId);
     this.panels.delete(deviceId);
     this.observationIds.delete(deviceId);
     this.panelRevisions.delete(deviceId);

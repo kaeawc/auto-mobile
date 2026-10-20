@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import fs from "fs/promises";
 import path from "path";
 import { PNG } from "pngjs";
@@ -11,6 +11,8 @@ import { getMcpServerVersion, releaseVersion } from "../../src/utils/mcpVersion"
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeImageBackend } from "../fakes/FakeImageBackend";
+
+afterEach(() => mock.restore());
 
 // These spies cover the UTF-8 overloads used by PlanSerializer.
 const logFileSystem: {
@@ -165,29 +167,27 @@ describe("Plan export characterization", () => {
 });
 
 function expectSummary(raw: Record<string, unknown>, texts: string[], ids: string[]): void {
-  const now = spyOn(Date, "now").mockReturnValue(123);
-  try {
-    const expected = {
-      capturedAtMs: 123,
-      activeWindow: raw.activeWindow,
-      awaitTimeout: typeof raw.awaitTimeout === "boolean" ? raw.awaitTimeout : undefined,
-      awaitedElement: raw.awaitedElement,
-      accessibilityState: raw.accessibilityState,
-      viewHierarchy: raw.viewHierarchy,
-      rawViewHierarchy: raw.rawViewHierarchy,
-      visibleTextsSample: texts,
-      resourceIdsSample: ids,
-      observeError: typeof raw.error === "string" ? raw.error : undefined,
-    };
-    const actual = summarizeObserveResultForFailure(raw);
-    expect(actual).toEqual(expected);
-    expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
-  } finally {
-    now.mockRestore();
-  }
+  const expected = {
+    capturedAtMs: 123,
+    activeWindow: raw.activeWindow,
+    awaitTimeout: typeof raw.awaitTimeout === "boolean" ? raw.awaitTimeout : undefined,
+    awaitedElement: raw.awaitedElement,
+    accessibilityState: raw.accessibilityState,
+    viewHierarchy: raw.viewHierarchy,
+    rawViewHierarchy: raw.rawViewHierarchy,
+    visibleTextsSample: texts,
+    resourceIdsSample: ids,
+    observeError: typeof raw.error === "string" ? raw.error : undefined,
+  };
+  const actual = summarizeObserveResultForFailure(raw);
+  expect(actual).toEqual(expected);
+  expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
 }
 
 describe("Failure summary characterization", () => {
+  beforeEach(() => {
+    spyOn(Date, "now").mockReturnValue(123);
+  });
   test("preserves complete payload, bucket order, deduplication, clipping and malformed entries", () => {
     const longText = "t".repeat(301);
     const longId = "i".repeat(201);

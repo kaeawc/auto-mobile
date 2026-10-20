@@ -789,6 +789,25 @@ class FilterTelemetryServer extends TelemetryPushSocketServer {
   constructor(timer: FakeTimer) {
     super("/fake/telemetry-filter.sock", timer);
   }
+  addSubscriber(filter: Partial<TelemetryFilter> = {}, backfilling = false): FakeSocket {
+    const socket = new FakeSocket();
+    const subscriptionId = `telemetry-${++this.subscriptionCounter}`;
+    this.subscribers.set(subscriptionId, {
+      socket,
+      subscriptionId,
+      lastActivity: 0,
+      filter: {
+        category: null,
+        deviceSessionUuid: null,
+        deviceId: null,
+        sessionId: null,
+        ...filter,
+      },
+      backfilling,
+      drainPending: false,
+    });
+    return socket;
+  }
   parse(request: Record<string, unknown>) {
     return this.parseSubscriptionFilter(request);
   }
@@ -840,5 +859,48 @@ describe("TelemetryPushSocketServer serial-scoped subscribe (#10143)", () => {
     expect(() => server.parse({ deviceId: "emulator-9999" })).toThrow(/does not identify a live/);
     expect(() => server.parse({ deviceId: "  " })).toThrow(/non-blank/);
     expect(() => server.parse({ deviceId: 5 })).toThrow(/non-blank/);
+  });
+});
+
+describe("TelemetryPushSocketServer performance demand", () => {
+  let server: FilterTelemetryServer;
+  let resolver: FakeDeviceSessionResolver;
+  beforeEach(() => {
+    resolver = new FakeDeviceSessionResolver().bind("device", "uuid");
+    server = new FilterTelemetryServer(new FakeTimer());
+    server.setDeviceSessionResolver(resolver);
+  });
+
+  test("no subscribers means no demand", () => {
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+  });
+
+  for (const category of [null, "performance", "network"]) {
+    for (const deviceSessionUuid of [null, "uuid", "other"]) {
+      test(`category=${category}, uuid=${deviceSessionUuid}`, () => {
+        server.addSubscriber({ category, deviceSessionUuid, sessionId: "unknown-at-demand-time" });
+        expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(
+          category !== "network" && deviceSessionUuid !== "other",
+        );
+      });
+    }
+  }
+
+  test("ignores destroyed and backfilling sockets while finding a live match", () => {
+    server.addSubscriber({}, true);
+    server.addSubscriber().destroy();
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+    server.addSubscriber({ category: "performance" });
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+  });
+
+  test("resolves the current epoch and keeps null uuid subscriptions global", () => {
+    server.addSubscriber({ deviceSessionUuid: "uuid", deviceId: "irrelevant-backfill-serial" });
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(true);
+    resolver.bind("device", "new-uuid");
+    expect(server.hasSubscriberForPerformanceTelemetry("device")).toBe(false);
+    expect(server.hasSubscriberForPerformanceTelemetry("unresolved")).toBe(false);
+    server.addSubscriber();
+    expect(server.hasSubscriberForPerformanceTelemetry("unresolved")).toBe(true);
   });
 });

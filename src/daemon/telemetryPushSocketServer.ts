@@ -158,6 +158,24 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     this.deviceSessionResolver = resolver;
   }
 
+  /** Whether a live subscriber could receive performance telemetry for this device. */
+  hasSubscriberForPerformanceTelemetry(deviceId: string): boolean {
+    const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
+    for (const subscriber of this.subscribers.values()) {
+      const { filter } = subscriber;
+      // The event's sessionId is unknown at demand time; ignoring it only over-counts demand.
+      if (
+        !subscriber.backfilling &&
+        !subscriber.socket.destroyed &&
+        (filter.category === null || filter.category === "performance") &&
+        (filter.deviceSessionUuid === null || filter.deviceSessionUuid === deviceSessionUuid)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Stamp the live `deviceSessionUuid` for an event's serial (epic #5256). */
   private stampDeviceSession(event: TelemetryEvent): TelemetryEvent {
     const deviceSessionUuid = event.deviceId

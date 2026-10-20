@@ -80,6 +80,7 @@ import {
   type DaemonProcessBirthTimeProvider,
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
+import { DaemonHttpTokenLifecycle } from "./daemonCore/DaemonHttpTokenLifecycle";
 import type { DaemonStateWrites } from "./daemonContext";
 import { DaemonBroker } from "./daemonCore/DaemonBroker";
 import { DaemonSessions } from "./daemonCore/DaemonSessions";
@@ -125,16 +126,9 @@ export type {
   DaemonProcessGenerationTokenProvider,
 };
 
-/**
- * Main daemon process
- *
- * Combines:
- * - MCP server in Streamable HTTP mode
- * - Unix socket server for CLI communication
- * - PID file management
- * - Graceful shutdown handling
- */
+/** Composes authenticated HTTP MCP ingress, control sockets, state and lifecycle services. */
 export class Daemon {
+  private readonly httpToken: DaemonHttpTokenLifecycle;
   private pidFileWritten: boolean = false;
   private stoppingRecordings: Set<string> = new Set();
   private readonly broker: DaemonBroker;
@@ -200,6 +194,7 @@ export class Daemon {
   private rejectStartupCompletion!: (reason: unknown) => void;
 
   private readonly mcpServices = new DaemonMcpServices({
+    httpToken: () => this.httpToken.value,
     iosDoctorDependencies: this.iosDoctorDependencies,
     debug: () => this.debug,
     acceptanceDiscoveryCapability: () => this.acceptanceDiscoveryCapability,
@@ -384,6 +379,11 @@ export class Daemon {
     } = resolveDaemonDependencies(dependencies);
     this.daemonState = retained.daemonState;
     this.httpServerFactory = retained.httpServerFactory;
+    this.httpToken = new DaemonHttpTokenLifecycle(
+      retained.httpTokenStore,
+      dependencies.idGenerator,
+      retained.httpToken,
+    );
     this.liveDaemonSessionIdProvider = retained.liveDaemonSessionIdProvider;
     this.avdManagerFactory = retained.avdManagerFactory;
     this.iosDeviceVerifier = retained.iosDeviceVerifier;
@@ -608,6 +608,8 @@ export class Daemon {
       navigationGraphBridge: this.navigationGraphBridge,
 
       httpIngress: this.httpIngress.testHooks,
+      prepareHttpToken: () => this.httpToken.prepare(),
+      publishHttpToken: () => this.httpToken.publish(),
 
       /** Installs (or clears) a socket server double whose members the shutdown path calls. */
       setSocketServer: (server: Partial<DaemonSocketServer> | null): void => {
@@ -767,7 +769,9 @@ export class Daemon {
       setVideoRecordingManagerDependencies: (...args) =>
         defaultDaemonRecordingHost.setVideoRecordingManagerDependencies(...args),
       enterDaemonProcess: (...args) => this.enterDaemonProcess(...args),
-      startHttpIngress: (...args) => this.startHttpIngress(...args),
+      prepareHttpToken: () => this.httpToken.prepare(),
+      publishHttpToken: () => this.httpToken.publish(),
+      startHttpIngress: () => this.startup.startHttpIngress(),
       bindControlSocket: (...args) => this.bindControlSocket(...args),
       startServicesAfterSocketBind: (...args) => this.startServicesAfterSocketBind(...args),
       startMaintenanceMonitors: (...args) => this.startMaintenanceMonitors(...args),
@@ -938,6 +942,7 @@ export class Daemon {
       services,
       lifecycle,
       stopManagedAdbServer: () => daemon.stopManagedAdbServer,
+      removeHttpToken: () => this.httpToken.remove(),
       stop: (...args) => this.stop(...args),
       getDaemonFileCleanupOptions: (...args) => this.identity.getDaemonFileCleanupOptions(...args),
       closeManagedExecutionRelease: (...args) => this.broker.closeManagedExecutionRelease(...args),
@@ -1036,9 +1041,6 @@ export class Daemon {
   }
   private persistPidFileData(...args: Parameters<DaemonIdentity["persistPidFileData"]>) {
     return this.identity.persistPidFileData(...args);
-  }
-  private startHttpIngress(...args: Parameters<DaemonStartup["startHttpIngress"]>) {
-    return this.startup.startHttpIngress(...args);
   }
   private bindControlSocket(...args: Parameters<DaemonStartup["bindControlSocket"]>) {
     return this.startup.bindControlSocket(...args);

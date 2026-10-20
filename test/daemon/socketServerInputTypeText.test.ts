@@ -39,16 +39,18 @@ function request(submit?: boolean, append = false, platform = "ios"): DaemonRequ
 
 function fakeIosClient() {
   // Only the two text methods can run; construction cannot start a real client.
-  const client = Object.create(IOSCtrlProxyClient.prototype);
-  const setText = spyOn(client, "requestSetText").mockResolvedValue({
+  const client: IOSCtrlProxyClient = Object.create(IOSCtrlProxyClient.prototype);
+  const setText = mock<typeof client.requestSetText>().mockResolvedValue({
     success: true,
     totalTimeMs: 0,
   });
-  const ime = spyOn(client, "requestImeAction").mockResolvedValue({
+  const ime = mock<typeof client.requestImeAction>().mockResolvedValue({
     success: true,
     action: "done",
     totalTimeMs: 0,
   });
+  client.requestSetText = setText;
+  client.requestImeAction = ime;
   spyOnIosClientInstance(client);
   return { setText, ime };
 }

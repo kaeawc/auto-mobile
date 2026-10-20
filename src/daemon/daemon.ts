@@ -865,23 +865,22 @@ export class Daemon {
     identity: DaemonIdentityState,
     lifecycle: DaemonLifecycleState,
   ): DaemonMaintenance {
-    const daemon = this;
     return new DaemonMaintenance({
       services,
-      identity,
+      identityState: identity,
+      identity: this.identity,
       lifecycle,
-      healthCheck: () => daemon.healthCheck,
-      setHealthCheck: (value) => (daemon.healthCheck = value),
-      observationStreamHealth: () => daemon.observationStreamHealth,
+      healthCheck: () => this.healthCheck,
+      setHealthCheck: (value) => (this.healthCheck = value),
+      observationStreamHealth: () => this.observationStreamHealth,
       setObservationStreamHealth: (health) => (this.observationStreamHealth = health),
-      lastDatabaseHealthFailure: () => daemon.lastDatabaseHealthFailure,
-      setLastDatabaseHealthFailure: (value) => (daemon.lastDatabaseHealthFailure = value),
-      recoverFromDatabaseHealthFailure: () => daemon.recoverFromDatabaseHealthFailure,
+      lastDatabaseHealthFailure: () => this.lastDatabaseHealthFailure,
+      setLastDatabaseHealthFailure: (value) => (this.lastDatabaseHealthFailure = value),
+      recoverFromDatabaseHealthFailure: () => this.recoverFromDatabaseHealthFailure,
       attemptRecovery: (...args) => this.attemptRecovery(...args),
       sessionExecutionProbe: (...args) => this.sessions.sessionExecutionProbe(...args),
       cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),
       republishIdentity: (...args) => this.identity.republishIdentity(...args),
-      recordControlSocketIdentity: () => this.identity.recordControlSocketIdentity(),
       configureDeviceDataStreamServer: (...args) =>
         this.streams.configureDeviceDataStreamServer(...args),
     });

@@ -339,7 +339,6 @@ describe("auxiliary stream degradation", () => {
     const unused = (): never => {
       throw new Error("unexpected maintenance side effect");
     };
-    const ownership = { recordControlSocketIdentity: () => identity.recordControlSocketIdentity() };
     const host: DaemonMaintenanceHost = {
       services: {
         timer: () => timer,
@@ -358,7 +357,8 @@ describe("auxiliary stream degradation", () => {
         devicePool: unused,
         databaseHealthProbe: unused,
       },
-      identity: {
+      identity: { recordControlSocketIdentity: () => identity.recordControlSocketIdentity() },
+      identityState: {
         incumbentOwnerGuard: () => ownerGuard,
         generationStartedAt: () => 1,
         processStartedAt: () => 1,
@@ -396,7 +396,6 @@ describe("auxiliary stream degradation", () => {
       cancelAndReleaseSession: unused,
       republishIdentity: unused,
       configureDeviceDataStreamServer: unused,
-      ...ownership,
     };
     // A successful fake bind replaces the inode; no real listener or path is touched.
     const start = spyOn(UnixSocketServer.prototype, "start").mockImplementation(async () => {

@@ -16,7 +16,7 @@ class InsertTextOutcomeTest {
 
   @Test
   fun `set selection false on fallback path is success with warning`() {
-    val plan = planInsertText("", false, -1, -1, "X")
+    val plan = planInsertText(InsertTextSnapshot("", false, -1, -1), textToInsert = "X")
     fun outcomeForNode(advertisesSelection: Boolean): InsertTextOutcome {
       val setTextSucceeded = true
       val selectionAttempted = setTextSucceeded && advertisesSelection

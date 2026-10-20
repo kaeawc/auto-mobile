@@ -101,6 +101,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
 import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import dev.jasonpearson.automobile.protocol.RequestGlobalAction
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
@@ -2355,13 +2356,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
     gestureController.performTapCoordinates(
-      requestId,
-      x,
-      y,
-      50L,
-      frameContext,
-      displayId,
-      doubleTap = true,
+      RequestTapCoordinates(
+        requestId = requestId,
+        x = x,
+        y = y,
+        duration = 50L,
+        frameContext = frameContext,
+        displayId = displayId,
+        doubleTap = true,
+      ),
     )
   }
 
@@ -2374,7 +2377,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    gestureController.performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
+    gestureController.performTapCoordinates(
+      RequestTapCoordinates(
+        requestId = requestId,
+        x = x,
+        y = y,
+        duration = duration,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
+    )
   }
 
   override suspend fun requestSwipe(request: RequestSwipe) {
@@ -2388,7 +2400,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
-    gestureController.performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
+    gestureController.performSwipe(
+      RequestSwipe(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        duration = duration,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
+    )
   }
 
   override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
@@ -2402,15 +2425,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     gestureController.performTwoFingerSwipe(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      offset,
-      displayId,
-      request.fingerCount,
+      RequestTwoFingerSwipe(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        duration = duration,
+        offset = offset,
+        displayId = displayId,
+        fingerCount = request.fingerCount,
+      ),
     )
   }
 
@@ -2428,16 +2453,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
     gestureController.performDrag(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      frameContext,
-      displayId,
+      RequestDrag(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        pressDurationMs = pressDurationMs,
+        dragDurationMs = dragDurationMs,
+        holdDurationMs = holdDurationMs,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
     )
   }
 
@@ -2452,25 +2479,29 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     gestureController.performPinch(
-      requestId,
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      displayId,
+      RequestPinch(
+        requestId = requestId,
+        centerX = centerX,
+        centerY = centerY,
+        distanceStart = distanceStart,
+        distanceEnd = distanceEnd,
+        rotationDegrees = rotationDegrees,
+        duration = duration,
+        displayId = displayId,
+      ),
     )
   }
 
   override suspend fun requestGestureStart(request: RequestGestureStart) {
     gestureController.startStream(
-      request.requestId,
-      request.gestureId,
-      request.x,
-      request.y,
-      request.displayId,
-      CommandOriginContext.currentClient(),
+      RequestGestureStart(
+        requestId = request.requestId,
+        gestureId = request.gestureId,
+        x = request.x,
+        y = request.y,
+        displayId = request.displayId,
+      ),
+      requester = CommandOriginContext.currentClient(),
     )
   }
 
@@ -2491,11 +2522,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     cancel: Boolean,
   ) {
     gestureController.endStream(
-      requestId,
-      gestureId,
-      x,
-      y,
-      cancel,
+      RequestGestureEnd(
+        requestId = requestId,
+        gestureId = gestureId,
+        x = x,
+        y = y,
+        cancel = cancel,
+      ),
       requester = CommandOriginContext.currentClient(),
     )
   }
@@ -3106,10 +3139,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val eventPackage = event.packageName?.toString()
     val ownWindowDecision =
       ownWindowEventDecision(
-        eventPackage,
-        packageName,
-        event.windowId,
-        ownWindowTypeMemo,
+        OwnWindowEvent(eventPackage, packageName, event.windowId),
+        memo = ownWindowTypeMemo,
         appLayerShowing = {
           ::prototypeController.isInitialized && prototypeController.isAppLayerShowing
         },

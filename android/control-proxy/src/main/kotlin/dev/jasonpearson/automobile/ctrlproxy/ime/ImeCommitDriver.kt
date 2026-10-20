@@ -148,14 +148,16 @@ class ImeCommitDriver(
    * restoration as a backstop.
    */
   fun commit(
-    text: String,
-    priorImeId: String?,
+    request: ImeCommitRequest,
     deadlineMs: Long = Long.MAX_VALUE,
-    isCancelled: () -> Boolean = { false },
-    delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
     hardDeadlineMs: Long = Long.MAX_VALUE,
     onComplete: (ImeCommitResult) -> Unit,
   ) {
+    val text = request.text
+    val priorImeId = request.priorImeId
+    val isCancelled = request.isCancelled
+    val delivery = request.delivery
+
     check(completion == null) { "An IME commit driver handles one request" }
     completion = onComplete
     restoreId = priorImeId
@@ -331,13 +333,15 @@ class ImeCommitDriver(
       val lastResumeConfirmed = dispatched.indexOfLast { it.requestPosition <= lastResumePosition }
       val decision =
         reconcileDecision(
-          postDispatch,
-          startedByRestart,
-          baseline,
-          now,
-          expected,
-          // Express the last resent request position in the remaining expectation's indices.
-          lastResumeConfirmed,
+          ImeReconciliationState(
+            postDispatch = postDispatch,
+            startedByRestart = startedByRestart,
+            baseline = baseline,
+            now = now,
+            dispatched = expected,
+            // Express the last resent request position in the remaining expectation's indices.
+            lastResumeConfirmed = lastResumeConfirmed,
+          ),
         )
       generation = sink.connectionGeneration()
       val delta = editorDelta(now)
@@ -806,14 +810,14 @@ class ImeCommitDriver(
     }
 
     /** Treat editor consumption separately from losses with an advancing visible prefix. */
-    internal fun reconcileDecision(
-      postDispatch: Boolean,
-      startedByRestart: Boolean,
-      baseline: String?,
-      now: String?,
-      dispatched: List<String>,
-      lastResumeConfirmed: Int = -1,
-    ): Reconciliation {
+    internal fun reconcileDecision(state: ImeReconciliationState): Reconciliation {
+      val postDispatch = state.postDispatch
+      val startedByRestart = state.startedByRestart
+      val baseline = state.baseline
+      val now = state.now
+      val dispatched = state.dispatched
+      val lastResumeConfirmed = state.lastResumeConfirmed
+
       val delta = editorDelta(baseline, now)
       val confirmed = delta?.let { confirmedUnits(it, dispatched) }
       return when {

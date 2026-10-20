@@ -135,9 +135,11 @@ class ImeCommitDriverTraceTest {
       )
     var result: ImeCommitResult? = null
     driver.commit(
-      text,
-      "prior",
-      delivery = if (scenario == "keys") ImeTextDelivery.KEY_EVENTS else ImeTextDelivery.COMMIT,
+      ImeCommitRequest(
+        text,
+        "prior",
+        delivery = if (scenario == "keys") ImeTextDelivery.KEY_EVENTS else ImeTextDelivery.COMMIT,
+      ),
     ) {
       result = it
     }

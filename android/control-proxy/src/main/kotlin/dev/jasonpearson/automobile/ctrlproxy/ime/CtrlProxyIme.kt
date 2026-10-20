@@ -346,32 +346,33 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         finish(ImeCommitResult(success = false, error = reason))
       }
       awaitInputConnection(
-        text = request.text,
-        priorImeId = restoreId,
-        driver = driver,
-        deadlineMs = connectionDeadlineMs(SystemClock.uptimeMillis(), request.requestDeadlineMs),
-        generation = generation,
-        isCancelled = request.isCancelled,
-        delivery = request.delivery,
-        commitBudgetMs = commitTimeoutMs(request.timeoutMs, ImeGraphemes.split(request.text).size),
-        requestDeadlineMs = request.requestDeadlineMs,
+        request.copy(priorImeId = restoreId),
+        ImeConnectionWait(
+          driver = driver,
+          deadlineMs = connectionDeadlineMs(SystemClock.uptimeMillis(), request.requestDeadlineMs),
+          generation = generation,
+          commitBudgetMs =
+            commitTimeoutMs(request.timeoutMs, ImeGraphemes.split(request.text).size),
+        ),
         onResult = ::finish,
       )
     }
   }
 
   private fun awaitInputConnection(
-    text: String,
-    priorImeId: String?,
-    driver: ImeCommitDriver,
-    deadlineMs: Long,
-    generation: Long,
-    isCancelled: () -> Boolean,
-    delivery: ImeTextDelivery,
-    commitBudgetMs: Long,
-    requestDeadlineMs: Long,
+    request: ImeCommitRequest,
+    wait: ImeConnectionWait,
     onResult: (ImeCommitResult) -> Unit,
   ) {
+    val priorImeId = request.priorImeId
+    val isCancelled = request.isCancelled
+    val delivery = request.delivery
+    val requestDeadlineMs = request.requestDeadlineMs
+    val driver = wait.driver
+    val deadlineMs = wait.deadlineMs
+    val generation = wait.generation
+    val commitBudgetMs = wait.commitBudgetMs
+
     if (generation != commitGeneration) return
     if (isCancelled()) {
       onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
@@ -406,11 +407,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         return
       }
       driver.commit(
-        text,
-        priorImeId,
-        SystemClock.uptimeMillis() + commitBudgetMs,
-        isCancelled,
-        delivery,
+        request,
+        deadlineMs = SystemClock.uptimeMillis() + commitBudgetMs,
         hardDeadlineMs = driverDeadlineMs(SystemClock.uptimeMillis(), requestDeadlineMs),
       ) { result ->
         onResult(result)
@@ -428,18 +426,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     }
     mainHandler.postDelayed(
       {
-        awaitInputConnection(
-          text,
-          priorImeId,
-          driver,
-          deadlineMs,
-          generation,
-          isCancelled,
-          delivery,
-          commitBudgetMs,
-          requestDeadlineMs,
-          onResult,
-        )
+        awaitInputConnection(request, wait, onResult)
       },
       minOf(INPUT_CONNECTION_POLL_MS, deadlineMs - SystemClock.uptimeMillis()).coerceAtLeast(0),
     )

@@ -96,7 +96,8 @@ class CtrlProxyGestureDispatchPinTest {
   fun `multi finger swipe dispatches one parallel stroke per finger`() = runTest {
     multiFinger(fingerCount = 3, x2 = 300.0, y2 = 400.0)
     val gesture = shadow.attempts.single().gesture
-    val expected = computeMultiFingerStrokes(100.0, 200.0, 300.0, 400.0, 20, 3)
+    val expected =
+      computeMultiFingerStrokes(MultiFingerStrokeGeometry(100.0, 200.0, 300.0, 400.0, 20, 3))
     assertEquals(3, gesture.strokeCount)
     expected.forEachIndexed { index, finger ->
       val stroke = gesture.getStroke(index)

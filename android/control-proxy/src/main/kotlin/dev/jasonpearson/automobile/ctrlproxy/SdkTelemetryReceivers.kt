@@ -42,12 +42,14 @@ internal class NavigationEventReceiver(
           if (
             !sdkEventBatchProcessor()
               .enqueueNavigationEvent(
-                destination = event.destination,
-                source = event.source.name,
-                arguments = event.arguments ?: emptyMap(),
-                metadata = event.metadata ?: emptyMap(),
-                applicationId = event.applicationId,
-                timestamp = event.timestamp,
+                NavigationEventInput(
+                  destination = event.destination,
+                  source = event.source.name,
+                  arguments = event.arguments ?: emptyMap(),
+                  metadata = event.metadata ?: emptyMap(),
+                  applicationId = event.applicationId,
+                  timestamp = event.timestamp,
+                ),
               )
           ) {
             Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
@@ -77,12 +79,14 @@ internal class NavigationEventReceiver(
     if (
       !sdkEventBatchProcessor()
         .enqueueNavigationEvent(
-          destination = destination,
-          source = source,
-          arguments = arguments,
-          metadata = metadata,
-          applicationId = applicationId,
-          timestamp = timeProvider.currentTimeMillis(),
+          NavigationEventInput(
+            destination = destination,
+            source = source,
+            arguments = arguments,
+            metadata = metadata,
+            applicationId = applicationId,
+            timestamp = timeProvider.currentTimeMillis(),
+          ),
         )
     ) {
       Log.w(TAG, "Dropping navigation event because the SDK event queue is full")

@@ -137,7 +137,11 @@ object AutoMobileCrashes {
         originalHandler?.uncaughtException(thread, throwable)
       } catch (t: Throwable) {
         // Original handler threw — ensure process terminates
-        Runtime.getRuntime().exit(1)
+        try {
+          android.util.Log.w(TAG, "Host crash handler failed", t)
+        } finally {
+          Runtime.getRuntime().exit(1)
+        }
       }
     }
   }

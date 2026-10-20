@@ -15,7 +15,8 @@ import kotlinx.serialization.json.JsonElement
  * @property body Optional JSON body.
  * @property timeoutMs Effective timeout in milliseconds.
  */
-data class PrototypeHttpRequest(
+class PrototypeHttpRequest
+internal constructor(
   val requestId: String,
   val prototypeId: String,
   val method: String,
@@ -27,19 +28,25 @@ data class PrototypeHttpRequest(
 
 /** An app-owned transport; the renderer adds no HTTP stack or network policy. */
 fun interface PrototypeHttpClient {
-  /** Return a typed response for every failure; propagate coroutine cancellation. */
+  /**
+   * Called on the main thread; implementations must switch dispatchers for blocking work. Return a
+   * typed response for every failure; propagate coroutine cancellation.
+   */
   suspend fun execute(request: PrototypeHttpRequest): PrototypeRequestResponse
 }
 
 /**
  * Embedded routing: [hostHandler] handles `via: "host"`, otherwise [device] handles both routes.
  * Without [device], every request fails with the typed `network` error, even with a host handler.
- * Clients must cooperate with coroutine cancellation and enforce their own egress policy.
+ * Clients must cooperate with coroutine cancellation and enforce their own egress policy. Instances
+ * have identity semantics: replacing this object reloads the runtime. Creating a network with
+ * inline client lambdas on each recomposition recreates the runtime each time; callers should
+ * remember the network and its clients.
  *
  * @property device The app's device transport, or null to disable all requests.
  * @property hostHandler Optional override for host requests (including omitted `via`).
  */
-data class PrototypeNetwork(
+class PrototypeNetwork(
   val device: PrototypeHttpClient? = null,
   val hostHandler: PrototypeHttpClient? = null,
 ) {

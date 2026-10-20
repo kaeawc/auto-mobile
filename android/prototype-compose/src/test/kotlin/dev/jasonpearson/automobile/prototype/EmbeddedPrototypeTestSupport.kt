@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.prototype
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.OnBackPressedDispatcherOwner
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
@@ -15,12 +17,16 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.JsonPrimitive
 
-internal class FakePrototypeStorage : PrototypeStorage {
+internal class FakePrototypeStorage(private val loadFailure: Exception? = null) : PrototypeStorage {
   private val values = mutableMapOf<String, PrototypeStoredValues>()
   var saves = 0
     private set
 
-  @Synchronized override fun load(id: String): PrototypeStoredValues? = values[id]
+  @Synchronized
+  override fun load(id: String): PrototypeStoredValues? {
+    loadFailure?.let { throw it }
+    return values[id]
+  }
 
   @Synchronized
   override fun save(id: String, values: PrototypeStoredValues) {
@@ -46,8 +52,12 @@ internal class FakePrototypeHttp : PrototypeHttpClient {
 internal class EmbeddedPrototypeTestHost {
   val dispatcher = UnconfinedTestDispatcher()
   val scope = TestScope(dispatcher)
+  var unhandledBacks = 0
+    private set
+
   val owner =
-    object : LifecycleOwner {
+    object : OnBackPressedDispatcherOwner {
+      override val onBackPressedDispatcher = OnBackPressedDispatcher(Runnable { unhandledBacks++ })
       override val lifecycle =
         LifecycleRegistry.createUnsafe(this).apply { currentState = Lifecycle.State.RESUMED }
     }
@@ -65,6 +75,7 @@ internal class EmbeddedPrototypeTestHost {
     CompositionLocalProvider(
       LocalEmbeddedPrototypeEnvironment provides environment,
       LocalLifecycleOwner provides owner,
+      LocalOnBackPressedDispatcherOwner provides owner,
       content = content,
     )
   }

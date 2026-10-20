@@ -5,7 +5,8 @@ import androidx.compose.runtime.Composable
 
 /**
  * A spec could not be loaded; no prototype nodes are drawn. The Kotlin validator does not report
- * required capabilities separately: unsupported fields/types surface as [Invalid].
+ * required capabilities separately: unsupported fields/types surface as [Invalid]. This interface
+ * is sealed but may grow; consumers should include an `else` branch in `when`.
  */
 sealed interface PrototypeLoadError {
   /**
@@ -14,14 +15,15 @@ sealed interface PrototypeLoadError {
    * @property path Canonical JSON path rejected by the validator.
    * @property message Canonical explanation from the validator.
    */
-  data class Invalid(val path: String, val message: String) : PrototypeLoadError
+  data class Invalid internal constructor(val path: String, val message: String) :
+    PrototypeLoadError
 
   /**
    * Persistence could not be opened.
    *
-   * @property message Description of the I/O failure.
+   * @property message Description of the persistence or serialization failure.
    */
-  data class Storage(val message: String) : PrototypeLoadError
+  data class Storage internal constructor(val message: String) : PrototypeLoadError
 }
 
 /** Visible fallback used when the embedding app does not supply custom error content. */
@@ -35,16 +37,11 @@ fun DefaultPrototypeError(error: PrototypeLoadError) {
   )
 }
 
-/** Why an embedded prototype dismissed itself. Disposal alone emits no dismissal. */
+/**
+ * Why an embedded prototype dismissed itself. Disposal alone emits no dismissal. Reasons may grow;
+ * consumers should include an `else` branch in `when`.
+ */
 enum class PrototypeDismissReason {
   /** A user gesture, back action, or authored dismiss action. */
   USER,
-  /** Removed by an agent. */
-  AGENT,
-  /** Its host disconnected. */
-  DISCONNECT,
-  /** Its lifetime expired. */
-  TTL,
-  /** Its host shut down. */
-  TEARDOWN,
 }

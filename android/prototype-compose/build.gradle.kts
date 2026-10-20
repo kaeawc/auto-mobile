@@ -1,6 +1,5 @@
 import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
 import com.vanniktech.maven.publish.JavadocJar
-import dev.detekt.gradle.extensions.DetektExtension
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 plugins {
@@ -20,12 +19,6 @@ android {
   buildFeatures { compose = true }
 
   testOptions { unitTests.isIncludeAndroidResources = true }
-}
-
-// The specified public Compose API follows Compose's named/default parameter convention.
-// Keep this exemption module-local; ordinary renderer functions retain the shared parameter limit.
-extensions.configure<DetektExtension> {
-  config.setFrom(files(rootDir.resolve("config/detekt/detekt.yml"), "detekt.yml"))
 }
 
 kotlin {

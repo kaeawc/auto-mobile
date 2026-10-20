@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.prototype
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.*
@@ -11,6 +12,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDismissReason as InternalPrototypeDismissReason
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
@@ -35,7 +37,9 @@ import kotlinx.serialization.json.jsonPrimitive
  * Embeds a validated prototype. The composition owns its runtime and cancels requests when [spec]
  * changes or it leaves composition. Declared storage keys restore before drawing and flush on
  * lifecycle stop and disposal. Keep [assets], [storage] and [network] stable; replacing one reloads
- * the runtime. Callback changes do not reload it. No daemon or HTTP stack is required.
+ * the runtime. Callback changes do not reload it. No daemon or HTTP stack is required. After
+ * dismissal, content stays removed until [spec] changes or the caller uses `key()` to create a new
+ * composition identity.
  *
  * @param spec Complete prototype JSON; invalid/unsupported input draws only [onError].
  * @param modifier Applied to the embedded content, including error content.
@@ -44,17 +48,21 @@ import kotlinx.serialization.json.jsonPrimitive
  * @param network App-owned request transports; disabled by default.
  * @param onEvent Receives typed runtime events on the main thread.
  * @param onDismiss Receives the reason for an authored or user dismissal, once.
+ * @param handleBack Opt in to dismissing active content on back; false leaves back to the app.
  * @param onError Content for load failures. Validation has no separate capability-requirement list.
  */
 @Composable
+// Compose callers configure the public API through named, optional parameters.
+@Suppress("LongParameterList")
 fun AutoMobilePrototype(
   spec: String,
   modifier: Modifier = Modifier,
   assets: PrototypeAssets = PrototypeAssets.None,
   storage: PrototypeStorage = PrototypeStorage.None,
-  network: PrototypeNetwork = PrototypeNetwork(),
+  network: PrototypeNetwork = remember { PrototypeNetwork() },
   onEvent: (PrototypeEvent) -> Unit = {},
   onDismiss: (PrototypeDismissReason) -> Unit = {},
+  handleBack: Boolean = false,
   onError: @Composable (PrototypeLoadError) -> Unit = { DefaultPrototypeError(it) },
 ) {
   val validation = remember(spec) { PrototypeSpecValidator.validate(spec) }
@@ -66,6 +74,7 @@ fun AutoMobilePrototype(
         EmbeddedPrototype(
           EmbeddedInput(spec, validation.spec, assets, storage, network),
           EmbeddedCallbacks(onEvent, onDismiss),
+          handleBack,
           onError,
         )
     }
@@ -91,7 +100,10 @@ private class EmbeddedCallbacks(
     this.event(event)
     if (event.kind == PrototypeEventKind.DISMISSED) {
       val reason = event.payload?.jsonObject?.get("reason")?.jsonPrimitive?.content
-      PrototypeDismissReason.entries.firstOrNull { it.name.lowercase() == reason }?.let(dismiss)
+      when (reason) {
+        InternalPrototypeDismissReason.USER.wireValue -> dismiss(PrototypeDismissReason.USER)
+        else -> Unit
+      }
     }
   }
 }
@@ -114,6 +126,7 @@ private data class EmbeddedInput(
 private fun EmbeddedPrototype(
   input: EmbeddedInput,
   callbacks: EmbeddedCallbacks,
+  handleBack: Boolean,
   onError: @Composable (PrototypeLoadError) -> Unit,
 ) {
   val context = LocalContext.current.applicationContext
@@ -128,21 +141,17 @@ private fun EmbeddedPrototype(
     remember(input, environment) { EmbeddedOwner(input.assets, interactions, environment.io) }
   LaunchedEffect(owner) {
     interactions.withLock {
-      try {
-        owner.open(
-          EmbeddedConfiguration(
-            input.spec,
-            input.storage,
-            input.network,
-            scope,
-            environment,
-            context.cacheDir,
-          ),
-        ) {
-          latestCallbacks.send(it)
-        }
-      } catch (error: IOException) {
-        owner.error = PrototypeLoadError.Storage(error.message ?: "Storage unavailable")
+      owner.open(
+        EmbeddedConfiguration(
+          input.spec,
+          input.storage,
+          input.network,
+          scope,
+          environment,
+          context.cacheDir,
+        ),
+      ) {
+        latestCallbacks.send(it)
       }
     }
   }
@@ -150,8 +159,10 @@ private fun EmbeddedPrototype(
   val session = owner.session
   if (session != null) {
     val active by session.runtime.snapshots.collectAsState()
-    BackHandler(active.active) {
-      scope.launch { interactions.withLock { session.runtime.dismiss() } }
+    if (handleBack) {
+      BackHandler(enabled = active.active) {
+        scope.launch { interactions.withLock { session.runtime.dismiss() } }
+      }
     }
     PrototypeRuntimeContent(session.runtime, session.images, session.fonts) {
       interactions.withLock { session.runtime.handle(it) }
@@ -207,6 +218,24 @@ private class EmbeddedOwner(
   private val source = EmbeddedPrototypeAssets(assets)
 
   suspend fun open(config: EmbeddedConfiguration, event: (PrototypeEvent) -> Unit) {
+    try {
+      createSession(config, event)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: IOException) {
+      Log.w("AutoMobilePrototype", "Cannot open prototype storage", error)
+      this.error = PrototypeLoadError.Storage(error.message ?: "Storage unavailable")
+    } catch (expectedStorageFailure: RuntimeException) {
+      // App-owned storage and serialization can fail with arbitrary runtime exceptions.
+      Log.w("AutoMobilePrototype", "Cannot open prototype storage", expectedStorageFailure)
+      error = PrototypeLoadError.Storage(expectedStorageFailure.message ?: "Storage unavailable")
+    }
+  }
+
+  private suspend fun createSession(
+    config: EmbeddedConfiguration,
+    event: (PrototypeEvent) -> Unit,
+  ) {
     val opened =
       PrototypeStoragePersistence(
           config.storage.adapt(),

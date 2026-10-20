@@ -1,12 +1,14 @@
 package dev.jasonpearson.automobile.prototype
 
 import androidx.compose.material3.Text
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleRegistry
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.serialization.json.*
 import org.junit.After
@@ -153,12 +155,23 @@ class AutoMobilePrototypeTest {
     val dismissed = mutableListOf<PrototypeDismissReason>()
     val events = mutableListOf<PrototypeEvent>()
     val input =
-      embeddedSpec(
-        """{"type":"button","testTag":"go","label":"Close","onTap":[{"type":"dismiss"}]}""",
+      mutableStateOf(
+        embeddedSpec(
+          """{"type":"button","testTag":"go","label":"Close","onTap":[{"type":"dismiss"}]}""",
+        ),
       )
+    val identity = mutableStateOf(0)
+    val handleBack = mutableStateOf(false)
     compose.setContent {
       host.Content {
-        AutoMobilePrototype(input, onEvent = { events += it }, onDismiss = { dismissed += it })
+        key(identity.value) {
+          AutoMobilePrototype(
+            input.value,
+            onEvent = { events += it },
+            onDismiss = { dismissed += it },
+            handleBack = handleBack.value,
+          )
+        }
       }
     }
     compose.onNodeWithTag("go").performClick()
@@ -166,7 +179,77 @@ class AutoMobilePrototypeTest {
     compose.runOnIdle {
       assertEquals(listOf(PrototypeDismissReason.USER), dismissed)
       assertEquals(listOf(PrototypeEventKind.DISMISSED), events.map { it.kind })
+      handleBack.value = true
     }
+    compose.onNodeWithTag("go").assertDoesNotExist()
+    compose.runOnIdle { input.value += " " }
+    compose.onNodeWithTag("go").assertExists().performClick()
+    compose.onNodeWithTag("go").assertDoesNotExist()
+    compose.runOnIdle {
+      assertEquals(listOf(PrototypeDismissReason.USER, PrototypeDismissReason.USER), dismissed)
+      identity.value++
+    }
+    compose.onNodeWithTag("go").assertExists()
+  }
+
+  @Test
+  fun `back handling is opt in and stops after dismissal`() {
+    val handleBack = mutableStateOf(false)
+    val dismissed = mutableListOf<PrototypeDismissReason>()
+    val input = storedSwitchSpec()
+    compose.setContent {
+      host.Content {
+        AutoMobilePrototype(
+          input,
+          onDismiss = { dismissed += it },
+          handleBack = handleBack.value,
+        )
+      }
+    }
+    compose.onNodeWithTag("dark").performClick()
+    compose.runOnIdle {
+      host.owner.onBackPressedDispatcher.onBackPressed()
+      assertEquals(1, host.unhandledBacks)
+      assertTrue(dismissed.isEmpty())
+      handleBack.value = true
+    }
+    compose.onNodeWithTag("dark").assertIsOn()
+    compose.runOnIdle { host.owner.onBackPressedDispatcher.onBackPressed() }
+    compose.onNodeWithTag("dark").assertDoesNotExist()
+    compose.runOnIdle {
+      assertEquals(listOf(PrototypeDismissReason.USER), dismissed)
+      host.owner.onBackPressedDispatcher.onBackPressed()
+      assertEquals(2, host.unhandledBacks)
+      assertEquals(1, dismissed.size)
+    }
+  }
+
+  @Test
+  fun `replacing network with the same clients reloads runtime`() {
+    val client = FakePrototypeHttp()
+    val network = mutableStateOf(PrototypeNetwork(client))
+    val input = storedSwitchSpec()
+    compose.setContent {
+      host.Content { AutoMobilePrototype(input, network = network.value) }
+    }
+    compose.onNodeWithTag("dark").performClick()
+    compose.onNodeWithTag("dark").assertIsOn()
+    compose.runOnIdle { network.value = PrototypeNetwork(client) }
+    compose.onNodeWithTag("dark").assertIsOff()
+  }
+
+  @Test
+  fun `storage cancellation propagates without load error content`() {
+    val storage = FakePrototypeStorage(CancellationException("Cancelled"))
+    val errors = mutableListOf<PrototypeLoadError>()
+    val input = storedSwitchSpec()
+    compose.setContent {
+      host.Content {
+        AutoMobilePrototype(input, storage = storage, onError = { errors += it })
+      }
+    }
+    compose.onNodeWithTag("dark").assertDoesNotExist()
+    compose.runOnIdle { assertTrue(errors.isEmpty()) }
   }
 
   @Test

@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import { AuxiliarySocketHeldError } from "./AuxiliarySocketHeldError";
 import type { AuxiliaryDaemonSocketName } from "./types";
 
 /** A live or replaced path must never be reclaimed by an auxiliary server. */
@@ -17,6 +18,9 @@ export interface AuxiliarySocketWarning {
   code: "AUXILIARY_SOCKET_UNAVAILABLE";
   name: string;
   socketPath: string;
+  holderPid?: number;
+  holderVersion?: string;
+  holderVerified?: boolean;
 }
 
 // Stream delivery is optional. Keep configuration/control endpoints fail-closed:
@@ -38,13 +42,17 @@ export function degradeAuxiliarySocket(
   name: AuxiliaryDaemonSocketName,
   error: unknown,
 ): AuxiliarySocketWarning | undefined {
-  if (!(error instanceof AuxiliarySocketBindConflict) || !optionalStreams.has(name)) {
+  if (
+    !(error instanceof AuxiliarySocketBindConflict || error instanceof AuxiliarySocketHeldError) ||
+    !optionalStreams.has(name)
+  ) {
     return undefined;
   }
   const warning: KnownSocketWarning = {
     code: "AUXILIARY_SOCKET_UNAVAILABLE",
     name,
     socketPath: error.socketPath,
+    ...(error instanceof AuxiliarySocketHeldError ? error.holder : {}),
   };
   unavailable.set(name, warning);
   return warning;

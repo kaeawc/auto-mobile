@@ -241,6 +241,15 @@ export function writePidFileDataAtomicSync(
   data: PidFileData,
   dependencies: AtomicPidFileWriteSyncDependencies = defaultAtomicPidFileWriteSyncDependencies,
 ): void {
+  writeJsonFileAtomicSync(pidFilePath, data, dependencies);
+}
+
+/** Publish a JSON sidecar using the same owner-only atomic writer as PID records. */
+export function writeJsonFileAtomicSync(
+  pidFilePath: string,
+  data: unknown,
+  dependencies: AtomicPidFileWriteSyncDependencies = defaultAtomicPidFileWriteSyncDependencies,
+): void {
   const temporaryPath = dependencies.createTemporaryPath(pidFilePath);
   try {
     dependencies.writeTemporaryFile(temporaryPath, JSON.stringify(data, null, 2));

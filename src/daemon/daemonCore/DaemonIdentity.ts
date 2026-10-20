@@ -4,6 +4,8 @@ import {
   markAuxiliarySocketAvailable,
 } from "../auxiliarySocketAvailability";
 import type { DaemonCoreServices, DaemonIdentityState } from "./DaemonCoreState";
+import { AuxiliarySocketHeldError } from "../AuxiliarySocketHeldError";
+import { writeSync } from "node:fs";
 import { republishOwnedIdentity } from "../identityRecovery";
 import { logger } from "../../utils/logger";
 import { SOCKET_PATH, DAEMON_LAUNCH_LOG_PATH_ENV, DAEMON_LAUNCH_NONCE_ENV } from "../constants";
@@ -53,6 +55,9 @@ export class DaemonIdentity {
     private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statSync },
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly databasePath: () => string = getDatabasePath,
+    private readonly reportStartupFailure: (message: string) => void = (message) => {
+      writeSync(2, `${message}\n`);
+    },
   ) {}
 
   /**
@@ -223,6 +228,10 @@ export class DaemonIdentity {
     } catch (error) {
       const warning = degradeAuxiliarySocket(name, error);
       if (!warning) {
+        if (error instanceof AuxiliarySocketHeldError) {
+          // Synchronous stderr reaches the launcher capture even if teardown exits immediately.
+          this.reportStartupFailure(error.message);
+        }
         throw error;
       }
       logger.warn(`[Daemon] ${warning.code}: ${name} disabled at ${warning.socketPath}`, error);

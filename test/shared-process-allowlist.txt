@@ -75,7 +75,7 @@ test/daemon/appearanceSyncOff.test.ts
 test/daemon/appearanceSyncSchedulerResilience.test.ts
 test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
-test/daemon/auxiliarySocketDegradation.test.ts
+test/daemon/auxiliarySocketOwner.test.ts
 test/daemon/boundSessionLossMessage.test.ts
 test/daemon/canonicalPixels.property.test.ts
 test/daemon/canonicalPixels.test.ts

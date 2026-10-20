@@ -1,3 +1,4 @@
+import { AuxiliarySocketHeldError } from "../../../src/daemon/AuxiliarySocketHeldError";
 import { DaemonLaunch, type DaemonLaunchHost } from "../../../src/daemon/manager/DaemonLaunch";
 import { DaemonLauncher, type DaemonLaunchRequest } from "../../../src/daemon/DaemonLauncher";
 import { FakeDaemonProcess } from "../../fakes/FakeDaemonProcess";
@@ -154,7 +155,59 @@ describe("launched daemon identity readiness", () => {
   });
 });
 
+function launchHost(launcher: DaemonLauncher, h: ReturnType<typeof harness>): DaemonLaunchHost {
+  const ids = new FakeIdGenerator(["launch-uuid"]);
+  return {
+    ...h.host,
+    launcher,
+    fallbackLauncher: launcher,
+    seams: {
+      nextLaunchNonce: () => ids.next(),
+      currentBuildId: () => "test",
+      portFreeProbe: async () => true,
+      exitRecordFileSystem: {
+        readFileSync: () => "",
+        writeFileSync: () => {},
+        rmSync: () => {},
+      },
+      launchLogFileSystem: { openSync: () => 1, closeSync: () => {} },
+      launchWorkingDirectory: () => "/fake",
+    },
+    throwIfRecoveryCancelled: () => {},
+    waitForReady: (...args) => h.readiness.waitForReady(...args),
+    isLaunchedProcessReady: (...args) => h.readiness.isLaunchedProcessReady(...args),
+    createDaemonExitFailure: async () => new Error("unused"),
+    withDaemonOptions: (command) => command,
+    extractionCleaner: { removeExtractionForEntryScript: async () => false },
+    describeError: String,
+    lockFilePath: "fake.lock",
+    launchCommandResolver: undefined,
+    getLockHolderStartupLogPath: async () => null,
+  };
+}
+
 describe("package-runner launch identity", () => {
+  test("client launch failure includes the holder line from the captured startup log", async () => {
+    const h = harness();
+    const launcher = new DaemonLauncher({
+      timer: h.timer,
+      environment: {},
+      entryScript: "/fake/index.ts",
+    });
+    const refusal = new AuxiliarySocketHeldError("/fake/appearance.sock", "appearance", {
+      holderPid: 741,
+      holderVersion: "0.0.old",
+      holderVerified: true,
+    });
+    const launch = new DaemonLaunch(launchHost(launcher, h), async (logPath) => {
+      expect(logPath).toBe("/fake/launch.log");
+      return refusal.message;
+    });
+    const failure = await launch.createDaemonExitFailure(1, null, "/fake/launch.log");
+    expect(failure.message).toContain("exit code 1");
+    expect(failure.message).toContain(refusal.message);
+  });
+
   test.each([false, true])(
     "onSpawn hands PID 300 to readiness (package runner: %s)",
     async (packageRunner) => {
@@ -197,34 +250,7 @@ describe("package-runner launch identity", () => {
         version: "1.2.3",
         executableExists: () => false,
       });
-      const ids = new FakeIdGenerator(["launch-uuid"]);
-      const host: DaemonLaunchHost = {
-        ...h.host,
-        launcher,
-        fallbackLauncher: launcher,
-        seams: {
-          nextLaunchNonce: () => ids.next(),
-          currentBuildId: () => "test",
-          portFreeProbe: async () => true,
-          exitRecordFileSystem: {
-            readFileSync: () => "",
-            writeFileSync: () => {},
-            rmSync: () => {},
-          },
-          launchLogFileSystem: { openSync: () => 1, closeSync: () => {} },
-          launchWorkingDirectory: () => "/fake",
-        },
-        throwIfRecoveryCancelled: () => {},
-        waitForReady: (...args) => h.readiness.waitForReady(...args),
-        isLaunchedProcessReady: (...args) => h.readiness.isLaunchedProcessReady(...args),
-        createDaemonExitFailure: async () => new Error("unused"),
-        withDaemonOptions: (command) => command,
-        extractionCleaner: { removeExtractionForEntryScript: async () => false },
-        describeError: String,
-        lockFilePath: "fake.lock",
-        launchCommandResolver: undefined,
-        getLockHolderStartupLogPath: async () => null,
-      };
+      const host = launchHost(launcher, h);
       const launch = new DaemonLaunch(host);
       await launch.launchWithExtractionRetry(
         {

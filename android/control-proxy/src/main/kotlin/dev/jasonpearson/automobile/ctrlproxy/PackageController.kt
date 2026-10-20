@@ -198,38 +198,10 @@ internal class PackageController(
       val versionCode =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
         else @Suppress("DEPRECATION") info.versionCode.toLong()
-      val installerPackage =
-        try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            packageManager().getInstallSourceInfo(packageName).installingPackageName
-          } else {
-            @Suppress("DEPRECATION") packageManager().getInstallerPackageName(packageName)
-          }
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: PackageManager.NameNotFoundException) {
-          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
-          null
-        } catch (e: IllegalArgumentException) {
-          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
-          null
-        } catch (e: SecurityException) {
-          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
-          null
-        }
+      val installerPackage = installerPackage(packageName)
       val allowBackup = appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
       val requested = info.requestedPermissions?.toList().orEmpty()
-      val flagsArray = info.requestedPermissionsFlags
-      val granted = mutableMapOf<String, Boolean>()
-      if (includePermissions && flagsArray != null) {
-        for (i in requested.indices) {
-          val isGranted =
-            if (i < flagsArray.size) {
-              (flagsArray[i] and PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
-            } else false
-          granted[requested[i]] = isGranted
-        }
-      }
+      val granted = grantedPermissions(info, requested, includePermissions)
       val mainActivity =
         try {
           packageManager().getLaunchIntentForPackage(packageName)?.component?.flattenToShortString()
@@ -259,6 +231,46 @@ internal class PackageController(
         error = null,
         totalTimeMs = totalTime,
       )
+    }
+  }
+
+  private fun grantedPermissions(
+    info: PackageInfo,
+    requested: List<String>,
+    includePermissions: Boolean,
+  ): Map<String, Boolean> {
+    val flagsArray = info.requestedPermissionsFlags
+    val granted = mutableMapOf<String, Boolean>()
+    if (includePermissions && flagsArray != null) {
+      for (i in requested.indices) {
+        val isGranted =
+          if (i < flagsArray.size) {
+            (flagsArray[i] and PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
+          } else false
+        granted[requested[i]] = isGranted
+      }
+    }
+    return granted
+  }
+
+  private fun installerPackage(packageName: String): String? {
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        packageManager().getInstallSourceInfo(packageName).installingPackageName
+      } else {
+        @Suppress("DEPRECATION") packageManager().getInstallerPackageName(packageName)
+      }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: PackageManager.NameNotFoundException) {
+      Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+      null
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+      null
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+      null
     }
   }
 

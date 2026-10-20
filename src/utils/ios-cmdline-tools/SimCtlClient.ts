@@ -22,6 +22,7 @@ import {
   SimCtlBootOptions,
   DEFAULT_SIMCTL_BOOT_OPTIONS,
   SimulatorBootLease,
+  findUniqueSimulatorRow,
 } from "./SimCtlSupport";
 import { simCtlSharedState } from "./SimCtlSharedState";
 export type {
@@ -171,8 +172,7 @@ export class SimCtlClient implements SimCtl {
         return client.bootOptions;
       },
       executeCommandArgs: (...args) => client.executeCommandArgs(...args),
-      listSimulatorImages: (...args) => client.listSimulatorImages(...args),
-      listSimulators: (...args) => client.listSimulators(...args),
+      readSimulatorTarget: (...args) => client.readSimulatorTarget(...args),
       get observationSequence() {
         return client.observationSequence;
       },
@@ -559,6 +559,10 @@ export class SimCtlClient implements SimCtl {
           `stderr (first 300 chars): ${stderrSnippet || "<empty>"}.`,
       );
     }
+  }
+
+  async readSimulatorTarget(udid: string, timeoutMs?: number, signal?: AbortSignal) {
+    return findUniqueSimulatorRow(await this.listSimulators(timeoutMs, signal), udid);
   }
 
   async isSimulatorRunning(identifier: string): Promise<boolean> {

@@ -867,10 +867,15 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   }
 
   protected handleMessage(data: WebSocket.Data): void {
-    // Inbound frames indicate an active app; reset the SDK-event poll backoff.
-    this.sdkEvents.noteSdkEventPollWsActivity();
     try {
       const message = JSON.parse(data.toString()) as WebSocketMessage;
+      // Only app activity resets backoff; runner metrics and handshakes do not.
+      if (
+        message.type === "hierarchy_update" ||
+        (message.requestId && message.type !== "performance_update" && message.type !== "connected")
+      ) {
+        this.sdkEvents.noteSdkEventPollWsActivity();
+      }
       this.processMessage(message);
     } catch (error) {
       logger.warn(`[IOSCtrlProxyClient] Failed to parse message: ${error}`);

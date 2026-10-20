@@ -6343,13 +6343,17 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
-    test("resets SDK-event poll backoff on inbound WebSocket activity (#5472)", async function () {
-      const { factory } = createCapturingWebSocketFactory(fakeTimer);
+    test.each([
+      { type: "hierarchy_update" },
+      { type: "tap_coordinates_result", requestId: "tap-activity", success: true },
+    ])("only app activity resets SDK-event poll backoff: %j (#13966)", async function (activity) {
+      const timer = new FakeTimer();
+      const { factory } = createCapturingWebSocketFactory(timer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
-        fakeTimer,
+        timer,
         {
           serviceManagerFactory: undefined,
           bootedDeviceLister: undefined,
@@ -6357,32 +6361,76 @@ describe("IOSCtrlProxyClient", function () {
           sdkEventIngestor: new FakeIosSdkEventIngestor(),
         },
       );
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = createFetchMock(async () => ({
-        ok: true,
-        json: async () => [],
-      }));
-      const { polling: internals } = testClient.getSdkEventPollingTestHooks();
+      const poll = spyOn(testClient, "pollSdkEvents").mockResolvedValue({
+        receivedEvents: false,
+        rememberedApplicationIds: new Set<string>(),
+      });
+      const refresh = spyOn(
+        testClient["sdkCapability"],
+        "refreshSdkCapabilitiesAndSync",
+      ).mockResolvedValue(undefined);
+      const { polling, receiveMessage } = testClient.getSdkEventPollingTestHooks();
 
       try {
-        const generation = internals.diagnostics().generation;
-        for (let i = 0; i < 5; i++) {
-          await internals.runSdkEventPollCycle(generation);
+        polling.startSdkEventPolling();
+        await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+          description: "initial SDK poll to schedule its successor",
+        });
+        // The real runner streams metrics once a second even when the app is idle.
+        for (let second = 1; second <= 180; second++) {
+          timer.advanceTime(1000);
+          receiveMessage(
+            Buffer.from(
+              JSON.stringify({
+                type: "performance_update",
+                performanceData: { timestamp: timer.now(), fps: 60 },
+              }),
+            ),
+          );
+          await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+            description: "SDK poll to schedule its successor",
+          });
         }
-        expect(internals.currentSdkEventPollIntervalMs()).toBe(30_000);
+        expect(poll).toHaveBeenCalledTimes(10);
+        expect(polling.diagnostics().consecutiveEmpty).toBe(10);
+        expect(polling.currentSdkEventPollIntervalMs()).toBe(30_000);
 
-        // Any inbound runner frame is treated as app activity: reset the empty
-        // counter and restore fast cadence, even for an unrecognized message type.
-        testClient
-          .getSdkEventPollingTestHooks()
-          .receiveMessage(Buffer.from(JSON.stringify({ type: "unrecognized" })));
+        for (const frame of [
+          '{"type":"connected","requestId":"handshake"}',
+          '{"type":"performance_update","requestId":"metric"}',
+          '{"type":"unrecognized"}',
+          "malformed JSON",
+        ]) {
+          receiveMessage(Buffer.from(frame));
+          expect(polling.diagnostics().consecutiveEmpty).toBe(10);
+          expect(polling.currentSdkEventPollIntervalMs()).toBe(30_000);
+        }
 
-        expect(internals.diagnostics().consecutiveEmpty).toBe(0);
-        expect(internals.currentSdkEventPollIntervalMs()).toBe(2000);
+        const response = activity.requestId
+          ? testClient.testHooks.requestManager.register(
+              activity.requestId,
+              "request_tap_coordinates",
+              2000,
+              () => ({ success: false }),
+            )
+          : undefined;
+        receiveMessage(Buffer.from(JSON.stringify(activity)));
+        if (response) {
+          expect(await response).toMatchObject({ success: true });
+        }
+        expect(polling.diagnostics().consecutiveEmpty).toBe(0);
+        expect(polling.currentSdkEventPollIntervalMs()).toBe(2000);
+        expect(timer.getMsUntilNextDueEvent()).toBe(2000);
 
-        internals.stopSdkEventPolling();
+        timer.advanceTime(2000);
+        await drainUntil(() => polling.diagnostics().consecutiveEmpty === 1, {
+          description: "app activity to restore fast SDK polling",
+        });
+        expect(poll).toHaveBeenCalledTimes(11);
       } finally {
-        globalThis.fetch = originalFetch;
+        polling.stopSdkEventPolling();
+        poll.mockRestore();
+        refresh.mockRestore();
         await testClient.close();
       }
     });

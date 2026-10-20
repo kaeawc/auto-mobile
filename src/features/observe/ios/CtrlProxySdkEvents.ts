@@ -40,8 +40,8 @@ export class CtrlProxySdkEvents {
   private static readonly SDK_EVENT_POLL_INTERVAL_MS = 2000;
 
   // After this many consecutive empty batches (e.g. an app with no SDK
-  // integrated) the poll backs off to the slower cadence below. Any inbound WS
-  // activity resets the counter and restores fast cadence (#5472, AC#2).
+  // integrated) the poll backs off to the slower cadence below. App activity on
+  // WS resets the counter and restores fast cadence (#5472, AC#2).
   private static readonly SDK_EVENT_POLL_EMPTY_BATCHES_BEFORE_BACKOFF = 5;
 
   private static readonly SDK_EVENT_POLL_BACKOFF_INTERVAL_MS = 30_000;
@@ -148,7 +148,7 @@ export class CtrlProxySdkEvents {
   }
 
   /**
-   * Any inbound WebSocket frame from the runner is a signal the app is active,
+   * A hierarchy update or request response signals app activity,
    * so reset the empty-batch backoff and — if we had already backed off — restore
    * fast cadence immediately rather than waiting out the long backoff timer.
    */

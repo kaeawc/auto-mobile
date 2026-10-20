@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import { SessionBrokerInvariantError } from "../../../src/daemon/sessionBroker/SessionBrokerInvariantError";
+import { SessionRequestOwnerMismatchError } from "../../../src/daemon/sessionBroker/SessionRequestOwnerMismatchError";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
@@ -158,9 +160,58 @@ describe("clean release retains warm devices across retryable failures", () => {
     await expectPendingThenRedrive("release", error);
   });
 
-  test("an unclassified receipt write error after a clean reset never destroys the device", async () => {
+  test.each(["AbortError", "TimeoutError"])("%s identity is realm safe", async (name) => {
+    // Remove the local Error prototype to stand in for an error from another realm.
+    const cause = Object.setPrototypeOf(Object.assign(new Error("interrupted"), { name }), null);
+    expect(cause instanceof Error).toBe(false);
+    await expectPendingThenRedrive("reset", new Error("native call failed", { cause }));
+  });
+
+  test("an unknown receipt write failure after a clean reset stays pending for recovery", async () => {
     await expectPendingThenRedrive("completeCleanRelease", new Error("receipt write failed"));
   });
+
+  test.each([
+    new SessionBrokerInvariantError("Clean release precondition failed"),
+    new SessionRequestOwnerMismatchError(false),
+    new SessionRequestOwnerMismatchError(true),
+    Object.assign(
+      new Error("wrapped invariant", {
+        cause: new SessionBrokerInvariantError("Lost reservation"),
+      }),
+      { name: "TimeoutError" },
+    ),
+    Object.assign(new Error("invalid receipt"), { code: "SQLITE_CONSTRAINT_FOREIGNKEY" }),
+  ])("a permanent receipt failure after a clean reset destroys: %s", async (error) => {
+    const sessionUuid = await ready("first");
+    spyOn(options.store, "completeCleanRelease").mockRejectedValue(error);
+    expect(await broker.release(sessionUuid)).toMatchObject({ outcome: "released" });
+    expect(devices.resetResources).toEqual([devices.prepared[0]]);
+    expect(devices.destroyed).toEqual([devices.prepared[0]]);
+    expect((await options.store.listResources())[0].state).toBe("destroyed");
+    await broker.recover();
+    expect(devices.resetResources).toHaveLength(1);
+    await ready("second");
+    expect(devices.prepared[1]).not.toBe(devices.prepared[0]);
+  });
+
+  for (const stage of ["release", "reset"] as const) {
+    test.each([
+      new Error("spawn EAGAIN"),
+      new Error("adb: resource busy"),
+      Object.assign(new Error("simctl: resource busy"), { code: "EBUSY" }),
+    ])(
+      `${stage}: native busy text does not make an unknown failure retryable: %s`,
+      async (error) => {
+        const sessionUuid = await ready("first");
+        // Wrap to exercise every cause level without preventing the destruction drain.
+        spyOn(devices, stage).mockRejectedValueOnce(toActionableError(error, "Native failure"));
+        expect(await broker.release(sessionUuid)).toMatchObject({ outcome: "released" });
+        expect(devices.destroyed).toEqual([devices.prepared[0]]);
+        expect((await options.store.listResources())[0].state).toBe("destroyed");
+      },
+    );
+  }
 
   test("a committed clean-release write with a lost reply never starts destruction", async () => {
     const sessionUuid = await ready("first");

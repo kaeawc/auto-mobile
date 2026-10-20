@@ -3,7 +3,7 @@ import { NativeHelperRegistry } from "../../../src/utils/nativeHelpers/NativeHel
 import { FakeNativeHelperRecordStore } from "../../fakes/FakeNativeHelperRecordStore";
 import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProcessControl";
 import { FakeLogger } from "../../fakes/FakeLogger";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -737,7 +737,7 @@ describe("IosScreenCaptureHelper", () => {
         },
       });
       helper.start();
-      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      const warning = cleanupWarning.mockImplementation(() => {});
 
       try {
         const stopped = helper.stop();
@@ -836,4 +836,12 @@ test("tracks capture helper with the detached process-group flag on darwin", () 
   child.simulateExit();
   timer.advanceTime(0);
   expect(store.list()).toEqual([]);
+});
+
+let cleanupWarning: ReturnType<typeof spyOn<typeof logger, "warn">>;
+beforeEach(() => {
+  cleanupWarning = spyOn(logger, "warn");
+});
+afterEach(() => {
+  cleanupWarning.mockRestore();
 });

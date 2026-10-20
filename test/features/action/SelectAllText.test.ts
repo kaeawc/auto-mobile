@@ -1,6 +1,6 @@
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
-import { expect, describe, test, spyOn } from "bun:test";
+import { expect, describe, test, spyOn, afterEach, mock } from "bun:test";
 import { SelectAllText } from "../../../src/features/action/SelectAllText";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -49,18 +49,14 @@ describe("SelectAllText outcomes", () => {
   };
   const iosDevice: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "ios-1" };
 
-  const runWithoutObservation = (selectAllText: SelectAllText) => {
-    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
-      runBlockWith(() => createObserveResultForTest()),
-    );
-    return { promise: selectAllText.execute(), observedSpy };
-  };
-
   test("reports success when the Android accessibility service selects all", async () => {
     const selectAllText = new SelectAllText(androidDevice, new FakeAdbClientFactory(), () => ({
       requestSelectAll: async () => ({ success: true, totalTimeMs: 3 }),
     }));
-    const { promise, observedSpy } = runWithoutObservation(selectAllText);
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
+      runBlockWith(() => createObserveResultForTest()),
+    );
+    const promise = selectAllText.execute();
     const result = await promise;
 
     expect(result).toEqual({ success: true });
@@ -71,7 +67,10 @@ describe("SelectAllText outcomes", () => {
     const selectAllText = new SelectAllText(androidDevice, new FakeAdbClientFactory(), () => ({
       requestSelectAll: async () => ({ success: false, totalTimeMs: 3, error: "no focused field" }),
     }));
-    const { promise, observedSpy } = runWithoutObservation(selectAllText);
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
+      runBlockWith(() => createObserveResultForTest()),
+    );
+    const promise = selectAllText.execute();
     const result = await promise;
 
     expect(result.success).toBe(false);
@@ -83,7 +82,10 @@ describe("SelectAllText outcomes", () => {
     const selectAllText = new SelectAllText(iosDevice, new FakeAdbClientFactory(), () => ({
       requestSelectAll: async () => ({ success: true, totalTimeMs: 3 }),
     }));
-    const { promise, observedSpy } = runWithoutObservation(selectAllText);
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
+      runBlockWith(() => createObserveResultForTest()),
+    );
+    const promise = selectAllText.execute();
     const result = await promise;
 
     expect(result).toEqual({ success: true });
@@ -98,7 +100,10 @@ describe("SelectAllText outcomes", () => {
         error: "editor not first responder",
       }),
     }));
-    const { promise, observedSpy } = runWithoutObservation(selectAllText);
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
+      runBlockWith(() => createObserveResultForTest()),
+    );
+    const promise = selectAllText.execute();
     const result = await promise;
 
     expect(result.success).toBe(false);
@@ -113,7 +118,10 @@ describe("SelectAllText outcomes", () => {
       },
     }));
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    const { promise, observedSpy } = runWithoutObservation(selectAllText);
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(
+      runBlockWith(() => createObserveResultForTest()),
+    );
+    const promise = selectAllText.execute();
     try {
       const result = await promise;
       expect(result.success).toBe(false);
@@ -127,4 +135,8 @@ describe("SelectAllText outcomes", () => {
       observedSpy.mockRestore();
     }
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

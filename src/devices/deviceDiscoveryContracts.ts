@@ -116,6 +116,8 @@ export interface BootedDeviceDiscoveryOptions {
   bypassAndroidDeviceListCache?: boolean;
   /** Bypass iOS's short simulator-list cache to verify simulator identity. */
   bypassIosDeviceListCache?: boolean;
+  /** Require a new physical iOS listing before counting an absence. */
+  bypassPhysicalIosDeviceListCache?: boolean;
   /**
    * Skip devicectl physical-device discovery. For a caller that already holds a
    * simulator UDID, a physical sweep can neither find nor prove anything and only

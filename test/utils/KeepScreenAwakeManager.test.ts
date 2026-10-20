@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import {
   KeepScreenAwakeManager,
   type KeepScreenAwakeSettingsClient,
@@ -679,4 +679,8 @@ describe("typed restore outcomes", () => {
     ]);
     expect(adb.calls).toEqual([]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

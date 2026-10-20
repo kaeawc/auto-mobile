@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -304,4 +304,8 @@ describe("SessionManager", () => {
       expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
     });
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

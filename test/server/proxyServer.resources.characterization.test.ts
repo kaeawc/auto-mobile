@@ -3,7 +3,7 @@ import { fakeServerContext } from "../helpers/fakeServerContext";
 import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { Server } from "@modelcontextprotocol/server";
 import { McpError } from "../../src/daemon/mcpError";
-import { beforeAll, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ActionableError } from "../../src/models";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -18,7 +18,6 @@ import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
 function createHarness() {
-  const registration = spyOn(Server.prototype, "setRequestHandler");
   const harness = createProxyMcpServer({
     proxyConfig: {
       timer: new FakeTimer(),
@@ -33,18 +32,28 @@ function createHarness() {
   const registrations: ReadonlyArray<readonly [string, unknown, ...unknown[]]> = [
     ...registration.mock.calls,
   ];
-  registration.mockRestore();
   return { ...harness, registrations };
 }
 
-beforeAll(async () => {
+let registration: ReturnType<typeof spyOn<typeof Server.prototype, "setRequestHandler">>;
+let warmed = false;
+beforeEach(async () => {
+  registration = spyOn(Server.prototype, "setRequestHandler");
+  if (warmed) {
+    return;
+  }
+  warmed = true;
   // Warm the SDK's one-off handler/schema initialization with a disposable server.
   const { server, proxy } = createHarness();
   try {
     await server.close();
   } finally {
     await proxy.close();
+    registration.mockClear();
   }
+});
+afterEach(() => {
+  registration.mockRestore();
 });
 
 const requests = [

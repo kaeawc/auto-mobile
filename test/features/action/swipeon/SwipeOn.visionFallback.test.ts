@@ -37,7 +37,7 @@ describe("SwipeOn vision fallback", () => {
   let fakeGesture: FakeGestureExecutor;
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
   let fakeTimer: FakeTimer;
-  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let getInstanceSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
@@ -53,7 +53,7 @@ describe("SwipeOn vision fallback", () => {
   });
 
   afterEach(() => {
-    getInstanceSpy?.mockRestore();
+    getInstanceSpy.mockRestore();
   });
 
   const createSwipeOn = (capturer: FakeScreenshotCapturer, analyzer: FakeVisionAnalyzer) => {

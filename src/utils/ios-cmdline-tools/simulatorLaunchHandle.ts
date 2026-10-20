@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { HostChildProcess } from "../HostCommandExecutor";
+import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 
 /**
  * An honest launch handle for a simulator boot. `simctl bootstatus -b` is
@@ -12,16 +14,40 @@ class SimulatorLaunchHandle extends EventEmitter implements HostChildProcess {
   readonly stdin = null;
   readonly stdout = null;
   readonly stderr = null;
-  readonly killed = false;
-  readonly exitCode = 0;
+  killed = false;
+  exitCode: number | null = null;
   readonly signalCode = null;
+  readonly terminationConfirmed = new Promise<boolean>((resolve) => {
+    this.once("exit", () => resolve(this.exitCode === 0));
+  });
 
-  constructor(private readonly cancel: () => boolean) {
+  constructor(
+    private readonly cancel: () => Promise<void>,
+    private readonly label: string,
+  ) {
     super();
   }
 
   kill(): boolean {
-    return this.cancel();
+    if (!this.killed) {
+      this.killed = true;
+      void this.shutDown();
+    }
+    return true;
+  }
+
+  private async shutDown(): Promise<void> {
+    try {
+      await this.cancel();
+      this.exitCode = 0;
+    } catch (error) {
+      logger.warn(
+        `[iOS] handle.kill() shutdown failed for ${this.label}: ${errorMessage(error)}`,
+        error,
+      );
+      this.exitCode = 1;
+    }
+    this.emit("exit", this.exitCode, null);
   }
 
   unref(): void {
@@ -29,6 +55,9 @@ class SimulatorLaunchHandle extends EventEmitter implements HostChildProcess {
   }
 }
 
-export function createSimulatorLaunchHandle(kill: () => boolean): HostChildProcess {
-  return new SimulatorLaunchHandle(kill);
+export function createSimulatorLaunchHandle(
+  kill: () => Promise<void>,
+  label = "simulator",
+): HostChildProcess {
+  return new SimulatorLaunchHandle(kill, label);
 }

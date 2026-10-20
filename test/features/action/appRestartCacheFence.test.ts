@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ClearAppData } from "../../../src/features/action/ClearAppData";
 import { InstallApp } from "../../../src/features/action/InstallApp";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -154,12 +154,15 @@ function iosInstallHarness(device = simulator, downgrade = false) {
 
 describe("app restart cache generation", () => {
   // The installed-app query falls back to the fake ADB; never connect to a device.
-  let proxySpy: ReturnType<typeof spyOn> | undefined;
+  let proxySpy: ReturnType<typeof spyOn>;
   afterEach(() => {
-    proxySpy?.mockRestore();
+    proxySpy.mockRestore();
+  });
+  beforeEach(() => {
+    proxySpy = spyOn(AndroidCtrlProxyClient, "getInstance");
   });
   function fakeAndroidProxy() {
-    proxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+    proxySpy.mockImplementation(() => {
       throw new Error("fake proxy unavailable");
     });
   }

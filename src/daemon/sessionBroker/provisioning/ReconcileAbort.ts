@@ -36,6 +36,7 @@ export interface BindingFailureCapacity {
   booted: number;
   retryAfterMs: number;
   externalDevices?: string[];
+  heldDevices?: string[];
 }
 
 export class ReconcileAbort extends Error {

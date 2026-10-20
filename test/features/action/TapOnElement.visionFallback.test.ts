@@ -35,7 +35,7 @@ const createObserveResult = (): ObserveResult => ({
 });
 
 describe("TapOnElement vision fallback (handleElementNotFound)", () => {
-  let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let getInstanceSpy: ReturnType<typeof spyOn>;
   let fakeCtrlProxy: FakeCtrlProxy;
 
   beforeEach(() => {
@@ -44,7 +44,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
   });
 
   afterEach(() => {
-    getInstanceSpy?.mockRestore();
+    getInstanceSpy.mockRestore();
   });
 
   const createTapOnElement = (

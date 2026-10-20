@@ -254,7 +254,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         let events = try session.run(button(session, "Delete two"))
         XCTAssertEqual(events.count, 1)
         let event = try XCTUnwrap(events.first)
-        XCTAssertEqual(event.kind, "change")
+        XCTAssertEqual(event.wireKind, "change")
         XCTAssertEqual(event.name, "/data/items/1")
         XCTAssertEqual(event.payload, .object(["op": .string("remove"), "revision": .number(2)]))
         XCTAssertEqual(event.sequence, 1)

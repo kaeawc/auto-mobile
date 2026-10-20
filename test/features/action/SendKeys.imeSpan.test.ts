@@ -1,5 +1,5 @@
 import { createExecResult } from "../../../src/utils/execResult";
-import { expect, mock, spyOn, test } from "bun:test";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import {
   DefaultSendKeysCommandExecutor,
   SendKeys,
@@ -540,9 +540,12 @@ test.each([true, false])(
   async (supported) => {
     const h = fieldHarness("hunter2", { password: "true" });
     h.client.supportsImeClearField = async () => supported;
-    const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
-      spyOn(logger, level),
-    );
+    const spies = [
+      spyOn(logger, "debug"),
+      spyOn(logger, "info"),
+      spyOn(logger, "warn"),
+      spyOn(logger, "error"),
+    ];
     try {
       const result = await h.action.execute([{ action: "clear" }]);
       expect(result.success).toBe(true);
@@ -1249,4 +1252,8 @@ test("IME commit of a marked-up string stays verified when the field shows the h
   const h = harness(read);
   const result = await h.action.execute([type("*bold*")]);
   expect(result.success).toBe(true);
+});
+
+afterEach(() => {
+  mock.restore();
 });

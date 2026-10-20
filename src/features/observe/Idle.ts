@@ -14,6 +14,8 @@ import {
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
+import { QuietTreeStability } from "./androidLauncherPackages";
+import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { shellQuote } from "../../utils/shellQuote";
 
 /**
@@ -34,6 +36,7 @@ export interface UiStabilityBaseline {
 export class Idle {
   private adb: AdbExecutor;
   private timer: Timer;
+  private quietTree: QuietTreeStability;
 
   /** Typed unit-test view of the launcher classification, which has no public entry point. */
   readonly testHooks = {
@@ -50,9 +53,11 @@ export class Idle {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    hierarchyReader?: ViewHierarchyRequestReader,
   ) {
     this.adb = adbFactory.create(device);
     this.timer = timer;
+    this.quietTree = new QuietTreeStability(device, adbFactory, timer, hierarchyReader);
   }
 
   /**
@@ -76,7 +81,6 @@ export class Idle {
       "com.oneplus.launcher",
       "com.huawei.android.launcher",
       "com.sec.android.app.launcher",
-      "com.android.settings",
     ];
 
     // Match by prefix, not substring. Reverse containment
@@ -90,6 +94,19 @@ export class Idle {
         (sysPackage) => packageName === sysPackage || packageName.startsWith(`${sysPackage}.`),
       )
     );
+  }
+
+  /** Packages without useful gfxinfo use fresh trees within the same stability budget. */
+  async waitForQuietTreeStability(
+    packageName: string,
+    startTime: number,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ) {
+    if (!this.isSystemLauncher(packageName)) {
+      return null;
+    }
+    return this.quietTree.metrics(packageName, startTime, timeoutMs, signal);
   }
 
   /**
@@ -603,11 +620,8 @@ export class Idle {
       totalFrames: prevTotalFrames,
     } = baseline;
     try {
-      // For system packages, use a simpler approach
       if (this.isSystemLauncher(packageName)) {
-        logger.info(
-          `[AwaitIdle] ${packageName} is a system package, using simplified stability check`,
-        );
+        await this.quietTree.wait(options.timeoutMs ?? 1000, options.signal);
         return {
           isStable: true,
           shouldUpdateLastNonIdleTime: false,

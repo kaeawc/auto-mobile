@@ -10,7 +10,7 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
-import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, mock, spyOn, test, afterEach } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -63,6 +63,8 @@ import {
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+
+afterEach(() => mock.restore());
 
 describe("SendKeys iOS text transport", () => {
   test.each([5, 1000])("passes a scaled timeout for %s characters", async (length) => {
@@ -2283,9 +2285,12 @@ describe("DefaultSendKeysCommandExecutor", () => {
         createObserver(focusedAndroidObservation("zQ9 X", { password: "true" })),
         { textClient: createTextClient().client },
       );
-      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
-        spyOn(logger, level).mockImplementation(() => {}),
-      );
+      const spies = [
+        spyOn(logger, "debug").mockImplementation(() => {}),
+        spyOn(logger, "info").mockImplementation(() => {}),
+        spyOn(logger, "warn").mockImplementation(() => {}),
+        spyOn(logger, "error").mockImplementation(() => {}),
+      ];
       try {
         const result = await executor.type({ action: "type", text: "Zq9 x", mode });
 
@@ -4642,13 +4647,12 @@ describe("SendKeys post-action capture boundary", () => {
     const focus = new CapturingFocus(device, h.adb, timer);
     focus.observeScreen = observe;
     focus.window = new FakeWindow();
-    const capture = spyOn(observe, "captureScreenshot").mockImplementation(
-      async (_perf, _signal, chosen) => {
-        events.push(`capture:start:${chosen?.observationId}`);
-        await Promise.resolve();
-        events.push(`capture:end:${chosen?.observationId}`);
-      },
-    );
+    const capture = mock<typeof observe.captureScreenshot>(async (_perf, _signal, chosen) => {
+      events.push(`capture:start:${chosen?.observationId}`);
+      await Promise.resolve();
+      events.push(`capture:end:${chosen?.observationId}`);
+    });
+    observe.captureScreenshot = capture;
     const insert = h.client.insert;
     h.client.insert = async (...args) => {
       events.push("dispatch");
@@ -4713,7 +4717,7 @@ describe("SendKeys post-action capture boundary", () => {
         expect(h.capture).toHaveBeenCalledTimes(2);
         expect(h.capture.mock.calls[0][2]).toBe(h.before);
       } finally {
-        h.capture.mockRestore();
+        h.capture.mockReset();
       }
     },
   );

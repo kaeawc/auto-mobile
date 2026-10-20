@@ -227,3 +227,27 @@ test.each([undefined, "device:a"])(
     });
   },
 );
+
+test("overlapping host inventory reads respect earlier and later barriers", async () => {
+  const queue = new SocketRequestAdmissionQueue();
+  const started: string[] = [];
+  const earlier = enqueueBlocked(queue, undefined, "earlier", started);
+  const first = enqueueBlocked(queue, "host:inventory", "first", started);
+  const second = enqueueBlocked(queue, "host:inventory", "second", started);
+  const later = enqueueBlocked(queue, undefined, "later", started);
+  expect(started).toEqual(["earlier"]);
+  earlier.release();
+  await earlier.done;
+  await flush();
+  expect(started).toEqual(["earlier", "first", "second"]);
+  first.release();
+  await first.done;
+  await flush();
+  expect(started).not.toContain("later");
+  second.release();
+  await second.done;
+  await flush();
+  expect(started).toEqual(["earlier", "first", "second", "later"]);
+  later.release();
+  await later.done;
+});

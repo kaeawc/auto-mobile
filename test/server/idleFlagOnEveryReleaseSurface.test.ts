@@ -212,7 +212,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "plan base end fields",
-    builders: ["src/server/planExecutionOrchestrator.ts#planBaseEndFields"],
+    builders: ["src/server/planExecutionRecords.ts#planBaseEndFields"],
     reasonKey: "reason",
     holder: (reason) => {
       const ended = new TerminalSessionError(SESSION, snapshot(reason));

@@ -42,7 +42,7 @@ export const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 // shade is found closed. A high-importance notification that re-posts (e.g. a persistent
 // connection push) re-fires a heads-up that can collapse the shade or race the initial
 // expand; without re-expanding, the poll loop would sit on a closed shade until timeout.
-const SYSTEM_TRAY_REEXPAND_INTERVAL_MS = 1000;
+export const SYSTEM_TRAY_REEXPAND_INTERVAL_MS = 1000;
 
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 
@@ -261,6 +261,8 @@ export const ensureSystemTrayOpen = async (
   awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
   _progress?: ProgressCallback,
   signal?: AbortSignal,
+  // Recovery can reuse the closed observation it just read instead of reading twice.
+  initialObservation?: ObserveResult,
 ): Promise<{
   observation?: ObserveResult;
   opened: boolean;
@@ -272,7 +274,8 @@ export const ensureSystemTrayOpen = async (
   const observeScreen = observeScreenFactory(device);
 
   let minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
-  const observation = await observeSystemTray(observeScreen, minTimestamp, signal);
+  const observation =
+    initialObservation ?? (await observeSystemTray(observeScreen, minTimestamp, signal));
   if (detector.isTrayOpen(observation.viewHierarchy)) {
     return { observation, opened: false, skipped: true, minTimestamp };
   }

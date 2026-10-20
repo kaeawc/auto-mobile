@@ -57,7 +57,7 @@ import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctr
 import { resolveTapAccessibilityDependencies } from "./tapAccessibilityDependencies";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { type RenderedObservationReader } from "./TargetDisplayAction";
-import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
+import { resolveTapOnCall, type TapOnCall } from "./ActionCall";
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -836,16 +836,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     recoveryArg?: { throwOnKeyboardOcclusion?: boolean },
     requestArg?: { requestDeadlineMs?: number },
   ): Promise<TapOnFocusResult> {
-    const { progress, signal, recovery, deadlineMs } = resolveTapOnCall(
-      progressOrCall,
-      signalArg,
-      recoveryArg,
-      requestArg,
-    );
-    const request = deadlineRequest(deadlineMs);
-    return withObservationReadScope(() =>
-      this.executeWithReadScope(options, progress, signal, recovery, request),
-    );
+    const call = resolveTapOnCall(progressOrCall, signalArg, recoveryArg, requestArg);
+    return withObservationReadScope(() => this.executeWithReadScope(options, call));
   }
 
   private executeWithReadScope(

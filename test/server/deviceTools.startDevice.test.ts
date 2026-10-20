@@ -2679,26 +2679,38 @@ describe("startDevice handler", () => {
     }
   });
 
-  it("an iOS cold boot still terminates after a retryable readiness deadline", async () => {
-    const child = new FakeChildProcess(bootTimer);
-    const kill = spyOn(child, "kill").mockImplementation(() => {
-      child.exitCode = 0;
-      child.emit("exit", 0, null);
-      return true;
-    });
-    try {
-      const settlement = cancelUnownedColdBootUnlessRetryable(
-        { device: iosDevice, source: "cold-boot", processHandle: child, provisioned: false },
-        new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
-        undefined,
-      );
-      expect(settlement).toBeInstanceOf(Promise);
-      await settlement;
-      expect(kill).toHaveBeenCalledTimes(1);
-    } finally {
-      kill.mockRestore();
-    }
-  });
+  it.each(["retryable", "aborted", "non-retryable"] as const)(
+    "existing iOS cold boot: %s readiness failure",
+    async (kind) => {
+      const child = new FakeChildProcess(bootTimer);
+      const kill = spyOn(child, "kill").mockImplementation(() => {
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+        return true;
+      });
+      try {
+        const controller = new AbortController();
+        if (kind === "aborted") {
+          controller.abort();
+        }
+        const settlement = cancelUnownedColdBootUnlessRetryable(
+          { device: iosDevice, source: "cold-boot", processHandle: child, provisioned: false },
+          new RunnerReadinessError(
+            "readiness timeout",
+            false,
+            kind !== "non-retryable",
+            "runner-connect",
+          ),
+          controller.signal,
+        );
+        expect(settlement).toBeInstanceOf(Promise);
+        await settlement;
+        expect(kill).toHaveBeenCalledTimes(1);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
 
   it("a newly provisioned cold boot still terminates after a retryable readiness deadline", async () => {
     const child = new FakeChildProcess(bootTimer);

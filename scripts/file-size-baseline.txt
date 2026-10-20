@@ -11,7 +11,6 @@
 1048	src/daemon/sessionDeviceStateRestore.ts
 5519	src/daemon/sessionManager.ts
 1180	src/daemon/videoStreamSocketServer.ts
-1401	src/db/navigationRetention.ts
 1390	src/devices/deviceBootService.ts
 1339	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts

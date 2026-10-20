@@ -85,55 +85,7 @@ internal class ScreenshotController(
       try {
         val startTime = timeProvider.currentTimeMillis()
 
-        // Use suspendCancellableCoroutine to bridge callback-based API
-        val rotationProvenance = host.rotationProvenance()
-        val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-        val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
-        val captured =
-          suspendCancellableCoroutine<ScreenshotCallbackResult> { continuation ->
-            host.takeScreenshot(
-              targetDisplayId,
-              object : TakeScreenshotCallback {
-                override fun onSuccess(screenshot: ScreenshotResult) {
-                  val hardwareBitmap =
-                    Bitmap.wrapHardwareBuffer(
-                      screenshot.hardwareBuffer,
-                      screenshot.colorSpace,
-                    )
-                  screenshot.hardwareBuffer.close()
-                  if (hardwareBitmap == null) {
-                    continuation.resume(ScreenshotCallbackResult.Failed(null))
-                    return
-                  }
-                  // A display change makes the pixels' orientation ambiguous.
-                  // Preserve that
-                  // ambiguity as null so desktop control fails closed rather than
-                  // guessing.
-                  val rotation =
-                    rotationProvenance.rotationIfUnchanged(
-                      rotationCapture,
-                      rotationAtCaptureStart,
-                      displayController.getRotationOrNull(
-                        targetDisplayId,
-                      ),
-                      targetDisplayId,
-                    )
-                  continuation.resume(
-                    ScreenshotCallbackResult.Captured(hardwareBitmap, rotation),
-                  )
-                }
-
-                override fun onFailure(errorCode: Int) {
-                  // Retain the platform error code so the broadcast can
-                  // distinguish a rate limit
-                  // (ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) from a real
-                  // failure (issue #4927).
-                  Log.e(TAG, "Screenshot failed with error code: $errorCode")
-                  continuation.resume(ScreenshotCallbackResult.Failed(errorCode))
-                }
-              },
-            )
-          }
+        val captured = captureBitmap(targetDisplayId)
 
         if (captured is ScreenshotCallbackResult.Failed) {
           Log.e(
@@ -143,7 +95,7 @@ internal class ScreenshotController(
           return@withContext ScreenshotCaptureOutcome.Failure(captured.errorCode)
         }
 
-        val (bitmap, rotation) = captured as ScreenshotCallbackResult.Captured
+        val bitmap = (captured as ScreenshotCallbackResult.Captured).bitmap
 
         val screenshotTime = timeProvider.currentTimeMillis() - startTime
         Log.d(
@@ -151,40 +103,7 @@ internal class ScreenshotController(
           "Screenshot captured in ${screenshotTime}ms (${bitmap.width}x${bitmap.height})",
         )
 
-        // Convert to JPEG bytes on IO thread
-        val encodeStart = timeProvider.currentTimeMillis()
-        val outputStream = ByteArrayOutputStream()
-
-        // Convert hardware bitmap to software bitmap for compression
-        val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-        bitmap.recycle()
-
-        softwareBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-        softwareBitmap.recycle()
-
-        val jpegBytes = outputStream.toByteArray()
-        val base64String = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-
-        val encodeTime = timeProvider.currentTimeMillis() - encodeStart
-        val totalTime = timeProvider.currentTimeMillis() - startTime
-
-        Log.d(
-          TAG,
-          "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
-        )
-
-        ScreenshotCaptureOutcome.Success(
-          ScreenshotCapturePayload(
-            base64Image = base64String,
-            rotation = rotation,
-            displayId = targetDisplayId,
-            panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-            captureDurationMs = screenshotTime,
-            encodeDurationMs = encodeTime,
-            byteLength = jpegBytes.size,
-            base64Length = base64String.length,
-          ),
-        )
+        encodeScreenshot(captured, targetDisplayId, quality, startTime, screenshotTime)
       } catch (e: CancellationException) {
         // The awaiting caller is being cancelled — rethrow instead of converting the
         // cancellation
@@ -201,5 +120,100 @@ internal class ScreenshotController(
         ScreenshotCaptureOutcome.Failure(null)
       }
     }
+  }
+
+  private suspend fun captureBitmap(targetDisplayId: Int): ScreenshotCallbackResult {
+    // Use suspendCancellableCoroutine to bridge callback-based API
+    val rotationProvenance = host.rotationProvenance()
+    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
+    val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
+    return suspendCancellableCoroutine<ScreenshotCallbackResult> { continuation ->
+      host.takeScreenshot(
+        targetDisplayId,
+        object : TakeScreenshotCallback {
+          override fun onSuccess(screenshot: ScreenshotResult) {
+            val hardwareBitmap =
+              Bitmap.wrapHardwareBuffer(
+                screenshot.hardwareBuffer,
+                screenshot.colorSpace,
+              )
+            screenshot.hardwareBuffer.close()
+            if (hardwareBitmap == null) {
+              continuation.resume(ScreenshotCallbackResult.Failed(null))
+              return
+            }
+            // A display change makes the pixels' orientation ambiguous.
+            // Preserve that
+            // ambiguity as null so desktop control fails closed rather than
+            // guessing.
+            val rotation =
+              rotationProvenance.rotationIfUnchanged(
+                rotationCapture,
+                rotationAtCaptureStart,
+                displayController.getRotationOrNull(
+                  targetDisplayId,
+                ),
+                targetDisplayId,
+              )
+            continuation.resume(
+              ScreenshotCallbackResult.Captured(hardwareBitmap, rotation),
+            )
+          }
+
+          override fun onFailure(errorCode: Int) {
+            // Retain the platform error code so the broadcast can
+            // distinguish a rate limit
+            // (ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) from a real
+            // failure (issue #4927).
+            Log.e(TAG, "Screenshot failed with error code: $errorCode")
+            continuation.resume(ScreenshotCallbackResult.Failed(errorCode))
+          }
+        },
+      )
+    }
+  }
+
+  private fun encodeScreenshot(
+    captured: ScreenshotCallbackResult.Captured,
+    targetDisplayId: Int,
+    quality: Int,
+    startTime: Long,
+    screenshotTime: Long,
+  ): ScreenshotCaptureOutcome {
+    val (bitmap, rotation) = captured
+    // Convert to JPEG bytes on IO thread
+    val encodeStart = timeProvider.currentTimeMillis()
+    val outputStream = ByteArrayOutputStream()
+
+    // Convert hardware bitmap to software bitmap for compression
+    val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+    bitmap.recycle()
+
+    softwareBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+    softwareBitmap.recycle()
+
+    val jpegBytes = outputStream.toByteArray()
+    val base64String = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
+
+    val encodeTime = timeProvider.currentTimeMillis() - encodeStart
+    val totalTime = timeProvider.currentTimeMillis() - startTime
+
+    Log.d(
+      TAG,
+      "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
+    )
+
+    return ScreenshotCaptureOutcome.Success(
+      ScreenshotCapturePayload(
+        base64Image = base64String,
+        rotation = rotation,
+        displayId = targetDisplayId,
+        panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+        captureDurationMs = screenshotTime,
+        encodeDurationMs = encodeTime,
+        byteLength = jpegBytes.size,
+        base64Length = base64String.length,
+      ),
+    )
   }
 }

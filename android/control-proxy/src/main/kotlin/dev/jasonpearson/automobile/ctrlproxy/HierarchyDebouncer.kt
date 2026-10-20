@@ -468,53 +468,8 @@ internal constructor(
           // so consumers never saw the Error (#3608).
           resultToEmit = HierarchyResult.Error("Failed to extract hierarchy")
         } else {
-          val extractionTime = timeProvider.currentTimeMillis() - startTime
-
-          perfProvider.startOperation("computeHash")
-          val structuralHash = StructuralHasher.computeHash(hierarchy)
-          perfProvider.endOperation("computeHash")
-
-          // Compare-and-publish under eventLock so the hash, animation window and cached
-          // hierarchy always describe the same extraction and are visible to the main thread.
-          synchronized(eventLock) {
-            if (structuralHash == lastStructuralHash) {
-              stats.unchangedCaptures.incrementAndGet()
-              // Structure unchanged - likely animation
-              // Enter animation mode to skip subsequent events
-              inAnimationMode = true
-              animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
-
-              resultToEmit =
-                HierarchyResult.Unchanged(
-                  hierarchy = hierarchy,
-                  hash = structuralHash,
-                  extractionTimeMs = extractionTime,
-                  skippedEventCount = skippedEventCount,
-                )
-
-              Log.d(
-                TAG,
-                "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
-              )
-            } else {
-              // Structure changed - this is a real content change
-              val oldHash = lastStructuralHash
-              inAnimationMode = false
-              lastStructuralHash = structuralHash
-
-              resultToEmit =
-                HierarchyResult.Changed(
-                  hierarchy = hierarchy,
-                  hash = structuralHash,
-                  extractionTimeMs = extractionTime,
-                )
-
-              Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
-            }
-            skippedEventCount = 0
-            hierarchyToCache = hierarchy
-            lastHierarchy = hierarchy
-          }
+          resultToEmit = HierarchyComparison().compareAndCache(hierarchy, startTime)
+          hierarchyToCache = hierarchy
         }
       } finally {
         // End perf block BEFORE emit to prevent nesting if emit suspends
@@ -532,6 +487,59 @@ internal constructor(
       Log.d(TAG, "Flow emission suppressed (setText operation in progress)")
     }
     return hierarchyToCache
+  }
+
+  private inner class HierarchyComparison {
+    fun compareAndCache(hierarchy: ViewHierarchy, startTime: Long): HierarchyResult {
+      val extractionTime = timeProvider.currentTimeMillis() - startTime
+
+      perfProvider.startOperation("computeHash")
+      val structuralHash = StructuralHasher.computeHash(hierarchy)
+      perfProvider.endOperation("computeHash")
+
+      // Compare-and-publish under eventLock so the hash, animation window and cached
+      // hierarchy always describe the same extraction and are visible to the main thread.
+      return synchronized(eventLock) {
+        val result: HierarchyResult
+        if (structuralHash == lastStructuralHash) {
+          stats.unchangedCaptures.incrementAndGet()
+          // Structure unchanged - likely animation
+          // Enter animation mode to skip subsequent events
+          inAnimationMode = true
+          animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
+
+          result =
+            HierarchyResult.Unchanged(
+              hierarchy = hierarchy,
+              hash = structuralHash,
+              extractionTimeMs = extractionTime,
+              skippedEventCount = skippedEventCount,
+            )
+
+          Log.d(
+            TAG,
+            "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
+          )
+        } else {
+          // Structure changed - this is a real content change
+          val oldHash = lastStructuralHash
+          inAnimationMode = false
+          lastStructuralHash = structuralHash
+
+          result =
+            HierarchyResult.Changed(
+              hierarchy = hierarchy,
+              hash = structuralHash,
+              extractionTimeMs = extractionTime,
+            )
+
+          Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
+        }
+        skippedEventCount = 0
+        lastHierarchy = hierarchy
+        result
+      }
+    }
   }
 
   /** Get the last extracted hierarchy without triggering a new extraction. */

@@ -3,31 +3,10 @@ import { logger } from "../../utils/logger";
 import type { DeviceSessionResolver } from "../deviceSessionResolver";
 import type { SubscriptionResponse, Subscriber } from "../socketServer/index";
 import type {
+  DeviceDataFilter,
   OnScreenshotCadenceChangedCallback,
   OnHierarchyCadenceChangedCallback,
-} from "../deviceDataStreamSocketServer";
-
-/**
- * Filter for device data stream subscriptions.
- *
- * `deviceSessionUuid` is the primary routing key (epic #5256, item 3): frame
- * delivery matches on it (`null` = every device). `deviceId` is the serial
- * resolved from that uuid at subscribe time and is used ONLY by the serial-scoped
- * cadence/polling machinery (which device to poll, at what interval) — it is never
- * the delivery key. The two are separated on purpose: routing is epoch-stable,
- * polling is inherently serial-addressed.
- */
-export interface DeviceDataFilter {
-  deviceSessionUuid: string | null; // null means subscribe to all devices
-  /**
-   * Serial resolved from deviceSessionUuid, for cadence only. A non-null UUID
-   * that cannot be resolved remains null: it is a no-device subscription, not
-   * an all-devices subscription.
-   */
-  deviceId: string | null;
-  screenshotIntervalMs: number | null;
-  hierarchyIntervalMs: number | null;
-}
+} from "./streamContracts";
 
 export interface StreamCadenceHost {
   getSubscribers(): Iterable<Subscriber<DeviceDataFilter>>;
@@ -57,6 +36,8 @@ const MAX_HIERARCHY_INTERVAL_MS = 2_147_483_647;
 // restores fast cadence via the same cadence-refresh call. This mirrors the
 // screenshot stream, which is already `hasSubscriberForDevice`-gated (#5472).
 const PAUSED_HIERARCHY_INTERVAL_MS = MAX_HIERARCHY_INTERVAL_MS;
+
+export type { DeviceDataFilter } from "./streamContracts";
 
 /** Owns cadence validation, active-subscriber polling queries, and cadence notifications. */
 export class StreamCadence {

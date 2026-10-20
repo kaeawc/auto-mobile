@@ -68,7 +68,18 @@ class HierarchyMetadataBuilderTest {
       val start = source.indexOf(route)
       assertTrue("$route not found in HierarchyController.kt", start >= 0)
       val bodyOpen = source.indexOf('{', start)
-      val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val entry = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val suffix = if (route.contains("Direct")) "Direct" else "Fallback"
+      assertTrue(entry.contains("HierarchyCapture("))
+      assertTrue(entry.contains(".extract$suffix("))
+      val extractStart = source.indexOf("fun extract$suffix(")
+      val extractOpen = source.indexOf('{', extractStart)
+      val extraction =
+        source.substring(extractOpen, KotlinSourceScan.matchBrace(source, extractOpen))
+      assertTrue(extraction.contains("enrich$suffix(hierarchy)"))
+      val enrichStart = source.indexOf("private fun enrich$suffix(")
+      val enrichOpen = source.indexOf('{', enrichStart)
+      val body = source.substring(enrichOpen, KotlinSourceScan.matchBrace(source, enrichOpen))
       assertTrue(
         "$route must use the shared metadata builder",
         "HierarchyMetadataBuilder.enrich(" in body,

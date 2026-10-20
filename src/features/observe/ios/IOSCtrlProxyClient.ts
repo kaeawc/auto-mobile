@@ -1,3 +1,7 @@
+import {
+  sdkCapabilityQueryOptions,
+  type SdkCapabilityQueryOptions,
+} from "./CtrlProxySdkCapabilities";
 import { retireIosServiceEndpoint } from "./iosServiceEndpointChange";
 import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
 import { CtrlProxyBuildContext } from "./CtrlProxyBuildContext";
@@ -418,8 +422,10 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     isCommandSupported: (type) => this.isCommandSupported(type),
     createDelegateContext: () => this.createDelegateContext(),
   });
-  public syncNetworkMockRulesIfAvailable(): Promise<IosMockRuleSyncResult> {
-    return this.networkSync.syncNetworkMockRulesIfAvailable();
+  public syncNetworkMockRulesIfAvailable(
+    options?: SdkCapabilityQueryOptions,
+  ): Promise<IosMockRuleSyncResult> {
+    return this.networkSync.syncNetworkMockRulesIfAvailable(options);
   }
   async setNetworkErrorSimulation(
     config: IosNetworkErrorSimulationConfig,
@@ -876,9 +882,17 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
    * Used after a session release clears the store (issue #10061); the
    * reconnect path runs the same two syncs.
    */
-  public async syncNetworkStateFromHost(): Promise<void> {
-    await this.syncNetworkMockRulesIfAvailable();
-    this.networkSync.syncNetworkErrorSimulationToDevice();
+  public async syncNetworkStateFromHost(
+    options: SdkCapabilityQueryOptions = sdkCapabilityQueryOptions(this.timer),
+  ): Promise<void> {
+    try {
+      await this.syncNetworkMockRulesIfAvailable(options);
+    } catch (error) {
+      // Release cleanup is best effort; a failed mock sync must not retain error simulation.
+      logger.warn("[IOSCtrlProxyClient] Failed to sync network mock rules during cleanup", error);
+    } finally {
+      this.networkSync.syncNetworkErrorSimulationToDevice();
+    }
   }
 
   private syncHierarchyCadenceToDevice(): void {

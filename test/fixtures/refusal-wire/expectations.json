@@ -68,6 +68,22 @@
         "acquireNewSession": false
       }
     },
+    "cancelled.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "cancelled",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "timeout.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
     "provision_device.platform_command_failed.create_rejected": {
       "expected": "fail",
       "fields": {
@@ -571,6 +587,22 @@
       "fields": {
         "code": "runtime_incompatible",
         "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "not_connected.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "not_connected",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "sdk_capability_query_failed": {
+      "expected": "retry",
+      "fields": {
+        "code": "sdk_capability_query_failed",
+        "retryable": true,
         "acquireNewSession": false
       }
     }

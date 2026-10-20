@@ -64,6 +64,10 @@ export interface EmulatorMemoryRow {
 
 /** A boot counted as in flight by the same sample's admission ledger or host registry. */
 export interface InFlightBootMemory {
+  /** Device identity when memory is attributed per device rather than per process. */
+  deviceId?: string;
+  /** The device identity belongs to the old device awaiting replacement. */
+  replacement?: boolean;
   processId?: number;
   handedOff: boolean;
 }

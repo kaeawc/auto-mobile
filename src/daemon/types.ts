@@ -1,3 +1,4 @@
+import type { AuxiliarySocketWarning } from "./auxiliarySocketAvailability";
 import { z } from "zod";
 import {
   idleReleaseField,
@@ -53,6 +54,13 @@ export interface DaemonRequest {
    * own request declared the extension. Absent: the request never declares it. Additive.
    */
   tasks?: TaskRelayFrame;
+  /**
+   * Set by a client that understands {@link REQUEST_BUDGET_NOTIFICATION_METHOD} (#13797). The
+   * daemon then reports the budget it resolved for this request when that is larger than the
+   * `timeoutMs` the client sent, so the client's own backstop waits as long as the daemon does.
+   * Absent: the request never gets that notification (older and Kotlin/Swift clients).
+   */
+  acceptsRequestBudget?: boolean;
 }
 
 /**
@@ -395,6 +403,15 @@ export function sanitizeBoundSessionLoss(value: unknown): BoundSessionLoss | und
  */
 export const PROGRESS_NOTIFICATION_METHOD = "notifications/progress";
 
+/**
+ * Wire method for the daemon's resolved request budget (#13797). The client and the daemon resolve
+ * a `tools/call` budget from their own environments (per-tool floors such as
+ * `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS`), so the daemon can wait longer than the client sent; it
+ * tells the requesting socket, which lengthens its backstop instead of cancelling a call the daemon
+ * is still prepared to wait for. Carries `requestId` and `timeoutMs`.
+ */
+export const REQUEST_BUDGET_NOTIFICATION_METHOD = "notifications/automobile/requestBudget";
+
 export const RESOURCE_SUBSCRIBE_METHOD = "resources/subscribe";
 export const RESOURCE_UNSUBSCRIBE_METHOD = "resources/unsubscribe";
 
@@ -449,6 +466,8 @@ export interface DaemonNotification {
   total?: number;
   /** Optional human-readable status for `notifications/progress` frames. */
   message?: string;
+  /** The daemon's resolved budget for `requestId`, for budget notifications (#13797). */
+  timeoutMs?: number;
 }
 
 /** Discriminates a daemon socket frame as a server-pushed notification. */
@@ -493,6 +512,8 @@ export type DaemonSocketPaths = Record<DaemonSocketName, string>;
  * Daemon status information
  */
 export interface DaemonStatus {
+  launchNonce?: string;
+  unavailableSockets?: AuxiliarySocketWarning[];
   reportedPidFilePath?: string;
   reportedSocketPath?: string;
   reportedSockets?: Record<string, string>;
@@ -511,7 +532,7 @@ export interface DaemonStatus {
   /** Unix socket path */
   socketPath?: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */
-  sockets?: DaemonSocketPaths;
+  sockets?: Partial<DaemonSocketPaths>;
   /** Absolute path to the SQLite file this daemon owns (issue #2795) */
   dbPath?: string;
   /** Timestamp when daemon was started */
@@ -585,6 +606,7 @@ export interface SupersededSocketOwner {
 }
 
 export interface PidFileData {
+  launchNonce?: string;
   /** Process ID */
   pid: number;
   /**
@@ -595,7 +617,7 @@ export interface PidFileData {
   /** Unix socket path */
   socketPath: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */
-  sockets?: DaemonSocketPaths;
+  sockets?: Partial<DaemonSocketPaths>;
   /** HTTP port */
   port: number;
   /**

@@ -1,6 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AutoMobilePrototype
+import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import org.junit.After

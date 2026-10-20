@@ -78,7 +78,13 @@ export interface BindingsFailure {
   message: string;
   nextAction: string;
   /** Boot-capacity details of a `capacity_exhausted` binding failure (#11390). */
-  capacity?: { limit: number; booted: number; retryAfterMs: number; externalDevices?: string[] };
+  capacity?: {
+    limit: number;
+    booted: number;
+    retryAfterMs: number;
+    externalDevices?: string[];
+    heldDevices?: string[];
+  };
   /** Total-resource refusal evidence; retryable, without a bounded retry delay. */
   budget?: BindingBudgetEvidence;
 }

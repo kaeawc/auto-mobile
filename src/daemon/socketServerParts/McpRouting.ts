@@ -354,11 +354,12 @@ export class McpRouting {
       );
     }
     if (this.callbacks.hasImplicitDeviceSelector(args)) {
-      return this.callbacks.selectorMcpForwardRoute(
+      return this.implicitSelectorRoute(
         socketSessionId,
         args,
         scopedKey,
         toolSelectionProfileUuid,
+        toolName,
       );
     }
     if (sessionUuid) {
@@ -403,6 +404,28 @@ export class McpRouting {
     // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
     // pre-forward key so separate daemon clients can autolock and run independently.
     return this.callbacks.sharedMcpForwardRoute(`socket:${socketSessionId}`);
+  }
+  /**
+   * The route of a call whose arguments name a platform or device. A `platform` filter on a
+   * host-inventory listing selects nothing on the device: it must not queue behind the caller's
+   * in-flight device call, as admission already assumes (#13796).
+   */
+  private implicitSelectorRoute(
+    socketSessionId: string,
+    args: unknown,
+    scopedKey: string | undefined,
+    toolSelectionProfileUuid: string | undefined,
+    toolName: unknown,
+  ): McpForwardRoute {
+    const route = this.callbacks.selectorMcpForwardRoute(
+      socketSessionId,
+      args,
+      scopedKey,
+      toolSelectionProfileUuid,
+    );
+    return isHostInventoryCall(toolName, args)
+      ? { ...route, executionKey: "host:inventory" }
+      : route;
   }
   hostInventoryOrBoundRoute(
     boundRoute: McpForwardRoute,

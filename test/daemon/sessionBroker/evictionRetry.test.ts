@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import { SessionBrokerInvariantError } from "../../../src/daemon/sessionBroker/SessionBrokerInvariantError";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
@@ -42,7 +43,6 @@ describe("idle eviction retry receipts", () => {
   let devices: EvictionPort;
   let options: SessionBrokerOptions;
   let broker: SessionBroker;
-  let timer: FakeTimer;
 
   beforeAll(async () => {
     const warm = await openSqliteBindingRegistry({ dbPath: ":memory:" });
@@ -50,7 +50,7 @@ describe("idle eviction retry receipts", () => {
   });
 
   beforeEach(async () => {
-    timer = new FakeTimer();
+    const timer = new FakeTimer();
     registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       timer,
@@ -103,11 +103,11 @@ describe("idle eviction retry receipts", () => {
       const failed = await broker.prepare(request, "owner-token");
       expect(failed).toMatchObject({
         outcome: "failed",
-        failure: { code: "cleanup_pending", retryable: true, retryAfterMs: 1_000 },
+        failure: { code: "eviction_pending", retryable: true, retryAfterMs: 1_000 },
       });
       expect(failed.failure).not.toHaveProperty("retryRequires");
       expect(await options.store.getRequest(request.requestId)).toMatchObject({
-        errorCode: "cleanup_pending",
+        errorCode: "eviction_pending",
         retryable: true,
       });
       expect((await options.store.listResources())[0].state).toBe("destroying");
@@ -115,14 +115,13 @@ describe("idle eviction retry receipts", () => {
       expect(await broker.ownedStatus(request.requestId, "owner-token")).toEqual(failed);
       devices.destroyError = undefined;
       devices.canDestroy = true;
-      timer.advanceTime(1_000);
       await broker.recover();
       expect((await options.store.listResources())[0].state).toBe("destroyed");
       // Reconstruct the broker to prove the failure remains durable after recovery.
       broker = new SessionBroker(options);
       expect(await broker.ownedStatus(request.requestId, "owner-token")).toMatchObject({
         outcome: "failed",
-        failure: { code: "cleanup_pending", retryable: true, retryAfterMs: 1_000 },
+        failure: { code: "eviction_pending", retryable: true, retryAfterMs: 1_000 },
       });
       const retry = config("needs-tablet-retry", true);
       const ready = await broker.prepare(retry, "owner-token");
@@ -132,21 +131,28 @@ describe("idle eviction retry receipts", () => {
     },
   );
 
-  test("permanent eviction failure stays terminal and generic after capacity frees", async () => {
-    devices.destroyError = new Error("permission denied");
-    const request = config("permanent", true);
-    const failed = await broker.prepare(request, "owner-token");
-    expect(failed).toMatchObject({
-      outcome: "failed",
-      failure: { code: "session_preparation_failed", retryable: false },
-    });
-    expect(await options.store.getRequest(request.requestId)).toMatchObject({ retryable: false });
-    devices.destroyError = undefined;
-    await broker.recover();
-    expect(await broker.prepare(request, "owner-token")).toMatchObject({
-      outcome: "failed",
-      failure: { code: "session_preparation_failed", retryable: false },
-    });
-    expect(devices.prepared).toHaveLength(1);
-  });
+  test.each([
+    ["unknown", new Error("permission denied")],
+    ["permanent", new SessionBrokerInvariantError("eviction ownership lost")],
+  ] as const)(
+    "%s eviction failure stays terminal and generic after capacity frees",
+    async (kind, error) => {
+      devices.destroyError = error;
+      const request = config(kind, true);
+      const failed = await broker.prepare(request, "owner-token");
+      expect(failed).toMatchObject({
+        outcome: "failed",
+        failure: { code: "session_preparation_failed", message: error.message, retryable: false },
+      });
+      expect(failed.failure).not.toHaveProperty("retryAfterMs");
+      expect(await options.store.getRequest(request.requestId)).toMatchObject({ retryable: false });
+      devices.destroyError = undefined;
+      await broker.recover();
+      expect(await broker.prepare(request, "owner-token")).toMatchObject({
+        outcome: "failed",
+        failure: { code: "session_preparation_failed", retryable: false },
+      });
+      expect(devices.prepared).toHaveLength(1);
+    },
+  );
 });

@@ -82,6 +82,40 @@ describe("broker result receipts", () => {
     expect(await broker.prepare(config("late-capacity"), "owner-token")).toEqual(first);
   });
 
+  test.each([true, false])(
+    "managed cleanup_pending replays without an eviction delay with confirmed cleanup=%s",
+    async (cleanupConfirmed) => {
+      devices.prepareError = new SessionBrokerFailureError({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: true,
+      });
+      devices.canDestroy = cleanupConfirmed;
+      const request = config("managed-cleanup");
+      const first = await broker.prepare(request, "owner-token");
+      expect(first).toMatchObject({ outcome: "failed", cleanupPending: !cleanupConfirmed });
+      expect(first.failure).toEqual({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: cleanupConfirmed,
+      });
+      const scopeKey = (await options.store.listResources())[0].scopeKey;
+      const reopened = new SessionBroker({
+        ...options,
+        store: registry.sessionBrokerStore(scopeKey),
+      });
+      expect(await reopened.ownedStatus(request.requestId, "owner-token")).toEqual(first);
+      expect(await reopened.prepare(request, "owner-token")).toEqual(first);
+      devices.canDestroy = true;
+      await reopened.recover();
+      expect((await reopened.status(request.requestId))?.failure).toEqual({
+        code: "cleanup_pending",
+        message: "Managed device deletion is pending",
+        retryable: true,
+      });
+    },
+  );
+
   test("an abandonment committed while the ready receipt is assembled is not reported ready", async () => {
     const activate = options.store.activate.bind(options.store);
     const listResources = options.store.listResources.bind(options.store);

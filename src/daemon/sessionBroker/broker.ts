@@ -355,8 +355,9 @@ export class SessionBroker {
         return false;
       });
       if (!destroyed) {
+        // A new request ID may evict the next idle device during this destroy, bounded by pool size.
         throw new SessionBrokerFailureError({
-          code: "cleanup_pending",
+          code: "eviction_pending",
           message: "Device eviction remains unresolved; its capacity is still reserved",
           retryable: true,
           retryAfterMs: 1_000,
@@ -940,13 +941,13 @@ export class SessionBroker {
   ): SessionBrokerFailure {
     const retryable =
       request.retryable &&
-      (request.errorCode === "cleanup_pending" || !this.cleanupIsPending(request, resource));
+      (request.errorCode === "eviction_pending" || !this.cleanupIsPending(request, resource));
     return {
       code: request.errorCode ?? "session_preparation_failed",
       message: request.error ?? "",
       retryable,
       // Eviction retains capacity for redrive; a new request may try again after cleanup.
-      ...(retryable && request.errorCode === "cleanup_pending" ? { retryAfterMs: 1_000 } : {}),
+      ...(retryable && request.errorCode === "eviction_pending" ? { retryAfterMs: 1_000 } : {}),
       // The refusal is a stored terminal receipt: only a new request ID can observe freed capacity.
       ...(retryable && request.errorCode === "capacity_exhausted"
         ? { retryRequires: "new_request_id" as const }

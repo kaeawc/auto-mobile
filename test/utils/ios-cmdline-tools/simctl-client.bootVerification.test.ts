@@ -1,7 +1,5 @@
 import { SimCtlBoot } from "../../../src/utils/ios-cmdline-tools/SimCtlBoot";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
-import { DeviceBootTimeoutError } from "../../../src/devices/DeviceBootTimeoutError";
-import { toProvisionDeviceError } from "../../../src/server/provisioning/provisioningErrors";
 import { runPhaseWithSettlement } from "../../../src/utils/runPhaseWithSettlement";
 import { FakeSimulatorDeviceTypeProfiles } from "../../fakes/FakeSimulatorDeviceTypeProfiles";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";

@@ -40,7 +40,7 @@ import {
   pushProgressNotification as fanOutProgress,
   type NotificationTransport,
 } from "./socketServer/notificationFanOut";
-import { shapeToolCallError } from "../server/shapeToolCallError";
+import { shapeToolCallError } from "./shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../utils/toolEnvelopePayload";
 import { createServer, Server as NetServer, Socket } from "node:net";

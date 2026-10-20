@@ -1,4 +1,4 @@
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";

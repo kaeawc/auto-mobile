@@ -32,7 +32,7 @@ import {
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
 } from "../../src/daemon/types";
 import { declaresDeviceSessionSuspect } from "../../src/daemon/deviceSessionResult";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { SessionSuspectError } from "../../src/daemon/sessionManager";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

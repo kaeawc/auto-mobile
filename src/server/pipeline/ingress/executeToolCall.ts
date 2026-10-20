@@ -28,11 +28,11 @@ import {
 } from "../../foreignOwnedSessionRefusal";
 import { InvalidToolParamsError } from "../../invalidToolParamsError";
 import { stripInternalToolParams } from "../../internalToolParams";
-import { PlanExecutionInProgressError } from "../../planExecutionInProgressRefusal";
+import { PlanExecutionInProgressError } from "../../../daemon/planExecutionInProgressRefusal";
 import type { PlanExecutionLock } from "../../PlanExecutionLock";
 import { withAdmittedSessionEcho } from "../../routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "../../../daemon/routedSessionMeta";
-import { isTypedToolRefusal, shapeToolCallError } from "../../shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../../daemon/shapeToolCallError";
 import {
   responseCarriesStructuredContent,
   stripToolResultStructuredContent,

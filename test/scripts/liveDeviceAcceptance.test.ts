@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   getAndroidSchema,
   getAppleSchema,

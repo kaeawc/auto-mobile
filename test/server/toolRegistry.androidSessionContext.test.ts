@@ -1,5 +1,5 @@
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";

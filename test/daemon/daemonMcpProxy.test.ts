@@ -4,7 +4,7 @@ import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNo
 import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { SessionOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   SessionRecoveryIdentityLossError,
   SessionTerminalReleaseInProgressError,

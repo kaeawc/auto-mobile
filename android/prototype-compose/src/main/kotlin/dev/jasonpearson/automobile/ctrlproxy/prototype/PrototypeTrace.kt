@@ -4,7 +4,8 @@ import android.os.Build
 import android.os.Trace
 import java.util.concurrent.atomic.AtomicInteger
 
-internal interface PrototypeTraceSink {
+@InternalAutoMobilePrototypeApi
+interface PrototypeTraceSink {
   fun isEnabled(): Boolean
 
   fun begin(name: String)
@@ -21,7 +22,8 @@ internal interface PrototypeTraceSink {
  * Below API 29 (and in plain JVM unit tests), no section is emitted and no [Trace] method is
  * called.
  */
-internal object PrototypeTrace {
+@InternalAutoMobilePrototypeApi
+object PrototypeTrace {
   const val VALIDATE_STATE_WRITE = "Prototype.validateStateWrite"
   const val PREPARE_STATE_WRITES = "Prototype.prepareStateWrites"
   const val MAP_RENDER_TREE = "Prototype.mapRenderTree"
@@ -32,7 +34,7 @@ internal object PrototypeTrace {
   const val SYNC_APPEARANCE = "Prototype.syncAppearance"
   const val HOST_SHOW = "Prototype.host.show"
 
-  private val asyncCookie = AtomicInteger()
+  @PublishedApi internal val asyncCookie = AtomicInteger()
 
   @Volatile var sink: PrototypeTraceSink = FrameworkPrototypeTraceSink
 

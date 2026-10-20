@@ -60,7 +60,8 @@ const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
  * [dismissBarDrawn] defaults to the legacy fullscreen bar; a chromeless window has no translucent
  * strip, so its authored surface alone decides opacity.
  */
-internal fun prototypeWindowMetadata(
+@InternalAutoMobilePrototypeApi
+fun prototypeWindowMetadata(
   model: PrototypeRenderModel,
   dismissBarOpaque: Boolean = FULLSCREEN_DISMISS_BAR_OPAQUE,
   palettes: List<PrototypePalette>? = null,
@@ -161,7 +162,8 @@ fun isPrototypeWindow(
   hasPrototypeTitle(windowType, title) && ownPackage != null && windowPackage == ownPackage
 
 /** Reads roots only for titled candidates; any unreadable candidate prevents an absence claim. */
-internal fun <W> prototypeWindowOnScreen(
+@InternalAutoMobilePrototypeApi
+fun <W> prototypeWindowOnScreen(
   windows: List<W>?,
   hasTitle: (W) -> Boolean,
   rootPackage: (W) -> String?,

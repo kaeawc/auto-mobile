@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
 import { observeResultFromFixture } from "../../../helpers/observeFixture";
 import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -66,7 +67,7 @@ function harness() {
       accessibilityDetector: new FakeAccessibilityDetector(),
     },
   );
-  action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
+  action.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
   return { action, voiceOverExecutor, finder };
 }
 

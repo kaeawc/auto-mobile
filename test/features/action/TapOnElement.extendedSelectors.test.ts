@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { flatHierarchyFromFixture } from "../../helpers/flatHierarchyFixture";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
@@ -534,15 +535,14 @@ describe("TapOnElement extended selectors", () => {
         const initialHierarchy: ViewHierarchyResult = {
           hierarchy: { node: createFlatNodeForTest({ $: element }) },
         };
-        tapOn.observedInteraction = (callback) =>
-          callback(
-            buildObserveResult({
-              updatedAt: 0,
-              systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-              viewHierarchy: initialHierarchy,
-              screenSize: { width: 1080, height: 2400 },
-            }),
-          );
+        tapOn.observedInteraction = runBlockWith(() =>
+          buildObserveResult({
+            updatedAt: 0,
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: initialHierarchy,
+            screenSize: { width: 1080, height: 2400 },
+          }),
+        );
         const stable = spyOn(
           tapOn,
           "resolveAndroidStableTapTargetAfterRefreshes",

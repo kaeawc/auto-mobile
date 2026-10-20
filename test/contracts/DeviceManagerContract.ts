@@ -104,8 +104,8 @@ export function runDeviceManagerContract(
       expect(result.devices).toEqual([IPHONE_BOOTED]);
       expect(result.succeededPlatforms.has("android")).toBe(false);
       expect(result.succeededPlatforms.has("ios")).toBe(true);
-      expect(result.discoveryErrors.android?.code).toBe("failed");
-      expect(result.discoveryErrors.ios).toBeUndefined();
+      expect(result.discoveryErrors?.android?.code).toBe("failed");
+      expect(result.discoveryErrors?.ios).toBeUndefined();
     });
 
     test("isDeviceImageRunning is true only for an image that is booted", async () => {

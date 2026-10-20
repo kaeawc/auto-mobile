@@ -1,3 +1,4 @@
+import { toolPayload } from "./toolResponse";
 import { spyOn } from "bun:test";
 import { z } from "zod/v4";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -93,7 +94,7 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
       recorder.stopVideoRecording,
     ),
     spyOn(videoRecordingManager, "rollbackVideoRecordingStart").mockResolvedValue(undefined),
-    spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(null),
+    spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(undefined),
     spyOn(videoRecordingManager, "getVideoRecordingMetadata").mockResolvedValue(null),
   ];
   restores.push(() => videoSpies.forEach((spy) => spy.mockRestore()));
@@ -197,10 +198,7 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
       probeStep = step;
     },
     runPlan: async (planContent, signal) => {
-      const response: {
-        structuredContent?: PlanRunResult;
-        content: Array<{ text: string }>;
-      } = await ToolRegistry.getTool("executePlan")!.handler(
+      const response = await ToolRegistry.getTool("executePlan")!.handler(
         {
           planContent,
           startStep: 0,
@@ -212,7 +210,19 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
         undefined,
         signal,
       );
-      return response.structuredContent ?? JSON.parse(response.content[0].text);
+      const result = toolPayload(response);
+      if (!result) {
+        throw new Error("Missing plan result");
+      }
+      return z
+        .looseObject({
+          success: z.boolean().optional(),
+          error: z.string().optional(),
+          code: z.string().optional(),
+          retryable: z.boolean().optional(),
+          deviceMapping: z.record(z.string(), z.string()).optional(),
+        })
+        .parse(result);
     },
     poolHolder: (deviceId) => daemon().pool.getDevice(deviceId)?.sessionId ?? undefined,
     tearDown: () => {

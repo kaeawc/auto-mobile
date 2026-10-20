@@ -154,13 +154,12 @@ describe("Android CtrlProxy singleton incarnation", () => {
     const oldAdb = adbForForwards();
     const old = resolve(oldAdb);
     const oldPort = PortManager.getPort(device.deviceId)!;
-    // Arrange an already-forwarding old client; the behavior under test is its
-    // replacement's setup and the old client's real, gated cleanup.
-    const oldLease: FileCtrlProxyForwardLease = Reflect.get(old, "ctrlProxyForwardLease");
-    expect(oldLease.tryAcquire()).toBe(true);
-    oldLease.recordOwnedForward(oldPort);
-    forwards.set(oldPort, `${device.deviceId} tcp:${oldPort} tcp:8765`);
-    Reflect.set(old, "portForwardingSetup", true);
+    // Establish the old forward through its public API before gating cleanup.
+    await settleByFakeEvents(timer, old.setupPortForwarding(), {
+      description: "old incarnation owns its forward before replacement",
+    });
+    expect(AndroidCtrlProxyClient.getForwardLeaseHeldDeviceIds()).toContain(device.deviceId);
+    expect(forwards.has(oldPort)).toBe(true);
     const lease = new FileCtrlProxyForwardLease(device.deviceId);
     expect(lease.ownsForward(oldPort)).toBe(true);
     const gate = new Promise<void>((release) => {

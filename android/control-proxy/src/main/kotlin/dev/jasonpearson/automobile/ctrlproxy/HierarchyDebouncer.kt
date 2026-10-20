@@ -315,6 +315,36 @@ internal constructor(
         inAnimationMode = false
       }
 
+      val wait = QuiescenceWait(startTime, initialTimestamp, pollIntervalMs)
+      wait.awaitFirstEvent(initialEventWaitMs)
+      wait.awaitQuiescence(maxWaitMs, quiescenceMs)
+
+      // Now extract the hierarchy
+      val hierarchy = extractAndCompare(skipFlowEmit = true, snapshotOptions = snapshotOptions)
+
+      val totalWait = timeProvider.currentTimeMillis() - startTime
+      Log.d(TAG, "extractAfterQuiescence: completed in ${totalWait}ms")
+
+      return hierarchy
+    } finally {
+      // Release only this call's suppression; other overlapping calls retain theirs.
+      val remaining = flowEmissionSuppressionDepth.updateAndGet { depth ->
+        if (depth > 0) depth - 1 else 0
+      }
+      Log.d(
+        TAG,
+        if (remaining == 0) "extractAfterQuiescence: flow emissions re-enabled"
+        else "extractAfterQuiescence: flow emissions remain suppressed ($remaining calls active)",
+      )
+    }
+  }
+
+  private inner class QuiescenceWait(
+    private val startTime: Long,
+    private val initialTimestamp: Long,
+    private val pollIntervalMs: Long,
+  ) {
+    suspend fun awaitFirstEvent(initialEventWaitMs: Long) {
       // PHASE 1: Wait for at least one new accessibility event to fire
       // This is critical because ACTION_SET_TEXT completes before the accessibility
       // tree is updated. The tree update triggers TYPE_WINDOW_CONTENT_CHANGED events.
@@ -338,7 +368,9 @@ internal constructor(
 
         delay(pollIntervalMs)
       }
+    }
 
+    suspend fun awaitQuiescence(maxWaitMs: Long, quiescenceMs: Long) {
       // PHASE 2: Wait for quiescence (no events for quiescenceMs)
       var lastCheckedTimestamp = lastEventTimestamp
 
@@ -374,24 +406,6 @@ internal constructor(
         // Wait before checking again
         delay(pollIntervalMs)
       }
-
-      // Now extract the hierarchy
-      val hierarchy = extractAndCompare(skipFlowEmit = true, snapshotOptions = snapshotOptions)
-
-      val totalWait = timeProvider.currentTimeMillis() - startTime
-      Log.d(TAG, "extractAfterQuiescence: completed in ${totalWait}ms")
-
-      return hierarchy
-    } finally {
-      // Release only this call's suppression; other overlapping calls retain theirs.
-      val remaining = flowEmissionSuppressionDepth.updateAndGet { depth ->
-        if (depth > 0) depth - 1 else 0
-      }
-      Log.d(
-        TAG,
-        if (remaining == 0) "extractAfterQuiescence: flow emissions re-enabled"
-        else "extractAfterQuiescence: flow emissions remain suppressed ($remaining calls active)",
-      )
     }
   }
 

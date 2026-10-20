@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.control
 
 import dev.jasonpearson.automobile.desktop.domain.CoordinateSpace
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
+import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesture
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragRejection
 import dev.jasonpearson.automobile.desktop.domain.DevicePoint
@@ -22,7 +23,7 @@ class DeviceDragGesturePolicyTest {
     DevicePoint(x, y, inBounds = x in 0 until width && y in 0 until height)
 
   private fun evaluate(start: DevicePoint, end: DevicePoint) =
-    DeviceDragGesturePolicy.evaluate(start, end, width, height)
+    DeviceDragGesturePolicy.evaluate(DeviceDragGesture(start, end, width, height))
 
   @Test
   fun `a drag past the threshold becomes one swipe with both mapped endpoints`() {
@@ -41,11 +42,13 @@ class DeviceDragGesturePolicyTest {
     val swipe =
       assertIs<DeviceDragDecision.Swipe>(
         DeviceDragGesturePolicy.evaluate(
-          at(100, 200),
-          at(100, 1400),
-          width,
-          height,
-          gestureDurationMs = 80,
+          DeviceDragGesture(
+            at(100, 200),
+            at(100, 1400),
+            width,
+            height,
+            gestureDurationMs = 80,
+          ),
         ),
       )
     // A fast flick (80ms over a long distance) replays as a short, high-velocity swipe → strong
@@ -58,11 +61,13 @@ class DeviceDragGesturePolicyTest {
     fun durationFor(gesture: Int) =
       assertIs<DeviceDragDecision.Swipe>(
           DeviceDragGesturePolicy.evaluate(
-            at(100, 200),
-            at(100, 1400),
-            width,
-            height,
-            gestureDurationMs = gesture,
+            DeviceDragGesture(
+              at(100, 200),
+              at(100, 1400),
+              width,
+              height,
+              gestureDurationMs = gesture,
+            ),
           ),
         )
         .durationMs
@@ -133,10 +138,12 @@ class DeviceDragGesturePolicyTest {
   fun `a screen with no addressable pixel sends nothing`() {
     val decision =
       DeviceDragGesturePolicy.evaluate(
-        DevicePoint(0, 0, inBounds = false),
-        DevicePoint(0, 500, inBounds = false),
-        deviceWidth = 0,
-        deviceHeight = 0,
+        DeviceDragGesture(
+          DevicePoint(0, 0, inBounds = false),
+          DevicePoint(0, 500, inBounds = false),
+          deviceWidth = 0,
+          deviceHeight = 0,
+        ),
       )
 
     assertEquals(DeviceDragDecision.Ignored(DeviceDragRejection.NoAddressableScreen), decision)
@@ -150,23 +157,27 @@ class DeviceDragGesturePolicyTest {
     assertEquals(
       DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
       DeviceDragGesturePolicy.evaluate(
-        at(100, 200),
-        at(100, 200 + pxThreshold - 1),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-        nativeScale,
+        DeviceDragGesture(
+          at(100, 200),
+          at(100, 200 + pxThreshold - 1),
+          width,
+          height,
+          CoordinateSpace.Pixels,
+          nativeScale,
+        ),
       ),
       "one pixel below the bar sends nothing",
     )
     assertIs<DeviceDragDecision.Swipe>(
       DeviceDragGesturePolicy.evaluate(
-        at(100, 200),
-        at(100, 200 + pxThreshold),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-        nativeScale,
+        DeviceDragGesture(
+          at(100, 200),
+          at(100, 200 + pxThreshold),
+          width,
+          height,
+          CoordinateSpace.Pixels,
+          nativeScale,
+        ),
       ),
       "exactly at the bar swipes",
     )
@@ -183,22 +194,28 @@ class DeviceDragGesturePolicyTest {
     val end = at(100, 200 + 24)
 
     assertIs<DeviceDragDecision.Swipe>(
-      DeviceDragGesturePolicy.evaluate(start, end, width, height, coordinateSpace = null),
+      DeviceDragGesturePolicy.evaluate(
+        DeviceDragGesture(start, end, width, height, coordinateSpace = null),
+      ),
       "the legacy path keeps its 24-unit behavior exactly",
     )
     assertEquals(
       DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
-      DeviceDragGesturePolicy.evaluate(start, end, width, height, CoordinateSpace.Pixels, 3.0),
+      DeviceDragGesturePolicy.evaluate(
+        DeviceDragGesture(start, end, width, height, CoordinateSpace.Pixels, 3.0),
+      ),
     )
     // A movement scaled up for the pixel space is a swipe again.
     assertIs<DeviceDragDecision.Swipe>(
       DeviceDragGesturePolicy.evaluate(
-        start,
-        at(100, 200 + 72),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-        3.0,
+        DeviceDragGesture(
+          start,
+          at(100, 200 + 72),
+          width,
+          height,
+          CoordinateSpace.Pixels,
+          3.0,
+        ),
       ),
     )
   }
@@ -211,22 +228,26 @@ class DeviceDragGesturePolicyTest {
     assertEquals(
       DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
       DeviceDragGesturePolicy.evaluate(
-        at(100, 200),
-        at(100, 200 + threshold.toInt() - 1),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-        scale,
+        DeviceDragGesture(
+          at(100, 200),
+          at(100, 200 + threshold.toInt() - 1),
+          width,
+          height,
+          CoordinateSpace.Pixels,
+          scale,
+        ),
       ),
     )
     assertIs<DeviceDragDecision.Swipe>(
       DeviceDragGesturePolicy.evaluate(
-        at(100, 200),
-        at(100, 200 + threshold.toInt()),
-        width,
-        height,
-        CoordinateSpace.Pixels,
-        scale,
+        DeviceDragGesture(
+          at(100, 200),
+          at(100, 200 + threshold.toInt()),
+          width,
+          height,
+          CoordinateSpace.Pixels,
+          scale,
+        ),
       ),
     )
 
@@ -248,12 +269,14 @@ class DeviceDragGesturePolicyTest {
       assertEquals(
         DeviceDragDecision.Ignored(DeviceDragRejection.BelowThreshold),
         DeviceDragGesturePolicy.evaluate(
-          start,
-          end,
-          width,
-          height,
-          CoordinateSpace.Pixels,
-          invalidScale,
+          DeviceDragGesture(
+            start,
+            end,
+            width,
+            height,
+            CoordinateSpace.Pixels,
+            invalidScale,
+          ),
         ),
         "nativeScale=$invalidScale must not authorize a px swipe",
       )

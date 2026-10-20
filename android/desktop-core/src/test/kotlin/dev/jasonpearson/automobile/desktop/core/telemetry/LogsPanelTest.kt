@@ -41,9 +41,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-class LogsPanelTest {
+internal abstract class LogsPanelFixture {
 
-  private fun log(level: Int, tag: String, message: String, timestamp: Long) =
+  protected fun log(level: Int, tag: String, message: String, timestamp: Long) =
     TelemetryDisplayEvent.Log(
       timestamp = timestamp,
       level = level,
@@ -53,6 +53,16 @@ class LogsPanelTest {
 
   // -- Pure filter tests (no Compose) --
 
+  // -- Tail-follow clear-decision tests (pure) --
+
+  // -- Compose UI tests --
+
+  // -- Selection + detail (issue #4705) --
+
+}
+
+@OptIn(ExperimentalTestApi::class)
+internal class LogsPanelTest : LogsPanelFixture() {
   @Test
   fun `logLevelOf maps android levels to canonical buckets`() {
     assertEquals(LogLevel.Verbose, logLevelOf(2))
@@ -248,8 +258,6 @@ class LogsPanelTest {
     assertEquals(listOf(logs[1]), filterLogs(logs, setOf(LogLevel.Error), "", LogPlatform.Ios))
   }
 
-  // -- Tail-follow clear-decision tests (pure) --
-
   @Test
   fun `a user upward scroll clears tail-follow intent`() {
     // Positive y = content moving down = scrolling toward older rows (away from the tail).
@@ -268,8 +276,6 @@ class LogsPanelTest {
     // list) dispatch as SideEffect and must be ignored, or they would defeat tail-follow.
     assertFalse(clearsTailFollow(Offset(0f, 12f), NestedScrollSource.SideEffect))
   }
-
-  // -- Compose UI tests --
 
   @Test
   fun `saving applying and deleting a view round trips through SettingsProvider`() =
@@ -479,7 +485,10 @@ class LogsPanelTest {
     assertEquals(49, listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index)
     onNodeWithText("burst row 49").assertIsDisplayed()
   }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class LogsPanelFilteringTest : LogsPanelFixture() {
   @Test
   fun `selected levels persist per device and restore when returning`() = runComposeUiTest {
     val settings = FakeSettingsProvider()
@@ -894,9 +903,10 @@ class LogsPanelTest {
       }
       onNodeWithText("b-row 29").assertIsDisplayed()
     }
+}
 
-  // -- Selection + detail (issue #4705) --
-
+@OptIn(ExperimentalTestApi::class)
+internal class LogsPanelSelectionTest : LogsPanelFixture() {
   @Test
   fun `clicking a log row selects and highlights it, clicking again clears it`() =
     runComposeUiTest {

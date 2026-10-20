@@ -260,40 +260,7 @@ class OfflineNavigationBrowserTest {
     runComposeUiTest {
       // Distinct graph per appId so a stale render is detectable by screen name.
       val loaderAppIds = mutableListOf<String>()
-      val provider: (String?) -> NavigationDataSource = { appId ->
-        when (appId) {
-          null ->
-            SuppliedDataSource(
-              apps = {
-                Result.Success(
-                  listOf(appSummary("com.example.a", "AppA"), appSummary("com.example.b", "AppB")),
-                )
-              },
-            )
-          "com.example.a" ->
-            SuppliedDataSource(
-              graph = {
-                Result.Success(
-                  NavigationGraph(
-                    listOf(screen("Alpha").copy(screenshotUri = "shot?appId=com.example.a")),
-                    emptyList(),
-                  ),
-                )
-              },
-            )
-          else ->
-            SuppliedDataSource(
-              graph = {
-                Result.Success(
-                  NavigationGraph(
-                    listOf(screen("Beta").copy(screenshotUri = "shot?appId=com.example.b")),
-                    emptyList(),
-                  ),
-                )
-              },
-            )
-        }
-      }
+      val provider = appSwitchDataSourceProvider()
       setContent {
         CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
           MaterialTheme {
@@ -427,5 +394,40 @@ class OfflineNavigationBrowserTest {
         .fetchSemanticsNodes()
         .isEmpty(),
     )
+  }
+
+  private fun appSwitchDataSourceProvider(): (String?) -> NavigationDataSource = { appId ->
+    when (appId) {
+      null ->
+        SuppliedDataSource(
+          apps = {
+            Result.Success(
+              listOf(appSummary("com.example.a", "AppA"), appSummary("com.example.b", "AppB")),
+            )
+          },
+        )
+      "com.example.a" ->
+        SuppliedDataSource(
+          graph = {
+            Result.Success(
+              NavigationGraph(
+                listOf(screen("Alpha").copy(screenshotUri = "shot?appId=com.example.a")),
+                emptyList(),
+              ),
+            )
+          },
+        )
+      else ->
+        SuppliedDataSource(
+          graph = {
+            Result.Success(
+              NavigationGraph(
+                listOf(screen("Beta").copy(screenshotUri = "shot?appId=com.example.b")),
+                emptyList(),
+              ),
+            )
+          },
+        )
+    }
   }
 }

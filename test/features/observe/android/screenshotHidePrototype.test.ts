@@ -43,7 +43,9 @@ function clientWithCapturedFrames(supportedCommands?: readonly string[]) {
     },
   };
   if (supportedCommands) {
-    client["webSocketMessageHandlers"].connected({ type: "connected", supportedCommands });
+    void client.testHooks.handleWebSocketMessage(
+      JSON.stringify({ type: "connected", supportedCommands: [...supportedCommands] }),
+    );
   }
   return { client, sent };
 }

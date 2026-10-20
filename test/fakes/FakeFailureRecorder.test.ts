@@ -27,7 +27,13 @@ describe("FakeFailureRecorder", () => {
     exceptionType: "NullPointerException",
     exceptionMessage: "Cannot invoke method on null",
     stackTrace: [
-      { className: "com.example.App", methodName: "onClick", lineNumber: 42, isAppCode: true },
+      {
+        className: "com.example.App",
+        methodName: "onClick",
+        fileName: "App.kt",
+        lineNumber: 42,
+        isAppCode: true,
+      },
     ],
     deviceModel: "Pixel 6",
     os: "Android 14",

@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, spyOn, test } from "bun:test";
@@ -121,15 +122,14 @@ for (const row of scopedSelectionMatrix) {
         supportsNodeActionSelectors: async () => true,
       },
     });
-    tap.observedInteraction = (action) =>
-      action(
-        buildObserveResult({
-          updatedAt: 0,
-          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-          viewHierarchy: capture,
-          screenSize: { width: 1080, height: 2400 },
-        }),
-      );
+    tap.observedInteraction = runBlockWith(() =>
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: capture,
+        screenSize: { width: 1080, height: 2400 },
+      }),
+    );
     tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });
@@ -167,15 +167,14 @@ for (const row of scopedSelectionMatrix) {
         supportsNodeActionSelectors: async () => true,
       },
     });
-    tap.observedInteraction = (action) =>
-      action(
-        buildObserveResult({
-          updatedAt: 0,
-          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-          viewHierarchy: capture,
-          screenSize: { width: 1080, height: 2400 },
-        }),
-      );
+    tap.observedInteraction = runBlockWith(() =>
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: capture,
+        screenSize: { width: 1080, height: 2400 },
+      }),
+    );
     tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });

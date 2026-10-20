@@ -8,22 +8,34 @@ export function iosProjectionFixture(): ViewHierarchyResult {
     screenWidth: 100,
     screenHeight: 100,
     hierarchy: {
-      bounds: [0, 0, 100, 100],
-      node: [
-        {
-          class: "WKWebView",
-          bounds: [10, 10, 30, 30],
-          node: {
-            class: "XCUIElementTypeButton",
-            "resource-id": "source-id",
-            text: "Source",
-            clickable: true,
-            bounds: [10, 10, 30, 30],
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: {
+        node: [
+          {
+            class: "WKWebView",
+            bounds: { left: 10, top: 10, right: 30, bottom: 30 },
+            node: [
+              {
+                class: "XCUIElementTypeButton",
+                "resource-id": "source-id",
+                text: "Source",
+                clickable: true,
+                bounds: { left: 10, top: 10, right: 30, bottom: 30 },
+              },
+            ],
           },
-        },
-        { "resource-id": "target-id", text: "Target", bounds: [60, 60, 80, 80] },
-        { "resource-id": "hidden-id", text: "Hidden", bounds: [10, 500, 30, 520] },
-      ],
+          {
+            "resource-id": "target-id",
+            text: "Target",
+            bounds: { left: 60, top: 60, right: 80, bottom: 80 },
+          },
+          {
+            "resource-id": "hidden-id",
+            text: "Hidden",
+            bounds: { left: 10, top: 500, right: 30, bottom: 520 },
+          },
+        ],
+      },
     },
   };
 }

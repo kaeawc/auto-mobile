@@ -18,23 +18,6 @@
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
-    <ID>CyclomaticComplexMethod:CtrlProxyMessageHandler.kt:CtrlProxyMessageHandler$override suspend fun handleMessage: WebSocketResponse?</ID>
-    <ID>CyclomaticComplexMethod:FailureReceivers.kt:CrashReceiver$private fun parse: CrashReport?</ID>
-    <ID>CyclomaticComplexMethod:GestureController.kt:GestureController$fun performDrag</ID>
-    <ID>CyclomaticComplexMethod:GestureStreamSession.kt:GestureStreamSession$private fun drive</ID>
-    <ID>CyclomaticComplexMethod:HierarchyDebouncer.kt:HierarchyDebouncer$suspend fun extractAfterQuiescenceSuspending: ViewHierarchy?</ID>
-    <ID>CyclomaticComplexMethod:HingeFallbackPostureSource.kt:HingeFallbackPostureSource$override fun observe: AutoCloseable</ID>
-    <ID>CyclomaticComplexMethod:ImeCommitDriver.kt:ImeCommitDriver.CommitSequence$private fun applyReconciliation</ID>
-    <ID>CyclomaticComplexMethod:ImeCommitDriver.kt:ImeCommitDriver.CommitSequence$private fun commitUnits</ID>
-    <ID>CyclomaticComplexMethod:ImeCommitDriver.kt:ImeCommitDriver.Companion$internal fun reconcileDecision: Reconciliation</ID>
-    <ID>CyclomaticComplexMethod:ImeGraphemes.kt:ImeGraphemes$private fun Int.isConjoiningLetter: Boolean</ID>
-    <ID>CyclomaticComplexMethod:InputConnectionDriver.kt:InputConnectionDriver$fun execute: Boolean</ID>
-    <ID>CyclomaticComplexMethod:InteractionEventController.kt:InteractionEventController$private fun recordInteractionEvent</ID>
-    <ID>CyclomaticComplexMethod:LogcatReader.kt:LogcatReader$private fun isOwnDiagnostic: Boolean</ID>
-    <ID>CyclomaticComplexMethod:NodeActionController.kt:NodeActionController$fun performAccessibilityLinkActivation</ID>
-    <ID>CyclomaticComplexMethod:NodeActionController.kt:NodeActionController$suspend fun performNodeAction</ID>
-    <ID>CyclomaticComplexMethod:PackageController.kt:PackageController$suspend fun performPackageInfo</ID>
-    <ID>CyclomaticComplexMethod:PackageScreenReceivers.kt:PackageEventReceiver$override fun onReceive</ID>
     <ID>CyclomaticComplexMethod:PrototypeAppearance.kt:internal fun prototypeResolveAppearance: PrototypeAppearance</ID>
     <ID>CyclomaticComplexMethod:PrototypeController.kt:PrototypeController$private suspend fun display: Surface</ID>
     <ID>CyclomaticComplexMethod:PrototypeFlowGridLayout.kt:@Composable internal fun PrototypeGridLayout</ID>
@@ -65,16 +48,11 @@
     <ID>CyclomaticComplexMethod:PrototypeTheme.kt:internal fun prototypeTextRole: TextStyle?</ID>
     <ID>CyclomaticComplexMethod:PrototypeValidation.kt:internal fun PrototypeNode.validationMode: PrototypeValidateOn</ID>
     <ID>CyclomaticComplexMethod:PrototypeWindowMetadata.kt:internal fun prototypeWindowMetadata: PrototypeWindowMetadata</ID>
-    <ID>CyclomaticComplexMethod:RotationProvenanceTracker.kt:DisplayRotationChangeSignal$internal fun emitTransition</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeActivity.kt:@Composable private fun SavedPrototypeStatus</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeController.kt:internal fun SavedPrototypeRejection.errorCode: SavedPrototypeErrorCode</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
     <ID>CyclomaticComplexMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun validate: SavedPrototypeSaveResult.Rejected?</ID>
-    <ID>CyclomaticComplexMethod:SdkTelemetryReceivers.kt:NavigationEventReceiver$override fun onReceive</ID>
-    <ID>CyclomaticComplexMethod:StructuralHasher.kt:StructuralHasher$private fun computeElementHash: Int</ID>
-    <ID>CyclomaticComplexMethod:TextInputController.kt:TextInputController$suspend fun performImeAction</ID>
-    <ID>CyclomaticComplexMethod:TextInputController.kt:TextInputController$suspend fun performInsertText</ID>
     <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromActiveWindow: ViewHierarchy?</ID>
     <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
     <ID>CyclomaticComplexMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$internal fun calculateUnionArea: Int</ID>
@@ -109,12 +87,8 @@
     <ID>LongMethod:HierarchyController.kt:HierarchyController$internal suspend fun extractHierarchyNow</ID>
     <ID>LongMethod:HierarchyController.kt:HierarchyController$private fun extractHierarchyDirect: ViewHierarchy?</ID>
     <ID>LongMethod:HierarchyDebouncer.kt:HierarchyDebouncer$private suspend fun extractAndCompare: ViewHierarchy?</ID>
-    <ID>LongMethod:HierarchyDebouncer.kt:HierarchyDebouncer$suspend fun extractAfterQuiescenceSuspending: ViewHierarchy?</ID>
-    <ID>LongMethod:HingeFallbackPostureSource.kt:HingeFallbackPostureSource$override fun observe: AutoCloseable</ID>
     <ID>LongMethod:ImeController.kt:ImeController$suspend fun requestCommitText</ID>
-    <ID>LongMethod:InteractionEventController.kt:InteractionEventController$private fun recordInteractionEvent</ID>
     <ID>LongMethod:KeyboardScreen.kt:@Composable private fun KeyCap</ID>
-    <ID>LongMethod:NodeActionController.kt:NodeActionController$fun performAccessibilityLinkActivation</ID>
     <ID>LongMethod:NodeActionController.kt:NodeActionController$suspend fun performNodeAction</ID>
     <ID>LongMethod:PackageController.kt:PackageController$suspend fun performInstalledPackages</ID>
     <ID>LongMethod:PackageController.kt:PackageController$suspend fun performPackageInfo</ID>
@@ -135,10 +109,8 @@
     <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
     <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
     <ID>LongMethod:ScreenshotController.kt:ScreenshotController$suspend fun takeScreenshotAsync: ScreenshotCaptureOutcome</ID>
-    <ID>LongMethod:SdkTelemetryReceivers.kt:NavigationEventReceiver$override fun onReceive</ID>
     <ID>LongMethod:SettingsController.kt:SettingsController$suspend fun performSettingsWrite</ID>
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performImeAction</ID>
-    <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performInsertText</ID>
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSelectAll</ID>
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSetText</ID>
     <ID>LongMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromActiveWindow: ViewHierarchy?</ID>

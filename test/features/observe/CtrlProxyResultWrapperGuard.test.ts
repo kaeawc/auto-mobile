@@ -22,7 +22,6 @@ import { maskRealCtrlProxyWebSocketOptIn } from "../../helpers/maskRealCtrlProxy
 const androidDevice: BootedDevice = {
   deviceId: "guard-android",
   platform: "android",
-  isEmulator: true,
   name: "Guard Android",
 };
 
@@ -50,6 +49,10 @@ function createIosManager(timer: FakeTimer): CtrlProxyIosManager {
     },
     async start() {},
     async stop() {},
+    resetSetupState() {},
+    async getReportedRunnerPort() {
+      return null;
+    },
     getServicePort() {
       return 0;
     },

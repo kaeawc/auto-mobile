@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../src/models";
 import type {
@@ -6,7 +7,7 @@ import type {
 } from "../../src/features/observe/interfaces/ObserveScreen";
 
 export interface ObserveScreenHandle {
-  screen: ObserveScreen;
+  screen: ObserveScreen & Required<Pick<ObserveScreen, "cacheObserveResult">>;
   /** Make the NEXT observation carry `marker` as its updatedAt; geometry never changes, because a
    * geometry change legitimately invalidates the real cache. */
   present(marker: number): void;
@@ -131,11 +132,11 @@ export function runObserveScreenContract(name: string, make: () => ObserveScreen
 
     test("appendRawViewHierarchy attaches nothing when the primary hierarchy is absent", async function () {
       await withScreen(async ({ screen }) => {
-        const result: ObserveResult = {
+        const result: ObserveResult = buildObserveResult({
           updatedAt: new Date(0).toISOString(),
           screenSize: { width: 0, height: 0 },
           systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        };
+        });
 
         await screen.appendRawViewHierarchy(result);
 

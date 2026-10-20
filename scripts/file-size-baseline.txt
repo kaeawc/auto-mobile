@@ -20,7 +20,6 @@
 2135	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1291	src/features/prototype/prototypeSpec.ts
-1399	src/features/utility/ElementResolver.ts
 1502	src/features/video/FfmpegVideoProcessingBackend.ts
 1516	src/features/webrtc/IosH264Source.ts
 1315	src/features/webrtc/PersistentEncoderH264Source.ts

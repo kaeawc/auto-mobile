@@ -890,7 +890,16 @@ internal class GestureController(
 
     resultBroadcaster.guard(requestId, "swipe_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        swipeResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
+        swipeResultFrame(
+          GestureFrameResult(
+            requestId = requestId,
+            success = success,
+            error = error,
+            totalTimeMs = totalTimeMs,
+            gestureTimeMs = gestureTimeMs,
+          ),
+          perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted swipe result to ${responseSender.connectionCount()} clients")
     }
@@ -911,7 +920,16 @@ internal class GestureController(
 
     resultBroadcaster.guard(requestId, "drag_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        dragResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
+        dragResultFrame(
+          GestureFrameResult(
+            requestId = requestId,
+            success = success,
+            error = error,
+            totalTimeMs = totalTimeMs,
+            gestureTimeMs = gestureTimeMs,
+          ),
+          perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted drag result to ${responseSender.connectionCount()} clients")
     }
@@ -955,7 +973,16 @@ internal class GestureController(
 
     resultBroadcaster.guard(requestId, "pinch_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        pinchResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
+        pinchResultFrame(
+          GestureFrameResult(
+            requestId = requestId,
+            success = success,
+            error = error,
+            totalTimeMs = totalTimeMs,
+            gestureTimeMs = gestureTimeMs,
+          ),
+          perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted pinch result to ${responseSender.connectionCount()} clients")
     }

@@ -52,11 +52,13 @@ class CtrlProxyDragDispatchTest {
     fixture.gestureController.dragResultReporter = { id, outcome ->
       frames.add(
         dragResultFrame(
-          id,
-          outcome.completed,
-          outcome.error,
-          outcome.totalTimeMs,
-          outcome.gestureTimeMs,
+          GestureFrameResult(
+            requestId = id,
+            success = outcome.completed,
+            error = outcome.error,
+            totalTimeMs = outcome.totalTimeMs,
+            gestureTimeMs = outcome.gestureTimeMs,
+          ),
           null,
         ),
       )

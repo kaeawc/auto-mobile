@@ -8,6 +8,7 @@ import {
   ViewHierarchyResult,
 } from "../../../models";
 import type { NotificationUIDetector } from "../../../utils/interfaces/NotificationUIDetector";
+import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import type { ProgressCallback } from "../../action/BaseVisualChange";
@@ -31,6 +32,7 @@ import {
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
   SYSTEM_TRAY_POLL_INTERVAL_MS,
+  SYSTEM_TRAY_REEXPAND_INTERVAL_MS,
   ensureSystemTrayOpen,
   observeSystemTray,
   sleep,
@@ -300,45 +302,93 @@ const waitForClearAllDismissal = async (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   awaitTimeoutMs: number,
-  signal?: AbortSignal,
+  options: {
+    observation: ObserveResult;
+    reexpandState: { lastAttemptAtMs: number };
+    signal?: AbortSignal;
+  },
 ): Promise<{ observation: ObserveResult; dismissed: boolean }> => {
   const { timer, observeScreenFactory } = getSystemTrayDependencies();
+  const { signal: requestSignal, reexpandState } = options;
+  const controller = new AbortController();
+  const signal = requestSignal
+    ? AbortSignal.any([requestSignal, controller.signal])
+    : controller.signal;
   const detector = getDetector(device, signal);
   const observer = observeScreenFactory(device);
   const deadlineMs = timer.now() + awaitTimeoutMs;
-  const minTimestamp = await detector.getObservationTimestamp();
-  // A cache entry that merely meets the floor is served `verified: false`, which the readability
-  // check rejects; under load that stays "not readable" until the deadline (#10296/#10431).
-  const read = () =>
-    raceWithDeadline(() => observeSystemTray(observer, minTimestamp, signal, true), {
-      timer,
-      signal,
-      timeoutMs: Math.max(0, deadlineMs - timer.now()),
-      label: "Notification shade read",
-      timeoutError: () =>
-        new ActionableError(
-          "Could not clear notifications: shade not readable after dismissal (read timed out).",
-        ),
-    });
-  let observation = await read();
-  while (true) {
-    const outcome = isReadableNotificationShade(detector, observation)
-      ? classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, observation)
-      : "indeterminate";
-    if (outcome === "dismissed") {
-      return { observation, dismissed: true };
-    }
-    const remainingMs = deadlineMs - timer.now();
-    if (remainingMs <= 0) {
-      if (outcome === "indeterminate") {
-        throw new ActionableError(
-          "Could not clear notifications: shade not readable after dismissal.",
-        );
+  const timeoutError = new ActionableError(
+    "Could not verify notification dismissal: shade read or reopen timed out.",
+  );
+  const raceOptions = () => ({
+    timer,
+    signal,
+    timeoutMs: Math.max(0, deadlineMs - timer.now()),
+    label: "Notification shade read",
+    timeoutError: () => timeoutError,
+    onTimeout: () => controller.abort(),
+  });
+  let observation = options.observation;
+  try {
+    let minTimestamp = await raceWithDeadline(
+      () => detector.getObservationTimestamp(),
+      raceOptions(),
+    );
+    // A floor-meeting cached tree is unverified; require a fresh extraction (#10296/#10431).
+    const read = () =>
+      raceWithDeadline(
+        () => observeSystemTray(observer, minTimestamp, signal, true),
+        raceOptions(),
+      );
+    while (timer.now() < deadlineMs) {
+      observation = await read();
+      throwIfAborted(signal);
+      const outcome = isReadableNotificationShade(detector, observation)
+        ? classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, observation)
+        : "indeterminate";
+      if (outcome === "dismissed") {
+        return { observation, dismissed: true };
       }
-      return { observation, dismissed: false };
+      const remainingMs = deadlineMs - timer.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      if (
+        !detector.isTrayOpen(observation.viewHierarchy) &&
+        timer.now() - reexpandState.lastAttemptAtMs >= SYSTEM_TRAY_REEXPAND_INTERVAL_MS
+      ) {
+        reexpandState.lastAttemptAtMs = timer.now();
+        const reopened = await raceWithDeadline(
+          () =>
+            ensureSystemTrayOpen(
+              device,
+              Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs),
+              undefined,
+              signal,
+              observation,
+            ),
+          raceOptions(),
+        );
+        observation = reopened.observation ?? observation;
+        minTimestamp = reopened.minTimestamp;
+        continue;
+      }
+      await sleep(Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs), signal);
     }
-    await sleep(Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remainingMs), signal);
-    observation = await read();
+    throwIfAborted(requestSignal);
+    if (!isReadableNotificationShade(detector, observation)) {
+      logger.warn(
+        "[systemTray] Shade unreadable at the clearAll deadline; returning partial counts.",
+      );
+    }
+    return { observation, dismissed: false };
+  } catch (error) {
+    if (error !== timeoutError) {
+      throw error;
+    }
+    throwIfAborted(requestSignal);
+    logger.warn("[systemTray] Dismissal verification timed out; returning partial counts.", error);
+    return { observation, dismissed: false };
   }
 };
 
@@ -430,6 +480,8 @@ export const clearMatchingSystemTrayNotifications = async (
   );
   let swipeCount = 0;
   let dismissedCount = 0;
+  // Share the reopen throttle across rows, just like the clearAll deadline.
+  const reexpandState = { lastAttemptAtMs: Number.NEGATIVE_INFINITY };
   while (current.match && swipeCount < maxSwipes && timer.now() < deadlineMs) {
     const expanded = await expandAndRematchIfCollapsed(
       device,
@@ -459,7 +511,7 @@ export const clearMatchingSystemTrayNotifications = async (
       criteria,
       appMatchTexts,
       Math.max(0, deadlineMs - timer.now()),
-      signal,
+      { observation: expanded.observation, reexpandState, signal },
     );
     if (!verified.dismissed) {
       return { swipeCount, dismissedCount, stalled: true };

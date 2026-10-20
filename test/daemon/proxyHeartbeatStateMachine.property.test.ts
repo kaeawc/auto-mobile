@@ -434,10 +434,10 @@ class World {
   lateHeldAcknowledgement(sessionUuid: string): void {
     // The fake answers one keeper request at a time; use the acknowledgement seams to model an
     // abandoned request answering after a later not-found request dropped the held session.
-    this.proxy["noteDaemonIdleEvidence"](sessionUuid, {
+    this.proxy.getInternalsForTesting().noteDaemonIdleEvidence(sessionUuid, {
       daemonInstance: `daemon-${this.daemonInstance}`,
     });
-    this.proxy["recordHeldSessionHeartbeatSuccess"](sessionUuid, true);
+    this.proxy.getInternalsForTesting().recordHeldSessionHeartbeatSuccess(sessionUuid, true);
     this.acknowledged(this.sessions.get(sessionUuid)!);
   }
 
@@ -2229,8 +2229,8 @@ describe("not-found peer and retained handoff regressions", () => {
           await world.apply({ kind: "ticks", count: WINDOW_TICKS + 2 });
           if (name.startsWith("late ack")) {
             if (
-              !world.proxy["notFoundStopped"].has(held) ||
-              world.proxy["otherHeldSessions"].has(held)
+              !world.proxy.getInternalsForTesting().notFoundStopped.has(held) ||
+              world.proxy.getInternalsForTesting().otherHeldSessions.has(held)
             ) {
               world.violations.push("scenario did not drop the held session on stopped");
             }
@@ -2239,7 +2239,7 @@ describe("not-found peer and retained handoff regressions", () => {
             const beats = world.sessions.get(held)!.heartbeats;
             await world.tick();
             if (
-              !world.proxy["otherHeldSessions"].has(held) ||
+              !world.proxy.getInternalsForTesting().otherHeldSessions.has(held) ||
               world.sessions.get(held)!.heartbeats <= beats
             ) {
               world.violations.push(

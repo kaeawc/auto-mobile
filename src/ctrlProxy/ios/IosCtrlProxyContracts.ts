@@ -233,6 +233,8 @@ export interface IosCtrlProxyManagerOptions {
   steps?: IosCtrlProxyStepOverrides;
   deviceDetector?: IosDeviceDetector;
   appBundleGuard?: IosAppBundleGuard;
+  /** Consecutive missed health probes tolerated while the runner process stays alive. */
+  healthMissThreshold?: number;
   /** Builds the runner supervisor; a test wraps the default to drive it directly. */
   processSupervisorFactory?: (options: ProcessSupervisorOptions) => ProcessSupervisor;
 }

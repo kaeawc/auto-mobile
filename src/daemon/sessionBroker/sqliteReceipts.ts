@@ -178,28 +178,9 @@ export async function pruneTerminalRequests(
       .execute();
     const ids = expired.map((row) => row.request_id);
     if (ids.length === 0) {
+      await deleteUnreferencedTombstones(trx);
       return 0;
     }
-    // Tombstones still named by a retained receipt keep answering its profile.
-    await trx
-      .deleteFrom("session_broker_resources")
-      .where("request_id", "in", ids)
-      .where("state", "=", "destroyed")
-      .where(({ not, exists, selectFrom }) =>
-        not(
-          exists(
-            selectFrom("session_broker_requests")
-              .select("session_broker_requests.request_id")
-              .whereRef(
-                "session_broker_requests.resource_id",
-                "=",
-                "session_broker_resources.resource_id",
-              )
-              .where("session_broker_requests.request_id", "not in", ids),
-          ),
-        ),
-      )
-      .execute();
     await trx
       .updateTable("session_broker_resources")
       .set({ request_id: null })
@@ -207,6 +188,33 @@ export async function pruneTerminalRequests(
       .execute();
     await trx.deleteFrom("session_broker_exports").where("request_id", "in", ids).execute();
     await trx.deleteFrom("session_broker_requests").where("request_id", "in", ids).execute();
+    await deleteUnreferencedTombstones(trx);
     return ids.length;
   });
+}
+
+/** Only receipts name destroyed resources; exports reference requests, not resources. */
+export async function deleteUnreferencedTombstones(
+  db: Executor,
+  resourceId?: string,
+): Promise<void> {
+  await db
+    .deleteFrom("session_broker_resources")
+    .where("state", "=", "destroyed")
+    .where("request_id", "is", null)
+    .$if(resourceId !== undefined, (query) => query.where("resource_id", "=", resourceId!))
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("session_broker_requests")
+            .select("request_id")
+            .whereRef(
+              "session_broker_requests.resource_id",
+              "=",
+              "session_broker_resources.resource_id",
+            ),
+        ),
+      ),
+    )
+    .execute();
 }

@@ -81,7 +81,7 @@ const readPackageVersionFromDisk = (): string | null => {
  * null when git is unavailable or this is not AutoMobile's own source checkout
  * (i.e. a published/release install), which keeps release versions unstamped.
  *
- * `git rev-parse` searches *upward* from the package directory, so a release
+ * Repository discovery searches *upward* from the package directory, so a release
  * install vendored inside an unrelated git repo (or a `bunx`/global-cache layout
  * with no `node_modules` segment) would otherwise be stamped with the *host*
  * repo's commit. Two guards prevent that:

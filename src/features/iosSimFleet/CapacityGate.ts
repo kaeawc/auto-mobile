@@ -188,7 +188,7 @@ export class IosSimCapacityGate
     if (warm && warmMatch === "substitute") {
       return { outcome: "reuse-warm", udid: warm.udid };
     }
-    const limits = this.limitsFor(report);
+    const limits = this.limitsFor(report, window);
     // The boot's own target (already Booting or Booted) needs no new slot.
     const occupied = occupyingUdids(report, bootUdid);
     this.forgetExitedStarted(report);
@@ -328,7 +328,7 @@ export class IosSimCapacityGate
     return this.sampleInWindow(options, (report, window) => {
       this.assertCountKnown(report);
       return {
-        limit: this.limitsFor(report).maxBooted,
+        limit: this.limitsFor(report, window).maxBooted,
         booted: occupyingUdids(report).length,
         inFlight: this.inFlightBootCount(report, undefined, window),
         hostPressure: {
@@ -435,7 +435,7 @@ export class IosSimCapacityGate
     return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)), bootUdid, window);
   }
 
-  private limitsFor(report: FleetCostReport): CapacityLimits {
+  private limitsFor(report: FleetCostReport, window?: LedgerSampleWindow): CapacityLimits {
     if (!report.host) {
       // Without host numbers we cannot derive a limit; fall back to a single concurrent boot.
       // A failed `ps` no longer lands here: its snapshot still carries the os totals (#11389).
@@ -447,8 +447,11 @@ export class IosSimCapacityGate
         resolveCapacityLimits(this.env, { totalMemoryBytes: 0, cpuCount: 0 }),
       );
     }
+    // Sizing keeps even Booted admissions until release: a listing can see a simulator before
+    // its boot finishes. Slot counting still excludes devices already visible in that listing.
+    const { boots } = this.admittedBoots.inFlightView(new Set(), undefined, window);
     return this.warnOnUnusableLimit(
-      resolveCapacityLimits(this.env, report.host, estimatePerSimulatorBytes(report)),
+      resolveCapacityLimits(this.env, report.host, estimatePerSimulatorBytes(report, boots)),
     );
   }
 

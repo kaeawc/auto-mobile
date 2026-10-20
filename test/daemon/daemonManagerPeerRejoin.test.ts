@@ -73,7 +73,8 @@ function harness() {
     close: async () => {},
     callTool: async () => ({}),
     readResource: async () => ({}),
-    callDaemonMethod: async () => ({}),
+    callDaemonMethod: async (method) =>
+      method === "ide/status" ? readPidFileDataSync(pidPath) : {},
   };
   const manager = new SafeDaemonManager({
     clientFactory: () => client,

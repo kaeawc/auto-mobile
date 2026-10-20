@@ -291,25 +291,31 @@ internal class HierarchyController(
         viewHierarchyExtractor.extractFromAllWindows(
           allWindows,
           rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          host.occlusionEnabled(),
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = null,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              occlusionEnabled = host.occlusionEnabled(),
+              snapshotOptions = snapshotOptions,
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
           rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = null,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              snapshotOptions = snapshotOptions,
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       }
 
@@ -542,23 +548,29 @@ internal class HierarchyController(
         viewHierarchyExtractor.extractFromAllWindows(
           allWindows,
           rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          host.occlusionEnabled(),
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = textFilter,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              occlusionEnabled = host.occlusionEnabled(),
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
           rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = textFilter,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       }
     val rotation =

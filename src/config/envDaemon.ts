@@ -412,6 +412,12 @@ export const DAEMON_ENV = {
     default: "unset",
     doc: "Manager-injected launcher PID for the orphan watchdog.",
   },
+  DAEMON_LAUNCH_NONCE: {
+    name: "AUTOMOBILE_DAEMON_LAUNCH_NONCE",
+    kind: "string",
+    default: "unset",
+    doc: "Manager-injected per-launch nonce that readiness matches against the answering daemon.",
+  },
   HARNESS_PRIVATE_DAEMON: {
     name: "AUTOMOBILE_HARNESS_PRIVATE_DAEMON",
     kind: "string",

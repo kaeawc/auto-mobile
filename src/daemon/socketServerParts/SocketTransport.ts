@@ -252,21 +252,7 @@ export class SocketTransport {
       };
       pending = tracked;
       this.state.pendingSocketRequests.add(tracked);
-      if (
-        !controlFrame &&
-        request.type === "mcp_request" &&
-        request.acceptsRequestBudget === true &&
-        context.totalTimeoutMs > (request.timeoutMs ?? 0)
-      ) {
-        // The client sized its backstop from its own environment (#13797); say how long this
-        // daemon will really wait so the client does not cancel a call still inside that budget.
-        this.callbacks.writeFrame(socket, sessionId, {
-          type: "daemon_notification",
-          method: REQUEST_BUDGET_NOTIFICATION_METHOD,
-          requestId: request.id,
-          timeoutMs: context.totalTimeoutMs,
-        });
-      }
+      this.announceResolvedBudget(socket, sessionId, request, context.totalTimeoutMs, controlFrame);
       deviceId = this.state.onFrameTrace ? this.callbacks.frameDeviceId(request) : undefined;
       if (this.state.onFrameTrace) {
         this.callbacks.traceFrame("frame_parsed", request.id, deviceId);
@@ -579,6 +565,33 @@ export class SocketTransport {
       message,
     });
   }
+  /**
+   * The client sized its backstop from its own environment (#13797); an opted-in client is told how
+   * long this daemon will really wait so it does not cancel a call still inside that budget.
+   */
+  private announceResolvedBudget(
+    socket: Socket,
+    sessionId: string,
+    request: DaemonRequest,
+    resolvedMs: number,
+    controlFrame: boolean,
+  ): void {
+    if (
+      controlFrame ||
+      request.type !== "mcp_request" ||
+      request.acceptsRequestBudget !== true ||
+      resolvedMs <= (request.timeoutMs ?? 0)
+    ) {
+      return;
+    }
+    this.callbacks.writeFrame(socket, sessionId, {
+      type: "daemon_notification",
+      method: REQUEST_BUDGET_NOTIFICATION_METHOD,
+      requestId: request.id,
+      timeoutMs: resolvedMs,
+    });
+  }
+
   writeFrame(
     socket: Socket,
     sessionId: string,

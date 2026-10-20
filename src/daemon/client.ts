@@ -100,6 +100,13 @@ export interface DaemonMethodCallOptions {
    * as notification subscription may cancel only itself and leave sibling release RPCs live.
    */
   abortMode?: "connection" | "request";
+  /**
+   * Whether the response backstop sends `daemon/cancelRequest` when no reply arrives in time
+   * (default true). A caller that shortened this RPC's wait only to recover the result later by
+   * request id (session preparation, #13800) sets false so the daemon's work keeps running.
+   * A caller-supplied `signal` abort still cancels.
+   */
+  cancelOnTimeout?: boolean;
 }
 
 /**
@@ -929,7 +936,12 @@ export class DaemonClient {
         () => {
           removeAbortListener();
           this.pendingRequests.delete(requestId);
-          this.sendCancelFrame(requestId);
+          if (options.cancelOnTimeout !== false) {
+            this.sendCancelFrame(requestId);
+          } else {
+            // The daemon keeps working (#13800); its late answer is expected, not an unknown id.
+            this.rememberCancelledRequestId(requestId);
+          }
           reject(
             new McpTimeoutError({
               toolName: method,

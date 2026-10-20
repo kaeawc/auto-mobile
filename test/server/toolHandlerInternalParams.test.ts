@@ -129,7 +129,9 @@ describe("handler internal metadata regression guard", () => {
   let offenders: string[];
   beforeAll(() => {
     const server = join(import.meta.dir, "../../src/server");
-    const files = Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: server }));
+    const files = Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: server }), (file) =>
+      file.replaceAll("\\", "/"),
+    );
     expect(files.length).toBeGreaterThan(0);
     offenders = files.flatMap((file) =>
       unsafeSchemaParses(file, readFileSync(join(server, file), "utf8")),

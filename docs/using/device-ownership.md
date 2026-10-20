@@ -971,6 +971,15 @@ this way. `listDevices` reports `capacity` per gated platform as
 [environment variables](environment-variables.md#boot-capacity) for the opt-out
 and the per-platform overrides.
 
+For iOS `capacity_exhausted` refusals, `externalDevices` lists occupying simulator
+UDIDs with no known AutoMobile owner. `heldDevices` separately lists occupying
+UDIDs owned by AutoMobile admissions, live sessions or persisted broker bindings
+and journals, including after a daemon restart. Each field is an array of strings
+and is omitted when empty. Both groups count toward the same limit. A held device
+is not a stray simulator to shut down; release its session or binding first. Warm
+simulator hints exclude live-session and broker-held devices. An unreadable broker
+registry returns `discovery_incomplete` rather than labelling unknown owners external.
+
 ## Per-session settings
 
 Appearance configuration is per session (owner decision 2026-10-09, #10982).

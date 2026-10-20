@@ -652,6 +652,7 @@ test/features/iosSimFleet/capacityCheckSampleBounds.test.ts
 test/features/iosSimFleet/failedBootUdidExternal.test.ts
 test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
+test/features/iosSimFleet/iosSimulatorOwnership.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
 test/features/memory/MemoryMetricsCollector.test.ts
 test/features/navigation/DefaultPathOptimizer.test.ts

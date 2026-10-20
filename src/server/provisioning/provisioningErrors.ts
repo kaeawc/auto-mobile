@@ -97,14 +97,19 @@ function capacityExhaustedProvisionError(
   args: ProvisionDeviceArgs,
   error: BootCapacityExhaustedError,
 ): ProvisionDeviceError {
-  const { limit, booted, externalDevices } = error.details;
+  const { limit, booted, externalDevices, heldDevices } = error.details;
   return new ProvisionDeviceError(
     "capacity_exhausted",
     `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
     true,
     {
       retryAfterMs: error.retryAfterMs,
-      capacity: { limit, booted, ...(externalDevices ? { externalDevices } : {}) },
+      capacity: {
+        limit,
+        booted,
+        ...(externalDevices ? { externalDevices } : {}),
+        ...(heldDevices ? { heldDevices } : {}),
+      },
     },
   );
 }

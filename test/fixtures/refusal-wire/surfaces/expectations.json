@@ -344,7 +344,8 @@
           "retryAfterMs": 5000,
           "externalDevices": ["9A1B2C3D-0000-4000-8000-000000000001"],
           "code": "capacity_exhausted",
-          "retryable": true
+          "retryable": true,
+          "heldDevices": ["9A1B2C3D-0000-4000-8000-000000000002"]
         }
       }
     },

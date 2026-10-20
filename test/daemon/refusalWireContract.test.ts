@@ -518,6 +518,7 @@ function readFields(payload: WirePayload): RefusalFields {
     ...(typeof retryAfterMs === "number" && retryAfterMs > 0 ? { retryAfterMs } : {}),
     ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
+    ...(payload.heldDevices ? { heldDevices: payload.heldDevices } : {}),
   };
 }
 

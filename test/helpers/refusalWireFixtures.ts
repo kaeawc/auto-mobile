@@ -234,6 +234,7 @@ function bootCapacityRefusal(platform: "android" | "ios" = "android"): unknown {
     noun: ios ? "simulator" : "emulator",
     envName: ios ? IOS_SIM_MAX_BOOTED_ENV : "AUTO_MOBILE_MAX_BOOTED",
     externalDevices: [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    ...(ios ? { heldDevices: ["9A1B2C3D-0000-4000-8000-000000000002"] } : {}),
   });
   try {
     if (!decision) {

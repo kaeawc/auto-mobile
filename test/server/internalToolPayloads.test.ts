@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   InternalToolPayloads,
   narrowInternalToolEnvelope,
-} from "../../src/server/internalToolPayloads";
+} from "../../src/utils/internalToolPayloads";
 import {
   createStructuredToolResponse,
   getStructuredField,
   StructuredToolResponse,
 } from "../../src/utils/toolUtils";
-import { ObserveToolPayload, SwipeOnToolPayload } from "../../src/models";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { ObserveToolPayload, SwipeOnToolPayload, type ViewHierarchyResult } from "../../src/models";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 
 /**
  * Issue #3222 (follow-up to #2932 / PR #3217): thread the concrete payload type
@@ -44,13 +46,14 @@ describe("narrowInternalToolEnvelope (AC2 runtime-validated narrowing)", () => {
   });
 
   test("narrows a valid observe envelope keyed to the observe payload type", () => {
-    const hierarchy = { hierarchy: { node: {} } };
+    const hierarchy: ViewHierarchyResult = { hierarchy: { node: {} } };
     const response: unknown = createStructuredToolResponse<ObserveToolPayload>({
+      ...loadAndroidHomeObserve().observe,
       viewHierarchy: hierarchy,
-    } as unknown as ObserveToolPayload);
+    });
 
     const envelope = narrowInternalToolEnvelope("observe", response);
-    expect(getStructuredField(envelope, "viewHierarchy")).toBe(hierarchy as never);
+    expect(getStructuredField(envelope, "viewHierarchy")).toBe(hierarchy);
   });
 
   test("returns undefined for null / undefined responses", () => {
@@ -78,7 +81,7 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
   });
 
   function registerSwipeOn(found: boolean): void {
-    ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
+    ToolRegistry.register("swipeOn", "swipeOn", z.object({}), async () =>
       createStructuredToolResponse<SwipeOnToolPayload>({
         success: true,
         found,
@@ -100,7 +103,7 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
 
   test("delegates through callInternal so the args are marked internal (#3108)", async () => {
     let seenArgs: Record<string, unknown> | undefined;
-    ToolRegistry.register("swipeOn", "swipeOn", {}, async (args: any) => {
+    ToolRegistry.register("swipeOn", "swipeOn", z.object({}), async (args: any) => {
       seenArgs = args;
       return createStructuredToolResponse<SwipeOnToolPayload>({
         success: true,
@@ -119,7 +122,7 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
   });
 
   test("narrows a non-envelope handler response to undefined", async () => {
-    ToolRegistry.register("swipeOn", "swipeOn", {}, async () => 42 as unknown);
+    ToolRegistry.register("swipeOn", "swipeOn", z.object({}), async () => 42 as unknown);
     const result = await ToolRegistry.callInternalTyped("swipeOn", { direction: "up" });
     expect(result).toBeUndefined();
     expect(getStructuredField(result, "found")).toBeUndefined();

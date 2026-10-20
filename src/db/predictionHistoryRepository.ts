@@ -7,6 +7,8 @@ import type {
   PredictionTransitionStats,
 } from "./types";
 import { normalizeToolArgs } from "../utils/predictionUtils";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { nowIso } from "./nowIso";
 
 export type PredictionErrorType = "wrong_screen" | "missing_elements" | "unexpected_elements";
 
@@ -39,7 +41,10 @@ export interface TransitionKey {
 export class PredictionHistoryRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor(
+    db?: Kysely<Database>,
+    private readonly timer: Timer = defaultTimer,
+  ) {
     this.db = db ?? null;
   }
 
@@ -52,7 +57,7 @@ export class PredictionHistoryRepository {
 
   async recordOutcome(outcome: PredictionOutcomeRecord): Promise<void> {
     const db = this.getDb();
-    const now = new Date().toISOString();
+    const now = nowIso(this.timer);
     const toolArgs = normalizeToolArgs(outcome.toolArgs ?? undefined);
 
     const record: NewPredictionOutcome = {
@@ -97,7 +102,7 @@ export class PredictionHistoryRepository {
     correct: boolean,
   ): Promise<PredictionTransitionStats> {
     const db = this.getDb();
-    const now = new Date().toISOString();
+    const now = nowIso(this.timer);
     const toolArgs = normalizeToolArgs(transition.toolArgs ?? undefined);
     const brier = Math.pow(confidence - (correct ? 1 : 0), 2);
 

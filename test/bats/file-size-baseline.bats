@@ -35,6 +35,17 @@ lines() {
   [[ "$output" == *"no growth (1 file(s) over 5 lines"* ]]
 }
 
+@test "generated src/constants/release.ts is exempt from the ratchet" {
+  mkdir -p "$TEST_DIR/src/constants"
+  lines 8 > "$TEST_DIR/src/constants/release.ts"
+  bash "$SCRIPT" --update
+  run grep -q 'release.ts' "$FILE_SIZE_BASELINE"
+  [ "$status" -ne 0 ]
+  lines 50 > "$TEST_DIR/src/constants/release.ts"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
 @test "blank lines do not count" {
   { lines 8; printf '\n\n\n\n'; } > "$TEST_DIR/src/big.ts"
   bash "$SCRIPT" --update

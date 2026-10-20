@@ -52,53 +52,57 @@ type Boomerang = (
 ) => Promise<SwipeResult>;
 
 function androidBoomerang(): Boomerang {
-  const device = { platform: "android", deviceId: "emulator-5554" } as unknown as BootedDevice;
+  const device: BootedDevice = {
+    name: "emulator",
+    platform: "android",
+    deviceId: "emulator-5554",
+  };
   return (gesture, timer, signal) => {
     const proxy = new FakeCtrlProxy();
     spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
       hierarchy: { node: { $: {} } },
     });
-    const executor = new TalkBackSwipeExecutor(
+    const executor = new TalkBackSwipeExecutor({
       device,
-      gesture,
-      proxy as unknown as ConstructorParameters<typeof TalkBackSwipeExecutor>[2],
-      new FakeAccessibilityDetector(),
-      new FakeAdbClient(),
+      executeGesture: gesture,
+      accessibilityService: proxy,
+      accessibilityDetector: new FakeAccessibilityDetector(),
+      adb: new FakeAdbClient(),
       timer,
-    );
-    return executor.executeBoomerangGesture(
-      100,
-      500,
-      100,
-      200,
-      { duration: 300 },
-      BOOMERANG,
+    });
+    return executor.executeBoomerangGesture({
+      x1: 100,
+      y1: 500,
+      x2: 100,
+      y2: 200,
+      gestureOptions: { duration: 300 },
+      boomerang: BOOMERANG,
       perf,
       signal,
-    );
+    });
   };
 }
 
 function iosBoomerang(): Boomerang {
-  const device = { platform: "ios", deviceId: "ios-sim" } as unknown as BootedDevice;
+  const device: BootedDevice = { name: "ios-sim", platform: "ios", deviceId: "ios-sim" };
   return (gesture, timer, signal) => {
     const executor = new VoiceOverSwipeExecutor(
       device,
       gesture,
-      new FakeIOSCtrlProxy() as unknown as ConstructorParameters<typeof VoiceOverSwipeExecutor>[2],
+      new FakeIOSCtrlProxy(),
       new FakeIosVoiceOverDetector(),
       timer,
     );
-    return executor.executeBoomerangGesture(
-      100,
-      500,
-      100,
-      200,
-      { duration: 300 },
-      BOOMERANG,
+    return executor.executeBoomerangGesture({
+      x1: 100,
+      y1: 500,
+      x2: 100,
+      y2: 200,
+      gestureOptions: { duration: 300 },
+      boomerang: BOOMERANG,
       perf,
       signal,
-    );
+    });
   };
 }
 

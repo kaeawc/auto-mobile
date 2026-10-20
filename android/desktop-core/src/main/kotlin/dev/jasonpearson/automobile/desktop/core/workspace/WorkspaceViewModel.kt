@@ -101,7 +101,7 @@ class WorkspaceViewModel(
   private val screenshotLoaderRegistry: NavigationScreenshotLoaderRegistry =
     DefaultNavigationScreenshotLoaderRegistry,
 ) {
-  private val _state = MutableStateFlow<WorkspaceUiState>(WorkspaceUiState.Empty)
+  internal val _state = MutableStateFlow<WorkspaceUiState>(WorkspaceUiState.Empty)
   val state: StateFlow<WorkspaceUiState> = _state.asStateFlow()
 
   private val _effect = Channel<WorkspaceEffect>(Channel.BUFFERED)
@@ -146,7 +146,7 @@ class WorkspaceViewModel(
         controlExecutor.pressButton(deviceId, column.platform, button)
       } catch (cancellation: CancellationException) {
         throw cancellation
-      } catch (error: Exception) {
+      } catch (error: dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException) {
         LOG.warn("Device button $button failed for $deviceId: ${error.message}", error)
         reportRefusal(deviceId, error)
       }
@@ -165,7 +165,7 @@ class WorkspaceViewModel(
         controlExecutor.setLocale(deviceId, column.platform, locale)
       } catch (cancellation: CancellationException) {
         throw cancellation
-      } catch (error: Exception) {
+      } catch (error: dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException) {
         LOG.warn("Set locale $locale failed for $deviceId: ${error.message}", error)
         reportRefusal(deviceId, error)
       }
@@ -176,47 +176,14 @@ class WorkspaceViewModel(
     (_state.value as? WorkspaceUiState.Content)?.columns?.firstOrNull { it.deviceId == deviceId }
 
   /** Reflect an observed lock-state snapshot onto the columns; absent devices keep their state. */
-  private fun setLockStates(locked: Map<String, Boolean>) {
-    if (locked.isEmpty()) return
-    _state.update { current ->
-      val content = current as? WorkspaceUiState.Content ?: return@update current
-      content.copy(
-        columns =
-          content.columns.map { column ->
-            val next = locked[column.deviceId] ?: return@map column
-            if (next == column.locked) column else column.copy(locked = next)
-          },
-      )
-    }
-  }
 
   /**
    * Replace only non-null UUIDs from a fresh booted-devices snapshot. A missing UUID means an older
    * daemon did not expose epoch identity; preserving the known UUID makes a transient or downgraded
    * response unable to silently widen an existing UUID-scoped stream.
    */
-  private fun refreshDeviceSessionUuids(sessionUuids: Map<String, String>) {
-    if (sessionUuids.isEmpty()) return
-    _state.update { current ->
-      val content = current as? WorkspaceUiState.Content ?: return@update current
-      content.copy(
-        columns =
-          content.columns.map { column ->
-            val refreshed = sessionUuids[column.deviceId] ?: return@map column
-            if (refreshed == column.deviceSessionUuid) column
-            else column.copy(deviceSessionUuid = refreshed)
-          },
-      )
-    }
-  }
 
   /** Open [tool] on every observed column so all panes show the same facet side by side. */
-  private fun diffTool(tool: Tool) {
-    _state.update { current ->
-      val content = current as? WorkspaceUiState.Content ?: return@update current
-      content.copy(columns = content.columns.map { it.copy(activeTool = tool) })
-    }
-  }
 
   /** Emit [WorkspaceEffect.OpenPicker]; the picker screen itself arrives in a later PR. */
   fun openPicker() {
@@ -292,7 +259,7 @@ class WorkspaceViewModel(
         controlExecutor.run(deviceId, column.platform, control, orientation)
       } catch (cancellation: CancellationException) {
         throw cancellation
-      } catch (error: Exception) {
+      } catch (error: dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException) {
         LOG.warn("Emulator control $control failed for $deviceId: ${error.message}", error)
         if (control == EmulatorControl.Rotate) {
           // Only undo this rotate's own toggle: a later rotate that already moved the pane on
@@ -310,21 +277,6 @@ class WorkspaceViewModel(
   private suspend fun reportRefusal(deviceId: String, error: Exception) {
     if (error.isDeviceOwnedRefusal()) {
       _effect.send(WorkspaceEffect.DeviceHeldElsewhere(deviceId))
-    }
-  }
-
-  private fun focus(deviceId: String) {
-    _state.update { current ->
-      (current as? WorkspaceUiState.Content)?.copy(focusedDeviceId = deviceId) ?: current
-    }
-  }
-
-  private fun mutate(deviceId: String, transform: (DeviceColumn) -> DeviceColumn) {
-    _state.update { current ->
-      val content = current as? WorkspaceUiState.Content ?: return@update current
-      content.copy(
-        columns = content.columns.map { if (it.deviceId == deviceId) transform(it) else it },
-      )
     }
   }
 }

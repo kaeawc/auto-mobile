@@ -7,7 +7,7 @@ import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 describe("GetDeepLinks", () => {
   let getDeepLinks: GetDeepLinks;
-  let mockDeepLinkManager: DeepLinkManager;
+  let mockDeepLinkManager: Pick<DeepLinkManager, "getDeepLinks">;
 
   const mockDeepLinkResult: DeepLinkResult = {
     success: true,
@@ -33,17 +33,11 @@ describe("GetDeepLinks", () => {
   };
 
   beforeEach(() => {
-    // GetDeepLinks takes a BootedDevice | null; the device is irrelevant here
-    // because the DeepLinkManager is replaced by a mock below.
-    getDeepLinks = new GetDeepLinks(null);
-
-    // Create mock DeepLinkManager
+    // The device is irrelevant here because the DeepLinkManager is injected.
     mockDeepLinkManager = {
       getDeepLinks: async (appId: string) => mockDeepLinkResult,
-    } as any;
-
-    // Replace the internal deepLinkManager with our mock
-    (getDeepLinks as any).deepLinkManager = mockDeepLinkManager;
+    };
+    getDeepLinks = new GetDeepLinks(null, mockDeepLinkManager);
   });
 
   // (Deleted the `constructor` describe block: `new GetDeepLinks(...)` is trivially

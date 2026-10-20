@@ -1,4 +1,4 @@
-import type { PrototypeHiddenReason } from "../features/prototype/prototypeHidden";
+import type { PrototypeHiddenReason } from "./PrototypeHiddenReason";
 import type { PanelFingerprint } from "./DisplayPanel";
 import { ElementBounds } from "./ElementBounds";
 import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";
@@ -176,6 +176,12 @@ export type Hierarchy = {
   unavailableReason?: HierarchyUnavailableReason;
   unavailableDetail?: string;
   node?: ViewHierarchyNode;
+  /** Raw (unconverted) iOS XCTest root: `XCUIElementTypeApplication`, carried without `node`. */
+  type?: string;
+  /** Raw iOS XCTest element kind of the root, e.g. `application`. */
+  elementType?: string;
+  /** Raw iOS root bundle identifier; present without `node` on unconverted captures. */
+  bundleId?: string;
   /** iOS root XCTestNode bounds (points): {left, top, right, bottom} */
   bounds?: { left?: number; top?: number; right: number; bottom: number };
   /**
@@ -281,6 +287,40 @@ export type ViewHierarchyNode = {
   occludedByViewId?: string;
   "test-tag"?: string;
   "view-id"?: string;
+  /** Flat Android attributes real dumps put on the node itself (see {@link NodeAttributes}). */
+  "resource-id"?: string;
+  "content-desc"?: string;
+  clickable?: boolean | string;
+  text?: string;
+  class?: string;
+  checked?: boolean | string;
+  /**
+   * Emitted by the iOS runner (`UIElementInfo.checkable`/`selected`, e.g.
+   * `test/fixtures/ios/keyboard-modes/software-docked.runner-hierarchy.json`); string-typed on the wire.
+   */
+  /**
+   * Flat attributes captured from real Android dumps (`test/fixtures/android-enabled/playground-disabled-control-api36.json`
+   * carries `enabled`, `scrollable` and `pane-title` on its nodes).
+   */
+  enabled?: boolean | string;
+  scrollable?: boolean | string;
+  "pane-title"?: string;
+  /**
+   * Captured on real nodes: iOS `role` and `hint-text` (`test/fixtures/observe-output/ios-keyboard-tabbar/observe-keyboard-up.json`)
+   * and the Android collection column index (`test/fixtures/identify-interactions/playground-text-fields.json`).
+   */
+  /** Emitted by the Android extractor (`ViewHierarchyExtractor.kt`) and the iOS runner. */
+  focusable?: boolean | string;
+  role?: string;
+  "hint-text"?: string;
+  "collection-column-index"?: number | string;
+  checkable?: boolean | string;
+  selected?: boolean | string;
+  /**
+   * Accessibility action names (`click`, `focus`, ...) from the Android extractor
+   * (`ViewHierarchyExtractor.kt`) and the iOS runner (`UIElementInfo.actions`).
+   */
+  actions?: string[];
   extras?: Record<string, string>;
 };
 
@@ -292,4 +332,17 @@ export function nodeAttributes(node: { $?: NodeAttributes }): NodeAttributes {
 /** Direct bounds take precedence when a converter also carries bounds in `$`. */
 export function nodeBounds(node: ViewHierarchyNode): unknown {
   return node.bounds ?? nodeAttributes(node)["bounds"];
+}
+
+function isPlainObject(value: unknown): value is object {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Shallow wire-boundary check for a capture arriving as untyped JSON: it has an object
+ * `hierarchy`. Deeper node shapes (array roots, array bounds from older runners) are
+ * tolerated downstream by `ElementParser`, so they are deliberately not validated here.
+ */
+export function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
+  return isPlainObject(value) && "hierarchy" in value && isPlainObject(value.hierarchy);
 }

@@ -15,21 +15,18 @@ import {
   buildIdentityFromStatus,
   type BuildIdentity,
 } from "../buildIdentity";
-import { compareStrictNumericVersions } from "../../server/deviceMatcher";
+import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { releaseVersion } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
 import { startupOptionDeficits, mergeDaemonOptions } from "./startupOptions";
 import {
   DaemonVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonAssetVersionMismatchError,
-  daemonInternalErrors,
   type VersionMismatchReason,
-  type BuildMismatchReason,
-} from "./daemonErrors";
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
-
+} from "./DaemonVersionMismatchError";
+import { DaemonBuildMismatchError, type BuildMismatchReason } from "./DaemonBuildMismatchError";
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
 export async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
@@ -234,7 +231,12 @@ export class DaemonLifecycleReconciler {
       recorded.entryScript === actualBuild.entryScript;
     // Only the socket owner can advertise support, even when PID metadata matches.
     return matchesRecord
-      ? { ...recorded, ...actual, structuredSessionNotFound: actual.structuredSessionNotFound }
+      ? {
+          ...recorded,
+          ...actual,
+          structuredSessionNotFound: actual.structuredSessionNotFound,
+          structuredToolErrorCodes: actual.structuredToolErrorCodes,
+        }
       : actual;
   }
 

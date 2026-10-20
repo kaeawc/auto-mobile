@@ -1,15 +1,58 @@
-import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
-import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { z } from "zod";
-import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { record, BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  keySchema,
+  pointerSchema,
+  prototypeDataActionValueSchema,
+  stateKeySchema,
+  type PrototypeDataActionValue,
+} from "./prototypeActionValues";
+import {
+  prototypeJsonObjectSchema,
+  prototypeJsonSchema,
+  type PrototypeJson,
+} from "./prototypeJson";
+import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
+import {
+  anchorSchema,
+  colorTokenSchema,
+  colorValueSchema,
+  conditionSchema,
+  detentSchema,
+  hexColorSchema,
+  iconNameSchema,
+  iconVariantSchema,
+  imageAssetSchema,
+  itemSchema,
+  placementSchema,
+  PROTOTYPE_COLOR_ROLES,
+  type PrototypeData,
+  safeAreaPaddingSchema,
+  sheetConditionSchema,
+  styleSchema,
+  styleWhenEntrySchema,
+} from "./prototypePresentationSchemas";
+import { bindPrototypeRequestFollowUps, requestActionSchema } from "./prototypeRequestSchema";
+import { prototypeStorageSchema } from "./prototypeStorageSchema";
+import { record } from "./prototypeTemplate";
+export {
+  anchorSchema,
+  placementSchema,
+  PROTOTYPE_COLOR_ROLES,
+  type PrototypeAnchor,
+  type PrototypeCondition,
+  type PrototypeData,
+  type PrototypeDataValue,
+} from "./prototypePresentationSchemas";
+export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
   MAX_PROTOTYPE_TEXT_SPANS,
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES,
   MAX_PROTOTYPE_DATA_BYTES,
+  MAX_PROTOTYPE_DATA_WRITE_BYTES,
   MAX_PROTOTYPE_DATA_DEPTH,
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH,
@@ -18,409 +61,18 @@ export const {
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
-export type PrototypeJson =
-  | null
-  | string
-  | number
-  | boolean
-  | PrototypeJson[]
-  | { [key: string]: PrototypeJson };
-// zod v3 calls a lazy schema's getter on every parse, so each getter builds its schema once and
-// returns that same instance afterwards instead of rebuilding it for every nested value.
-let jsonValueUnion: z.ZodType<PrototypeJson> | undefined;
-const jsonValueSchema: z.ZodType<PrototypeJson> = z.lazy(
-  () =>
-    (jsonValueUnion ??= z.union([
-      z.null(),
-      z.string(),
-      z.number().finite(),
-      z.boolean(),
-      z.array(jsonValueSchema),
-      z.record(jsonValueSchema),
-    ])),
-);
-// Preserve arbitrary JSON keys: Zod record decoding deliberately drops __proto__.
-const prototypeJsonSchema = z.custom<PrototypeJson>(
-  (value) => jsonValueSchema.safeParse(value).success,
-);
-export const prototypeJsonObjectSchema = z.record(prototypeJsonSchema).and(z.unknown());
-// Icon names are the closed list of Material icons the Android renderer bundles
-// (androidx material-icons-extended); the shared contract is the single source.
-const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
-const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
-  message: "Unknown prototype icon name",
-});
-const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
-const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
-const offsetSchema = z
-  .object({
-    x: z.number().finite().min(-10000).max(10000),
-    y: z.number().finite().min(-10000).max(10000),
-  })
-  .strict();
-const boundsSchema = z
-  .object({
-    x: z.number().finite().min(-10000).max(10000),
-    y: z.number().finite().min(-10000).max(10000),
-    width: z.number().finite().min(0).max(10000),
-    height: z.number().finite().min(0).max(10000),
-  })
-  .strict();
-// Reuse the existing interaction contract's type; anchors reject ambiguous selection.
-let containerObject: z.ZodType<ElementContainerSelector> | undefined;
-const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(
-  () =>
-    (containerObject ??= z
-      .object({
-        elementId: z.string().min(1).optional(),
-        text: z
-          .string()
-          .refine((value) => value.trim().length > 0)
-          .optional(),
-        index: z.number().finite().int().min(0).max(2147483647).optional(),
-        selectionStrategy: z.literal("unique").optional(),
-        container: containerSchema.optional(),
-      })
-      .strict()),
-);
-const selectorSchema = z
-  .object({
-    elementId: z.string().min(1).optional(),
-    text: z.string().min(1).optional(),
-    testTag: z.string().min(1).optional(),
-    container: containerSchema.optional(),
-  })
-  .strict();
-// State-key fields also take repeat placeholders such as `liked_{item.id}` (#11051).
-const stateKeySchema = z.string().regex(BOUND_STATE_KEY_PATTERN);
-const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
-export type PrototypeDataValue =
-  | string
-  | number
-  | boolean
-  | PrototypeDataValue[]
-  | { [key: string]: PrototypeDataValue };
-export type PrototypeData = Record<string, PrototypeDataValue>;
-const pointerSchema = z
-  .string()
-  .min(1)
-  .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
-  .regex(/^(?:\/(?:[^~\/]|~[01])*)+$/);
-
-export type PrototypeCondition =
-  | { valid: string | string[] }
-  | { data: string; equals: string | number | boolean }
-  | { data: string; notEquals: string | number | boolean }
-  | { data: string; gt: number }
-  | { data: string; lt: number }
-  | { key: string; equals: string | number | boolean }
-  | { key: string; notEquals: string | number | boolean }
-  | { key: string; gt: number }
-  | { key: string; lt: number }
-  | { all: PrototypeCondition[] }
-  | { any: PrototypeCondition[] }
-  | { not: PrototypeCondition };
-let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
-const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
-  () =>
-    (conditionUnion ??= z.union([
-      z
-        .object({ valid: z.union([stateKeySchema, z.array(stateKeySchema).min(1).max(8)]) })
-        .strict(),
-      z.object({ data: pointerSchema, equals: scalarSchema }).strict(),
-      z.object({ data: pointerSchema, notEquals: scalarSchema }).strict(),
-      z.object({ data: pointerSchema, gt: z.number().finite() }).strict(),
-      z.object({ data: pointerSchema, lt: z.number().finite() }).strict(),
-      z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
-      z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
-      z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
-      z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
-      z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
-      z.object({ any: z.array(conditionSchema).min(1).max(16) }).strict(),
-      z.object({ not: conditionSchema }).strict(),
-    ])),
-);
-const sheetConditionSchema = z.object({ key: stateKeySchema, equals: z.boolean() }).strict();
-const safeAreaPaddingSchema = z
-  .object({
-    edges: z
-      .array(z.enum(["top", "bottom", "start", "end"]))
-      .min(1)
-      .max(4),
-    types: z
-      .array(z.enum(["systemBars", "cutout", "ime"]))
-      .min(1)
-      .max(3),
-  })
-  .strict();
-const dimensionSchema = z.union([
-  z.enum(["fill", "wrap"]),
-  z.object({ dp: z.number().finite().min(0).max(10000) }).strict(),
-]);
-const detentSchema = z.union([
-  z.enum(["half", "full"]),
-  z.object({ dp: z.number().finite().min(1e-6).max(10000) }).strict(),
-]);
-const paddingSchema = z
-  .object({
-    top: z.number().finite().min(0).max(10000).optional(),
-    bottom: z.number().finite().min(0).max(10000).optional(),
-    start: z.number().finite().min(0).max(10000).optional(),
-    end: z.number().finite().min(0).max(10000).optional(),
-  })
-  .strict();
-/** Material 3 ColorScheme roles a colour field can name instead of a hex value. */
-export const PROTOTYPE_COLOR_ROLES = [
-  "primary",
-  "onPrimary",
-  "primaryContainer",
-  "onPrimaryContainer",
-  "inversePrimary",
-  "secondary",
-  "onSecondary",
-  "secondaryContainer",
-  "onSecondaryContainer",
-  "tertiary",
-  "onTertiary",
-  "tertiaryContainer",
-  "onTertiaryContainer",
-  "background",
-  "onBackground",
-  "surface",
-  "onSurface",
-  "surfaceVariant",
-  "onSurfaceVariant",
-  "surfaceTint",
-  "inverseSurface",
-  "inverseOnSurface",
-  "error",
-  "onError",
-  "errorContainer",
-  "onErrorContainer",
-  "outline",
-  "outlineVariant",
-  "scrim",
-  "surfaceBright",
-  "surfaceDim",
-  "surfaceContainer",
-  "surfaceContainerHigh",
-  "surfaceContainerHighest",
-  "surfaceContainerLow",
-  "surfaceContainerLowest",
-] as const;
-/** Material 3 Shapes steps a `cornerRadius` can name instead of a dp number. */
-const CORNER_RADIUS_TOKENS = [
-  "none",
-  "extraSmall",
-  "small",
-  "medium",
-  "large",
-  "extraLarge",
-  "full",
-] as const;
-/** Per-corner dp radii; an omitted corner is square. */
-const cornerRadiiSchema = z
-  .object({
-    topStart: z.number().finite().min(0).max(10000).optional(),
-    topEnd: z.number().finite().min(0).max(10000).optional(),
-    bottomEnd: z.number().finite().min(0).max(10000).optional(),
-    bottomStart: z.number().finite().min(0).max(10000).optional(),
-  })
-  .strict();
-const hexColorSchema = z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
-/** One colour: a hex value or a Material role name. */
-const colorTokenSchema = z.union([hexColorSchema, z.enum(PROTOTYPE_COLOR_ROLES)]);
-/**
- * A colour slot (#11218): one token used in both modes, or a `{light, dark}` pair of tokens. A pair
- * needs a device advertising `prototype_theme_modes_v1`.
- */
-const colorValueSchema = z.union([
-  hexColorSchema,
-  z.enum(PROTOTYPE_COLOR_ROLES),
-  z.object({ light: colorTokenSchema, dark: colorTokenSchema }).strict(),
-]);
-/** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
-const imageAssetSchema = z.union([
-  z.string().min(1),
-  z.object({ light: z.string().min(1), dark: z.string().min(1) }).strict(),
-]);
-const borderSchema = z
-  .object({
-    width: z.number().finite().min(0).max(10000),
-    color: colorValueSchema,
-  })
-  .strict();
-const gradientStopSchema = z
-  .object({ color: colorValueSchema, position: z.number().finite().min(0).max(1).optional() })
-  .strict();
-const gradientSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.enum(["linear"]),
-      angle: z.number().finite(),
-      stops: z.array(gradientStopSchema).min(2).max(4),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.enum(["radial"]),
-      stops: z.array(gradientStopSchema).min(2).max(4),
-    })
-    .strict(),
-]);
-
-/** Material 3 type roles a text node's `textStyle` can name. */
-const TEXT_STYLE_ROLES = [
-  "displayLarge",
-  "displayMedium",
-  "displaySmall",
-  "headlineLarge",
-  "headlineMedium",
-  "headlineSmall",
-  "titleLarge",
-  "titleMedium",
-  "titleSmall",
-  "bodyLarge",
-  "bodyMedium",
-  "bodySmall",
-  "labelLarge",
-  "labelMedium",
-  "labelSmall",
-] as const;
-const styleSchema = z
-  .object({
-    width: dimensionSchema.optional(),
-    height: dimensionSchema.optional(),
-    weight: z.number().finite().min(1e-6).max(10000).optional(),
-    minWidth: z.number().finite().min(0).max(10000).optional(),
-    maxWidth: z.number().finite().min(0).max(10000).optional(),
-    minHeight: z.number().finite().min(0).max(10000).optional(),
-    maxHeight: z.number().finite().min(0).max(10000).optional(),
-    padding: paddingSchema.optional(),
-    background: colorValueSchema.optional(),
-    cornerRadius: z
-      .union([
-        z.number().finite().min(0).max(10000),
-        z.enum(CORNER_RADIUS_TOKENS),
-        cornerRadiiSchema,
-      ])
-      .optional(),
-    border: borderSchema.optional(),
-    elevation: z.number().finite().min(0).max(1000).optional(),
-    shadowColor: colorValueSchema.optional(),
-    gradient: gradientSchema.optional(),
-    aspectRatio: z.number().finite().min(1e-6).max(10000).optional(),
-    offset: offsetSchema.optional(),
-    alpha: z.number().finite().min(0).max(1).optional(),
-    pressScale: z.number().finite().min(0.5).max(1).optional(),
-    alignment: z
-      .enum([
-        "topStart",
-        "topCenter",
-        "topEnd",
-        "centerStart",
-        "center",
-        "centerEnd",
-        "bottomStart",
-        "bottomCenter",
-        "bottomEnd",
-      ])
-      .optional(),
-    arrangement: z
-      .enum(["start", "center", "end", "spaceBetween", "spaceAround", "spaceEvenly"])
-      .optional(),
-    spacing: z.number().finite().min(0).max(10000).optional(),
-    runSpacing: z.number().finite().min(0).max(10000).optional(),
-    textSize: z.number().finite().min(1e-6).max(1000).optional(),
-    fontWeight: z.number().finite().int().min(100).max(900).optional(),
-    color: colorValueSchema.optional(),
-    textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
-    maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
-    lineHeight: z.number().finite().min(1e-6).max(1000).optional(),
-    letterSpacing: z.number().finite().min(-1000).max(1000).optional(),
-    textDecoration: z.enum(["none", "underline", "lineThrough", "underlineLineThrough"]).optional(),
-    fontStyle: z.enum(["normal", "italic"]).optional(),
-    overflow: z.enum(["clip", "ellipsis", "visible"]).optional(),
-    fontFamily: z
-      .union([
-        z.enum(["default", "sansSerif", "serif", "monospace"]),
-        z.object({ asset: z.string().min(1) }).strict(),
-      ])
-      .optional(),
-    textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
-  })
-  .strict();
-const styleWhenEntrySchema = z.object({ when: conditionSchema, style: styleSchema }).strict();
-const itemSchema = z
-  .object({
-    label: z.string().min(1),
-    icon: iconNameSchema.optional(),
-    image: imageAssetSchema.optional(),
-  })
-  .strict();
-const anchorAlignmentSchema = z.enum(["cover", "top", "bottom", "start", "end"]);
-// Bounds are screen-space dp. The host resolves an element anchor into a bounds anchor carrying
-// the same alignment and offset, so the device only ever lays out bounds (#9316).
-export const anchorSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.enum(["bounds"]),
-      bounds: boundsSchema,
-      alignment: anchorAlignmentSchema.optional(),
-      offset: offsetSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.enum(["element"]),
-      selector: selectorSchema,
-      alignment: anchorAlignmentSchema,
-      offset: offsetSchema.optional(),
-    })
-    .strict(),
-]);
-export type PrototypeAnchor = z.infer<typeof anchorSchema>;
-export const placementSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.enum(["fullscreen"]),
-      scrim: colorValueSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.enum(["sheet"]),
-      edge: z.enum(["top", "bottom"]),
-      height: z.number().finite().min(1e-6).max(10000),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.enum(["floating"]),
-      gravity: z.enum([
-        "topStart",
-        "topCenter",
-        "topEnd",
-        "centerStart",
-        "center",
-        "centerEnd",
-        "bottomStart",
-        "bottomCenter",
-        "bottomEnd",
-      ]),
-      offset: offsetSchema,
-    })
-    .strict(),
-]);
+export { prototypeJsonObjectSchema, prototypeJsonSchema, type PrototypeJson };
 export const prototypeEmitContextBindingSchema = z.union([
-  z.object({ state: stateKeySchema }).strict(),
-  z.object({ item: keySchema }).strict(),
-  z.object({ index: z.literal(true) }).strict(),
+  ...prototypeDataActionValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
-  z.object({ data: pointerSchema }).strict(),
-  z.object({ value: prototypeJsonSchema }).strict(),
 ]);
 export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
+// A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
+const dataActionPathSchema = z
+  .string()
+  .min(1)
+  .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
+const dataActionFields = { path: dataActionPathSchema, value: prototypeDataActionValueSchema };
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
   .record(z.string().min(1), prototypeEmitContextBindingSchema)
@@ -471,6 +123,10 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
+  z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
+  requestActionSchema,
   z
     .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
@@ -480,6 +136,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
 ]);
+bindPrototypeRequestFollowUps(() => actionSchema);
 const gestureNodeShape = {
   onLongPress: z.array(actionSchema).min(1).max(32).optional(),
   onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
@@ -538,8 +195,32 @@ const repeatShape = { repeat: repeatSchema.optional() };
 const boxBaseSchema = z
   .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["box"]) })
   .strict();
+const swipeActionSchema = z
+  .object({
+    label: z.string().min(1),
+    icon: iconNameSchema.optional(),
+    role: z.enum(["default", "destructive"]).optional(),
+    color: colorTokenSchema.optional(),
+    onTap: z.array(actionSchema).min(1).max(32),
+  })
+  .strict();
+const swipeActionListSchema = z.array(swipeActionSchema).min(1).max(3);
+const swipeActionsSchema = z
+  .object({
+    start: swipeActionListSchema.optional(),
+    end: swipeActionListSchema.optional(),
+    fullSwipe: z.boolean().optional(),
+  })
+  .strict();
+const swipeActionsShape = { swipeActions: swipeActionsSchema.optional() };
 const rowBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["row"]) })
+  .object({
+    ...commonNodeShape,
+    ...gestureNodeShape,
+    ...swipeActionsShape,
+    ...repeatShape,
+    type: z.enum(["row"]),
+  })
   .strict();
 const columnBaseSchema = z
   .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["column"]) })
@@ -609,6 +290,11 @@ const iconBaseSchema = z
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();
+const actionListSchema = z.array(actionSchema).min(1).max(32);
+// An icon-only control in a top app bar: the icon, its accessible label and its tap.
+const appBarActionSchema = z
+  .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
+  .strict();
 const textFieldBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -627,6 +313,10 @@ const textFieldBaseSchema = z
     minLines: z.number().int().min(1).max(20).optional(),
     maxLines: z.number().int().min(1).max(20).optional(),
     maxLength: z.number().int().min(1).max(10000).optional(),
+    leadingIcon: iconNameSchema.optional(),
+    trailingIcon: appBarActionSchema.optional(),
+    imeAction: z.enum(["done", "next", "search", "send", "go"]).optional(),
+    onSubmit: actionListSchema.optional(),
   })
   .strict();
 const switchBaseSchema = z
@@ -700,6 +390,7 @@ const listItemBaseSchema = z
   .object({
     ...commonNodeShape,
     ...enabledShape,
+    ...swipeActionsShape,
     type: z.enum(["listItem"]),
     headline: z.string().min(1),
     supporting: z.string().min(1).optional(),
@@ -738,11 +429,6 @@ const cardBaseSchema = z
   })
   .strict();
 const stateKeyFieldSchema = stateKeySchema;
-const actionListSchema = z.array(actionSchema).min(1).max(32);
-// An icon-only control in a top app bar: the icon, its accessible label and its tap.
-const appBarActionSchema = z
-  .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
-  .strict();
 const searchBarBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -877,11 +563,15 @@ const datePickerBaseSchema = z
     stateKey: stateKeyFieldSchema,
   })
   .strict();
+const scrollRefreshSchema = z
+  .object({ stateKey: stateKeySchema, onRefresh: z.array(actionSchema).min(1).max(32) })
+  .strict();
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["scroll"]),
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
+    refresh: scrollRefreshSchema.optional(),
   })
   .strict();
 // Pager distances share the contract's 10000 dp dimension ceiling.
@@ -903,6 +593,17 @@ const pagerBaseSchema = z
         z.object({ dp: z.number().finite().min(1e-6).max(MAX_PROTOTYPE_PAGER_DP) }).strict(),
       ])
       .optional(),
+    indicator: z.enum(["none", "dots"]).optional(),
+  })
+  .strict();
+const carouselBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    ...repeatShape,
+    type: z.enum(["carousel"]),
+    variant: z.enum(["multiBrowse", "hero", "uncontained"]).optional(),
+    itemWidth: z.number().finite().min(1e-6).max(MAX_PROTOTYPE_PAGER_DP),
+    itemSpacing: pagerDpSchema.optional(),
   })
   .strict();
 const tabBarBaseSchema = z
@@ -950,6 +651,7 @@ export type PrototypeNode =
   | (z.infer<typeof columnBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof flowBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof gridBaseSchema> & { children: PrototypeNode[] })
+  | (z.infer<typeof carouselBaseSchema> & { children: PrototypeNode[] })
   | z.infer<typeof textBaseSchema>
   | z.infer<typeof imageBaseSchema>
   | z.infer<typeof iconBaseSchema>
@@ -1025,6 +727,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       columnBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       flowBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       gridBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
+      carouselBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(1) }),
       textBaseSchema,
       imageBaseSchema,
       iconBaseSchema,
@@ -1166,6 +869,7 @@ const specSchema = z
       )
       .optional(),
     motion: z.enum(["none", "standard"]).optional(),
+    storage: prototypeStorageSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();
@@ -1177,6 +881,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "column",
   "flow",
   "grid",
+  "carousel",
   "text",
   "image",
   "icon",
@@ -1223,6 +928,10 @@ export const PROTOTYPE_ACTION_TYPES = [
   "increment",
   "decrement",
   "dismiss",
+  "setData",
+  "appendData",
+  "removeData",
+  "request",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

@@ -57,7 +57,7 @@ test("IME output schemas allow absent identity details and reject incorrect back
 
 test("sendKeys advertises additive IME failure evidence on each command", () => {
   const imeFailure = {
-    stage: "verification",
+    stage: "verification" as const,
     cause: "read-back mismatch",
     expectedText: "@everyone",
     observedText: "@every",

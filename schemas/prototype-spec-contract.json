@@ -21,7 +21,15 @@
     "MAX_PROTOTYPE_STACK_SCREENS": 32,
     "MAX_PROTOTYPE_STACK_DEPTH": 32,
     "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16,
-    "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096
+    "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096,
+    "MAX_PROTOTYPE_DATA_WRITE_BYTES": 262144,
+    "MAX_PROTOTYPE_STORAGE_BYTES": 262144,
+    "MAX_PROTOTYPE_STORAGE_KEYS": 64,
+    "DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS": 10000,
+    "MAX_PROTOTYPE_REQUEST_TIMEOUT_MS": 30000,
+    "MAX_PROTOTYPE_RESPONSE_BYTES": 262144,
+    "MAX_PROTOTYPE_REQUESTS_IN_FLIGHT": 4,
+    "MAX_PROTOTYPE_ACTION_DEPTH": 4
   },
   "definitions": {
     "offset": {
@@ -1480,6 +1488,485 @@
               "optional": false
             }
           }
+        },
+        "setData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["setData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": false
+            },
+            "value": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "appendData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["appendData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": false
+            },
+            "value": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": false
+            }
+          }
+        },
+        "removeData": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["removeData"]
+              },
+              "optional": false
+            },
+            "path": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": false
+            }
+          }
+        },
+        "request": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["request"]
+              },
+              "optional": false
+            },
+            "method": {
+              "rule": {
+                "kind": "enum",
+                "values": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+              },
+              "optional": true
+            },
+            "url": {
+              "rule": {
+                "kind": "string",
+                "max": 2048
+              },
+              "optional": false
+            },
+            "headers": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 16,
+                "item": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "string",
+                      "empty": true,
+                      "max": 4096
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "state": {
+                          "rule": {
+                            "kind": "boundKey"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "item": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "index": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": [true]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "data": {
+                          "rule": {
+                            "kind": "pointer"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "rule": {
+                            "kind": "json",
+                            "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "optional": true
+            },
+            "query": {
+              "rule": {
+                "kind": "record",
+                "maxEntries": 16,
+                "item": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "kind": "string",
+                      "empty": true,
+                      "max": 4096
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "state": {
+                          "rule": {
+                            "kind": "boundKey"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "item": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "index": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": [true]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "data": {
+                          "rule": {
+                            "kind": "pointer"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "rule": {
+                            "kind": "json",
+                            "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "optional": true
+            },
+            "body": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "state": {
+                        "rule": {
+                          "kind": "boundKey"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "item": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "index": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "data": {
+                        "rule": {
+                          "kind": "pointer"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": {
+                          "kind": "json",
+                          "maxDepth": 24
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "into": {
+              "rule": {
+                "kind": "string",
+                "max": 261
+              },
+              "optional": true
+            },
+            "statusKey": {
+              "rule": {
+                "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "via": {
+              "rule": {
+                "kind": "enum",
+                "values": ["host", "device"]
+              },
+              "optional": true
+            },
+            "timeoutMs": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 30000
+              },
+              "optional": true
+            },
+            "onSuccess": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
+            },
+            "onError": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -1694,6 +2181,13 @@
                 "min": 1,
                 "unique": false,
                 "max": 32
+              },
+              "optional": true
+            },
+            "swipeActions": {
+              "rule": {
+                "kind": "ref",
+                "name": "swipeActions"
               },
               "optional": true
             },
@@ -2186,6 +2680,147 @@
                 ]
               },
               "optional": false
+            }
+          }
+        },
+        "carousel": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["carousel"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "children": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                },
+                "min": 1,
+                "unique": false
+              },
+              "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["multiBrowse", "hero", "uncontained"]
+              },
+              "optional": true
+            },
+            "itemWidth": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 1e-6,
+                "max": 10000
+              },
+              "optional": false
+            },
+            "itemSpacing": {
+              "rule": {
+                "kind": "ref",
+                "name": "pagerDp"
+              },
+              "optional": true
             }
           }
         },
@@ -2884,6 +3519,40 @@
                 "integer": true,
                 "min": 1,
                 "max": 10000
+              },
+              "optional": true
+            },
+            "leadingIcon": {
+              "rule": {
+                "kind": "ref",
+                "name": "iconName"
+              },
+              "optional": true
+            },
+            "trailingIcon": {
+              "rule": {
+                "kind": "ref",
+                "name": "appBarAction"
+              },
+              "optional": true
+            },
+            "imeAction": {
+              "rule": {
+                "kind": "enum",
+                "values": ["done", "next", "search", "send", "go"]
+              },
+              "optional": true
+            },
+            "onSubmit": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
               },
               "optional": true
             },
@@ -3703,6 +4372,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "listItemTrailing"
+              },
+              "optional": true
+            },
+            "swipeActions": {
+              "rule": {
+                "kind": "ref",
+                "name": "swipeActions"
               },
               "optional": true
             },
@@ -5739,6 +6415,13 @@
               },
               "optional": true
             },
+            "refresh": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollRefresh"
+              },
+              "optional": true
+            },
             "child": {
               "rule": {
                 "kind": "ref",
@@ -5897,6 +6580,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "pagerPageSize"
+              },
+              "optional": true
+            },
+            "indicator": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "dots"]
               },
               "optional": true
             }
@@ -6680,6 +7370,40 @@
             "kind": "data"
           },
           "optional": true
+        },
+        "storage": {
+          "rule": {
+            "kind": "ref",
+            "name": "storage"
+          },
+          "optional": true
+        }
+      }
+    },
+    "storage": {
+      "kind": "object",
+      "fields": {
+        "version": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 1,
+            "max": 2147483647
+          },
+          "optional": false
+        },
+        "keys": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "string",
+              "max": 261
+            },
+            "min": 1,
+            "unique": true,
+            "max": 64
+          },
+          "optional": false
         }
       }
     },
@@ -9589,11 +10313,117 @@
         }
       }
     },
+    "scrollRefresh": {
+      "kind": "object",
+      "fields": {
+        "stateKey": {
+          "rule": {
+            "kind": "boundKey"
+          },
+          "optional": false
+        },
+        "onRefresh": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 32
+          },
+          "optional": false
+        }
+      }
+    },
     "pagerDp": {
       "kind": "number",
       "integer": false,
       "min": 0,
       "max": 10000
+    },
+    "swipeAction": {
+      "kind": "object",
+      "fields": {
+        "label": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "icon": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconName"
+          },
+          "optional": true
+        },
+        "role": {
+          "rule": {
+            "kind": "enum",
+            "values": ["default", "destructive"]
+          },
+          "optional": true
+        },
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorToken"
+          },
+          "optional": true
+        },
+        "onTap": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 32
+          },
+          "optional": false
+        }
+      }
+    },
+    "swipeActions": {
+      "kind": "object",
+      "fields": {
+        "start": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "swipeAction"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 3
+          },
+          "optional": true
+        },
+        "end": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "swipeAction"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 3
+          },
+          "optional": true
+        },
+        "fullSwipe": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
     },
     "pagerPageSize": {
       "kind": "choice",

@@ -1,20 +1,17 @@
+import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
+import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 
 /**
@@ -41,13 +38,10 @@ const avdLease: VirtualDeviceLifecycleIdentity = {
 };
 
 /** An emulator child that ignores SIGTERM and SIGKILL until `exit()` is called. */
-class StubbornChild extends EventEmitter {
-  readonly pid = 4242;
-  readonly exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
+class StubbornChild extends StreamlessChildProcess {
   readonly signals: Array<NodeJS.Signals | number | undefined> = [];
 
-  kill(signal?: NodeJS.Signals | number): boolean {
+  override kill(signal?: NodeJS.Signals | number): boolean {
     this.signals.push(signal);
     return true;
   }
@@ -81,7 +75,7 @@ class CancelledRelaunchManager extends OfflineAwareManager {
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
     this.startedDevices.push(device);
     this.onStart?.();
-    throw new EmulatorLaunchCancelledError(device.name, this.child as unknown as ChildProcess);
+    throw new EmulatorLaunchCancelledError(device.name, this.child);
   }
 }
 
@@ -107,16 +101,12 @@ async function setup<M extends OfflineAwareManager>(manager: M) {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const lifecycle = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-      lifecycleCoordinator: lifecycle,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    lifecycleCoordinator: lifecycle,
+  });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   return { timer, sessions, lifecycle, pool, manager };

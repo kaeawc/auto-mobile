@@ -195,6 +195,26 @@ function decodeGestureActionResult(
     ...(type === "tap_coordinates_result" && message.tapDiagnostics !== undefined
       ? { tapDiagnostics: message.tapDiagnostics }
       : {}),
+    ...(type === "swipe_result" ? decodeSwipeRouteReport(message) : {}),
+  };
+}
+
+/** Additive `swipe_result` fields (#13145); a malformed value is dropped, not trusted. */
+function decodeSwipeRouteReport(message: WebSocketMessage): {
+  swipeRoute?: string;
+  effectiveDurationMs?: number;
+} {
+  const { swipeRoute, effectiveDurationMs } = message as {
+    swipeRoute?: unknown;
+    effectiveDurationMs?: unknown;
+  };
+  return {
+    ...(typeof swipeRoute === "string" ? { swipeRoute } : {}),
+    ...(typeof effectiveDurationMs === "number" &&
+    Number.isFinite(effectiveDurationMs) &&
+    effectiveDurationMs > 0
+      ? { effectiveDurationMs }
+      : {}),
   };
 }
 
@@ -533,6 +553,7 @@ const messageDecoders = new Map<
   ["voiceover_set_result", decodeVoiceoverSetResult],
   ["highlight_response", decodeHighlightResponse],
   ["multi_finger_swipe_result", decodeMultiFingerSwipeResult],
+  ["path_gesture_result", decodeMultiFingerSwipeResult],
   ["clipboard_result", decodeClipboardResult],
   ["preference_files", decodePreferenceFiles],
   ["preferences", decodePreferences],

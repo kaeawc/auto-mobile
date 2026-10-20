@@ -12,7 +12,6 @@ plugins {
 }
 
 java {
-  toolchain { languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get())) }
   // Configure Gradle daemon to use same JDK
   System.setProperty("org.gradle.java.home", System.getProperty("java.home"))
   withSourcesJar()

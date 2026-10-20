@@ -6,7 +6,7 @@ import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { ListChangedKind } from "../../src/server/listChangedBroadcast";
+import type { ListChangedKind } from "../../src/daemon/listChangedBroadcast";
 
 // A FakeDaemonManager reporting a running daemon whose version matches this
 // client's stamped DAEMON_VERSION, so the version gate does not fire when a

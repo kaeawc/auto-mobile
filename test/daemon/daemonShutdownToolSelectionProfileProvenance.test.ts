@@ -6,7 +6,7 @@ import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarr
 import {
   PersistentToolSelectionProfileRegistry,
   type ToolSelectionProfileProvenanceStore,
-} from "../../src/server/toolSelectionProfileRegistry";
+} from "../../src/daemon/toolSelectionProfileRegistry";
 import { logger } from "../../src/utils/logger";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -101,7 +101,10 @@ describe("Daemon shutdown drains an in-flight tool-selection-profile provenance 
 
   test("record()'s write-through commits before the database closes, in that order", async () => {
     const timer = new FakeTimer();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer);
+    const daemon = new Daemon(
+      {},
+      { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
+    );
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
     const events: string[] = [];
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {

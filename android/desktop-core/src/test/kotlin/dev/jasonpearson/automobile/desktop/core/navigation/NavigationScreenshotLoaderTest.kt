@@ -4,6 +4,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResourceContent
+import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueRequest
+import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueRequest
+import dev.jasonpearson.automobile.desktop.core.daemon.SwipeInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TapInput
+import dev.jasonpearson.automobile.desktop.core.daemon.TextInput
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -325,7 +330,7 @@ class FakeImageBitmap(
   override val hasAlpha
     get() = true
 
-  override fun prepareToDraw() {}
+  override fun prepareToDraw() = Unit
 
   override fun readPixels(
     buffer: IntArray,
@@ -335,7 +340,7 @@ class FakeImageBitmap(
     height: Int,
     bufferOffset: Int,
     stride: Int,
-  ) {}
+  ) = Unit
 }
 
 /**
@@ -434,25 +439,15 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun updateService(deviceId: String, platform: String) = notImplemented()
 
-  override fun inputTap(
-    x: Double,
-    y: Double,
-    platform: String,
-    deviceId: String?,
-    duration: Int?,
-    frameContext: String?,
-  ) = notImplemented()
+  override fun inputTap(input: TapInput) =
+    with(input) {
+      notImplemented()
+    }
 
-  override fun inputSwipe(
-    startX: Double,
-    startY: Double,
-    endX: Double,
-    endY: Double,
-    platform: String,
-    deviceId: String?,
-    durationMs: Int?,
-    frameContext: String?,
-  ) = notImplemented()
+  override fun inputSwipe(input: SwipeInput) =
+    with(input) {
+      notImplemented()
+    }
 
   override fun inputPressButton(
     button: String,
@@ -461,14 +456,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     frameContext: String?,
   ) = notImplemented()
 
-  override fun inputTypeText(
-    text: String,
-    platform: String,
-    deviceId: String?,
-    submit: Boolean?,
-    append: Boolean,
-    frameContext: String?,
-  ) = notImplemented()
+  override fun inputTypeText(input: TextInput) =
+    with(input) {
+      notImplemented()
+    }
 
   override fun inputKey(
     key: String,
@@ -477,25 +468,15 @@ class FakeAutoMobileClient : AutoMobileClient {
     frameContext: String?,
   ) = notImplemented()
 
-  override fun setKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-    platform: String,
-    sessionUuid: String?,
-  ) = notImplemented()
+  override fun setKeyValue(input: SetKeyValueRequest) =
+    with(input) {
+      notImplemented()
+    }
 
-  override fun removeKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    platform: String,
-    sessionUuid: String?,
-  ) = notImplemented()
+  override fun removeKeyValue(input: RemoveKeyValueRequest) =
+    with(input) {
+      notImplemented()
+    }
 
   override fun clearKeyValueFile(
     deviceId: String,

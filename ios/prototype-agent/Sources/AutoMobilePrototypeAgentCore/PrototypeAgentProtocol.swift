@@ -19,6 +19,8 @@ enum PrototypeAgentProtocol {
         "put_prototype_asset",
         "remove_prototype_asset",
         "get_prototype_status",
+        patchRequest,
+        patchCapability,
         showInPlaceCapability,
         anchorCapability,
         hideForCaptureRequest,
@@ -32,8 +34,16 @@ enum PrototypeAgentProtocol {
         windowChromeCapability,
         iconSfSymbolsCapability,
         dataModelCapability,
+        dataActionsCapability,
+        networkCapability,
+        networkDeviceCapability,
         textFieldOptionsCapability,
         gesturesCapability,
+        swipeActionsCapability,
+        textFieldActionsCapability,
+        carouselCapability,
+        textFieldLeadingIconCapability,
+        refreshCapability,
         searchBarCapability,
         richTextCapability,
         menusCapability,
@@ -42,6 +52,8 @@ enum PrototypeAgentProtocol {
         checksCapability,
         identifierTestTagOnlyCapability,
         bottomSheetDragCapability,
+        clearStorageRequest,
+        storageCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -91,11 +103,33 @@ enum PrototypeAgentProtocol {
     /// show before repeat expansion. Status reports the shown data alongside state.
     static let checksCapability = "prototype_checks_v1"
     static let dataModelCapability = "prototype_data_model_v1"
+    /// `setData`, `appendData` and `removeData` change `/data` from a tap and report each write as a
+    /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
+    /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
+    static let dataActionsCapability = "prototype_data_actions_v1"
+    /// The `request` action (#12529): host-proxied calls (`via: "host"`, the default) through
+    /// `prototype_request` / `prototype_response` frames, and the `/data`, `__meta`, `statusKey` and
+    /// `prototype_request` event semantics of `applyPrototypeRequestOutcome`. Same name as the CtrlProxy
+    /// capability.
+    static let networkCapability = "prototype_network_v1"
+    /// `via: "device"`: the agent makes the call itself through its own HTTP client. Same name as the
+    /// CtrlProxy capability.
+    static let networkDeviceCapability = "prototype_network_device_v1"
     /// Text field options (#12066): keyboard, secure and multiline input, drawn labels and chrome,
     /// supporting text and a UTF-16 length limit with counter. Same name as the CtrlProxy capability.
     static let textFieldOptionsCapability = "prototype_text_field_options_v1"
     /// Long press and double tap action lists on generic nodes, matching CtrlProxy (#12065).
     static let gesturesCapability = "prototype_gestures_v1"
+    /// Swipe-revealed row actions with accessibility actions (#12065).
+    static let swipeActionsCapability = "prototype_swipe_actions_v1"
+    /// Text field `trailingIcon`, `imeAction` and `onSubmit` (#12066).
+    static let textFieldActionsCapability = "prototype_text_field_actions_v1"
+    /// The `carousel` node and the pager `indicator` option (#12071).
+    static let carouselCapability = "prototype_carousel_v1"
+    /// Text field `leadingIcon` drawn as an SF Symbol (#12066).
+    static let textFieldLeadingIconCapability = "prototype_text_field_leading_icon_v1"
+    /// Pull-to-refresh on a vertical scroll bound to a boolean state key (#12065).
+    static let refreshCapability = "prototype_refresh_v1"
     /// Drawn search field with authored expansion, submit actions and in-window results (#12069).
     static let searchBarCapability = "prototype_search_bar_v1"
     /// Styled text runs with optional inline actions.
@@ -111,6 +145,18 @@ enum PrototypeAgentProtocol {
     static let identifierTestTagOnlyCapability = "prototype_identifier_test_tag_only_v1"
     /// Bottom sheets drag between detents and optionally dismiss on a downward swipe.
     static let bottomSheetDragCapability = "prototype_bottom_sheet_drag_v1"
+    /// Persisted `storage` (#12526): the spec's `storage` block is restored on a show and saved after
+    /// writes, `get_prototype_status` reports `storage`, and `clear_prototype_storage` is handled.
+    /// Same name as the CtrlProxy capability; the host refuses `storage` on an agent without it.
+    static let storageCapability = "prototype_storage_v1"
+    /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
+    /// beside `storageCapability` because the host checks request types against `capabilities`.
+    static let clearStorageRequest = "clear_prototype_storage"
+    /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts
+    /// (#11675). Same name as the CtrlProxy capability; the host sends `patch_prototype` only to an agent
+    /// that advertises it.
+    static let patchCapability = "prototype_patch_v1"
+    static let patchRequest = "patch_prototype"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

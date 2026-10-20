@@ -38,8 +38,8 @@ function actions(options: { deviceId: string; simctl: FakeSimctl }) {
   const simctl = options.simctl;
   const timer = new FakeTimer();
   return {
-    capture: new CaptureSnapshot(device, factory, undefined, timer, store, simctl),
-    restore: new RestoreSnapshot(device, factory, undefined, timer, store, simctl),
+    capture: new CaptureSnapshot(device, { adbFactory: factory, timer, store, simctl }),
+    restore: new RestoreSnapshot(device, { adbFactory: factory, timer, store, simctl }),
   };
 }
 
@@ -190,12 +190,8 @@ describe("IosSnapshotBackend", () => {
     const backendSpy = spyOn(SimulatorIosSnapshotBackend.prototype, "getDeviceInfo");
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const metadataReader = capture as unknown as { getIosDeviceMetadata(): Promise<object> };
-      const versionReader = restore as unknown as {
-        getIosDeviceOsVersion(): Promise<string | undefined>;
-      };
-      expect(await metadataReader.getIosDeviceMetadata()).toEqual({});
-      expect(await versionReader.getIosDeviceOsVersion()).toBeUndefined();
+      expect(await capture.getIosDeviceMetadata()).toEqual({});
+      expect(await restore.getIosDeviceOsVersion()).toBeUndefined();
       expect(backendSpy).toHaveBeenCalledTimes(2);
       expect(loggerCallsWithPrefix(warn.mock.calls, "[iOS] Failed to read simulator ")).toEqual([
         ["[iOS] Failed to read simulator metadata: Error: metadata failure"],

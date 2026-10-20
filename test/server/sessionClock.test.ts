@@ -1,3 +1,4 @@
+import { unbindDevice } from "../../src/daemon/deviceBinding";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { retireShutdownOwnership } from "../../src/server/deviceToolsShutdown";
@@ -41,13 +42,11 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
   };
   const restoreSignals: Array<AbortSignal | undefined> = [];
   const restored: Array<{ deviceId: string; value: 0 | 1 }> = [];
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => ({ status: "restored" as const }) }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: (target) => ({
         restore: async (value, signal) => {
@@ -60,7 +59,7 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
         },
       }),
     },
-  );
+  });
   const state = new DeviceState(device, {
     timer,
     clockAdapter: adapter,
@@ -201,11 +200,11 @@ describe("session clock restoration", () => {
       await flush();
       expect(settled).toBe(true);
       expect(h.manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       await changing;
     } finally {
       finish.resolve();
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.timer.advanceTime(1000);
       await flush();
       h.manager.stopCleanupTimer();
@@ -219,11 +218,15 @@ describe("session clock restoration", () => {
       await h.state.setState({ clock: set });
       h.adapter.writeError = new Error("restore unavailable");
       const session = h.manager.getSession("clock-session")!;
-      const first = await h.manager["getPendingClockRestoration"](session, null);
-      const second = await h.manager["getPendingClockRestoration"](session, null);
+      const first = await h.manager["stateRestore"].getPendingClockRestoration.bind(
+        h.manager["stateRestore"],
+      )(session, null);
+      const second = await h.manager["stateRestore"].getPendingClockRestoration.bind(
+        h.manager["stateRestore"],
+      )(session, null);
       expect(second.pending).toBe(first.pending);
       expect(h.restored).toHaveLength(1);
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       expect(h.restoreSignals.every((signal) => signal?.aborted)).toBe(true);
       const calls = h.adapter.calls.length;
       h.timer.advanceTime(1000);
@@ -231,7 +234,7 @@ describe("session clock restoration", () => {
       expect(h.adapter.calls).toHaveLength(calls);
       await Promise.all([first.pending, second.pending]);
     } finally {
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.timer.advanceTime(1000);
       await flush();
       h.manager.stopCleanupTimer();
@@ -254,15 +257,13 @@ describe("session clock restoration", () => {
         rootedByUs: false,
       });
       h.adapter.writeError = new Error("restore unavailable");
-      const first = await h.manager["getPendingClockRestoration"](
-        h.manager.getSession("clock-session")!,
-        null,
-      );
-      const second = await h.manager["getPendingClockRestoration"](
-        h.manager.getSession("second-session")!,
-        null,
-      );
-      h.manager.retireClockRestoration(device.deviceId);
+      const first = await h.manager["stateRestore"].getPendingClockRestoration.bind(
+        h.manager["stateRestore"],
+      )(h.manager.getSession("clock-session")!, null);
+      const second = await h.manager["stateRestore"].getPendingClockRestoration.bind(
+        h.manager["stateRestore"],
+      )(h.manager.getSession("second-session")!, null);
+      h.manager.retireRestorations(device.deviceId, "removal");
       expect(h.restoreSignals).toHaveLength(2);
       expect(h.restoreSignals.every((signal) => signal?.aborted)).toBe(true);
       const calls = h.adapter.calls.length;
@@ -271,7 +272,7 @@ describe("session clock restoration", () => {
       expect(h.adapter.calls).toHaveLength(calls);
       await Promise.all([first.pending, second.pending]);
     } finally {
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.timer.advanceTime(1000);
       await flush();
       h.manager.stopCleanupTimer();
@@ -345,7 +346,7 @@ describe("session clock restoration", () => {
     try {
       await state.setState({ clock: set });
       expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()?.rootedByUs).toBe(true);
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()).toBeUndefined();
       h.adapter.rootedByUs = false;
       await state.setState({ clock: { mode: "reset" } });
@@ -679,7 +680,7 @@ describe("session clock restoration", () => {
       await pool.releaseDevice(device.deviceId, "clock-session");
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
       // Model the ownership detachment performed after a proven device shutdown.
-      pool.getDevice(device.deviceId)!.sessionId = null;
+      unbindDevice(pool.getDevice(device.deviceId)!);
       await pool.removeDevice(device.deviceId);
       expect(h.restoreSignals.at(-1)?.aborted).toBe(true);
       const writes = h.adapter.calls.filter((call) => call.startsWith("instant:")).length;
@@ -779,7 +780,7 @@ describe("session clock restoration", () => {
       await flush();
       await release;
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
-      h.manager.retireClockRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       finish.resolve();
       await mutation;
       await pending;

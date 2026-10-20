@@ -5,11 +5,14 @@ export type DeviceHealth = "ok" | "error";
 
 /** The pool side owns binding mutations; session-side maps keep their existing lifecycle. */
 export interface BindingFields {
-  sessionId: string | null;
-  status: BindingStatus;
+  readonly sessionId: string | null;
+  readonly status: BindingStatus;
   /** Absence is equivalent to healthy for older in-memory literals. */
-  health?: DeviceHealth;
+  readonly health?: DeviceHealth;
 }
+
+/** The writable view only this module's functions take; everyone else sees `BindingFields`. */
+type WritableBinding = { -readonly [K in keyof BindingFields]: BindingFields[K] };
 
 export function holderOf(device: Pick<BindingFields, "sessionId">): string | null;
 export function holderOf(
@@ -43,14 +46,14 @@ export function isErrored(
   return device?.health === "error";
 }
 
-export function bindDevice(device: BindingFields, sessionId: string): void {
+export function bindDevice(device: WritableBinding, sessionId: string): void {
   device.sessionId = sessionId;
   device.status = "busy";
   device.health = "ok";
 }
 
 export function unbindDevice(
-  device: BindingFields,
+  device: WritableBinding,
   opts?: { expectedSessionId?: string | null; status?: "idle" | "keep" },
 ): boolean {
   if (opts?.expectedSessionId !== undefined && opts.expectedSessionId !== device.sessionId) {
@@ -69,17 +72,17 @@ export function snapshotBinding(device: BindingFields): BindingFields {
   return { sessionId: device.sessionId, status: device.status, health: device.health };
 }
 
-export function restoreBinding(device: BindingFields, snapshot: BindingFields): void {
+export function restoreBinding(device: WritableBinding, snapshot: BindingFields): void {
   device.sessionId = snapshot.sessionId;
   device.status = snapshot.status;
   device.health = snapshot.health;
 }
 
-export function markDeviceError(device: BindingFields): void {
+export function markDeviceError(device: WritableBinding): void {
   device.health = "error";
 }
 
-export function clearDeviceError(device: BindingFields): void {
+export function clearDeviceError(device: WritableBinding): void {
   device.health = "ok";
   // Legacy clear always made the device idle, even if a holder was still attached.
   device.status = "idle";

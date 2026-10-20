@@ -146,11 +146,9 @@ test.each(["plan-auto-release", "explicit-release"])(
 
 test("declined release restores admission and clears the op and releasing mark", async () => {
   const h = await harness();
-  const release = h.manager.releaseSessionUnlessSuperseded(
-    "id",
-    "device-disconnected:fake",
-    () => false,
-  );
+  const release = h.manager.releaseSessionUnlessSuperseded("id", "device-disconnected:fake", {
+    commitFence: () => false,
+  });
   h.check("declining");
   await h.turns();
   expect((await release).superseded).toBe(true);

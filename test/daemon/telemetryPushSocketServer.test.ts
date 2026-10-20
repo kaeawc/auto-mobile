@@ -1,5 +1,8 @@
 import { Socket } from "node:net";
-import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
+import {
+  TelemetryPushSocketServer,
+  type TelemetryFilter,
+} from "../../src/daemon/telemetryPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
@@ -18,6 +21,7 @@ import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { logger } from "../../src/utils/logger";
 import { BODY_TRUNCATION_LIMIT } from "../../src/utils/truncateBodyText";
+import { telemetryEventPushFrameSchema } from "../helpers/wireMessageSchemas";
 
 class AuthTelemetryServer extends TelemetryPushSocketServer {
   private subscribed = 0;
@@ -45,13 +49,13 @@ streamSubscribeAuthCases(
   (timer, authenticator) => new AuthTelemetryServer(timer, authenticator),
 );
 
-type BackfillFilter = ReturnType<BackfillTelemetryServer["filter"]>;
+type BackfillFilter = TelemetryFilter;
 
 class BackfillTelemetryServer extends TelemetryPushSocketServer {
   override waitForDrain(socket: Socket): Promise<boolean> {
     return super.waitForDrain(socket);
   }
-  filter(category: string | null = null, sessionId: string | null = null) {
+  filter(category: string | null = null, sessionId: string | null = null): TelemetryFilter {
     return { category, deviceSessionUuid: null, deviceId: null, sessionId };
   }
   subscribe(socket: Socket, filter: BackfillFilter): void {
@@ -101,7 +105,7 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     arguments: null,
     metadata: null,
   });
-  const messages = () => socket.getWrittenMessages<{ data: TelemetryEvent }>();
+  const messages = () => socket.getWrittenMessages(telemetryEventPushFrameSchema);
 
   beforeAll(async () => {
     // Warm the migrated in-memory template outside the per-test timing budget.
@@ -489,10 +493,13 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
   });
 
   test("session mismatch and duplicate continue without writes or incrementing yield count", async () => {
+    // The row dedupe key rides on a wire field the typed row does not declare.
+    const duplicateA = { ...row(1, "session"), id: "duplicate" };
+    const duplicateB = { ...row(2, "session"), id: "duplicate" };
     navigationSpy.mockResolvedValue([
       row(0, "other"),
-      { ...row(1, "session"), id: "duplicate" },
-      { ...row(2, "session"), id: "duplicate" },
+      duplicateA,
+      duplicateB,
       ...Array.from({ length: 49 }, (_, i) => row(i + 3, "session")),
     ]);
     const filter = server.filter("navigation", "session");

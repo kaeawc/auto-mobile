@@ -1,8 +1,8 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TerminateApp } from "../../../src/features/action/TerminateApp";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -109,7 +109,7 @@ describe("TerminateApp Android termination verification", () => {
     adb = new TerminatingAdb(timer);
     observedAt = undefined;
     invalidator = new FakeDeviceWindowCacheInvalidator(() => adb.events.push("invalidate"));
-    app = new TerminateApp(device, adb as unknown as AdbClient, {
+    app = new TerminateApp(device, adb, {
       timer,
       cacheInvalidator: invalidator,
     });
@@ -124,11 +124,13 @@ describe("TerminateApp Android termination verification", () => {
         }
       }
       return {
+        observationId: "termination-test",
+        display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
         updatedAt: timer.now(),
         screenSize: { width: 1170, height: 2532 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: {
-          hierarchy: { node: [] },
+          hierarchy: { node: createFlatNodeForTest({ node: [] }) },
           packageName: "com.android.settings",
           updatedAt: timer.now(),
         },
@@ -223,10 +225,15 @@ describe("TerminateApp Android termination verification", () => {
     // Even a lingering foreground record must not hide a confirmed restart.
     adb.foregroundDeathMs = Infinity;
     observe.setObserveResult({
+      observationId: "termination-test",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       updatedAt: timer.now(),
       screenSize: { width: 1170, height: 2532 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: { hierarchy: { node: [] }, updatedAt: timer.now() },
+      viewHierarchy: {
+        hierarchy: { node: createFlatNodeForTest({ node: [] }) },
+        updatedAt: timer.now(),
+      },
     });
     const result = await executeObserved();
     expect(elapsed()).toBe(0);

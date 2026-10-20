@@ -6,7 +6,7 @@ import type {
   ConfiguredImage,
 } from "../models/deviceDescription";
 import { formFactorFrom } from "../models/formFactor";
-import { iosSimulatorCapabilityInventory } from "../models/virtualDeviceCapabilities";
+import { iosSimulatorCapabilityInventory } from "./virtualDeviceCapabilities";
 import type { StableConfiguredDeviceImage } from "./configuredDeviceInventory";
 
 interface AndroidProvenance {
@@ -26,7 +26,7 @@ export function describeDevice(input: {
   return describeImage(input.image, input.androidProvenance);
 }
 
-// oxlint-disable-next-line complexity -- one exhaustive canonical image projection prevents producer drift.
+/** One exhaustive canonical image projection so producers cannot drift apart. */
 export function describeImage(
   image: ImageLike,
   androidProvenance?: AndroidProvenance,
@@ -34,12 +34,6 @@ export function describeImage(
   orientation?: "portrait" | "landscape",
 ): DeviceDescription {
   const platform = image.platform;
-  const stableId =
-    "stableId" in image
-      ? image.stableId
-      : image.platform === "android"
-        ? image.name
-        : (image.deviceId ?? image.name);
   const lifecycle = imageLifecycle(image);
   const staticFacts = staticFactsFrom(image);
   return {
@@ -47,20 +41,12 @@ export function describeImage(
     platform,
     isVirtual: true,
     source: image.source ?? "local",
-    identity: { stableId },
+    identity: { stableId: imageStableId(image) },
     ...staticFacts,
     display: displayFrom(image),
     ...(image.displays?.panels.length ? { displays: image.displays } : {}),
     capabilityInventory: capabilityInventory(image, true),
-    image: {
-      path: platform === "android" ? (androidProvenance?.path ?? imageLinkFrom(image).path) : null,
-      target:
-        platform === "android" ? (androidProvenance?.target ?? imageLinkFrom(image).target) : null,
-      basedOn:
-        platform === "android"
-          ? (androidProvenance?.basedOn ?? imageLinkFrom(image).basedOn)
-          : null,
-    },
+    image: imageProvenanceLink(image, androidProvenance),
     availabilityError:
       platform === "android"
         ? (androidProvenance?.error ?? null)
@@ -77,6 +63,28 @@ export function describeImage(
       locked,
       orientation: orientation ?? null,
     },
+  };
+}
+
+function imageStableId(image: ImageLike): string {
+  if ("stableId" in image) {
+    return image.stableId;
+  }
+  return image.platform === "android" ? image.name : (image.deviceId ?? image.name);
+}
+
+function imageProvenanceLink(
+  image: ImageLike,
+  androidProvenance: AndroidProvenance | undefined,
+): DeviceDescription["image"] {
+  if (image.platform !== "android") {
+    return { path: null, target: null, basedOn: null };
+  }
+  const link = imageLinkFrom(image);
+  return {
+    path: androidProvenance?.path ?? link.path,
+    target: androidProvenance?.target ?? link.target,
+    basedOn: androidProvenance?.basedOn ?? link.basedOn,
   };
 }
 

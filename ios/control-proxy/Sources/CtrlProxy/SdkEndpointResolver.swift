@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 import os
 
@@ -50,10 +51,10 @@ actor SdkEndpointResolver {
     }
 
     func resolve() async throws -> URL {
-        guard let udid = simulatorUdid else { return Self.baseURL(port: legacyPort) }
+        guard let udid = simulatorUdid else { return loopbackBaseURL(port: legacyPort) }
         if let cachedURL { return cachedURL }
         for attempt in 0 ..< SdkSimulatorPort.probeCount {
-            let url = Self.baseURL(port: SdkSimulatorPort.simulatorPort(udid: udid, attempt: attempt))
+            let url = loopbackBaseURL(port: SdkSimulatorPort.simulatorPort(udid: udid, attempt: attempt))
             // A collision, refused connection, or old SDK on a derived port is expected.
             if let info = try? await health(at: url),
                let actual = info.simulatorUdid,
@@ -63,7 +64,7 @@ actor SdkEndpointResolver {
                 return url
             }
         }
-        let url = Self.baseURL(port: legacyPort)
+        let url = loopbackBaseURL(port: legacyPort)
         guard let info = try await health(at: url) else {
             throw SdkEndpointError.unavailable("AutoMobile SDK unavailable on simulator \(udid)")
         }
@@ -149,7 +150,7 @@ actor SdkEndpointResolver {
     }
 
     private func health(at url: URL) async throws -> SdkHierarchyServerInfo? {
-        var request = URLRequest(url: url.appendingPathComponent("health"))
+        var request = URLRequest(url: url.appendingPathComponent(SdkRoute.health.path))
         request.setValue(simulatorUdid, forHTTPHeaderField: Self.identityHeader)
         let result: (Data, URLResponse)
         do {
@@ -164,10 +165,6 @@ actor SdkEndpointResolver {
     }
 
     nonisolated static let identityHeader = "X-AutoMobile-Simulator-Udid"
-
-    private nonisolated static func baseURL(port: UInt16) -> URL {
-        URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
-    }
 }
 
 enum SdkEndpointError: LocalizedError, Sendable {
@@ -214,20 +211,10 @@ private struct WrongSimulatorPayload: Decodable {
     let actualUdid: String
 }
 
-/// Cross-package contract: lowercase UTF-8, 32-bit FNV-1a, then linear probing.
-/// Keep identical to the other package; ios/sdk-port-contract.json pins the wire contract.
-enum SdkSimulatorPort {
-    static let rangeStart: UInt16 = 40000
-    static let rangeSize = 1000
-    static let probeCount = 8
-
-    static func simulatorPort(udid: String, attempt: Int = 0) -> UInt16 {
-        precondition(attempt >= 0)
-        var hash: UInt32 = 2_166_136_261
-        for byte in udid.lowercased().utf8 {
-            hash = (hash ^ UInt32(byte)) &* 16_777_619
-        }
-        let offset = (UInt64(hash) + UInt64(attempt)) % UInt64(rangeSize)
-        return rangeStart + UInt16(offset)
+/// The SDK clients and endpoint discovery use the same IPv4 loopback origin.
+func loopbackBaseURL(port: UInt16) -> URL {
+    guard let url = URL(string: "http://127.0.0.1:\(port)") else {
+        preconditionFailure("invalid loopback port \(port)")
     }
+    return url
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { createExecResult } from "../../src/utils/execResult";
@@ -32,7 +32,6 @@ const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 const DEVICECTL_RETENTION_MS = 60_000;
 
 function resetSimctlSharedListing(): void {
-  (SimCtlClient as unknown as { inFlightDeviceList: unknown }).inFlightDeviceList = null;
   SimCtlClient.invalidateDeviceListCache();
 }
 
@@ -59,8 +58,7 @@ describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
         }
         return createExecResult(capturedSimctlListing, "");
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
     const manager = DeviceSessionManager.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl),

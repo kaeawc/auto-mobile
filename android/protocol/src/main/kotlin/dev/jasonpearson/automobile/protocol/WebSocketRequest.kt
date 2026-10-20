@@ -108,6 +108,12 @@ data class RequestTwoFingerSwipe(
   val duration: Long = 300L,
   val offset: Int = 100,
   val displayId: Int? = null,
+  /**
+   * Number of simultaneous fingers, 2-5 (default 2). Finger `i` starts at `x1 + i * offset`. A
+   * service without the `multi_finger_gesture_v1` flag ignores this field and performs two fingers,
+   * so hosts must not send a value above 2 to it.
+   */
+  val fingerCount: Int = 2,
 ) : WebSocketRequest()
 
 @Serializable
@@ -530,6 +536,16 @@ data class ListSavedPrototypes(override val requestId: String? = null) : WebSock
 @Serializable
 @SerialName("delete_saved_prototype")
 data class DeleteSavedPrototype(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
+/**
+ * Wipes every stored value the device keeps for prototype [id] (`prototype_storage_v1`). Answered
+ * by one `prototype_result` whose `cleared` counts the stored keys removed; an id with nothing
+ * stored succeeds with 0. The prototype on screen is not changed.
+ */
+@Serializable
+@SerialName("clear_prototype_storage")
+data class ClearPrototypeStorage(override val requestId: String? = null, val id: String) :
   WebSocketRequest()
 
 /**

@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "swipe",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "carousel",
+      "itemWidth": 200,
+      "children": [
+        {
+          "type": "column",
+          "children": [
+            {
+              "type": "listItem",
+              "headline": "Order",
+              "swipeActions": {
+                "end": [
+                  {
+                    "label": "Delete",
+                    "onTap": [
+                      {
+                        "type": "emit",
+                        "name": "delete"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].children[0].swipeActions"
+}

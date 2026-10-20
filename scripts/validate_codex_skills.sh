@@ -26,6 +26,16 @@ trim() {
   printf '%s' "$value"
 }
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
 is_quoted() {
   local value="$1"
   [[ "$value" == \"*\" || "$value" == \'*\' ]]
@@ -117,7 +127,8 @@ for file in "${skill_files[@]}"; do
     errors=1
   fi
 
-  if [[ "$description_line" == *": "* ]] && ! is_quoted "$description_line"; then
+  run_capture_status is_quoted "$description_line"
+  if [[ "$description_line" == *": "* ]] && (( RUN_STATUS != 0 )); then
     echo "[ERROR] ${rel_path}: frontmatter description containing ': ' must be quoted" >&2
     errors=1
   fi
@@ -221,7 +232,8 @@ if [[ -d "${AGENTS_SKILLS_DIR}" ]]; then
       errors=1
     fi
 
-    if [[ "$description_line" == *": "* ]] && ! is_quoted "$description_line"; then
+    run_capture_status is_quoted "$description_line"
+    if [[ "$description_line" == *": "* ]] && (( RUN_STATUS != 0 )); then
       echo "[ERROR] ${rel_path}: frontmatter description containing ': ' must be quoted" >&2
       errors=1
     fi

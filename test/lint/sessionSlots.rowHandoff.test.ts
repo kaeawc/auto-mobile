@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { SessionSlots, type RowPendingSignal } from "../../src/daemon/sessionSlots";
 
 // SessionManager retains this row facet until #11799; slots may only read rowPending.
@@ -27,7 +28,7 @@ const rowFacetFields = [
 test.each(["sessionSlots.ts", "sessionSlotShadowProbe.ts", "legacyLifecycleView.ts"])(
   "%s never names a row-facet field",
   (file) => {
-    const source = readFileSync(new URL(`../../src/daemon/${file}`, import.meta.url), "utf8");
+    const source = readGuardFile(new URL(`../../src/daemon/${file}`, import.meta.url));
     for (const field of rowFacetFields) {
       expect(source).not.toContain(field);
     }

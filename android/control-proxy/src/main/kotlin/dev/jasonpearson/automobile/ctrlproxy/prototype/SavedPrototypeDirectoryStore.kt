@@ -1,12 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.ctrlproxy.formatHexByte
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.security.MessageDigest
 import java.util.UUID
 import java.util.logging.Level
 import java.util.logging.Logger
@@ -35,7 +33,7 @@ class SavedPrototypeDirectoryStore(
   private val root: File,
   private val limits: SavedPrototypeLimits = SavedPrototypeLimits(),
   private val clock: () -> Long = System::currentTimeMillis,
-  private val slugHash: (String) -> String = { sha256(it.toByteArray(Charsets.UTF_8)) },
+  private val slugHash: (String) -> String = { sha256Hex(it.toByteArray(Charsets.UTF_8)) },
   private val fault: (String) -> Unit = {},
   private val log: (String, Exception?) -> Unit = { message, error ->
     Logger.getLogger("SavedPrototypeStore").log(Level.WARNING, message, error)
@@ -72,7 +70,7 @@ class SavedPrototypeDirectoryStore(
       validate(request)?.let {
         return@synchronized it
       }
-      val hashes = request.assets.associate { it.id to sha256(it.bytes) }
+      val hashes = request.assets.associate { it.id to sha256Hex(it.bytes) }
       storage({ rejected(SavedPrototypeRejection.STORAGE_FAILURE, "Failed to save prototype.") }) {
         recover()
         val target = find(request.id)
@@ -106,7 +104,7 @@ class SavedPrototypeDirectoryStore(
             if (
               previous.isFile &&
                 previous.length() == asset.bytes.size.toLong() &&
-                sha256(previous.readBytes()) == hash
+                sha256Hex(previous.readBytes()) == hash
             ) {
               previous.copyTo(destination, overwrite = true)
               files.sync(destination)
@@ -280,7 +278,7 @@ class SavedPrototypeDirectoryStore(
         if (!file.isFile || file.length() !in 1..cap.toLong())
           throw IOException("Missing or oversized asset")
         val content = file.readBytes()
-        if (sha256(content) != asset.sha256) throw IOException("Asset hash mismatch")
+        if (sha256Hex(content) != asset.sha256) throw IOException("Asset hash mismatch")
         total += content.size
         bytes[asset.id] = content
         files[asset.id] = file
@@ -337,13 +335,7 @@ class SavedPrototypeDirectoryStore(
     }
 
   private fun find(id: String): File {
-    val prefix =
-      id
-        .lowercase(java.util.Locale.ROOT)
-        .replace(Regex("[^a-z0-9]+"), "-")
-        .trim('-')
-        .take(32)
-        .ifEmpty { "prototype" }
+    val prefix = prototypeIdSlugPrefix(id)
     val hash = slugHash(id)
     require(Regex("[a-f0-9]{64}").matches(hash)) { "Slug hash must be 64 lowercase hex characters" }
     var free: File? = null
@@ -452,8 +444,5 @@ class SavedPrototypeDirectoryStore(
         "font/ttf" to "ttf",
         "font/otf" to "otf",
       )
-
-    fun sha256(bytes: ByteArray): String =
-      MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { formatHexByte(it) }
   }
 }

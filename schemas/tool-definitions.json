@@ -599,6 +599,27 @@
       "required": ["lock", "deviceCount"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "lock": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "deviceCount": {
+          "type": "number"
+        }
+      },
+      "required": ["success", "lock", "deviceId", "deviceCount"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/planOnly": true
     }
@@ -632,6 +653,10 @@
           "description": "SDK override TTL ms (default 5000)",
           "type": "number"
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -659,6 +684,51 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["match", "fail", "cancel", "error", "enroll", "unenroll"]
+        },
+        "modality": {
+          "type": "string",
+          "enum": ["any", "fingerprint", "face"]
+        },
+        "fingerprintId": {
+          "type": "number"
+        },
+        "errorCode": {
+          "type": "number"
+        },
+        "supported": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "const": "partial"
+            }
+          ]
+        },
+        "observation": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "message", "action", "modality", "supported"],
+      "additionalProperties": {}
     }
   },
   {
@@ -723,6 +793,78 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "changes": {
+          "type": "object",
+          "properties": {
+            "locale": {
+              "type": "string"
+            },
+            "timeZone": {
+              "type": "string"
+            },
+            "textDirection": {
+              "type": "string",
+              "enum": ["ltr", "rtl"]
+            },
+            "timeFormat": {
+              "type": "string",
+              "enum": ["12", "24"]
+            },
+            "calendarSystem": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
+        "intentBroadcast": {
+          "type": "boolean"
+        },
+        "localeScope": {
+          "type": "string",
+          "enum": ["app", "system"]
+        },
+        "localeAppId": {
+          "type": "string"
+        },
+        "localeMethod": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "timeZoneWarning": {
+          "type": "string"
+        },
+        "iosLiveChanges": {
+          "type": "object",
+          "properties": {
+            "springBoardRestarted": {
+              "type": "boolean"
+            },
+            "notificationPosted": {
+              "type": "boolean"
+            },
+            "appRestarted": {
+              "type": "boolean"
+            }
+          },
+          "required": ["springBoardRestarted", "notificationPosted"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "changes", "intentBroadcast"],
+      "additionalProperties": {}
     }
   },
   {
@@ -771,6 +913,30 @@
       "required": ["appId"],
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "appId", "name"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -1205,6 +1371,74 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "snapshotName": {
+          "type": "string"
+        },
+        "snapshotType": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "deviceName": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "manifest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "bundleStatuses": {
+          "type": "array",
+          "items": {}
+        },
+        "evictedSnapshotNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restoreMode": {
+          "type": "string",
+          "enum": ["vm", "settings_only"]
+        },
+        "restoreNote": {
+          "type": "string"
+        },
+        "restoredAt": {
+          "type": "string"
+        },
+        "deviceSessionUuid": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": ["message", "snapshotName", "snapshotType", "deviceId", "deviceName"]
     }
   },
   {
@@ -1268,6 +1502,150 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "supported": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "type": "boolean"
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "partial"
+                }
+              ]
+            },
+            "theme": {
+              "type": "boolean"
+            }
+          },
+          "required": ["fontScale", "density", "theme"],
+          "additionalProperties": {}
+        },
+        "current": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": ["smaller", "default", "larger"]
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": ["light", "dark", "system", "custom"]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "applied": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": ["smaller", "default", "larger"]
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": ["light", "dark", "system", "custom"]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "previous": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": ["smaller", "default", "larger"]
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": ["light", "dark", "system", "custom"]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "deviceId", "platform", "supported"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnlyArgs": [
@@ -1405,6 +1783,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -1482,6 +1864,105 @@
           ]
         }
       }
+    }
+  },
+  {
+    "name": "dragPath",
+    "description": "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "points": {
+          "description": "Polyline vertices; the finger goes down on the first and lifts on the last",
+          "minItems": 2,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "description": "x in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "y": {
+                "description": "y in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "durationMs": {
+                "description": "Milliseconds spent moving from the previous point to this one (default 200); ignored on the first point",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5000
+              }
+            },
+            "required": ["x", "y"],
+            "additionalProperties": false
+          }
+        },
+        "holdMs": {
+          "description": "Press and hold at the first point before moving (long press, then drag)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3000
+        },
+        "releaseHoldMs": {
+          "description": "Keep the finger down at the last point before lifting",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3000
+        },
+        "coordinateSpace": {
+          "description": "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
+        },
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
+        "snapshotId": {
+          "description": "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          "type": "string",
+          "minLength": 1
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "prototype"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["points"],
+      "additionalProperties": false,
+      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag."
     }
   },
   {
@@ -2219,6 +2700,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -2245,6 +2727,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",
@@ -2280,6 +2763,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "swipeAt",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -2346,6 +2830,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -2372,6 +2857,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",
@@ -2407,6 +2893,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "swipeAt",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -2463,6 +2950,96 @@
       "required": ["appId"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "permission": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["granted", "denied", "unknown", "limited"]
+              },
+              "service": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": ["androidRuntime", "iosTcc"]
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "accessLevel": {
+                "type": "string",
+                "enum": ["readWrite", "addOnly"]
+              },
+              "evidence": {
+                "type": "string",
+                "enum": ["storedTccGrant", "impliedByFullPhotosGrant"]
+              },
+              "authValue": {
+                "type": "number"
+              },
+              "raw": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": ["permission", "state", "source"],
+            "additionalProperties": {}
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "deviceId", "platform", "permissions"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -2507,6 +3084,28 @@
       "required": ["appId", "adapterName", "name"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "entries": {}
+      },
+      "required": ["success", "appId", "adapterName", "name", "entries"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true
@@ -2543,6 +3142,107 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "schemes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "intentFilters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "category": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "scheme": {
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathPattern": {
+                      "type": "string"
+                    },
+                    "pathPrefix": {
+                      "type": "string"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": ["action", "category"],
+            "additionalProperties": {}
+          }
+        },
+        "supportedMimeTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "rawOutput": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "appId",
+        "schemes",
+        "hosts",
+        "intentFilters",
+        "supportedMimeTypes"
+      ],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -3274,6 +3974,84 @@
       "required": ["appId"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "policyAccess": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "allowed": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "android_cmd_notification",
+                "android_dumpsys_notification",
+                "ios_bulletinboard_plist",
+                "unsupported"
+              ]
+            },
+            "rawValue": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "authorizationStatus": {
+              "type": "string",
+              "enum": ["notDetermined", "denied", "authorized", "provisional", "ephemeral"]
+            },
+            "lockScreen": {
+              "type": "boolean"
+            },
+            "notificationCenter": {
+              "type": "boolean"
+            },
+            "alerts": {
+              "type": "boolean"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "deviceId", "platform", "policyAccess"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -3331,6 +4109,93 @@
       },
       "required": ["scope", "key"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "suite": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "redacted": {
+          "type": "boolean",
+          "const": true
+        },
+        "valueFormat": {
+          "type": "string",
+          "enum": ["canonical-json", "sdk-description"]
+        },
+        "warning": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "storeRoute": {
+          "type": "string",
+          "enum": ["sdk", "container-plist", "defaults"]
+        }
+      },
+      "required": ["success", "deviceId", "platform", "scope", "key", "value", "found"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -3546,6 +4411,20 @@
           ]
         }
       }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success"],
+      "additionalProperties": {}
     }
   },
   {
@@ -3611,6 +4490,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -3754,6 +4637,183 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "const": "android"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "userSource": {
+          "type": "string",
+          "enum": [
+            "explicit",
+            "installedUser",
+            "foregroundPackage",
+            "managedProfile",
+            "primary",
+            "currentUser"
+          ]
+        },
+        "presence": {
+          "type": "string",
+          "enum": ["installed", "absent", "unknown"]
+        },
+        "unknownReason": {
+          "type": "string"
+        },
+        "state": {
+          "type": "object",
+          "properties": {
+            "hidden": {
+              "type": "boolean"
+            },
+            "suspended": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": {}
+        },
+        "signing": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "available"
+                },
+                "scheme": {
+                  "type": "string",
+                  "enum": ["v2", "v3", "v3.1"]
+                },
+                "signerSha256": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "signers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sha256": {
+                        "type": "string"
+                      },
+                      "minSdkVersion": {
+                        "type": "number"
+                      },
+                      "maxSdkVersion": {
+                        "type": "number"
+                      },
+                      "lineage": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["sha256"],
+                    "additionalProperties": {}
+                  }
+                },
+                "history": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": ["status", "scheme", "signerSha256", "signers"],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "unavailable"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": ["status", "reason"],
+              "additionalProperties": {}
+            }
+          ]
+        },
+        "observation": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "const": "dumpsys-package+apk-signing-block"
+            },
+            "fresh": {
+              "type": "boolean",
+              "const": true
+            },
+            "observedAt": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "object",
+              "properties": {
+                "deviceId": {
+                  "type": "string"
+                },
+                "userId": {
+                  "type": "number"
+                },
+                "appId": {
+                  "type": "string"
+                },
+                "apkPath": {
+                  "type": "string"
+                }
+              },
+              "required": ["deviceId", "userId", "appId"],
+              "additionalProperties": {}
+            },
+            "apiLevel": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["source", "fresh", "observedAt", "scope", "apiLevel"],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "appId",
+        "platform",
+        "deviceId",
+        "userId",
+        "userSource",
+        "presence",
+        "signing",
+        "observation"
+      ],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -4010,6 +5070,10 @@
         },
         "prototype": {
           "description": "iOS simulator only: inject the prototype agent so the prototype tool can draw over this app. Always relaunches the app, losing its state. Rejected on physical iOS devices (use the in-app SDK), on Android (prototypes need no injection) and for com.apple.* apps.",
+          "type": "boolean"
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
           "type": "boolean"
         },
         "raw": {
@@ -4748,6 +5812,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -4770,6 +5835,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -5241,16 +6307,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -7346,6 +8403,153 @@
       },
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            },
+            "search": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": ["user", "system", "all", "launchable"]
+            },
+            "profile": {
+              "type": "number"
+            },
+            "deviceId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
+        "observationComplete": {
+          "type": "boolean"
+        },
+        "totalCount": {
+          "type": "number"
+        },
+        "installedCount": {
+          "type": "number"
+        },
+        "deviceCount": {
+          "type": "number"
+        },
+        "lastUpdated": {
+          "type": "string"
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "deviceId": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string",
+                "enum": ["android", "ios"]
+              },
+              "totalCount": {
+                "type": "number"
+              },
+              "lastUpdated": {
+                "type": "string"
+              },
+              "apps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "packageName": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["user", "system"]
+                    },
+                    "foreground": {
+                      "type": "boolean"
+                    },
+                    "recent": {
+                      "type": "boolean"
+                    },
+                    "userId": {
+                      "type": "number"
+                    },
+                    "userProfile": {
+                      "type": "string",
+                      "enum": ["personal", "work", "secondary", "unknown"]
+                    },
+                    "userIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    },
+                    "launchable": {
+                      "type": "boolean"
+                    },
+                    "launchableByUserId": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "required": ["packageName", "type", "foreground", "recent"],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": ["deviceId", "platform", "totalCount", "lastUpdated", "apps"],
+            "additionalProperties": {}
+          }
+        },
+        "launchabilityUnknownProfiles": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "launchabilityUnknownApps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "message",
+        "query",
+        "observationComplete",
+        "totalCount",
+        "installedCount",
+        "deviceCount",
+        "lastUpdated",
+        "devices"
+      ],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -7385,6 +8589,25 @@
       },
       "required": ["appId", "adapterName"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "type": "string"
+        },
+        "stores": {}
+      },
+      "required": ["success", "appId", "adapterName", "stores"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
@@ -8971,6 +10194,187 @@
     }
   },
   {
+    "name": "multiTouch",
+    "description": "Simultaneous 2-5 finger tap, long press, or swipe at a screen point.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Simultaneous multi-finger gesture to perform",
+          "type": "string",
+          "enum": ["tap", "longPress", "swipe"]
+        },
+        "fingers": {
+          "description": "Simultaneous fingers (2-5, default 2); use tapAt/swipeOn for one finger. Counts above 2 on Android need the multi_finger_gesture_v1 CtrlProxy capability and are refused before dispatch otherwise",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 5
+        },
+        "x": {
+          "description": "Finger-group center x in the selected coordinateSpace",
+          "type": "number"
+        },
+        "y": {
+          "description": "Finger-group center y in the selected coordinateSpace",
+          "type": "number"
+        },
+        "coordinateSpace": {
+          "description": "Units for x/y: native absolute (default), normalized 0-1, or percent 0-100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
+        },
+        "direction": {
+          "description": "Swipe finger direction; required for swipe, invalid otherwise",
+          "type": "string",
+          "enum": ["up", "down", "left", "right"]
+        },
+        "distance": {
+          "description": "Swipe travel in native px (default 30% of the travel axis); clamped so every finger stays on screen",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fingerSpacing": {
+          "description": "Horizontal gap between neighbouring fingers in native px (10-400; default 10% of the width, 40-160). The row is centered on x and shifted to fit the screen",
+          "type": "number",
+          "minimum": 10,
+          "maximum": 400
+        },
+        "durationMs": {
+          "description": "Duration in ms (max 3000). longPress 500-3000, default 1000; swipe default 300; tap is fixed at 50",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3000
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "prototype"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action", "x", "y"],
+      "additionalProperties": false,
+      "description": "Simultaneous 2-5 finger tap, long press, or swipe at a screen point. Fingers sit in a horizontal row centered on x/y."
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "x1": {
+          "type": "number"
+        },
+        "y1": {
+          "type": "number"
+        },
+        "x2": {
+          "type": "number"
+        },
+        "y2": {
+          "type": "number"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        },
+        "observation": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "action": {
+          "type": "string",
+          "enum": ["tap", "longPress", "swipe"]
+        },
+        "fingers": {
+          "type": "number"
+        },
+        "fingerSpacing": {
+          "type": "number"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": ["x", "y"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "deviceId",
+        "platform",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "duration",
+        "action",
+        "fingers",
+        "fingerSpacing",
+        "points"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "navigateTo",
     "description": "Navigate to screen using navigation graph",
     "inputSchema": {
@@ -9394,6 +10798,10 @@
         },
         "raw": {
           "description": "Include raw view hierarchy",
+          "type": "boolean"
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
           "type": "boolean"
         },
         "screenshot": {
@@ -15060,6 +16468,10 @@
           "required": ["quietPeriodMs"],
           "additionalProperties": false
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -15202,6 +16614,31 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["call", "accept", "cancel", "busy", "hold"]
+        },
+        "phoneNumber": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "supported", "message"],
+      "additionalProperties": {}
     }
   },
   {
@@ -15216,7 +16653,7 @@
           "type": "string"
         },
         "direction": {
-          "description": "Pinch direction",
+          "description": "Pinch direction; ignored when the finger distance does not change (rotation only)",
           "type": "string",
           "enum": ["in", "out"]
         },
@@ -15242,8 +16679,10 @@
           "maximum": 10000
         },
         "rotationDegrees": {
-          "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
-          "type": "number"
+          "description": "Degrees (-360 to 360) the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
+          "type": "number",
+          "minimum": -360,
+          "maximum": 360
         },
         "includeSystemInsets": {
           "description": "Use full screen including status/nav bars",
@@ -15265,6 +16704,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -15421,6 +16864,43 @@
       },
       "required": ["title", "body"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["sdk", "simctlPush"]
+        },
+        "imageType": {
+          "type": "string",
+          "enum": ["normal", "bigPicture"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "channelId": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "supported"],
+      "additionalProperties": {}
     }
   },
   {
@@ -15437,6 +16917,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -16170,6 +17654,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -16192,6 +17677,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -16663,16 +18149,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -18669,7 +20146,7 @@
   },
   {
     "name": "prototype",
-    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. Pinning is not available yet; iOS installs an app icon on the home screen. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. searchBar requires prototype_search_bar_v1 for show and patch.",
+    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) need prototype_saved_v1 on Android, or an iOS simulator (no agent needed) using the verified viewer template (or AUTOMOBILE_IOS_PROTOTYPE_VIEWER) for save; icon is an asset uploaded in the same call. On Android, save with pin:true then asks the launcher to pin a shortcut (pinned: pinned|pending|unsupported; pending until the launcher dialog is accepted (autoConfirm taps it), declining sends nothing); deleteSaved disables the shortcut, and removeIcon:true clears it with adb only when no saved prototype remains. iOS installs an app icon on the home screen and ignores pin. iOS listSaved ids are bundle ids accepted by deleteSaved and omit savedAt. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:\"patch\",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for severalBuffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid/carousel, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss/setData/appendData/removeData/request. Stack {type:\"stack\",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: \"device\" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"prototype\" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device's own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:\"appearance_changed\", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. row/listItem swipeActions {start?,end?,fullSwipe?} (1-3 {label,icon?,role?,color?,onTap} per side; not inside a horizontal pager or carousel) require prototype_swipe_actions_v1; revealed buttons are tagged <rowTag>.swipe.<index>. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). scroll.refresh {stateKey,onRefresh} (pull-to-refresh on a vertical scroll; stateKey is a boolean that shows the indicator) requires prototype_refresh_v1. carousel {itemWidth,variant?,itemSpacing?,children} (horizontal snapping row) and pager indicator \"dots\" require prototype_carousel_v1. Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:\"stack\",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. setData {path,value}, appendData {path,value} and removeData {path} (path is /data/<pointer>, with a whole {index} segment inside a repeat; value is {value: json}, {state: key}, {data: pointer}, or {item: field}/{index: true} in a repeat) change /data from a tap and require prototype_data_actions_v1. Each device write is a change event (awaitEvent kind:\"change\") with name = the written /data path and payload {op, value?, revision}; once the device has written a prototype's data, a patch with /data ops needs baseRevision (the latest revision seen) and is refused with conflict {revision, state, data} if a newer write touched an overlapping path. request {url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?} calls any absolute http(s) URL from a tap (no host allowlist; url takes {key} and {data:/pointer} placeholders; headers/query values and body are literals or {state}/{data}/{value}/{item} bindings) and needs prototype_network_v1, plus prototype_network_device_v1 for via \"device\" (default via \"host\": the host makes the call). A 2xx body (JSON, else a string) is written to into (a /data path naming an object member) like setData, and {status, headers, durationMs, error?} to into + \"__meta\" (/data/feed -> /data/feed__meta); a non-2xx status or failure leaves into alone and sets meta.error. statusKey names a declared string state key that moves loading -> success|error, for visibleWhen; onSuccess/onError are action lists (nest up to 4 deep). A newer request to the same into cancels the older. Limits: timeoutMs max 30000 (default 10000), response 262144 bytes, 4 in flight per device. Each finished request is an emit event named prototype_request (payload {requestId, method, url, via, into?, outcome, status?, durationMs, error?}; await it with kind emit, eventName prototype_request). Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. textField trailingIcon {icon,label,onTap?}, imeAction (done|next|search|send|go) and onSubmit require prototype_text_field_actions_v1 (not allowed with multiline). textField leadingIcon (icon name) requires prototype_text_field_leading_icon_v1. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. On Android, show replaceOthers:false retains other windows up to a limit of 4 (prototype_multi_surface_v1); a fifth is refused listing the shown ids. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. searchBar requires prototype_search_bar_v1 for show and patch. A root-level storage {version, keys:[\"state:<key>\",\"data:<pointer>\"]} block (up to 64 unique keys: each state key declared in state, each data pointer a member of /data, no overlapping pointers, at most 262144 stored bytes) makes the device save those values per prototype id after every write (user edit, device data action, request response) and requires prototype_storage_v1. Precedence on the next show of the same id: stored values replace the spec's for the listed keys; a changed storage.version discards them all; a stored key no longer listed (or a show without storage) is dropped; a stored value that no longer fits (state type changed, data of another JSON kind, unwritable pointer) is dropped and the spec's value stands. A host patch to a stored key wins under the usual baseRevision rules and the device then stores it. inspect reports storage {version, keys:[{key,bytes}], totalBytes, skippedKeys?} per prototype (absent if the device does not report it); {action:\"clearStorage\",id} wipes an id's stored values (result cleared = keys removed) and is refused without prototype_storage_v1; deleteSaved also clears them.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18685,7 +20162,8 @@
             "awaitEvent",
             "save",
             "listSaved",
-            "deleteSaved"
+            "deleteSaved",
+            "clearStorage"
           ]
         },
         "spec": {
@@ -19189,6 +20667,28 @@
               "type": "string",
               "enum": ["none", "standard"]
             },
+            "storage": {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 261
+                  },
+                  "minItems": 1,
+                  "maxItems": 64
+                }
+              },
+              "required": ["version", "keys"],
+              "additionalProperties": false
+            },
             "root": {
               "anyOf": [
                 {
@@ -19268,17 +20768,6 @@
                                         {
                                           "type": "object",
                                           "properties": {
-                                            "page": {
-                                              "type": "string",
-                                              "minLength": 1
-                                            }
-                                          },
-                                          "required": ["page"],
-                                          "additionalProperties": false
-                                        },
-                                        {
-                                          "type": "object",
-                                          "properties": {
                                             "data": {
                                               "type": "string",
                                               "minLength": 1,
@@ -19297,6 +20786,17 @@
                                             }
                                           },
                                           "required": ["value"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "page": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": ["page"],
                                           "additionalProperties": false
                                         }
                                       ]
@@ -19431,6 +20931,149 @@
                               }
                             },
                             "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["setData"]
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 261
+                              },
+                              "value": {
+                                "anyOf": [
+                                  {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/2"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3"
+                                  },
+                                  {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["type", "path", "value"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["appendData"]
+                              },
+                              "path": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/path"
+                              },
+                              "value": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/value"
+                              }
+                            },
+                            "required": ["type", "path", "value"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["removeData"]
+                              },
+                              "path": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/path"
+                              }
+                            },
+                            "required": ["type", "path"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["request"]
+                              },
+                              "method": {
+                                "type": "string",
+                                "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+                              },
+                              "url": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2048
+                              },
+                              "headers": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    {
+                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/value"
+                                    }
+                                  ]
+                                },
+                                "propertyNames": {
+                                  "minLength": 1
+                                }
+                              },
+                              "query": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/headers/additionalProperties"
+                                },
+                                "propertyNames": {
+                                  "minLength": 1
+                                }
+                              },
+                              "body": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/7/properties/value"
+                              },
+                              "into": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 261
+                              },
+                              "statusKey": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                              },
+                              "via": {
+                                "type": "string",
+                                "enum": ["host", "device"]
+                              },
+                              "timeoutMs": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 30000
+                              },
+                              "onSuccess": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                                },
+                                "minItems": 1,
+                                "maxItems": 32
+                              },
+                              "onError": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/10/properties/onSuccess"
+                              }
+                            },
+                            "required": ["type", "url"],
                             "additionalProperties": false
                           },
                           {
@@ -19885,7 +21528,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "equals": {
                                     "anyOf": [
@@ -19908,7 +21551,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/1/properties/equals"
@@ -19921,7 +21564,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -19934,7 +21577,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -20237,7 +21880,7 @@
                               "type": "object",
                               "properties": {
                                 "path": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
                                 }
                               },
                               "required": ["path"],
@@ -20311,6 +21954,52 @@
                     },
                     "onDoubleTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onDoubleTap"
+                    },
+                    "swipeActions": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "icon": {
+                                "type": "string"
+                              },
+                              "role": {
+                                "type": "string",
+                                "enum": ["default", "destructive"]
+                              },
+                              "color": {
+                                "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim/anyOf/2/properties/light"
+                              },
+                              "onTap": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                                },
+                                "minItems": 1,
+                                "maxItems": 32
+                              }
+                            },
+                            "required": ["label", "onTap"],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 3
+                        },
+                        "end": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start"
+                        },
+                        "fullSwipe": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "repeat": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
@@ -20558,6 +22247,74 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "repeat": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["carousel"]
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["multiBrowse", "hero", "uncontained"]
+                    },
+                    "itemWidth": {
+                      "type": "number",
+                      "minimum": 0.000001,
+                      "maximum": 10000
+                    },
+                    "itemSpacing": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root"
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "required": ["type", "itemWidth", "children"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
                     "onLongPress": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onLongPress"
                     },
@@ -20748,7 +22505,7 @@
                       "enum": ["icon"]
                     },
                     "name": {
-                      "type": "string"
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                     },
                     "variant": {
                       "type": "string",
@@ -21003,6 +22760,38 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 10000
+                    },
+                    "leadingIcon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
+                    },
+                    "trailingIcon": {
+                      "type": "object",
+                      "properties": {
+                        "icon": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "onTap": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        }
+                      },
+                      "required": ["icon", "label"],
+                      "additionalProperties": false
+                    },
+                    "imeAction": {
+                      "type": "string",
+                      "enum": ["done", "next", "search", "send", "go"]
+                    },
+                    "onSubmit": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon/properties/onTap"
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -21052,34 +22841,15 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/placeholder"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/placeholder"
                     },
                     "leadingIcon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                     },
                     "trailingActions": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "icon": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
-                          },
-                          "label": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "onTap": {
-                            "type": "array",
-                            "items": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
-                            },
-                            "minItems": 1,
-                            "maxItems": 32
-                          }
-                        },
-                        "required": ["icon", "label"],
-                        "additionalProperties": false
+                        "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon"
                       },
                       "minItems": 1,
                       "maxItems": 2
@@ -21092,7 +22862,7 @@
                       "enum": ["bar", "docked"]
                     },
                     "onSubmit": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items/properties/onTap"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon/properties/onTap"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -21138,13 +22908,13 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "checks": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/checks"
                     },
                     "validateOn": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
@@ -21198,13 +22968,13 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "checks": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/checks"
                     },
                     "validateOn": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
@@ -21258,7 +23028,7 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "type": {
                       "type": "string",
@@ -21273,7 +23043,7 @@
                       "enum": ["filled", "tonal", "elevated", "outlined", "text"]
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                     }
                   },
                   "required": ["type", "label"],
@@ -21316,13 +23086,13 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "checks": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/checks"
                     },
                     "validateOn": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
@@ -21463,7 +23233,10 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
+                    },
+                    "swipeActions": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions"
                     },
                     "type": {
                       "type": "string",
@@ -21478,7 +23251,7 @@
                       "minLength": 1
                     },
                     "leadingIcon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                     },
                     "trailing": {
                       "anyOf": [
@@ -21518,7 +23291,7 @@
                               "enum": ["icon"]
                             },
                             "name": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                              "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                             }
                           },
                           "required": ["type", "name"],
@@ -21567,13 +23340,13 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "checks": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/checks"
                     },
                     "validateOn": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
@@ -21636,7 +23409,7 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "type": {
                       "type": "string",
@@ -21755,14 +23528,14 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "type": {
                       "type": "string",
                       "enum": ["iconButton"]
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                     },
                     "variant": {
                       "type": "string",
@@ -21809,14 +23582,14 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "type": {
                       "type": "string",
                       "enum": ["fab"]
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                     },
                     "label": {
                       "type": "string",
@@ -21946,12 +23719,12 @@
                       "enum": ["small", "centerAligned", "medium", "large"]
                     },
                     "navigationIcon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon"
                     },
                     "actions": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon"
                       },
                       "minItems": 1,
                       "maxItems": 3
@@ -22172,7 +23945,7 @@
                       "minLength": 1
                     },
                     "icon": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                      "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                     },
                     "confirm": {
                       "type": "object",
@@ -22182,14 +23955,14 @@
                           "minLength": 1
                         },
                         "onTap": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingActions/items/properties/onTap"
+                          "$ref": "#/properties/spec/properties/root/anyOf/10/properties/trailingIcon/properties/onTap"
                         }
                       },
                       "required": ["label"],
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -22239,7 +24012,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -22249,13 +24022,13 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm/properties/onTap"
                               },
                               "icon": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                                "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                               },
                               "trailingText": {
                                 "type": "string",
@@ -22329,14 +24102,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -22384,13 +24157,13 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "checks": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/checks"
                     },
                     "validateOn": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
@@ -22446,13 +24219,13 @@
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
                     "enabledWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/enabledWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/enabledWhen"
                     },
                     "checks": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/checks"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/checks"
                     },
                     "validateOn": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/9/properties/validateOn"
+                      "$ref": "#/properties/spec/properties/root/anyOf/10/properties/validateOn"
                     },
                     "type": {
                       "type": "string",
@@ -22510,6 +24283,24 @@
                       "enum": ["vertical", "horizontal"],
                       "default": "vertical"
                     },
+                    "refresh": {
+                      "type": "object",
+                      "properties": {
+                        "stateKey": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
+                        },
+                        "onRefresh": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        }
+                      },
+                      "required": ["stateKey", "onRefresh"],
+                      "additionalProperties": false
+                    },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
                     }
@@ -22563,18 +24354,16 @@
                       "enum": ["horizontal", "vertical"]
                     },
                     "pageSpacing": {
-                      "type": "number",
-                      "minimum": 0,
-                      "maximum": 10000
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/itemSpacing"
                     },
                     "peek": {
                       "type": "object",
                       "properties": {
                         "start": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/33/properties/pageSpacing"
+                          "$ref": "#/properties/spec/properties/root/anyOf/5/properties/itemSpacing"
                         },
                         "end": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/33/properties/pageSpacing"
+                          "$ref": "#/properties/spec/properties/root/anyOf/5/properties/itemSpacing"
                         }
                       },
                       "additionalProperties": false
@@ -22598,6 +24387,10 @@
                           "additionalProperties": false
                         }
                       ]
+                    },
+                    "indicator": {
+                      "type": "string",
+                      "enum": ["none", "dots"]
                     },
                     "children": {
                       "type": "array",
@@ -22710,10 +24503,10 @@
                             "minLength": 1
                           },
                           "icon": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                            "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
                           },
                           "image": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/6/properties/asset"
+                            "$ref": "#/properties/spec/properties/root/anyOf/7/properties/asset"
                           }
                         },
                         "required": ["label"],
@@ -22779,7 +24572,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/35/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/36/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -22836,7 +24629,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/28/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -22950,7 +24743,7 @@
           }
         },
         "baseRevision": {
-          "description": "patch only: required for /state ops; the device refuses with conflict if a touched key changed since this revision",
+          "description": "patch only: required for /state ops, and for /data ops once the device has written the prototype's data with setData/appendData/removeData; the patch is refused with conflict if a touched key or an overlapping /data path changed since this revision",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
@@ -22961,7 +24754,7 @@
           "minLength": 1
         },
         "display": {
-          "description": "show only: panel key, role, or active to show the prototype on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising prototype_display_id_v1; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the prototype is on.",
+          "description": "show only: panel key, role, or active to show the prototype on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising prototype_display_id_v2; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the prototype is on.",
           "type": "string"
         },
         "replaceOthers": {
@@ -22978,7 +24771,7 @@
           "enum": ["device", "light", "dark"]
         },
         "id": {
-          "description": "Prototype id required for dismiss (unless all: true), awaitEvent and deleteSaved",
+          "description": "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage",
           "type": "string",
           "minLength": 1
         },
@@ -23023,17 +24816,17 @@
           "minLength": 1
         },
         "pin": {
-          "description": "save only: requests pinning, currently unsupported",
+          "description": "save only (Android): after saving, request a home-screen shortcut; the launcher then asks the user to confirm",
           "type": "boolean",
           "const": true
         },
         "autoConfirm": {
-          "description": "save only: requires pin; pinning is currently unsupported",
+          "description": "save only: requires pin; accepts the launcher dialog, verifies the pin",
           "type": "boolean",
           "const": true
         },
         "removeIcon": {
-          "description": "deleteSaved only: requests icon removal, currently unsupported",
+          "description": "deleteSaved only (Android): clear CtrlProxy's shortcuts with adb when no saved prototype remains; otherwise a disabled icon remains",
           "type": "boolean",
           "const": true
         },
@@ -23048,7 +24841,7 @@
           "minLength": 1
         },
         "kind": {
-          "description": "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth}) is sent only when the top screen or depth changes. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several",
+          "description": "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth}) is sent only when the top screen or depth changes. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. A finished request action arrives as kind emit with eventName prototype_request",
           "type": "string",
           "enum": [
             "emit",
@@ -23177,7 +24970,7 @@
           "maximum": 9007199254740991
         },
         "conflict": {
-          "description": "patch only: newer user edits that refused the whole patch, with current revision and touched state values",
+          "description": "patch only: newer user edits or device /data writes that refused the whole patch, with current revision and touched state values or data paths",
           "type": "object",
           "properties": {
             "revision": {
@@ -23203,10 +24996,24 @@
                   }
                 ]
               }
+            },
+            "data": {
+              "description": "/data paths a newer device write (setData, appendData, removeData) touched",
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": ["revision", "state"],
           "additionalProperties": false
+        },
+        "cleared": {
+          "description": "clearStorage only: how many stored keys the device removed (0 when nothing was stored); absent when the device did not say",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "success": {
           "type": "boolean"
@@ -23285,6 +25092,51 @@
                   }
                 },
                 "required": ["mode", "source"],
+                "additionalProperties": false
+              },
+              "storage": {
+                "description": "inspect only: what the device has stored for this prototype's storage block (prototype_storage_v1), as the device last reported it. Absent when the device does not report it or the prototype has no storage block",
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "description": "The storage.version the device stores values under",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "keys": {
+                    "description": "Stored keys that currently hold a value (state:<key> or data:<pointer>) and the bytes each occupies",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "bytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": ["key", "bytes"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "totalBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "skippedKeys": {
+                    "description": "Keys whose latest value was not stored because it would exceed the byte limit",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["version", "keys", "totalBytes"],
                 "additionalProperties": false
               },
               "success": {
@@ -23478,6 +25330,51 @@
               "required": ["mode", "source"],
               "additionalProperties": false
             },
+            "storage": {
+              "description": "inspect only: what the device has stored for this prototype's storage block (prototype_storage_v1), as the device last reported it. Absent when the device does not report it or the prototype has no storage block",
+              "type": "object",
+              "properties": {
+                "version": {
+                  "description": "The storage.version the device stores values under",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "keys": {
+                  "description": "Stored keys that currently hold a value (state:<key> or data:<pointer>) and the bytes each occupies",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "bytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": ["key", "bytes"],
+                    "additionalProperties": false
+                  }
+                },
+                "totalBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "skippedKeys": {
+                  "description": "Keys whose latest value was not stored because it would exceed the byte limit",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": ["version", "keys", "totalBytes"],
+              "additionalProperties": false
+            },
             "success": {
               "type": "boolean"
             },
@@ -23509,6 +25406,7 @@
                 "type": "string",
                 "enum": [
                   "stack",
+                  "carousel",
                   "node.id",
                   "bottomSheet.dismissOnSwipe",
                   "bottomSheet.detents",
@@ -23801,6 +25699,48 @@
         "hierarchyUpdatedAt": {
           "description": "show with element anchors: device timestamp of the hierarchy they were resolved against",
           "type": "number"
+        },
+        "unreversiblePorts": {
+          "description": "Android show and inspect: loopback URLs of via \"device\" request actions whose port is not a literal (a binding, or an unparseable URL), so no adb reverse was made for them. Use via \"host\" for those requests. Absent when none",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "prototypeId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["prototypeId", "url", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "reverseFailures": {
+          "description": "Android show and inspect: loopback ports of via \"device\" request actions whose automatic adb reverse failed (best-effort; the show is not failed). Absent when none",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "prototypeId": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": ["prototypeId", "port", "error"],
+            "additionalProperties": false
+          }
         },
         "deviceDroppedEvents": {
           "description": "inspect only: events the device dropped from its offline buffer (200 per device) since CtrlProxy started; a gap in sequences shows which",
@@ -24456,6 +26396,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -24482,6 +26423,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",
@@ -24517,6 +26459,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "swipeAt",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -25323,6 +27266,112 @@
       },
       "required": ["target", "files"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "warning": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean",
+          "enum": [true]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "target": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "destinationPath": {
+                "type": "string"
+              },
+              "byteCount": {
+                "type": "number"
+              },
+              "resourceUri": {
+                "type": "string"
+              },
+              "effects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["completed", "notRequested", "unavailable"]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "status"],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": ["destinationPath", "byteCount", "effects"],
+            "additionalProperties": {}
+          }
+        },
+        "appId": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "destinationPath": {
+          "type": "string"
+        },
+        "byteCount": {
+          "type": "number"
+        },
+        "resourceUri": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "deviceId", "platform"],
+      "if": {
+        "properties": {
+          "success": {
+            "const": true
+          }
+        },
+        "required": ["success"]
+      },
+      "then": {
+        "required": ["target", "files"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "success": {
+              "const": true
+            }
+          },
+          "required": ["success"]
+        },
+        "then": {
+          "required": ["appId", "container", "destinationPath", "byteCount", "resourceUri"]
+        }
+      }
     }
   },
   {
@@ -25335,6 +27384,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -25944,6 +27997,33 @@
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "appId", "name", "key"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -25996,6 +28076,51 @@
       },
       "required": ["appId", "paths"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["reset", "missing", "failed"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["path", "status"],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": ["success", "deviceId", "platform", "appId", "container", "entries"],
+      "additionalProperties": {}
     }
   },
   {
@@ -26060,6 +28185,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -26818,6 +28947,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -26840,6 +28970,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -27311,16 +29442,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -29319,6 +31441,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -29545,6 +31671,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -29906,6 +32036,30 @@
       },
       "required": ["phoneNumber", "message"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "phoneNumber": {
+          "type": "string"
+        },
+        "messageLength": {
+          "type": "number"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "phoneNumber", "messageLength", "supported", "message"],
+      "additionalProperties": {}
     }
   },
   {
@@ -29943,6 +32097,33 @@
       },
       "required": ["deviceId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "sessionUuid": {
+          "type": "string"
+        },
+        "displayPin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["message", "deviceId"],
+      "additionalProperties": {}
     }
   },
   {
@@ -31509,6 +33690,39 @@
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "effectiveValueDiffers": {
+          "type": "boolean"
+        }
+      },
+      "required": ["success", "appId", "name", "key", "type"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -31548,6 +33762,84 @@
       },
       "required": ["appId", "policyAccess"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "policyAccess": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "allowed": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "android_cmd_notification",
+                "android_dumpsys_notification",
+                "ios_bulletinboard_plist",
+                "unsupported"
+              ]
+            },
+            "rawValue": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "authorizationStatus": {
+              "type": "string",
+              "enum": ["notDetermined", "denied", "authorized", "provisional", "ephemeral"]
+            },
+            "lockScreen": {
+              "type": "boolean"
+            },
+            "notificationCenter": {
+              "type": "boolean"
+            },
+            "alerts": {
+              "type": "boolean"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "deviceId", "platform", "policyAccess"],
+      "additionalProperties": {}
     }
   },
   {
@@ -31740,11 +34032,98 @@
       },
       "required": ["scope", "key", "value", "type"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "suite": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "redacted": {
+          "type": "boolean",
+          "const": true
+        },
+        "valueFormat": {
+          "type": "string",
+          "enum": ["canonical-json", "sdk-description"]
+        },
+        "warning": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "storeRoute": {
+          "type": "string",
+          "enum": ["sdk", "container-plist", "defaults"]
+        }
+      },
+      "required": ["success", "deviceId", "platform", "scope", "key", "value", "found"],
+      "additionalProperties": {}
     }
   },
   {
     "name": "setToolEnabled",
-    "description": "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
+    "description": "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "Control which configurable AutoMobile tools appear in tools/list for an active session. A tool omitted from discovery remains callable directly by name through tools/call.",
@@ -31768,6 +34147,7 @@
             "deviceSnapshot",
             "displayConfig",
             "dragAndDrop",
+            "dragPath",
             "executePlan",
             "explore",
             "exportPlan",
@@ -31794,6 +34174,7 @@
             "listDeviceImages",
             "listDevices",
             "mockNetwork",
+            "multiTouch",
             "navigateTo",
             "network",
             "observe",
@@ -31829,6 +34210,7 @@
             "snapshotOf",
             "sqlQuery",
             "stageSessionDownloads",
+            "swipeAt",
             "swipeOn",
             "systemTray",
             "tapAny",
@@ -31861,6 +34243,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -31887,6 +34270,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",
@@ -31922,6 +34306,7 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
+              "swipeAt",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -32146,6 +34531,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -32220,6 +34609,141 @@
       },
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "expiresAt": {},
+        "unit": {
+          "type": "string",
+          "enum": ["points", "pixels"]
+        },
+        "requestedBounds": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": {}
+        },
+        "clippedBounds": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": {}
+        },
+        "screenSize": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          },
+          "required": ["width", "height"],
+          "additionalProperties": {}
+        },
+        "imageSize": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          },
+          "required": ["width", "height"],
+          "additionalProperties": {}
+        },
+        "pixelsPerNativeUnit": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": ["x", "y"],
+          "additionalProperties": false
+        },
+        "scaleProvenance": {
+          "type": "string",
+          "enum": ["raster-dimensions", "native-scale-confirmed"]
+        },
+        "clipped": {
+          "type": "boolean"
+        },
+        "rasterBounds": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": false
+        },
+        "screenshotOrientation": {
+          "type": "string",
+          "enum": ["display", "native"]
+        }
+      },
+      "required": [
+        "path",
+        "unit",
+        "requestedBounds",
+        "clippedBounds",
+        "screenSize",
+        "imageSize",
+        "pixelsPerNativeUnit",
+        "scaleProvenance",
+        "clipped",
+        "rasterBounds",
+        "screenshotOrientation"
+      ],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -32263,6 +34787,59 @@
       },
       "required": ["appId", "databasePath", "query"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["query", "mutation"]
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {}
+          }
+        },
+        "rowsAffected": {
+          "type": "number"
+        },
+        "bigIntegerColumns": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "diagnostic": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": ["code", "message"],
+          "additionalProperties": {}
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": ["message", "type"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -32341,6 +34918,561 @@
       },
       "required": ["sessionUuid", "directory", "files"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "enum": [true, false]
+        },
+        "sessionUuid": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "directory": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "userSource": {
+          "type": "string",
+          "enum": ["explicit", "currentUser", "foregroundPackage", "managedProfile", "primary"]
+        },
+        "destinationDirectory": {
+          "type": "string"
+        },
+        "reset": {
+          "type": "boolean"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "status": {
+          "type": "string",
+          "const": "unavailable"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "sessionUuid", "deviceId", "platform"],
+      "if": {
+        "properties": {
+          "success": {
+            "const": true
+          }
+        },
+        "required": ["success"]
+      },
+      "then": {
+        "required": ["directory", "userId", "userSource", "destinationDirectory", "reset", "files"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "success": {
+              "const": false
+            }
+          },
+          "required": ["success"]
+        },
+        "then": {
+          "required": ["status", "reason"]
+        }
+      }
+    }
+  },
+  {
+    "name": "swipeAt",
+    "description": "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "snapshotId": {
+          "description": "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "description": "Where the finger goes down, in the selected coordinateSpace; required with to unless image is given",
+          "type": "object",
+          "properties": {
+            "x": {
+              "description": "Screen x coordinate in the selected coordinateSpace",
+              "type": "number"
+            },
+            "y": {
+              "description": "Screen y coordinate in the selected coordinateSpace",
+              "type": "number"
+            }
+          },
+          "required": ["x", "y"],
+          "additionalProperties": false
+        },
+        "to": {
+          "description": "Where the finger lifts, in the selected coordinateSpace; required with from unless image is given",
+          "type": "object",
+          "properties": {
+            "x": {
+              "description": "Screen x coordinate in the selected coordinateSpace",
+              "type": "number"
+            },
+            "y": {
+              "description": "Screen y coordinate in the selected coordinateSpace",
+              "type": "number"
+            }
+          },
+          "required": ["x", "y"],
+          "additionalProperties": false
+        },
+        "coordinateSpace": {
+          "description": "Coordinate units for from/to: native absolute (default), normalized 0–1, or percent 0–100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
+        },
+        "image": {
+          "description": "Screenshot-relative from/to points sharing one image source; mutually exclusive with outer from, to, and coordinateSpace. Without image, from and to are required.",
+          "type": "object",
+          "properties": {
+            "unit": {
+              "description": "Use normalized image fractions (preferred); pixels means the real file raster, never a resized preview",
+              "type": "string",
+              "enum": ["normalized", "pixels"]
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "crop": {
+                      "description": "Pass the whole observe.crop object from the referenced image",
+                      "type": "object",
+                      "properties": {
+                        "cropPath": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "type": "string",
+                          "enum": ["pixels", "points"]
+                        },
+                        "requestedBounds": {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["left", "top", "right", "bottom"],
+                          "additionalProperties": false
+                        },
+                        "clippedBounds": {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["left", "top", "right", "bottom"],
+                          "additionalProperties": false
+                        },
+                        "clipped": {
+                          "type": "boolean"
+                        },
+                        "screenSize": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "height": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "imageSize": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "height": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "pixelsPerNativeUnit": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "y": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": ["x", "y"],
+                          "additionalProperties": false
+                        },
+                        "scaleProvenance": {
+                          "type": "string",
+                          "enum": ["raster-dimensions", "native-scale-confirmed"]
+                        },
+                        "rasterBounds": {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["left", "top", "right", "bottom"],
+                          "additionalProperties": false
+                        },
+                        "screenshotOrientation": {
+                          "type": "string",
+                          "enum": ["display", "native"]
+                        }
+                      },
+                      "required": [
+                        "unit",
+                        "requestedBounds",
+                        "clippedBounds",
+                        "clipped",
+                        "screenSize",
+                        "imageSize",
+                        "pixelsPerNativeUnit",
+                        "scaleProvenance",
+                        "rasterBounds",
+                        "screenshotOrientation"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rotation": {
+                      "description": "observe.rotation; required for native screenshot orientation",
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "const": 0
+                        },
+                        {
+                          "type": "number",
+                          "const": 1
+                        },
+                        {
+                          "type": "number",
+                          "const": 2
+                        },
+                        {
+                          "type": "number",
+                          "const": 3
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["crop"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "screenshot": {
+                      "type": "object",
+                      "properties": {
+                        "screenSize": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "height": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "screenshotOrientation": {
+                          "type": "string",
+                          "enum": ["display", "native"]
+                        },
+                        "rotation": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "const": 0
+                            },
+                            {
+                              "type": "number",
+                              "const": 1
+                            },
+                            {
+                              "type": "number",
+                              "const": 2
+                            },
+                            {
+                              "type": "number",
+                              "const": 3
+                            }
+                          ]
+                        },
+                        "imageSize": {
+                          "description": "Real file raster dimensions; required for pixels",
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "height": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "nativeScale": {
+                          "description": "Optional provenance only; never screenScale",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": ["screenSize", "screenshotOrientation"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["screenshot"],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "from": {
+              "description": "Where the finger goes down, in the image",
+              "type": "object",
+              "properties": {
+                "x": {
+                  "description": "x in image.unit: a 0-1 fraction or a raster pixel",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "y in image.unit: a 0-1 fraction or a raster pixel",
+                  "type": "number"
+                }
+              },
+              "required": ["x", "y"],
+              "additionalProperties": false
+            },
+            "to": {
+              "description": "Where the finger lifts, in the image",
+              "type": "object",
+              "properties": {
+                "x": {
+                  "description": "x in image.unit: a 0-1 fraction or a raster pixel",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "y in image.unit: a 0-1 fraction or a raster pixel",
+                  "type": "number"
+                }
+              },
+              "required": ["x", "y"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["unit", "source", "from", "to"],
+          "additionalProperties": false
+        },
+        "speed": {
+          "description": "Swipe speed preset",
+          "type": "string",
+          "enum": ["slow", "normal", "fast"]
+        },
+        "durationMs": {
+          "description": "Exact stroke duration in ms (integer 1-3000); exclusive with speed. Velocity = swipe distance / duration; the result reports the dispatched duration and velocityPxPerSecond. Android may quantize very short strokes.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3000
+        },
+        "display": {
+          "description": "Target panel key, role, or active; from/to/image resolve against that panel's observed screenSize (Android only)",
+          "type": "string"
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "prototype"]
+        },
+        "pointer": {
+          "description": "Pointer for this gesture; omit for a finger. Fails with a capability error instead of falling back to a finger.",
+          "type": "object",
+          "properties": {
+            "toolType": {
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "type": "string",
+              "enum": ["stylus"]
+            },
+            "pressure": {
+              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": ["toolType"],
+          "additionalProperties": false
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Swipe from one screen point to another, including diagonals. Bare from/to use platform-native observe coordinates; image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop."
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "x1": {
+          "type": "number"
+        },
+        "y1": {
+          "type": "number"
+        },
+        "x2": {
+          "type": "number"
+        },
+        "y2": {
+          "type": "number"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        },
+        "observation": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "velocityPxPerSecond": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "deviceId",
+        "platform",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "duration"
+      ],
+      "additionalProperties": {}
     }
   },
   {
@@ -32442,6 +35574,29 @@
           "type": "string",
           "enum": ["slow", "normal", "fast"]
         },
+        "durationMs": {
+          "description": "Forward-stroke duration in ms (integer 1-3000); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total) and, for a single swipe, velocityPxPerSecond (omitted for boomerang, lookFor, and the TalkBack route that ignores duration; uses effectiveDurationMs when clamped). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3000
+        },
+        "fromEdge": {
+          "description": "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. By default the start point is inset from the edge by the system bars/gesture insets (Android left/right: gesture inset plus edgeInset, e.g. x=88 for 78px + edgeInset 10), so the swipe stays in the app; pass includeSystemInsets:true to start at the physical screen edge (edgeInset px in), where a very-near-edge swipe may be taken as system back/home",
+          "type": "string",
+          "enum": ["left", "right", "top", "bottom"]
+        },
+        "edgeInset": {
+          "description": "With fromEdge: how far inside the edge the touch starts, px (iOS points); default 4 (iOS swipe-back needs the first ~20 pt). Measured from the content edge (after system insets) unless includeSystemInsets:true",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "at": {
+          "description": "With fromEdge: normalized 0-1 position along the edge (default 0.5)",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "layer": {
           "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",
@@ -32450,6 +35605,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -32630,6 +35789,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -32712,6 +35875,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -32843,6 +36010,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "image": {
           "description": "Screenshot-relative point; mutually exclusive with outer x, y, and coordinateSpace. Without image, x and y are required.",
@@ -33127,6 +36298,25 @@
           "type": "integer",
           "minimum": 500,
           "maximum": 10000
+        },
+        "pointer": {
+          "description": "Pointer for this gesture; omit for a finger. Fails with a capability error instead of falling back to a finger.",
+          "type": "object",
+          "properties": {
+            "toolType": {
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "type": "string",
+              "enum": ["stylus"]
+            },
+            "pressure": {
+              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": ["toolType"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
@@ -33284,6 +36474,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -34326,6 +37520,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -34348,6 +37543,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -34819,16 +38015,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -37336,6 +40523,10 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -38072,6 +41263,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -38094,6 +41286,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -38565,16 +41758,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {

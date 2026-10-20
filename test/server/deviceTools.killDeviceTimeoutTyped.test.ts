@@ -10,10 +10,13 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /** The platform kill command "succeeds" but the emulator stays in ADB discovery. */
 class StubbornDeviceManager extends FakeDeviceUtils {

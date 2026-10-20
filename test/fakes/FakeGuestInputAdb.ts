@@ -39,7 +39,7 @@ export class FakeGuestInputAdb extends FakeAdbExecutor implements AdbExecutor {
     // API 31+: the host adb client exits at hostExitMs, unless it was killed first.
     timer.setTimeout(() => {
       if (this.apiLevel >= 31 && !this.clientKilled) {
-        this.host.resolve({ stdout: "", stderr: "" });
+        this.host.resolve(this.createExecResult("", ""));
       }
     }, hostExitMs);
   }
@@ -70,7 +70,7 @@ export class FakeGuestInputAdb extends FakeAdbExecutor implements AdbExecutor {
           this.guest = "gone";
         }
       }
-      return { stdout: this.isTyping() && !this.clientKilled ? "alive\n" : "", stderr: "" };
+      return this.createExecResult(this.isTyping() && !this.clientKilled ? "alive\n" : "", "");
     }
     const result = await super.execute(args, options);
     if (args.join(" ").includes("input text ")) {

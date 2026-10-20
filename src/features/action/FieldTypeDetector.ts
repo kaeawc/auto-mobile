@@ -49,6 +49,17 @@ const IOS_PATTERNS = {
   dropdown: ["UIPickerView", "UIDatePicker"],
 };
 
+/** The slice of {@link FieldTypeDetector} that SetUIState consumes; fakes satisfy this structurally. */
+export type FieldTypeDetection = Pick<
+  FieldTypeDetector,
+  | "detect"
+  | "isChecked"
+  | "getTextValue"
+  | "isIOSElement"
+  | "isPasswordField"
+  | "shouldSkipVerification"
+>;
+
 /**
  * Detects the field type from element properties
  */
@@ -165,7 +176,7 @@ export class FieldTypeDetector {
    * @param element - The element to get text from
    * @returns The text value or empty string
    */
-  getTextValue(element: Element): string {
+  getTextValue(element: { value?: unknown; text?: unknown }): string {
     // For iOS elements, prefer the `value` attribute which contains the actual input value
     // The `text` attribute on iOS often contains the accessibility label
     if (typeof element.value === "string") {

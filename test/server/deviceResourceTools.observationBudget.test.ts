@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { toolIsError, toolJson } from "../helpers/toolResponse";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -86,25 +87,30 @@ test("exhausted observation preserves mutation and restore receipt with a comple
       resources: { animations: "disabled" },
       timeoutMs: 1000,
     });
-    const result = JSON.parse(response.content[0].text);
-    expect(result.success).toBe(true);
-    expect(result.restore).toEqual(controller.result.restore);
-    expect(result.observed.resources.animations.state).toBe("unknown");
-    expect(result.observed.resources.backup.state).toBe("unknown");
-    expect(Object.keys(result.observed.resources)).toEqual(
-      expect.arrayContaining([
-        ...Object.keys(androidDeviceResourceCatalog),
-        ...Object.keys(androidResourceSettings),
-        "backup",
-        "wallpaperRendering",
-        "widgets",
-        "liveActivities",
-        "backgroundSync",
-        "searchIndexing",
-      ]),
-    );
+    const result = toolJson(response);
+    const expectedKeys = [
+      ...Object.keys(androidDeviceResourceCatalog),
+      ...Object.keys(androidResourceSettings),
+      "backup",
+      "wallpaperRendering",
+      "widgets",
+      "liveActivities",
+      "backgroundSync",
+      "searchIndexing",
+    ];
+    expect(result).toMatchObject({
+      success: true,
+      restore: controller.result.restore,
+      observed: {
+        resources: {
+          ...Object.fromEntries(expectedKeys.map((key) => [key, expect.anything()])),
+          animations: { state: "unknown" },
+          backup: { state: "unknown" },
+        },
+      },
+    });
     expect(result.observationContradictions).toBeUndefined();
-    expect(response.isError).toBeUndefined();
+    expect(toolIsError(response)).toBe(false);
     expect(timer.now()).toBe(500);
     expect(adb.commands.some((args) => args[0] === "settings")).toBe(false);
   } finally {

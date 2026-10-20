@@ -39,6 +39,72 @@ class McpHttpClientStreamableTest {
   }
 
   @Test
+  fun `the session key header literal matches the daemon contract`() {
+    assertEquals("x-auto-mobile-mcp-session-id", McpHttpClient.MCP_SESSION_KEY_HEADER)
+  }
+
+  @Test
+  fun `every request carries the same injected session key`() {
+    val server = FakeStreamable()
+    val client = server.client(mcpSessionKey = "desktop-key-1")
+    client.listTools()
+    client.listTools()
+
+    assertTrue(server.requests.size >= 4)
+    server.requests.forEach {
+      assertEquals(listOf("desktop-key-1"), it.headers.allValues("x-auto-mobile-mcp-session-id"))
+    }
+  }
+
+  @Test
+  fun `the session key is stable across a 404 re-initialize`() {
+    val server = FakeStreamable()
+    val client = server.client(mcpSessionKey = "desktop-key-2")
+    client.listTools()
+    server.forgetSessions()
+    client.listTools()
+
+    assertEquals(
+      setOf("desktop-key-2"),
+      server.requests.map { it.headers.firstValue("x-auto-mobile-mcp-session-id").get() }.toSet(),
+    )
+  }
+
+  @Test
+  fun `clients built in the same app session share one default session key`() {
+    val server = FakeStreamable()
+    server.client().listTools()
+    server.client().listTools()
+
+    val keys =
+      server.requests.map { it.headers.firstValue("x-auto-mobile-mcp-session-id").get() }.toSet()
+    assertEquals(setOf(McpSessionKeyProvider.appSession.key), keys)
+  }
+
+  @Test
+  fun `different app sessions get different session keys`() {
+    val first = McpSessionKeyProvider()
+    val second = McpSessionKeyProvider()
+    val server = FakeStreamable()
+    server.client(mcpSessionKey = first.key).listTools()
+    server.client(mcpSessionKey = second.key).listTools()
+
+    val keys =
+      server.requests.map { it.headers.firstValue("x-auto-mobile-mcp-session-id").get() }.toSet()
+    assertEquals(setOf(first.key, second.key), keys)
+    assertEquals(2, keys.size)
+  }
+
+  @Test
+  fun `mcp-session-id is still echoed only after the server returns one`() {
+    val server = FakeStreamable()
+    server.client().listTools()
+
+    assertTrue(server.requests.first().headers.firstValue("mcp-session-id").isEmpty)
+    assertTrue(server.requests.last().headers.firstValue("mcp-session-id").isPresent)
+  }
+
+  @Test
   fun `a plain JSON reply still decodes`() {
     val server = FakeStreamable(asEventStream = false)
 
@@ -222,7 +288,23 @@ class McpHttpClientStreamableTest {
 
     fun forgetSessions() = sessions.clear()
 
-    fun client() = McpHttpClient(endpoint = "http://localhost/mcp", requestSender = sender)
+    fun client(mcpSessionKey: String? = null) =
+      if (mcpSessionKey == null) {
+        McpHttpClient(
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            endpoint = "http://localhost/mcp",
+            requestSender = sender,
+          ),
+        )
+      } else {
+        McpHttpClient(
+          dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+            endpoint = "http://localhost/mcp",
+            requestSender = sender,
+            mcpSessionKey = mcpSessionKey,
+          ),
+        )
+      }
 
     private val sender = HttpRequestSender { request -> handle(request) }
 

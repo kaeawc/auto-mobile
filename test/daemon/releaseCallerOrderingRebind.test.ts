@@ -12,11 +12,9 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 describe("explicit rebind release caller ordering", () => {
   test.each([false, true])("pool rejection=%s keeps rebound session live", async (rejectPool) => {
     const timer = new FakeTimer();
-    const sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     sessions.stopCleanupTimer();
     const events: unknown[][] = [];
     const devices = ["old", "new"].map((deviceId) => ({
@@ -46,7 +44,11 @@ describe("explicit rebind release caller ordering", () => {
     const restores: Array<() => void> = [];
     try {
       await pool.initializeWithDevices(devices);
-      await pool.bindOrReuseDeviceSession("s1", "old", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: "old",
+        platform: "android",
+      });
       const rebind = sessions.rebindSession.bind(sessions);
       const rebound = spyOn(sessions, "rebindSession").mockImplementation(async (...args) => {
         events.push(["session.rebindSession", ...args]);
@@ -54,7 +56,7 @@ describe("explicit rebind release caller ordering", () => {
       });
       restores.push(() => rebound.mockRestore());
       // Observe the existing private collaborator without replacing the production bind flow.
-      const autolock = Reflect.get(pool, "autolockManager") as DeviceAutolockManager;
+      const autolock = pool.testHooks.autolockManager as DeviceAutolockManager;
       const clear = autolock.clearRebindAutolockLock.bind(autolock);
       const cleared = spyOn(autolock, "clearRebindAutolockLock").mockImplementation((...args) => {
         events.push(["autolock.clearRebindAutolockLock", ...args]);
@@ -70,15 +72,12 @@ describe("explicit rebind release caller ordering", () => {
         }
       });
       restores.push(() => freed.mockRestore());
-      const binding = pool.bindOrReuseDeviceSession(
-        "s1",
-        "new",
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
+      const binding = pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: "new",
+        platform: "android",
+        allowSessionRebind: true,
+      });
       if (rejectPool) {
         await expect(binding).rejects.toBe(failure);
       } else {

@@ -1,12 +1,13 @@
 import {
   SessionManager,
+  type SessionManagerOptions,
   type Session,
   type SessionDeviceAssigner,
   TerminalSessionError,
   SessionTerminalReleaseInProgressError,
   SessionRebindingError,
 } from "../../src/daemon/sessionManager";
-import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCreationError } from "../../src/models/deviceAcquisitionRefusals";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { deriveSlot, isSlotKnown, type LegacyLifecycleView } from "../../src/daemon/sessionSlots";
 import { errorMessage } from "../../src/utils/describeUnknownError";
@@ -20,9 +21,12 @@ export function slotAgreementRig(
   persistence = new FakeDeviceSessionPersistence(),
   fs = new FakeTerminalReleaseJournalFileSystem(),
   timer = new FakeTimer(),
-  keepAwake?: ConstructorParameters<typeof SessionManager>[3],
+  keepAwake?: SessionManagerOptions["keepScreenAwakeRestorer"],
 ) {
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier(), keepAwake);
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: keepAwake,
+  });
   manager.stopCleanupTimer();
   manager.attachDaemonSessionId("shadow-daemon");
   manager.attachTerminalReleaseJournal(new FileTerminalReleaseJournal("/shadow/journal", fs));
@@ -57,14 +61,10 @@ export function slotAgreementRig(
   });
   const pool: SessionDeviceAssigner = {
     assignDeviceToSession: async (uuid) => {
-      await manager.createSession(
-        uuid,
-        `device-${uuid}`,
-        "android",
-        1000,
-        undefined,
-        `stable-${uuid}`,
-      );
+      await manager.createSession(uuid, `device-${uuid}`, "android", {
+        timeoutMs: 1000,
+        stableDeviceId: `stable-${uuid}`,
+      });
       return `device-${uuid}`;
     },
   };
@@ -249,14 +249,10 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
       case "create":
         issue(
           op,
-          rig.manager.createSession(
-            uuid,
-            `device-${uuid}`,
-            "android",
-            1000,
-            undefined,
-            `stable-${uuid}`,
-          ),
+          rig.manager.createSession(uuid, `device-${uuid}`, "android", {
+            timeoutMs: 1000,
+            stableDeviceId: `stable-${uuid}`,
+          }),
         );
         break;
       case "reissue":
@@ -268,7 +264,7 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
         }
         break;
       case "force":
-        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", true));
+        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", { allowExpired: true }));
         if (rig.manager.forceStuckRelease(uuid)) {
           observed.add("forced");
         }
@@ -277,16 +273,14 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
       case "supersede":
         issue(
           op,
-          rig.manager.releaseSessionUnlessSuperseded(
-            uuid,
-            "device-disconnected:shadow",
-            () => false,
-            true,
-          ),
+          rig.manager.releaseSessionUnlessSuperseded(uuid, "device-disconnected:shadow", {
+            commitFence: () => false,
+            allowExpired: true,
+          }),
         );
         break;
       case "graceful":
-        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", true));
+        issue(op, rig.manager.releaseSession(uuid, "plan-auto-release", { allowExpired: true }));
         break;
       case "expiry":
         rig.timer.advanceTime(1001);
@@ -301,19 +295,15 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
   // Shutdown handoff + restart use only the injected in-memory row store and journal.
   issue(
     "restart-fixture",
-    rig.manager.createSession(
-      ids[3],
-      "device-restart",
-      "android",
-      1000,
-      undefined,
-      "stable-restart",
-    ),
+    rig.manager.createSession(ids[3], "device-restart", "android", {
+      timeoutMs: 1000,
+      stableDeviceId: "stable-restart",
+    }),
   );
   await settle();
   rig.manager.stopAcceptingSessionCreations();
   for (const uuid of rig.manager.getAllKnownSessionIds()) {
-    issue("shutdown", rig.manager.releaseSession(uuid, "daemon-shutdown", true));
+    issue("shutdown", rig.manager.releaseSession(uuid, "daemon-shutdown", { allowExpired: true }));
   }
   await settle();
   await rig.manager.drainReleasePromises(1000);

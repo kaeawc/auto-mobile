@@ -1,5 +1,8 @@
+import { EventEmitter } from "node:events";
+import { ActionableError } from "../../src/models/ActionableError";
+import { isAndroidEmulatorSerial } from "../../src/utils/androidSerial";
 import type { AndroidEmulatorReadinessOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import { ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "../../src/utils/HostCommandExecutor";
 import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
 import type { TransitionalSimulator } from "../../src/models/TransitionalSimulator";
 import {
@@ -20,7 +23,11 @@ import {
  * Fake implementation of PlatformDeviceManager for testing
  * Allows configuring device states and asserting operations
  */
-export class FakeDeviceUtils implements PlatformDeviceManager {
+type FakeDeviceUtilsContract = Pick<PlatformDeviceManager, keyof PlatformDeviceManager>;
+
+export class FakeDeviceUtils implements FakeDeviceUtilsContract {
+  /** Optional on the interface; unset (the default) models a manager without an ADB transport. */
+  getAndroidListedDeviceStates?: PlatformDeviceManager["getAndroidListedDeviceStates"];
   private deviceImages: Map<Platform, DeviceInfo[]> = new Map();
   private hangingDeviceImagePlatforms: Set<Platform> = new Set();
   private listDeviceImagesCalls: Array<{ platform: SomePlatform; signal?: AbortSignal }> = [];
@@ -228,18 +235,47 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     }
 
     if (platform === "either") {
-      const androidDevices = this.deviceImages.get("android") || [];
+      const androidDevices = this.withRunningOverlay(
+        "android",
+        this.deviceImages.get("android") || [],
+      );
       const iosDevices = this.deviceImages.get("ios") || [];
       return [...androidDevices, ...iosDevices];
     }
 
-    return this.deviceImages.get(platform) || [];
+    return this.withRunningOverlay(platform, this.deviceImages.get(platform) || []);
+  }
+
+  /**
+   * Android AVD listings report every image as stopped; the real manager overlays the booted
+   * emulators so an image is running exactly when an emulator with its name is booted. iOS images
+   * carry their own state from simctl, so they pass through.
+   */
+  private withRunningOverlay(platform: Platform, images: DeviceInfo[]): DeviceInfo[] {
+    if (platform !== "android") {
+      return images;
+    }
+    // Only `emulator-<port>` serials count: the booted scan also reports physical handsets whose
+    // name is their model, and one modelled like an AVD must not mark that AVD running.
+    const bootedNames = new Set(
+      (this.bootedDevices.get("android") ?? [])
+        .filter((d) => isAndroidEmulatorSerial(d.deviceId))
+        .map((d) => d.name),
+    );
+    // A row a test configured as running stays running (the direct way to script a stale or
+    // racing listing); booting its emulator additionally flips a stopped row to running.
+    return images.map((image) =>
+      image.isRunning || !bootedNames.has(image.name) ? image : { ...image, isRunning: true },
+    );
   }
 
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
-    const identifier = device.deviceId ?? device.name;
+    // The real manager matches an Android image by AVD name (its serial is per-boot) and an iOS
+    // simulator by UDID, falling back to the name only for an image that has no UDID.
+    const identifier =
+      device.platform === "android" ? device.name : (device.deviceId ?? device.name);
     this.executedOperations.push(`isDeviceImageRunning:${identifier}`);
-    return this.runningDeviceNames.has(identifier) || this.runningDeviceNames.has(device.name);
+    return this.runningDeviceNames.has(identifier);
   }
 
   async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
@@ -383,7 +419,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       succeededPlatforms.add(p);
     }
     return {
-      devices,
+      devices: options.presentationOrder === "reverse" ? devices.toReversed() : devices,
       succeededPlatforms,
       discoveryErrors,
       ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
@@ -440,17 +476,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       return this.mockChildProcesses.get(device.name) ?? null;
     }
 
-    // Return a minimal mock ChildProcess
-    return {
-      on: () => null,
-      once: () => null,
-      off: () => null,
-      kill: () => false,
-      stdout: null,
-      stderr: null,
-      stdin: null,
-      pid: 12345,
-    } as any as ChildProcess;
+    return new FakeDeviceLaunchProcess();
   }
 
   async killDevice(device: BootedDevice): Promise<void> {
@@ -459,6 +485,11 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   }
 
   async destroyDevice(device: DeviceInfo, _options?: DeviceDestroyOptions): Promise<void> {
+    if (device.platform === "ios" && !device.deviceId) {
+      throw new ActionableError(
+        `Cannot delete iOS simulator '${device.name}' without a simulator UDID`,
+      );
+    }
     this.executedOperations.push(
       `destroyDevice:${device.platform}:${device.deviceId ?? device.name}`,
     );
@@ -466,9 +497,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     this.deviceImages.set(
       device.platform,
       images.filter((image) =>
-        device.platform === "ios"
-          ? (image.deviceId ?? image.name) !== (device.deviceId ?? device.name)
-          : image.name !== device.name,
+        device.platform === "ios" ? image.deviceId !== device.deviceId : image.name !== device.name,
       ),
     );
   }
@@ -496,5 +525,24 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       deviceId: device.deviceId || `mock-${device.name}`,
       source: device.source,
     };
+  }
+}
+
+type FakeDeviceLaunchProcessContract = Pick<ChildProcess, keyof ChildProcess>;
+
+/** A synthetic launch exits synchronously when cancelled; it owns no real process. */
+class FakeDeviceLaunchProcess extends EventEmitter implements FakeDeviceLaunchProcessContract {
+  pid = 12345;
+  stdin = null;
+  stdout = null;
+  stderr = null;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  unref(): void {}
+  kill(): boolean {
+    this.exitCode = 0;
+    this.emit("exit", 0, null);
+    return false;
   }
 }

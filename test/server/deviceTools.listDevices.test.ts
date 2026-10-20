@@ -1,3 +1,5 @@
+import { makePool } from "../helpers/makePool";
+import { toolJson, toolStructured, toolText } from "../helpers/toolResponse";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import {
   DEVICECTL_LIST_FIXTURES,
@@ -25,7 +27,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -106,8 +107,7 @@ describe("listDevices tool (#5870)", () => {
 
   const callListDevices = async (args: Record<string, unknown> = {}) => {
     const response = await callListDevicesResponse(args);
-    expect(response.content?.[0]?.type).toBe("text");
-    return JSON.parse(response.content?.[0]?.text ?? "{}");
+    return JSON.parse(toolText(response));
   };
 
   const callListDevicesResponse = async (args: Record<string, unknown> = {}) => {
@@ -121,15 +121,11 @@ describe("listDevices tool (#5870)", () => {
     const timer = new FakeTimer();
     const markers = new FakeDeviceHealthMarkers(timer);
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        deviceHealthMarkers: markers,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceHealthMarkers: markers,
+      deviceManager: fakeDeviceUtils,
+    });
     await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
     await pool.assignDeviceToSession("rehydrated-session", "android", {
       platform: "android",
@@ -446,8 +442,8 @@ describe("listDevices tool (#5870)", () => {
   test("provides structuredContent for the authenticated acceptance forwarding path", async () => {
     const response = await callListDevicesResponse({ platform: "android" });
 
-    expect(response.structuredContent).toEqual(JSON.parse(response.content?.[0]?.text ?? "{}"));
-    expect(response.structuredContent).toMatchObject({
+    expect(toolStructured(response)).toEqual(toolJson(response));
+    expect(toolStructured(response)).toMatchObject({
       count: 1,
       devices: [
         expect.objectContaining({
@@ -477,8 +473,8 @@ describe("listDevices tool (#5870)", () => {
         ResourceRegistry.register(
           resource.uri,
           resource.name,
-          resource.description,
-          resource.mimeType,
+          resource.description ?? "",
+          resource.mimeType ?? "application/json",
           resource.handler,
         );
       }
@@ -505,8 +501,8 @@ describe("listDevices tool (#5870)", () => {
         ResourceRegistry.register(
           previous.uri,
           previous.name,
-          previous.description,
-          previous.mimeType,
+          previous.description ?? "",
+          previous.mimeType ?? "application/json",
           previous.handler,
         );
       }
@@ -709,7 +705,7 @@ describe("listDevices tool (#5870)", () => {
         deviceType: "pixel_9",
         capabilityInventory: {
           schemaVersion: 1,
-          capabilities: [{ id: "android.hardware.camera", state: "available" }],
+          capabilities: [{ id: "android.hardware.camera", state: "available", source: "platform" }],
         },
       },
     ]);
@@ -745,10 +741,11 @@ describe("listDevices tool (#5870)", () => {
         timer,
         2_000,
       );
-      const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
       const configuredDiscoveryCall = fakeDeviceUtils.getGetDeviceImagesDetailedCalls().at(-1);
 
-      expect(payload.devices[0].apiLevel).toBeNull();
+      expect(toolJson(response)).toMatchObject({
+        devices: [expect.objectContaining({ apiLevel: null })],
+      });
       expect(configuredDiscoveryCall).toEqual(
         expect.objectContaining({
           platform: "android",
@@ -765,14 +762,10 @@ describe("listDevices tool (#5870)", () => {
   test("reports Android API and release metadata retained at device admission", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: fakeDeviceUtils,
+    });
     const image = {
       platform: "android" as const,
       name: android.name,
@@ -802,14 +795,10 @@ describe("listDevices tool (#5870)", () => {
   test("reports the assigned pooled session UUID", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: fakeDeviceUtils,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
     await pool.assignDeviceToSession("busy-session", "android");
@@ -827,14 +816,10 @@ describe("listDevices tool (#5870)", () => {
   test("expired pooled session is not released by listDevices", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: fakeDeviceUtils,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
     await pool.assignDeviceToSession("expired-inventory", "android");
@@ -916,14 +901,10 @@ describe("listDevices tool (#5870)", () => {
   test("reports the registry device-session UUID", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: fakeDeviceUtils,
+    });
     const registry = new DeviceSessionRegistry(timer);
     registry.onDeviceConnected({
       deviceId: android.deviceId,
@@ -947,14 +928,10 @@ describe("listDevices tool (#5870)", () => {
   test("withholds stale Android metadata after discovery quarantines a reused serial", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: fakeDeviceUtils,
+    });
     const admittedImage = {
       platform: "android" as const,
       name: android.name,

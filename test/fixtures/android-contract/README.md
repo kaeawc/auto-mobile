@@ -19,3 +19,12 @@ Hand-built response additions are explicitly documented in the contract test pen
 this guard is at the name/optionality level: it compares top-level field names,
 nullability and requiredness only. Field TYPES and nested-type contents are not
 compared.
+
+## Captured responses
+
+`android-responses.json` holds replies encoded by the real `WebSocketResponse` serializer
+(configured like the device's `responseJson`) in `ResponseContractFixtureTest`, for the
+behavioural contract `test/contracts/AndroidCtrlProxyContract.ts`. Timestamps are fixed and
+`requestId` is a placeholder the replaying socket substitutes. Regenerate with the same command
+as above, using `--tests '*ResponseContractFixtureTest*'`; without the environment variable the
+test fails on drift.

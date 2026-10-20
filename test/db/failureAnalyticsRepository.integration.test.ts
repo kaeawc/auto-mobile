@@ -23,7 +23,7 @@ describe("FailureAnalyticsRepository", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1000000);
-    repo = new FailureAnalyticsRepository(timer, db);
+    repo = new FailureAnalyticsRepository(db, timer);
   });
 
   afterEach(async () => {
@@ -82,8 +82,8 @@ describe("FailureAnalyticsRepository", () => {
     test("uses injected IdGenerator for persisted IDs", async () => {
       const idGenerator = new FakeIdGenerator(["occurrence-id", "group-id", "capture-id"]);
       const deterministicRepo = new FailureAnalyticsRepository(
-        timer,
         db,
+        timer,
         () => new FakeDbWriteBarrier(),
         idGenerator,
       );
@@ -363,8 +363,8 @@ describe("FailureAnalyticsRepository", () => {
     test("fetches aggregated group details with a bounded query count and preserves per-group top-N", async () => {
       const instrumented = await createInstrumentedTestDatabase();
       const instrumentedRepo = new FailureAnalyticsRepository(
-        timer,
         instrumented.db,
+        timer,
         () => new FakeDbWriteBarrier(),
       );
       try {
@@ -446,8 +446,8 @@ describe("FailureAnalyticsRepository", () => {
     test("chunks more than SQLite's conservative bound-parameter limit without dropping groups", async () => {
       const instrumented = await createInstrumentedTestDatabase();
       const instrumentedRepo = new FailureAnalyticsRepository(
-        timer,
         instrumented.db,
+        timer,
         () => new FakeDbWriteBarrier(),
       );
       try {
@@ -610,8 +610,8 @@ describe("FailureAnalyticsRepository", () => {
       const rows = Array.from({ length: count }, (_v, i) => ({
         occurrence_id: `occ-${i}`,
         group_id: `grp-${i}`,
-        type: "crash",
-        severity: "critical",
+        type: "crash" as const,
+        severity: "critical" as const,
         title: `Failure ${i}`,
         timestamp: 1000 + i,
         acknowledged: 0,
@@ -723,7 +723,7 @@ describe("FailureAnalyticsRepository", () => {
   describe("shutdown draining (issue #2792)", () => {
     test("routes background retention cleanup through the barrier", async () => {
       const barrier = new FakeDbWriteBarrier();
-      const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
+      const barrierRepo = new FailureAnalyticsRepository(db, timer, () => barrier);
 
       await barrierRepo.recordFailure(makeFailureInput());
 
@@ -735,7 +735,7 @@ describe("FailureAnalyticsRepository", () => {
     test("skips background retention cleanup while draining, still records the failure", async () => {
       const barrier = new FakeDbWriteBarrier();
       barrier.beginDrain();
-      const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
+      const barrierRepo = new FailureAnalyticsRepository(db, timer, () => barrier);
 
       const occurrenceId = await barrierRepo.recordFailure(makeFailureInput());
 
@@ -1030,7 +1030,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1000);
-    repo = new FailureAnalyticsRepository(timer, db);
+    repo = new FailureAnalyticsRepository(db, timer);
   });
 
   afterEach(async () => {
@@ -1063,7 +1063,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);
 
     // Keep only the 2 newest occurrences -> both belong to "new".
-    await (repo as any).pruneToRowCap(2);
+    await repo.testHooks.pruneToRowCap(2);
 
     const occurrences = await db
       .selectFrom("failure_occurrences")
@@ -1086,7 +1086,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     await repo.recordFailure(input("keep"));
 
     // Cap of 2 prunes the single oldest occurrence but the group retains two.
-    await (repo as any).pruneToRowCap(2);
+    await repo.testHooks.pruneToRowCap(2);
 
     expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(2);
     const groups = await db.selectFrom("failure_groups").select("signature").execute();
@@ -1099,7 +1099,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     timer.setCurrentTime(2000);
     await repo.recordFailure(input("b"));
 
-    await (repo as any).pruneToRowCap(10);
+    await repo.testHooks.pruneToRowCap(10);
 
     expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(2);
     expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);
@@ -1114,7 +1114,7 @@ describe("FailureAnalyticsRepository.getTimelineData (#3439)", () => {
   beforeEach(async () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new FailureAnalyticsRepository(timer, db);
+    repo = new FailureAnalyticsRepository(db, timer);
   });
 
   afterEach(async () => {

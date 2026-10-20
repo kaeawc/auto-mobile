@@ -5,12 +5,32 @@ import {
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
+  PROTOTYPE_SWIPE_ACTIONS_CAPABILITY,
+  PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
+  PROTOTYPE_CAROUSEL_CAPABILITY,
+  PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
+  PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   PROTOTYPE_CHECKS_CAPABILITY,
+  PROTOTYPE_DATA_ACTIONS_CAPABILITY,
+  PROTOTYPE_STORAGE_CAPABILITY,
+  PROTOTYPE_NETWORK_CAPABILITY,
+  PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeDataActionFields,
+  prototypeDataActionsUnsupportedMessage,
+} from "./prototypeDataActions";
+import { prototypeStorageFields, prototypeStorageUnsupportedMessage } from "./prototypeStorage";
+import {
+  prototypeDeviceRequestFields,
+  prototypeNetworkDeviceUnsupportedMessage,
+  prototypeNetworkUnsupportedMessage,
+  prototypeRequestFields,
+} from "./prototypeRequest";
 import { prototypeStackFields, prototypeStackUnsupportedMessage } from "./prototypeSpec";
 import {
   prototypeThemeModeFields,
@@ -19,6 +39,10 @@ import {
 import { prototypeDataModelFields, prototypeDataModelUnsupportedMessage } from "./prototypeData";
 import { PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
+  prototypeTextFieldActionFields,
+  prototypeTextFieldActionsUnsupportedMessage,
+  prototypeTextFieldLeadingIconFields,
+  prototypeTextFieldLeadingIconUnsupportedMessage,
   prototypeTextFieldOptionFields,
   prototypeTextFieldOptionsUnsupportedMessage,
 } from "./prototypeTextFieldOptions";
@@ -28,6 +52,12 @@ import {
   prototypePagerOptionsUnsupportedMessage,
 } from "./prototypePagerOptions";
 import { prototypeGestureFields, prototypeGesturesUnsupportedMessage } from "./prototypeGestures";
+import {
+  prototypeSwipeActionFields,
+  prototypeSwipeActionsUnsupportedMessage,
+} from "./prototypeSwipeActions";
+import { prototypeCarouselFields, prototypeCarouselUnsupportedMessage } from "./prototypeCarousel";
+import { prototypeRefreshFields, prototypeRefreshUnsupportedMessage } from "./prototypeRefresh";
 import {
   prototypeSearchBarFields,
   prototypeSearchBarUnsupportedMessage,
@@ -67,6 +97,16 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeTextFieldOptionsUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
+    fields: prototypeTextFieldActionFields,
+    unsupportedMessage: prototypeTextFieldActionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
+    fields: prototypeTextFieldLeadingIconFields,
+    unsupportedMessage: prototypeTextFieldLeadingIconUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_FLOW_GRID_CAPABILITY,
     fields: prototypeFlowGridFields,
     unsupportedMessage: prototypeFlowGridUnsupportedMessage,
@@ -80,6 +120,21 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_GESTURES_CAPABILITY,
     fields: prototypeGestureFields,
     unsupportedMessage: prototypeGesturesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CAROUSEL_CAPABILITY,
+    fields: prototypeCarouselFields,
+    unsupportedMessage: prototypeCarouselUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_REFRESH_CAPABILITY,
+    fields: prototypeRefreshFields,
+    unsupportedMessage: prototypeRefreshUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SWIPE_ACTIONS_CAPABILITY,
+    fields: prototypeSwipeActionFields,
+    unsupportedMessage: prototypeSwipeActionsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_SEARCH_BAR_CAPABILITY,
@@ -111,6 +166,26 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     fields: prototypeChecksFields,
     unsupportedMessage: prototypeChecksUnsupportedMessage,
   },
+  {
+    capability: PROTOTYPE_DATA_ACTIONS_CAPABILITY,
+    fields: prototypeDataActionFields,
+    unsupportedMessage: prototypeDataActionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STORAGE_CAPABILITY,
+    fields: prototypeStorageFields,
+    unsupportedMessage: prototypeStorageUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_NETWORK_CAPABILITY,
+    fields: prototypeRequestFields,
+    unsupportedMessage: prototypeNetworkUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
+    fields: prototypeDeviceRequestFields,
+    unsupportedMessage: prototypeNetworkDeviceUnsupportedMessage,
+  },
 ];
 
 export function prototypeRequiredCapabilities(spec: unknown): {
@@ -124,4 +199,9 @@ export function prototypeRequiredCapabilities(spec: unknown): {
       ? []
       : [{ capability: gate.capability, fields, unsupportedMessage: gate.unsupportedMessage }];
   });
+}
+
+/** Capability names required by a spec, for the native-code resource's renderer contract. */
+export function requiredPrototypeCapabilities(spec: unknown): string[] {
+  return [...new Set(prototypeRequiredCapabilities(spec).map((gate) => gate.capability))].sort();
 }

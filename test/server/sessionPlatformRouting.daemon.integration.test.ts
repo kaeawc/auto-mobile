@@ -1,5 +1,8 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { DaemonRequest } from "../../src/daemon/types";
+import { isRecord } from "../../src/server/pipeline/isRecord";
+import { toolJson } from "../helpers/toolResponse";
 import {
   DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
@@ -7,8 +10,8 @@ import {
 } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { DaemonClient } from "../../src/daemon/client";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -33,22 +36,23 @@ import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const devices: BootedDevice[] = [
   { name: "Pixel", deviceId: "emulator-5554", platform: "android" },
@@ -64,15 +68,15 @@ let previousAutolock: string | undefined;
 let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
-let originalDeviceSessionManager: unknown;
+let originalCollaborators: ToolRegistryCollaborators;
 let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
-  originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+  originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   deviceSessionManager = new FakeDeviceSessionManager();
   deviceSessionManager.setConnectedDevices(devices);
-  Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -92,15 +96,11 @@ beforeEach(async () => {
   utils.setBootedDevices("android", [devices[0], devices[2]]);
   utils.setBootedDevices("ios", [devices[1]]);
   PlatformDeviceManagerFactory.setInstance(utils);
-  pool = new DevicePool(
-    createDevicePoolDependencies(manager, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: utils,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      deviceSessionRepository: repository,
-    }),
-  );
+  pool = makePool(manager, "daemon", {
+    timer,
+    deviceManager: utils,
+    deviceSessionRepository: repository,
+  });
   await pool.initializeWithDevices(devices);
   DaemonState.getInstance().initialize(manager, pool);
   ToolRegistry.clearTools();
@@ -129,7 +129,7 @@ afterEach(async () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
   } finally {
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
   }
 });
 
@@ -180,7 +180,7 @@ test("setActiveDevice selects an acquired session without an explicit UUID", asy
     platform: "android",
     __mcpSessionId: "client",
   });
-  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(androidSession);
+  expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(androidSession);
 }, 30000);
 
@@ -192,7 +192,6 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const timer = new FakeTimer();
   const socket = new UnixSocketServer(
     "/private/tmp/unused-6807.sock",
-    "http://localhost:0/mcp",
     DaemonState.getInstance(),
     timer,
   );
@@ -202,9 +201,14 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const acquisitionOwners: Array<string | undefined> = [];
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
-    const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
-    await (socket as any).restoreSelectorSessions(args, socketSessionId);
-    const route = (socket as any).getMcpForwardRoute(request, socketSessionId);
+    const request: DaemonRequest = {
+      id: "routing",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name, arguments: args },
+    };
+    await socket.testHooks.restoreSelectorSessions(args, socketSessionId);
+    const route = await socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
@@ -287,9 +291,12 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         },
       );
     }
-    const forwarded = (socket as any).withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    const forwarded = socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    if (!isRecord(forwarded)) {
+      throw new Error("Expected forwarded tool arguments to be an object");
+    }
     const result = await fixture.client.callTool({ name, arguments: forwarded });
-    (socket as any).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };
   const daemon = new FakeDaemonManager();
@@ -381,7 +388,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     ]);
     const apple = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios")!;
     const pinned = new DaemonMcpProxy({
-      clientFactory: () => client,
+      // Each proxy owns its client: closing the pinned one must not drop the default proxy's handlers.
+      clientFactory: () => new FakeDaemonClient({ toolResultFor: dispatch }),
       daemonManager: daemon,
       autoStartDaemon: false,
       timer,
@@ -572,7 +580,7 @@ test("setActiveDevice rebinds the session of the device's platform, never the ot
     platform: "android",
     __mcpSessionId: "client",
   });
-  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(androidSession);
+  expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(manager.getSession(androidSession!)?.assignedDevice).toBe(devices[2].deviceId);
   expect(manager.getSession(iosSession!)?.platform).toBe("ios");
   expect(manager.getSession(iosSession!)?.assignedDevice).toBe(devices[1].deviceId);

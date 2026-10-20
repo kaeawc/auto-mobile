@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { sql } from "kysely";
 import {
-  DatabaseClosedForShutdownError,
   closeDatabase,
   ensureMigrations,
   getDatabase,
   getMigrationsPromiseForTest,
   refusedDatabaseAccessCountAfterShutdownClose,
 } from "../../src/db/database";
+import { DatabaseClosedForShutdownError } from "../../src/db/DatabaseClosedForShutdownError";
 import { getDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import * as migratorModule from "../../src/db/migrator";
 import { IN_MEMORY_DB_OPT_IN_ENV } from "../../src/db/migrationLock";
@@ -81,7 +81,7 @@ describe("no database reopen after the shutdown close (#11601)", () => {
     expect(runMigrations).not.toHaveBeenCalled();
     expect(getMigrationsPromiseForTest()).toBeNull();
     expect(refusedDatabaseAccessCountAfterShutdownClose()).toBe(1);
-    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+    expect(warn.mock.calls.map((call: unknown[]) => call[0])).toEqual([
       "[Database] Refused database access #1 after the shutdown close",
     ]);
     expect(warn.mock.calls[0]?.[1]).toBe(error);

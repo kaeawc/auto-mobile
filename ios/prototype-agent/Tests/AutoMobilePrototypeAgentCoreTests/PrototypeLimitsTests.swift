@@ -54,6 +54,7 @@ final class PrototypeLimitsTests: XCTestCase {
         XCTAssertEqual(PrototypeLimits.maxDataArrayItems, limits["MAX_PROTOTYPE_DATA_ARRAY_ITEMS"])
         XCTAssertEqual(PrototypeLimits.maxDataPointerLength, limits["MAX_PROTOTYPE_DATA_POINTER_LENGTH"])
         XCTAssertEqual(PrototypeLimits.maxDataBytes, limits["MAX_PROTOTYPE_DATA_BYTES"])
+        XCTAssertEqual(PrototypeLimits.maxDataWriteBytes, limits["MAX_PROTOTYPE_DATA_WRITE_BYTES"])
         XCTAssertEqual(PrototypeLimits.maxRepeatPathCells, limits["MAX_PROTOTYPE_REPEAT_PATH_CELLS"])
         XCTAssertEqual(PrototypeLimits.maxSubstitutedTextLength, limits["MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH"])
         XCTAssertEqual(PrototypeLimits.maxSubstitutedTextTotal, limits["MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL"])
@@ -383,6 +384,12 @@ final class PrototypeLimitsTests: XCTestCase {
             (.object(["type": .string("box"), "onTap": .array([
                 .object(["type": .string("toggle"), "key": .string("{i.b}")]),
             ])]), "onTap[0].key"),
+            (.object(["type": .string("box"), "onLongPress": .array([
+                .object(["type": .string("emit"), "name": .string("{i.b}")]),
+            ])]), "onLongPress[0].name"),
+            (.object(["type": .string("box"), "onDoubleTap": .array([
+                .object(["type": .string("setState"), "key": .string("k"), "value": .string("{i.b}")]),
+            ])]), "onDoubleTap[0].value"),
             (.object(["type": .string("topAppBar"), "actions": .array([
                 .object(["label": .string("{i.b}")]),
             ])]), "actions[0].label"),
@@ -418,11 +425,13 @@ final class PrototypeLimitsTests: XCTestCase {
     func testPartActionOrderAndSkippedDataOperands() throws {
         let long = JSONValue.object(["b": .string(String(repeating: "x", count: 16385))])
         let child = JSONValue.object([
-            "type": .string("topAppBar"), "navigationIcon": .object([
+            "type": .string("topAppBar"),
+            "navigationIcon": .object([
                 "label": .string("ok"), "onTap": .array([
                     .object(["type": .string("emit"), "name": .string("{i.b}")]),
                 ]),
-            ]), "actions": .array([.object(["label": .string("{i.b}")])]),
+            ]),
+            "actions": .array([.object(["label": .string("{i.b}")])]),
         ])
         XCTAssertEqual(
             try rejection(pathRepeatSpec(literalRepeat(child, items: [long]))),

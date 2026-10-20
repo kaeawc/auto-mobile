@@ -1,3 +1,4 @@
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { describe, expect, test } from "bun:test";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
@@ -19,12 +20,17 @@ describe("resolver selector compatibility with the shared resolution contract", 
       bounds: bounds(100, 200),
       node: [{ text: "Target", bounds: bounds(110, 130) }],
     };
-    const capture: ViewHierarchyResult = { hierarchy: { node: [partial, exact] } };
+    const capture: ViewHierarchyResult = createHierarchyForTest({
+      hierarchy: { node: [partial, exact] },
+    });
     const inInbox = { container: { text: "Inbox" }, intentAction: "inspect" } as const;
     expect(selector.selectByText(capture, "Target", inInbox).element?.bounds.top).toBe(110);
     expect(
-      selector.selectByText({ hierarchy: { node: [partial] } }, "Target", inInbox).element?.bounds
-        .top,
+      selector.selectByText(
+        createHierarchyForTest({ hierarchy: { node: [partial] } }),
+        "Target",
+        inInbox,
+      ).element?.bounds.top,
     ).toBe(10);
     const production = new ResolverElementSelector();
     expect(production.hasContainer(capture, { text: "Inbox" })).toBe(true);
@@ -32,27 +38,29 @@ describe("resolver selector compatibility with the shared resolution contract", 
       production.selectByText(capture, "Inbox", { intentAction: "inspect" }).element?.text,
     ).toBe("Inbox");
     expect(
-      production.selectByText({ hierarchy: { node: [partial] } }, "Inbox", {
+      production.selectByText(createHierarchyForTest({ hierarchy: { node: [partial] } }), "Inbox", {
         intentAction: "inspect",
       }).element?.text,
     ).toBe("Inbox (12)");
   });
 
   test("qualified native ID wins over a smaller bare Compose fallback", () => {
-    const capture: ViewHierarchyResult = {
+    const capture: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: {
         node: [
           { "resource-id": "action", bounds: bounds(0, 10), clickable: true },
           { "resource-id": "pkg:id/action", bounds: bounds(10, 110), clickable: true },
         ],
       },
-    };
+    });
     expect(selector.selectByResourceId(capture, "pkg:id/action").element?.["resource-id"]).toBe(
       "pkg:id/action",
     );
     expect(
       selector.selectByResourceId(
-        { hierarchy: { node: [{ "resource-id": "action", bounds: bounds(0, 10) }] } },
+        createHierarchyForTest({
+          hierarchy: { node: [{ "resource-id": "action", bounds: bounds(0, 10) }] },
+        }),
         "pkg:id/action",
         { intentAction: "inspect" },
       ).element?.["resource-id"],
@@ -61,31 +69,33 @@ describe("resolver selector compatibility with the shared resolution contract", 
 
   test("id-less runner view IDs round-trip, outrank a bare suffix, and reject duplicates", () => {
     const view = { "view-id": "runner/path", bounds: bounds(10, 110), clickable: true };
-    const capture: ViewHierarchyResult = {
+    const capture: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: {
         node: [{ "resource-id": "path", bounds: bounds(0, 10), clickable: true }, view],
       },
-    };
+    });
     expect(selector.selectByResourceId(capture, "runner/path").element?.["view-id"]).toBe(
       "runner/path",
     );
     expect(() =>
       selector.selectByResourceId(
-        { hierarchy: { node: [view, { ...view, bounds: bounds(120, 220) }] } },
+        createHierarchyForTest({
+          hierarchy: { node: [view, { ...view, bounds: bounds(120, 220) }] },
+        }),
         "runner/path",
       ),
     ).toThrow("ambiguous");
   });
 
   test("skeleton duplicate indexes replay area-ranked controls through the production selector", () => {
-    const capture: ViewHierarchyResult = {
+    const capture: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: {
         node: [
           { "resource-id": "pkg:id/repeat", bounds: bounds(0, 100), clickable: true },
           { "resource-id": "pkg:id/repeat", bounds: bounds(120, 140), clickable: true },
         ],
       },
-    };
+    });
     const collected = new DefaultObserveElementCollector().collect(capture, "android");
     const rows = projectSkeleton(collected!, { width: 100, height: 200 }).skeleton.filter(
       (row) => row.elementId === "pkg:id/repeat",

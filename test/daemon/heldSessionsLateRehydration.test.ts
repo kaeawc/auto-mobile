@@ -140,11 +140,13 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
           sessionId,
           target?.deviceId ?? DEVICES[sessionId]!,
           "ios",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
+          {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          },
         );
         return session.assignedDevice;
       },
@@ -163,7 +165,7 @@ async function ownerOutcomeAfterRestart(reasonLookup: "works" | "fails at first"
       manager,
       () => false,
       async (sessionId, reason) => {
-        await manager.releaseSession(sessionId, reason, true);
+        await manager.releaseSession(sessionId, reason, { allowExpired: true });
       },
       timer,
     );

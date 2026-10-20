@@ -11,9 +11,9 @@ import {
   type SessionCacheData,
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { DeviceCleanupInProgressError } from "../../src/models/deviceAcquisitionRefusals";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
 import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";
 import {
   LocationRouteRegistry,
@@ -21,6 +21,9 @@ import {
 } from "../../src/features/utility/LocationRoutePlayer";
 import { createSessionLocationAppliedCallback } from "../../src/server/sessionLocation";
 import { logger } from "../../src/utils/logger";
+import type { DeviceClockRestoreState } from "../../src/features/utility/DeviceClock";
+import type { ExecResult } from "../../src/models/ExecResult";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -37,8 +40,7 @@ import {
   getSessionHeartbeatCheckIntervalMs,
 } from "../../src/daemon/sessionLivenessWindows";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import type { DeferredRebindCleanup } from "../../src/daemon/acquisitionReceipt";
@@ -63,14 +65,10 @@ function harness(
 ) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_000_000);
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
     restorers,
-  );
+  });
   const deviceManager = new FakeDeviceUtils();
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "cleanup-bounds", {
@@ -127,7 +125,10 @@ async function deferredRebindHarness(
     restore.resolve();
     defaultDeviceClockRestoreRegistry.retire(android.deviceId);
   });
-  await h.manager.createSession("rebound", android.deviceId, "android", 600_000, 600_000);
+  await h.manager.createSession("rebound", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   h.manager.updateSessionCache("rebound", state);
   const pendingTimeouts = h.timer.getPendingTimeoutCount();
   let cleanup: DeferredRebindCleanup | undefined;
@@ -417,18 +418,17 @@ for (const [reason, forced] of [
   test(`terminal release enumeration partitions ${reason} and excludes it after ${forced ? "force" : "settlement"}`, async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const h = harness(persistence);
-    await h.manager.createSession("old", android.deviceId, "android", 600_000, 600_000);
+    await h.manager.createSession("old", android.deviceId, "android", {
+      timeoutMs: 600_000,
+      heartbeatTimeoutMs: 600_000,
+    });
     const gate = Promise.withResolvers<void>();
     const write = spyOn(persistence, "markReleased").mockImplementation(() => gate.promise);
     dispose.push(() => write.mockRestore());
     const startedAtMs = h.timer.now();
-    const release = h.manager.releaseSession(
-      "old",
-      reason,
-      false,
-      undefined,
-      reason === "cleanup-expired" ? { expiryOrigin: "cleanup-expired" } : undefined,
-    );
+    const release = h.manager.releaseSession("old", reason, {
+      ...(reason === "cleanup-expired" ? { expiryOrigin: "cleanup-expired" } : undefined),
+    });
     await flush();
     const entry = { sessionId: "old", startedAtMs };
     expect(h.manager.getTerminalReleasesInProgress()).toEqual(
@@ -471,8 +471,12 @@ test("the stuck deadline derives from first attempts and two shutdown-safe write
 });
 
 test("each own-budget restore adds exactly its first-attempt deadline", () => {
-  const clock = { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: true };
-  const rotation = { accelerometerRotation: 1, userRotation: 0 };
+  const clock: DeviceClockRestoreState = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: true,
+    rootedByUs: true,
+  };
+  const rotation = { accelerometerRotation: 1 as const, userRotation: 0 };
   const screenReader = { platform: "android" as const, previousEnabled: false };
   const base = releaseBudgets.SESSION_RELEASE_STUCK_DEADLINE_MS;
   expect(releaseBudgets.getSessionReleaseStuckDeadlineMs()).toBe(base);
@@ -548,7 +552,11 @@ test("a clock restore retains its recorded budget after clearing its cache mid-r
   });
   dispose.push(() => defaultDeviceClockRestoreRegistry.retire(android.deviceId));
   const session = await h.manager.createSession("old", android.deviceId, "android");
-  const clock = { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: true };
+  const clock: DeviceClockRestoreState = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: true,
+    rootedByUs: true,
+  };
   h.manager.setClock(session, clock);
   const row = Promise.withResolvers<void>();
   const write = spyOn(persistence, "markReleased").mockImplementation(() => row.promise);
@@ -748,7 +756,9 @@ for (const late of [false, true]) {
         executeCommandArgs: (_args, _timeout, abort) => {
           calls++;
           signal = abort;
-          return hung ? new Promise<string>(() => {}) : Promise.resolve("");
+          return hung
+            ? new Promise<ExecResult>(() => {})
+            : Promise.resolve(createExecResult("", ""));
         },
       }),
     });
@@ -889,7 +899,7 @@ for (const reason of [undefined, "heartbeat-timeout"] as const) {
         executeCommandArgs: (args, _timeout, abort) => {
           commands.push(args);
           signal = abort;
-          return new Promise<string>(() => {});
+          return new Promise<ExecResult>(() => {});
         },
       }),
     });
@@ -957,7 +967,7 @@ for (const marked of [false, true]) {
       simctlFactory: () => ({
         executeCommandArgs: async () => {
           calls++;
-          return "";
+          return createExecResult("", "");
         },
       }),
     });
@@ -998,7 +1008,7 @@ test("a late set from a same-UUID replacement's old object preserves the held ma
     simctlFactory: () => ({
       executeCommandArgs: async (args) => {
         commands.push(args);
-        return "";
+        return createExecResult("", "");
       },
     }),
   });
@@ -1043,9 +1053,11 @@ for (const interval of [3_000, 7_000]) {
     process.env[key] = String(interval);
     class ParkedPersistence extends FakeDeviceSessionPersistence {
       gate: Promise<void> | undefined;
-      override async upsertActiveSession(record: DeviceSessionRecord) {
+      override async upsertActiveSession(
+        ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+      ): Promise<number> {
         await this.gate;
-        await super.upsertActiveSession(record);
+        return super.upsertActiveSession(...args);
       }
     }
     const persistence = new ParkedPersistence();
@@ -1124,14 +1136,16 @@ test("a monitor reap joining after an execution veto still meets the advertised 
   const step = () => drainMicrotasks(20);
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
   const h = harness(persistence);
-  await h.manager.createSession("old", android.deviceId, "android", 600_000);
+  await h.manager.createSession("old", android.deviceId, "android", { timeoutMs: 600_000 });
   await h.timer.advanceTimeAsync(90_000, step);
   persistence.gate = new Promise<void>(() => {});
   void h.manager.rebindSession("old", "emulator-5556", "android");
@@ -1186,9 +1200,11 @@ test("a monitor reap joining after an execution veto still meets the advertised 
 test("a monitor-tracked wedged release advertises the whole forced-release worst case", async () => {
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
@@ -1284,7 +1300,7 @@ test("internal hung setup transfer stays uncapped with the default polling hint"
   const gate = Promise.withResolvers<void>();
   const setup = h.manager.trackSessionSetup(session, () => gate.promise);
   await flush();
-  const release = h.manager.releaseSession("old", "released", true);
+  const release = h.manager.releaseSession("old", "explicit-release", { allowExpired: true });
   await flush();
   await h.timer.advanceTimeAsync(1_000, flush);
   await release;
@@ -1315,9 +1331,11 @@ test("the env-resolved monitor interval is shared by the manager release bound",
   expect(getSessionHeartbeatCheckIntervalMs()).toBe(7_000);
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
@@ -1351,22 +1369,21 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   const step = () => drainMicrotasks(20);
   class ParkedPersistence extends FakeDeviceSessionPersistence {
     gate: Promise<void> | undefined;
-    override async upsertActiveSession(record: DeviceSessionRecord) {
+    override async upsertActiveSession(
+      ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+    ): Promise<number> {
       await this.gate;
-      await super.upsertActiveSession(record);
+      return super.upsertActiveSession(...args);
     }
   }
   const persistence = new ParkedPersistence();
   const h = harness(persistence);
   h.deviceManager.setBootedDevices("android", [android]);
   await h.pool.initializeWithDevices([android]);
-  const session = await h.manager.createSession(
-    "old",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("old", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   expect(await h.manager.claimLivenessOwnership("old", "live-owner")).toBe("claimed");
   persistence.gate = new Promise<void>(() => {});
   void h.manager.rebindSession("old", "emulator-5556", "android");
@@ -1405,7 +1422,11 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   expect(session.heartbeatTimeoutMs).toBeGreaterThan(worst);
   expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst);
   await expect(
-    h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android"),
+    h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: android.deviceId,
+      platform: "android",
+    }),
   ).rejects.toBeInstanceOf(DeviceCleanupInProgressError);
   await h.timer.advanceTimeAsync(dueScan - 1 - h.timer.now(), step);
   expect(force).not.toHaveBeenCalled();
@@ -1420,14 +1441,24 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   expect(h.manager.getTerminalReleaseSnapshot("old")?.releaseReason).toBe("explicit-release");
   await h.timer.advanceTimeAsync(cap - 1, step);
   await expect(
-    h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android"),
+    h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: android.deviceId,
+      platform: "android",
+    }),
   ).rejects.toBeInstanceOf(DeviceCleanupInProgressError);
   await h.timer.advanceTimeAsync(1, step);
   expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
   expect(h.timer.now()).toBeLessThanOrEqual(startedAt + worst);
   // Only the replacement row write is unparked; the old rebind remains wedged.
   persistence.gate = undefined;
-  expect(await h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android")).toBe("next");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: android.deviceId,
+      platform: "android",
+    }),
+  ).toBe("next");
   await h.timer.advanceTimeAsync(2 * interval, step);
   expect(reaps).toBe(0);
   expect(force).toHaveBeenCalledTimes(1);
@@ -1446,13 +1477,10 @@ test("late screen-reader setup grows the stuck budget before its first restore",
       },
     }),
   });
-  const session = await h.manager.createSession(
-    "late",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("late", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   const setupGate = Promise.withResolvers<void>();
   const setup = h.manager.trackScreenReaderSessionSetup(session, async () => {
     await setupGate.promise;
@@ -1496,17 +1524,15 @@ test("late screen-reader setup grows the stuck budget before its first restore",
 test("declined final commit fence cannot force a parked live-row rewrite", async () => {
   const persistence = new FakeDeviceSessionPersistence();
   const h = harness(persistence);
-  const session = await h.manager.createSession(
-    "kept",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("kept", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   const rewrite = Promise.withResolvers<void>();
-  const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(
-    () => rewrite.promise,
-  );
+  const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(async () => {
+    await rewrite.promise;
+    return 0;
+  });
   const force = spyOn(h.manager, "forceStuckRelease");
   dispose.push(() => {
     upsert.mockRestore();
@@ -1527,7 +1553,7 @@ test("declined final commit fence cannot force a parked live-row rewrite", async
   const release = h.manager.releaseSessionUnlessSuperseded(
     "kept",
     `device-disconnected:${android.deviceId}`,
-    () => ++checks < 2,
+    { commitFence: () => ++checks < 2 },
   );
   await flush();
   expect(checks).toBe(2);
@@ -1557,13 +1583,10 @@ test("an undecided commit fence still forces wedged teardown at its deadline", a
       },
     }),
   });
-  const session = await h.manager.createSession(
-    "wedged-fence",
-    android.deviceId,
-    "android",
-    600_000,
-    600_000,
-  );
+  const session = await h.manager.createSession("wedged-fence", android.deviceId, "android", {
+    timeoutMs: 600_000,
+    heartbeatTimeoutMs: 600_000,
+  });
   h.manager.setScreenReader(session, { platform: "android", previousEnabled: false });
   // Simulate a lost first-attempt timeout callback: the monitor's independent stuck timer
   // must still fence a release that has not reached either commit check.
@@ -1592,9 +1615,11 @@ test("an undecided commit fence still forces wedged teardown at its deadline", a
   const release = h.manager.releaseSessionUnlessSuperseded(
     "wedged-fence",
     `device-disconnected:${android.deviceId}`,
-    () => {
-      fenceChecks++;
-      return true;
+    {
+      commitFence: () => {
+        fenceChecks++;
+        return true;
+      },
     },
   );
   await flush();

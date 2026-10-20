@@ -1,10 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { resolve, sep } from "node:path";
 import type { AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   IOS_SIMULATOR_CLAIM_SCOPE,
@@ -14,12 +15,9 @@ import {
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { Platform } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // #10980 (owner decision 2026-10-09): an explicit bind of a device another daemon has claimed is
 // refused with a typed retryable device_owned_by_other_daemon error, on Android and iOS alike.
@@ -71,17 +69,13 @@ for (const [platform, deviceId] of [
       const devices = new FakeDeviceManager();
       const device = { deviceId, name: `${platform}-device`, platform };
       devices.bootedDevices = [device];
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessions, `daemon-${pid}`, {
-          timer,
-          deviceManager: devices,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          ...(platform === "android"
-            ? { foreignDeviceOwnership: ownership }
-            : { iosForeignDeviceOwnership: ownership }),
-        }),
-      );
+      const pool = makePool(sessions, `daemon-${pid}`, {
+        timer,
+        deviceManager: devices,
+        ...(platform === "android"
+          ? { foreignDeviceOwnership: ownership }
+          : { iosForeignDeviceOwnership: ownership }),
+      });
       await pool.initializeWithDevices([device]);
       return { sessions, pool };
     };
@@ -101,13 +95,15 @@ for (const [platform, deviceId] of [
       const a = await daemon(DAEMON_A_PID);
       const b = await daemon(DAEMON_B_PID);
 
-      await a.pool.bindOrReuseDeviceSession("a-session", deviceId, platform);
+      await a.pool.bindOrReuseDeviceSession({ sessionId: "a-session", deviceId, platform });
       expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
 
-      const refusal = await b.pool.bindOrReuseDeviceSession("b-session", deviceId, platform).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const refusal = await b.pool
+        .bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
       expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
       expect(refusal).toMatchObject({
         code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -121,7 +117,7 @@ for (const [platform, deviceId] of [
       await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "a-session", "explicit-release");
       expect(store.claims.has(deviceId)).toBe(false);
 
-      await b.pool.bindOrReuseDeviceSession("b-session", deviceId, platform);
+      await b.pool.bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform });
       expect(b.pool.getDevice(deviceId)?.sessionId).toBe("b-session");
       expect(store.claims.get(deviceId)).toBe(DAEMON_B_PID);
     });
@@ -140,10 +136,12 @@ for (const [platform, deviceId] of [
       };
       const b = await daemon(DAEMON_B_PID, racing);
 
-      const refusal = await b.pool.bindOrReuseDeviceSession("b-session", deviceId, platform).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const refusal = await b.pool
+        .bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
       expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.sessions.getSession("b-session")).toBeNull();
@@ -220,7 +218,7 @@ for (const [platform, deviceId] of [
     test("platform allocation skips a device another daemon claimed", async () => {
       const a = await daemon(DAEMON_A_PID);
       const b = await daemon(DAEMON_B_PID);
-      await a.pool.bindOrReuseDeviceSession("a-session", deviceId, platform);
+      await a.pool.bindOrReuseDeviceSession({ sessionId: "a-session", deviceId, platform });
 
       let settled = false;
       void b.pool.assignDeviceToSession("b-session", platform).finally(() => {
@@ -265,21 +263,14 @@ for (const [platform, deviceId] of [
         receipt?: AcquisitionReceipt,
         allowSessionRebind = false,
       ) =>
-        pool.bindOrReuseDeviceSession(
+        pool.bindOrReuseDeviceSession({
           sessionId,
           deviceId,
           platform,
-          undefined,
-          undefined,
-          undefined,
           allowSessionRebind,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          false,
+          oneShotCli: false,
           receipt,
-        );
+        });
       const autolockWith = (pool: DevicePool, receipt: AcquisitionReceipt) =>
         pool.autolockDevice(
           deviceId,

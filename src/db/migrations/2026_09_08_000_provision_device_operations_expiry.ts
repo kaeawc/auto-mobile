@@ -6,7 +6,7 @@ import { type Kysely, sql } from "kysely";
 // already-expired -- so the very next `begin()` call's prune sweep
 // (`ProvisionDeviceOperationRepository.begin()`) reclaims the pre-existing
 // backlog too, not just newly inserted rows.
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   const existingColumn = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('provision_device_operations')
     WHERE name = 'expires_at_ms'
@@ -20,6 +20,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.alterTable("provision_device_operations").dropColumn("expires_at_ms").execute();
 }

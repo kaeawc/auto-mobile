@@ -80,6 +80,67 @@ enum PrototypeRepeat {
         }
     }
 
+    private static func bindCompositeTextFields(
+        _ fields: inout [String: JSONValue],
+        string: (String, inout [String: JSONValue]) -> Void,
+        part: (String, inout [String: JSONValue]) -> Void,
+        list: (String, inout [String: JSONValue]) -> Void
+    ) {
+        switch fields["type"] {
+        case .string("topAppBar")?:
+            string("title", &fields)
+            part("navigationIcon", &fields)
+            list("actions", &fields)
+        case .string("textField")?:
+            part("trailingIcon", &fields)
+        case .string("searchBar")?:
+            string("placeholder", &fields)
+            list("trailingActions", &fields)
+        case .string("dialog")?:
+            string("title", &fields)
+            string("text", &fields)
+            part("confirm", &fields)
+            part("dismiss", &fields)
+        case .string("snackbar")?:
+            string("text", &fields)
+            part("action", &fields)
+        default: break
+        }
+    }
+
+    private static func bindBasicTextFields(
+        _ fields: inout [String: JSONValue],
+        string: (String, inout [String: JSONValue]) -> Void,
+        part: (String, inout [String: JSONValue]) -> Void,
+        list: (String, inout [String: JSONValue]) -> Void
+    ) {
+        switch fields["type"] {
+        case .string("text")?:
+            string("text", &fields)
+            if case let .array(spans)? = fields["spans"] {
+                fields["spans"] = .array(spans.map { span in
+                    guard case var .object(member) = span else { return span }
+                    string("text", &member)
+                    return .object(member)
+                })
+            }
+        case .string("button")?, .string("fab")?: string("label", &fields)
+        case .string("segmentedButton")?: list("options", &fields)
+        case .string("select")?:
+            string("label", &fields)
+            list("options", &fields)
+        case .string("menu")?:
+            guard case let .array(items)? = fields["items"] else { break }
+            fields["items"] = .array(items.map { item in
+                guard case var .object(entry) = item else { return item }
+                string("label", &entry)
+                string("trailingText", &entry)
+                return .object(entry)
+            })
+        default: bindCompositeTextFields(&fields, string: string, part: part, list: list)
+        }
+    }
+
     /// The contract's text-kind fields, shared by data resolution and repeat binding.
     /// This maps only this node's authored text, never actions, operands or descendants.
     static func bindTextFields(_ fields: inout [String: JSONValue], transform: (String) -> String) {
@@ -99,6 +160,11 @@ enum PrototypeRepeat {
                 return .object(member)
             })
         }
+        if case var .object(swipe)? = fields["swipeActions"] {
+            list("start", in: &swipe)
+            list("end", in: &swipe)
+            fields["swipeActions"] = .object(swipe)
+        }
         if case let .array(checks)? = fields["checks"] {
             fields["checks"] = .array(checks.map { check in
                 guard case var .object(rule) = check else { return check }
@@ -106,46 +172,7 @@ enum PrototypeRepeat {
                 return .object(rule)
             })
         }
-        switch fields["type"] {
-        case .string("text")?:
-            string("text", in: &fields)
-            if case let .array(spans)? = fields["spans"] {
-                fields["spans"] = .array(spans.map { span in
-                    guard case var .object(member) = span else { return span }
-                    string("text", in: &member)
-                    return .object(member)
-                })
-            }
-        case .string("button")?, .string("fab")?: string("label", in: &fields)
-        case .string("segmentedButton")?: list("options", in: &fields)
-        case .string("select")?:
-            string("label", in: &fields)
-            list("options", in: &fields)
-        case .string("menu")?:
-            guard case let .array(items)? = fields["items"] else { break }
-            fields["items"] = .array(items.map { item in
-                guard case var .object(entry) = item else { return item }
-                string("label", in: &entry)
-                string("trailingText", in: &entry)
-                return .object(entry)
-            })
-        case .string("topAppBar")?:
-            string("title", in: &fields)
-            part("navigationIcon", in: &fields)
-            list("actions", in: &fields)
-        case .string("searchBar")?:
-            string("placeholder", in: &fields)
-            list("trailingActions", in: &fields)
-        case .string("dialog")?:
-            string("title", in: &fields)
-            string("text", in: &fields)
-            part("confirm", in: &fields)
-            part("dismiss", in: &fields)
-        case .string("snackbar")?:
-            string("text", in: &fields)
-            part("action", in: &fields)
-        default: break
-        }
+        bindBasicTextFields(&fields, string: string, part: part, list: list)
     }
 
     /// A placeholder segment and the scalar index just past its closing brace.
@@ -188,6 +215,26 @@ extension PrototypeRepeat {
         let items: [JSONValue]
     }
 
+    private static func emitChildScope(
+        _ fields: [String: JSONValue],
+        scope: EmitScope?,
+        repeats: inout PrototypeRepeatData
+    )
+        -> EmitScope?
+    {
+        var childScope = scope
+        if case let .object(spec)? = fields["repeat"], let alias = spec["as"]?.stringValue {
+            let items: JSONValue
+            if case let .object(source)? = spec["items"], let pointer = source["path"]?.stringValue {
+                items = repeats.items(pointer)
+            } else {
+                items = spec["items"] ?? .array([])
+            }
+            if case let .array(rows) = items { childScope = EmitScope(alias: alias, items: rows) }
+        }
+        return childScope
+    }
+
     private static func validateEmitContexts(
         _ node: JSONValue, path: String, scope: EmitScope?, repeats: inout PrototypeRepeatData
     )
@@ -208,16 +255,7 @@ extension PrototypeRepeat {
                 }
             }
         }
-        var childScope = scope
-        if case let .object(spec)? = fields["repeat"], let alias = spec["as"]?.stringValue {
-            let items: JSONValue
-            if case let .object(source)? = spec["items"], let pointer = source["path"]?.stringValue {
-                items = repeats.items(pointer)
-            } else {
-                items = spec["items"] ?? .array([])
-            }
-            if case let .array(rows) = items { childScope = EmitScope(alias: alias, items: rows) }
-        }
+        let childScope = emitChildScope(fields, scope: scope, repeats: &repeats)
         if case let .array(children)? = fields["children"] {
             for (index, child) in children.enumerated() {
                 try validateEmitContexts(
@@ -236,6 +274,34 @@ extension PrototypeRepeat {
         }
     }
 
+    private static func validateEmitBinding(
+        _ binding: [String: JSONValue],
+        path bindingPath: String,
+        scope: EmitScope?
+    )
+        throws
+    {
+        if binding["item"] != nil || binding["index"] != nil {
+            guard let scope else {
+                throw PrototypeEmitContext.violation(
+                    bindingPath,
+                    "Emit item/index binding outside a repeat template"
+                )
+            }
+            if let field = binding["item"]?
+                .stringValue { try requireEmitField(field, at: bindingPath, scope: scope) }
+        }
+        if let key = binding["state"]?.stringValue, let scope {
+            for segment in segments(key, alias: scope.alias) {
+                if case let .field(field) = segment { try requireEmitField(
+                    field,
+                    at: "\(bindingPath).state",
+                    scope: scope
+                ) }
+            }
+        }
+    }
+
     private static func validateEmitActions(_ raw: JSONValue?, path: String, scope: EmitScope?) throws {
         guard case let .array(actions)? = raw else { return }
         for (index, rawAction) in actions.enumerated() {
@@ -246,25 +312,7 @@ extension PrototypeRepeat {
             for name in bindings.keys.sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {
                 guard case let .object(binding)? = bindings[name] else { continue }
                 let bindingPath = PrototypeLimits.dataMemberPath(contextPath, key: name)
-                if binding["item"] != nil || binding["index"] != nil {
-                    guard let scope else {
-                        throw PrototypeEmitContext.violation(
-                            bindingPath,
-                            "Emit item/index binding outside a repeat template"
-                        )
-                    }
-                    if let field = binding["item"]?
-                        .stringValue { try requireEmitField(field, at: bindingPath, scope: scope) }
-                }
-                if let key = binding["state"]?.stringValue, let scope {
-                    for segment in segments(key, alias: scope.alias) {
-                        if case let .field(field) = segment { try requireEmitField(
-                            field,
-                            at: "\(bindingPath).state",
-                            scope: scope
-                        ) }
-                    }
-                }
+                try validateEmitBinding(binding, path: bindingPath, scope: scope)
             }
         }
     }
@@ -276,7 +324,7 @@ extension PrototypeRepeat {
         }) else {
             let encoder = JSONEncoder()
             encoder.outputFormatting = .withoutEscapingSlashes
-            let quoted = try String(decoding: encoder.encode(field), as: UTF8.self)
+            let quoted = try String(data: encoder.encode(field), encoding: .utf8) ?? "\"\""
             throw PrototypeEmitContext.violation(path, "Unknown repeat field \(quoted)")
         }
     }
@@ -297,6 +345,10 @@ private struct Instance {
         }
         bindStateKeys(&fields)
         bindPartFields(&fields)
+        if case var .object(refresh)? = fields["refresh"], case let .array(actions)? = refresh["onRefresh"] {
+            refresh["onRefresh"] = .array(actions.map(bindAction))
+            fields["refresh"] = .object(refresh)
+        }
         for key in ["visibleWhen", "enabledWhen"] {
             if let condition = fields[key] { fields[key] = bindCondition(condition) }
         }
@@ -317,13 +369,27 @@ private struct Instance {
         return .object(fields)
     }
 
+    private func bindTextFieldActions(_ fields: inout [String: JSONValue]) {
+        bindPart("trailingIcon", in: &fields)
+        if case let .array(actions)? = fields["onSubmit"] {
+            fields["onSubmit"] = .array(actions.map(bindAction))
+        }
+    }
+
     /// Part actions bind independently of the shared text-kind field mapping.
     private func bindComponentActions(_ fields: inout [String: JSONValue]) {
+        if case var .object(swipe)? = fields["swipeActions"] {
+            bindList("start", in: &swipe) { bindPartFields(&$0) }
+            bindList("end", in: &swipe) { bindPartFields(&$0) }
+            fields["swipeActions"] = .object(swipe)
+        }
         guard case let .string(type)? = fields["type"] else { return }
         switch type {
         case "topAppBar":
             bindPart("navigationIcon", in: &fields)
             bindList("actions", in: &fields) { bindPartFields(&$0) }
+        case "textField":
+            bindTextFieldActions(&fields)
         case "searchBar":
             bindList("trailingActions", in: &fields) { bindPartFields(&$0) }
             if case let .array(actions)? = fields["onSubmit"] {
@@ -347,7 +413,7 @@ private struct Instance {
         for key in ["stateKey", "hourKey", "minuteKey", "activeKey"] {
             bindString(key, in: &fields)
         }
-        for (part, key) in [("trailing", "stateKey"), ("openWhen", "key")] {
+        for (part, key) in [("trailing", "stateKey"), ("openWhen", "key"), ("refresh", "stateKey")] {
             guard case var .object(partFields)? = fields[part] else { continue }
             bindString(key, in: &partFields)
             fields[part] = .object(partFields)
@@ -384,6 +450,26 @@ private struct Instance {
         })
     }
 
+    private func bindEmit(_ fields: inout [String: JSONValue]) {
+        if case let .string(name)? = fields["name"] { fields["name"] = .string(interpolate(name)) }
+        if case let .object(context)? = fields["context"] {
+            fields["context"] = .object(context.mapValues { raw in
+                guard case var .object(binding) = raw else { return raw }
+                if let field = binding["item"]?.stringValue {
+                    return .object(["value": item[field] ?? .null])
+                }
+                if binding["index"] == .bool(true) { return .object(["value": .number(Double(index))]) }
+                bindString("state", in: &binding)
+                return .object(binding)
+            })
+        }
+    }
+
+    private func bindDataAction(_ fields: inout [String: JSONValue]) {
+        if case let .string(path)? = fields["path"] { fields["path"] = .string(bindDataPath(path)) }
+        if case let .object(binding)? = fields["value"] { fields["value"] = bindDataValue(binding) }
+    }
+
     private func bindAction(_ action: JSONValue) -> JSONValue {
         guard case var .object(fields) = action else { return action }
         switch fields["type"] {
@@ -393,18 +479,11 @@ private struct Instance {
         case .string("toggle")?, .string("increment")?, .string("decrement")?:
             bindString("key", in: &fields)
         case .string("emit")?:
-            if case let .string(name)? = fields["name"] { fields["name"] = .string(interpolate(name)) }
-            if case let .object(context)? = fields["context"] {
-                fields["context"] = .object(context.mapValues { raw in
-                    guard case var .object(binding) = raw else { return raw }
-                    if let field = binding["item"]?.stringValue {
-                        return .object(["value": item[field] ?? .null])
-                    }
-                    if binding["index"] == .bool(true) { return .object(["value": .number(Double(index))]) }
-                    bindString("state", in: &binding)
-                    return .object(binding)
-                })
-            }
+            bindEmit(&fields)
+        case .string("setData")?, .string("appendData")?, .string("removeData")?:
+            bindDataAction(&fields)
+        case .string("request")?:
+            bindRequest(&fields)
         default:
             break
         }
@@ -412,6 +491,46 @@ private struct Instance {
             fields["requireValid"] = .array(keys.map { .string(interpolate($0.stringValue ?? "")) })
         }
         return .object(fields)
+    }
+
+    /// A `request` (#12529): `url`, `statusKey` and literal header and query strings take the row's
+    /// text placeholders, `into` binds like a data path, binding objects bind like a data value,
+    /// and the follow-up lists bind recursively.
+    private func bindRequest(_ fields: inout [String: JSONValue]) {
+        bindString("url", in: &fields)
+        bindString("statusKey", in: &fields)
+        if case let .string(path)? = fields["into"] { fields["into"] = .string(bindDataPath(path)) }
+        for entries in ["headers", "query"] {
+            guard case let .object(values)? = fields[entries] else { continue }
+            fields[entries] = .object(values.mapValues { value in
+                switch value {
+                case let .string(text): .string(interpolate(text))
+                case let .object(binding): bindDataValue(binding)
+                default: value
+                }
+            })
+        }
+        if case let .object(binding)? = fields["body"] { fields["body"] = bindDataValue(binding) }
+        for list in ["onSuccess", "onError"] {
+            if case let .array(actions)? = fields[list] { fields[list] = .array(actions.map(bindAction)) }
+        }
+    }
+
+    /// Only a whole `{index}` segment binds (#12519), so item content cannot inject pointer syntax.
+    private func bindDataPath(_ path: String) -> String {
+        path.split(separator: "/", omittingEmptySubsequences: false)
+            .map { $0 == "{index}" ? String(index) : String($0) }
+            .joined(separator: "/")
+    }
+
+    /// A data action's value binding, bound like an `emit.context` entry: `item` and `index` become
+    /// literals of this row, and a `state` key interpolates.
+    private func bindDataValue(_ binding: [String: JSONValue]) -> JSONValue {
+        if let field = binding["item"]?.stringValue { return .object(["value": item[field] ?? .null]) }
+        if binding["index"] == .bool(true) { return .object(["value": .number(Double(index))]) }
+        var bound = binding
+        bindString("state", in: &bound)
+        return .object(bound)
     }
 
     private func bindCondition(_ condition: JSONValue) -> JSONValue {

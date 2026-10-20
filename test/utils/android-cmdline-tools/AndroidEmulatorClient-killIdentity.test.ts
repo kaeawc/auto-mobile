@@ -68,7 +68,7 @@ function processFallbackFixture(name = original.name, offline = false) {
   stopper.candidates = [
     { pid: 83205, command: "qemu-system-aarch64-headless -avd Foreign -port 5554" },
   ];
-  const client = new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb));
+  const client = new AndroidEmulatorClient({ timer, adbFactory: new FakeAdbClientFactory(adb) });
   return { adb, client, timer, stopper, options: { timeoutMs: 30_000, processStop: { stopper } } };
 }
 
@@ -229,7 +229,7 @@ function fixture(observed: BootedDevice) {
   adb.setDevices([observed]);
   adb.setCommandResponse("emu avd name", execResult(`${observed.name}\nOK\n`));
   const factory = new FakeAdbClientFactory(adb);
-  const client = new AndroidEmulatorClient(null, null, new FakeTimer(), factory);
+  const client = new AndroidEmulatorClient({ timer: new FakeTimer(), adbFactory: factory });
   return { client, adb, factory };
 }
 
@@ -281,9 +281,7 @@ function recordingFactory(attached: string[]): {
             includes: (part: string) => stdout.includes(part),
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };
@@ -306,7 +304,7 @@ test("dispatches the kill serial-scoped through the discovered emulator", async 
 
 test("the real ADB builder emits exactly `-s <serial> emu kill`", async () => {
   const { factory, commands, timer } = recordingFactory(["emulator-5554"]);
-  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const client = new AndroidEmulatorClient({ timer, adbFactory: factory });
   await expect(client.killDevice(original)).resolves.toMatchObject({
     deviceId: "emulator-5554",
   });
@@ -318,7 +316,7 @@ test("the real ADB builder emits exactly `-s <serial> emu kill`", async () => {
 
 test("with two booted emulators each kill selects only its own serial", async () => {
   const { factory, commands, timer } = recordingFactory(["emulator-5554", "emulator-5556"]);
-  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const client = new AndroidEmulatorClient({ timer, adbFactory: factory });
 
   await client.killDevice({ ...original, deviceId: "emulator-5554" });
   expect(commands.filter((args) => args.slice(-2).join(" ") === "emu kill")).toEqual([
@@ -503,9 +501,7 @@ function wedgedConsoleFactory(attached: string[]): {
             includes: () => false,
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };
@@ -529,7 +525,7 @@ test("a forced kill dispatches within its deadline with several wedged consoles"
     "emulator-5556",
     "emulator-5558",
   ]);
-  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const client = new AndroidEmulatorClient({ timer, adbFactory: factory });
   const startedAt = timer.now();
 
   await client.killDevice(original, { force: true });
@@ -547,11 +543,11 @@ test("an unforced kill still enriches discovery with the AVD-name probe", async 
     "emulator-5556",
     "emulator-5558",
   ]);
-  const client = new AndroidEmulatorClient(null, null, timer, factory);
+  const client = new AndroidEmulatorClient({ timer, adbFactory: factory });
   const startedAt = timer.now();
 
   const kill = client.killDevice(original);
-  for (let turn = 0; turn < 20 && nameProbes(commands).length < 3; turn++) {
+  for (let turn = 0; turn < 100 && nameProbes(commands).length < 3; turn++) {
     await Promise.resolve();
   }
   expect(nameProbes(commands).length).toBe(3);
@@ -570,12 +566,10 @@ function offlineFixture(states: Array<{ deviceId: string; state: string }>) {
   const adb = new FakeAdbExecutor();
   adb.setDevices([]);
   adb.setDeviceStates(states);
-  const client = new AndroidEmulatorClient(
-    null,
-    null,
-    new FakeTimer(),
-    new FakeAdbClientFactory(adb),
-  );
+  const client = new AndroidEmulatorClient({
+    timer: new FakeTimer(),
+    adbFactory: new FakeAdbClientFactory(adb),
+  });
   return { client, adb };
 }
 
@@ -635,7 +629,11 @@ test("a kill asks for the adb states in the mode that rejects a missing adb exec
   // ownership of an emulator that is alive (#11643).
   const { client, adb } = offlineFixture(offlineEmulator);
   const asked: Array<boolean | undefined> = [];
-  adb.getDeviceStates = async (options?: { throwOnMissingAdb?: boolean }) => {
+  adb.getDeviceStates = async (options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    throwOnMissingAdb?: boolean;
+  }) => {
     asked.push(options?.throwOnMissingAdb);
     throw new Error("ADB executable is unavailable");
   };

@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "./TapCoordinatesRequest";
 /**
  * DeviceService - Unified interface for device automation clients
  *
@@ -7,7 +8,9 @@
  */
 
 import type { PerformanceTracker } from "../PerformanceTracker";
-import type { ViewHierarchyResult } from "../../models";
+import type { DragRequest } from "./DragRequest";
+import type { SwipeRequest } from "./SwipeRequest";
+import type { CurrentFocusResult, TraversalOrderResult, ViewHierarchyResult } from "../../models";
 import type { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 
 // =============================================================================
@@ -159,13 +162,7 @@ export interface DeviceService {
    * @param timeoutMs Operation timeout in milliseconds
    * @param perf Optional performance tracker
    */
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<GestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<GestureResult>;
 
   /**
    * Perform a swipe gesture.
@@ -177,59 +174,15 @@ export interface DeviceService {
    * @param timeoutMs Operation timeout in milliseconds
    * @param perf Optional performance tracker
    */
-  requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<GestureResult>;
+  requestSwipe(request: SwipeRequest): Promise<GestureResult>;
 
   /**
-   * Perform a drag gesture (press, move, release).
-   * @param x1 Start X coordinate
-   * @param y1 Start Y coordinate
-   * @param x2 End X coordinate
-   * @param y2 End Y coordinate
-   * @param pressDurationMs Duration to hold before dragging
-   * @param dragDurationMs Duration of the drag motion
-   * @param holdDurationMs Duration to hold at destination before release
-   * @param timeoutMs Operation timeout in milliseconds
+   * Perform a drag gesture (press, move, release); see {@link DragRequest} for the fields.
    */
-  requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-  ): Promise<GestureResult>;
+  requestDrag(request: DragRequest): Promise<GestureResult>;
 
-  /**
-   * Perform a pinch gesture (zoom in/out).
-   * @param centerX Center X coordinate
-   * @param centerY Center Y coordinate
-   * @param distanceStart Starting distance between fingers
-   * @param distanceEnd Ending distance between fingers
-   * @param rotationDegrees Rotation during pinch (optional)
-   * @param duration Gesture duration in milliseconds
-   * @param timeoutMs Operation timeout in milliseconds
-   * @param perf Optional performance tracker
-   */
-  requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees?: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<GestureResult>;
+  // requestPinch is deliberately not part of this shared surface: Android takes a PinchRequest and
+  // iOS takes positional arguments, so each platform client declares its own signature.
 
   // ---------------------------------------------------------------------------
   // Text Input
@@ -312,13 +265,13 @@ export interface AndroidDeviceService extends DeviceService {
    * Get current accessibility focus information.
    * @param timeoutMs Operation timeout in milliseconds
    */
-  requestCurrentFocus(timeoutMs?: number): Promise<FocusResult>;
+  requestCurrentFocus(timeoutMs?: number): Promise<CurrentFocusResult>;
 
   /**
    * Get accessibility traversal order.
    * @param timeoutMs Operation timeout in milliseconds
    */
-  requestTraversalOrder(timeoutMs?: number): Promise<TraversalResult>;
+  requestTraversalOrder(timeoutMs?: number): Promise<TraversalOrderResult>;
 }
 
 // =============================================================================
@@ -346,28 +299,6 @@ interface ActionResult extends DeviceOperationResult {
 }
 
 /**
- * Result for focus query (Android).
- */
-interface FocusResult extends DeviceOperationResult {
-  totalTimeMs: number;
-  /** JSON string of focused element */
-  focusedElement?: string;
-}
-
-/**
- * Result for traversal order query (Android).
- */
-interface TraversalResult extends DeviceOperationResult {
-  totalTimeMs: number;
-  /** Traversal order data */
-  result?: {
-    elements: string[];
-    focusedIndex?: number;
-    totalCount: number;
-  };
-}
-
-/**
  * Shared interface for platform CtrlProxy clients (Android, iOS).
  *
  * Extends DeviceService for the connection lifecycle and generic
@@ -376,12 +307,12 @@ interface TraversalResult extends DeviceOperationResult {
  * across platforms.
  *
  * Platform-specific gesture, text, and action methods live on the
- * platform-specific interfaces (AndroidCtrlProxy, IOSCtrlProxy) which
+ * platform-specific interfaces (AndroidCtrlProxy, IosCtrlProxy) which
  * extend this one and narrow the gesture/text return types to their
  * platform-specific result shapes.
  */
 
-/** Options form of `getAccessibilityHierarchy`, replacing its positional tail. */
+/** Options for `getAccessibilityHierarchy`. */
 export interface AccessibilityHierarchyRequest {
   perf?: PerformanceTracker;
   skipWaitForFresh?: boolean;
@@ -398,14 +329,6 @@ export interface CtrlProxyClient extends DeviceService {
   getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
     request?: AccessibilityHierarchyRequest,
-  ): Promise<ViewHierarchyResult | null>;
-  /** @deprecated Pass an {@link AccessibilityHierarchyRequest} instead of positional arguments. */
-  getAccessibilityHierarchy(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
   ): Promise<ViewHierarchyResult | null>;
 
   verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;

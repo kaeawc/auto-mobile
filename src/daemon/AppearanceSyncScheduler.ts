@@ -1,9 +1,9 @@
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../models";
-import { DaemonState } from "./daemonState";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { defaultDaemonContext } from "./daemonContext";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
-import { getAppearanceConfig, resolveAppearanceMode } from "../server/appearanceManager";
+import { getAppearanceConfig, resolveAppearanceMode } from "./appearanceManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
@@ -315,12 +315,13 @@ export class AppearanceSyncScheduler {
   }
 
   private getSyncTargets(): AppearanceSyncTarget[] {
-    const daemonState = DaemonState.getInstance();
-    if (daemonState.isInitialized()) {
-      const pool = daemonState.getDevicePool();
+    const pool = defaultDaemonContext.devicePool();
+    if (pool) {
       const pooledDevices = pool.getAllDevices();
-      if (pooledDevices.length > 0) {
-        const sessions = daemonState.getSessionManager().getAllSessions();
+      const sessionManager =
+        pooledDevices.length > 0 ? defaultDaemonContext.sessionManager() : undefined;
+      if (sessionManager) {
+        const sessions = sessionManager.getAllSessions();
         return pooledDevices.flatMap((device) => {
           const holder = sessions.find((session) => session.assignedDevice === device.id);
           return device.platform === "android" && holder
@@ -338,7 +339,7 @@ export class AppearanceSyncScheduler {
       }
     }
 
-    const current = DeviceSessionManager.getInstance().getCurrentDevice();
+    const current = DeviceReadiness.getInstance().getCurrentDevice();
     // Only return if it's an Android device
     return current && current.platform === "android" ? [current] : [];
   }

@@ -137,4 +137,12 @@ describe("FakeImageBackend", () => {
       await expect(invoke(backend, other)).resolves.toBeDefined();
     });
   });
+
+  describe("setRawPixelsResult", () => {
+    test("rejects pixel data that is not width*height*4 bytes", () => {
+      expect(() =>
+        backend.setRawPixelsResult({ width: 2, height: 2, data: Buffer.alloc(3) }),
+      ).toThrow(/width\*height\*4/);
+    });
+  });
 });

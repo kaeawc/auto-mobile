@@ -225,6 +225,8 @@ export async function waitForBrokerRelease(options: {
   timer: Timer;
   requireReleased?: boolean;
   allowFailed?: boolean;
+  /** Returned at once when the daemon holds no receipt for the request (it never became one). */
+  missingReceipt?: SessionBrokerResult;
   timeoutMs?: number;
 }): Promise<SessionBrokerResult> {
   const timeoutMs = options.timeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS;
@@ -233,6 +235,9 @@ export async function waitForBrokerRelease(options: {
     async () => {
       while (options.timer.now() < deadline) {
         const status = await options.client.status(options.requestId, options.token);
+        if (!status && options.missingReceipt) {
+          return options.missingReceipt;
+        }
         if (
           status &&
           !status.cleanupPending &&

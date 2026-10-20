@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeatIfKnown } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
@@ -9,7 +10,6 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
 } from "../../src/daemon/sessionLivenessWindows";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -30,9 +30,11 @@ const DEVICE = "emulator-5554";
 class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkUpsert: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkUpsert;
-    await super.upsertActiveSession(record);
+    return await super.upsertActiveSession(...args);
   }
 }
 
@@ -75,18 +77,20 @@ async function stuckRelease(
   const timer = new FakeTimer();
   timer.setCurrentTime(0);
   const persistence = new ParkablePersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   cleanups.push(() => manager.stopCleanupTimer());
   const released: string[] = [];
   manager.onSessionRelease((sessionId, _deviceId, reason) => {
     released.push(`${sessionId}:${reason}`);
   });
-  await manager.createSession("s", DEVICE, "android", idleWindowMs);
-  manager.recordHeartbeat("s");
+  await manager.createSession("s", DEVICE, "android", { timeoutMs: idleWindowMs });
+  await deliverDaemonHeartbeatIfKnown(manager, "s");
 
   // The owner stays alive but makes no tool call, then dies.
   timer.advanceTime(idleBeforeOwnerLossMs);
-  manager.recordHeartbeat("s");
+  await deliverDaemonHeartbeatIfKnown(manager, "s");
 
   // A rebind whose write does not return: the release that follows waits on it ("awaiting-rebind").
   const parked = Promise.withResolvers<void>();
@@ -108,7 +112,7 @@ async function stuckRelease(
       while (timer.now() < until) {
         if (options.ownerKeepsHeartbeating) {
           // A no-op once the session is releasing, exactly as the daemon's heartbeat handler is.
-          manager.recordHeartbeat("s");
+          await deliverDaemonHeartbeatIfKnown(manager, "s");
         }
         await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(20));
         result.idleReleaseStartedAt ??= manager.getIdleReleasesInProgress()[0]?.startedAtMs;
@@ -243,13 +247,13 @@ describe("a stuck idle release is held to the same deadline", () => {
     await quietly(async () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(0);
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       cleanups.push(() => manager.stopCleanupTimer());
-      await manager.createSession("s", DEVICE, "android", DEFAULT_SESSION_IDLE_TIMEOUT_MS);
+      await manager.createSession("s", DEVICE, "android", {
+        timeoutMs: DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+      });
       const forced: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
         manager,
@@ -266,7 +270,7 @@ describe("a stuck idle release is held to the same deadline", () => {
       cleanups.push(() => void monitor.stop());
       const until = DEFAULT_SESSION_IDLE_TIMEOUT_MS + 2 * STUCK_REAP_WARN_MS;
       while (timer.now() < until) {
-        manager.recordHeartbeat("s");
+        await deliverDaemonHeartbeatIfKnown(manager, "s");
         await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(20));
       }
       expect(manager.getSessionForDevice(DEVICE)).toBeNull();

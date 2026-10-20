@@ -201,8 +201,11 @@ const precedence: Array<Row & { name: string; kind: DeviceHold["kind"] }> = [
 ];
 
 describe("pure device holds", () => {
+  const isHoldKind = (kind: string): kind is DeviceHold["kind"] => kind in kinds;
   const rows = [
-    ...Object.entries(kinds).map(([kind, row]) => ({ ...row, name: kind, kind })),
+    ...Object.entries(kinds).flatMap(([kind, row]) =>
+      isHoldKind(kind) ? [{ ...row, name: kind, kind }] : [],
+    ),
     ...variants,
     ...precedence,
   ];
@@ -216,7 +219,7 @@ describe("pure device holds", () => {
         poolBucketOf(hold),
         holdAllowsHealthRecovery(hold),
         holdBlocksAssignment(hold),
-      ]).toEqual(answers);
+      ]).toEqual([...answers]);
     });
   }
 

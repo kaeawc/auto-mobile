@@ -1,7 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
@@ -11,7 +11,7 @@ import {
   joinInFlightDeviceGestureRecordingStop,
   stopDeviceGestureRecording,
   NoUserInputCapturedError,
-} from "../server/deviceGestureRecordingManager";
+} from "./deviceGestureRecordingManager";
 import { logger } from "../utils/logger";
 import {
   DeviceGestureRecordingCommand,
@@ -26,7 +26,7 @@ import {
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { assertInputNotOnForeignBindingDevice } from "./inputDeviceOwnership";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import { deviceGestureRecordingStartOwnershipRefusal } from "./deviceGestureRecordingStartAdmission";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
@@ -51,7 +51,7 @@ export interface DeviceGestureRecordingDeviceResolution {
 
 /** What device resolution needs of the device session manager; narrowed so a test can supply one. */
 export type DeviceGestureRecordingDeviceSessions = Pick<
-  DeviceSessionManager,
+  DeviceReadiness,
   "ensureDeviceReady" | "getPlatformDeviceManager" | "getCurrentDevice"
 >;
 
@@ -62,7 +62,7 @@ export type DeviceGestureRecordingDeviceSessions = Pick<
  * FUNNEL 1. This resolver runs its OWN fresh discovery, so it can be the first
  * path to see the `Unknown (<serial>)` placeholder or a different AVD on a
  * reused serial. It used to discover through
- * `DeviceSessionManager.detectConnectedPlatforms` and never fold the
+ * `DeviceReadiness.detectConnectedPlatforms` and never fold the
  * observation in, so the admission gate in `handleRequest` re-read pool state
  * from BEFORE this discovery — the same shape the video-stream and WebRTC
  * resolvers were given in #6888 (#6923).
@@ -128,8 +128,9 @@ export type DeviceGestureRecordingBindingGate = (input: {
 }) => Promise<void>;
 
 const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const sessionManager = defaultDaemonContext.sessionManager();
+  const pool = defaultDaemonContext.devicePool();
+  if (!sessionManager || !pool) {
     return;
   }
   await assertInputNotOnForeignBindingDevice({
@@ -137,8 +138,8 @@ const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
     deviceId: input.device.deviceId,
     platform: input.device.platform,
     requesterSessionUuid: input.requesterSessionUuid,
-    sessionManager: daemonState.getSessionManager(),
-    gate: daemonState.getDevicePool(),
+    sessionManager,
+    gate: pool,
   });
 };
 
@@ -147,8 +148,7 @@ const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
  * with the manager injectable so a test can drive real readiness (and its device writes) on fakes.
  */
 export function createDeviceGestureRecordingDeviceResolution(
-  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () =>
-    DeviceSessionManager.getInstance(),
+  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () => DeviceReadiness.getInstance(),
 ): DeviceGestureRecordingDeviceResolution {
   return {
     selectDevice: (deviceId, platform) => {
@@ -231,7 +231,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
             return refusal;
           }
         }
-        const daemonInitialized = DaemonState.getInstance().isInitialized();
+        const daemonInitialized = defaultDaemonContext.isInitialized();
         // With a daemon registry, resolve the target before authentication so an unheld-device
         // start gets the same acquire-session refusal even without a requester identity.
         if (!daemonInitialized) {

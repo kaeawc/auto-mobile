@@ -61,7 +61,7 @@ describe("BaselineManager", function () {
           bounds: { left: 0, top: 50, right: 100, bottom: 100 },
           text: "Low contrast text",
         },
-        details: { ratio: 2.5, required: 4.5 },
+        details: { contrastRatio: 2.5, requiredRatio: 4.5 },
         fingerprint: "def456",
       },
     ];
@@ -274,10 +274,9 @@ describe("BaselineManager", function () {
             text: "Sample",
           },
           details: {
-            ratio: 3.2,
-            required: 4.5,
-            textColor: { r: 128, g: 128, b: 128 },
-            backgroundColor: { r: 255, g: 255, b: 255 },
+            contrastRatio: 3.2,
+            requiredRatio: 4.5,
+            explanation: "Gray text on a white background",
           },
           fingerprint: "test123",
         },
@@ -330,6 +329,25 @@ describe("BaselineManager", function () {
           updated_at: now,
         })
         .execute();
+
+      const baselines = await manager.listBaselines();
+      expect(baselines.map((b) => b.screenId)).toEqual(["good_screen"]);
+    });
+
+    test("getBaseline and listBaselines ignore a row whose JSON is valid but not a violation list (#11859)", async function () {
+      const now = new Date().toISOString();
+      await manager.saveBaseline("good_screen", []);
+      for (const [screen, json] of [
+        ["object_screen", '{"fingerprint":"a"}'],
+        ["null_entry_screen", "[null]"],
+        ["no_fingerprint_screen", '[{"type":"missing-content-description"}]'],
+      ]) {
+        await testDb
+          .insertInto("accessibility_baselines")
+          .values({ screen_id: screen, violations_json: json, created_at: now, updated_at: now })
+          .execute();
+        expect(await manager.getBaseline(screen)).toBeNull();
+      }
 
       const baselines = await manager.listBaselines();
       expect(baselines.map((b) => b.screenId)).toEqual(["good_screen"]);

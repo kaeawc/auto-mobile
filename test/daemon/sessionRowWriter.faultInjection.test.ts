@@ -14,6 +14,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FaultPlan, type FaultKind } from "../fakes/FaultPlan";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 
 const UUID = "fault-uuid";
 const DEVICE = "fake-android";
@@ -89,11 +90,9 @@ class Run {
   }
 
   newManager(): SessionManager {
-    const manager = new SessionManager(
-      this.timer,
-      this.persistence,
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(this.timer, this.persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId(`fault-daemon-${++this.managerGeneration}`);
     manager.setTerminalReleaseRetryBackoff(fixedBackoff(11));
@@ -111,7 +110,11 @@ class Run {
   }
 
   create() {
-    return this.manager.createSession(UUID, DEVICE, "android", WINDOW, WINDOW, "Fake_AVD");
+    return this.manager.createSession(UUID, DEVICE, "android", {
+      timeoutMs: WINDOW,
+      heartbeatTimeoutMs: WINDOW,
+      stableDeviceId: "Fake_AVD",
+    });
   }
 
   /** Drive the manager's original promises without introducing real sleeps. */
@@ -184,11 +187,9 @@ class Run {
     let current = true;
     const release = recreate
       ? this.manager.releaseSession(UUID, "explicit-release")
-      : this.manager.releaseSessionUnlessSuperseded(
-          UUID,
-          `device-disconnected:${DEVICE}`,
-          () => current,
-        );
+      : this.manager.releaseSessionUnlessSuperseded(UUID, `device-disconnected:${DEVICE}`, {
+          commitFence: () => current,
+        });
     // The gate parks the injected statement before its synchronous SQLite-equivalent effect.
     await flush();
     current = false;
@@ -204,9 +205,13 @@ class Run {
     await flush();
   }
 
-  async force(reason = "heartbeat-timeout"): Promise<void> {
+  async force(reason: SessionReleaseReason = "heartbeat-timeout"): Promise<void> {
     const teardown = Promise.withResolvers<Promise<void>[]>();
-    Reflect.set(this.manager, "drainReleaseTeardown", () => teardown.promise);
+    Reflect.set(
+      Reflect.get(this.manager, "stateRestore") as object,
+      "drainReleaseTeardown",
+      () => teardown.promise,
+    );
     const release = this.manager.releaseSession(UUID, reason);
     await flush();
     if (!this.manager.forceStuckRelease(UUID)) {
@@ -236,16 +241,13 @@ class Run {
     const pool: SessionDeviceAssigner = {
       assignDeviceToSession: async (id, _platform, target) =>
         (
-          await this.manager.createSession(
-            id,
-            target?.deviceId ?? DEVICE,
-            "android",
-            WINDOW,
-            WINDOW,
-            target?.stableDeviceId ?? "Fake_AVD",
-            target?.liveness,
-            target?.initialOwnership,
-          )
+          await this.manager.createSession(id, target?.deviceId ?? DEVICE, "android", {
+            timeoutMs: WINDOW,
+            heartbeatTimeoutMs: WINDOW,
+            stableDeviceId: target?.stableDeviceId ?? "Fake_AVD",
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          })
         ).assignedDevice,
     };
     const before = await this.persistence.getSession(UUID);

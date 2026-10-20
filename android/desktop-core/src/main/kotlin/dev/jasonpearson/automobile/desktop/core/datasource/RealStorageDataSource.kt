@@ -2,26 +2,19 @@ package dev.jasonpearson.automobile.desktop.core.datasource
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueRequest
+import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueRequest
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeToolResponse
-import dev.jasonpearson.automobile.desktop.core.daemon.encodeResourceUriComponent
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import dev.jasonpearson.automobile.desktop.core.storage.ColumnInfo
 import dev.jasonpearson.automobile.desktop.core.storage.DatabaseInfo
-import dev.jasonpearson.automobile.desktop.core.storage.KeyValueEntry
 import dev.jasonpearson.automobile.desktop.core.storage.KeyValueFile
 import dev.jasonpearson.automobile.desktop.core.storage.KeyValueType
 import dev.jasonpearson.automobile.desktop.core.storage.QueryResult
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
-import dev.jasonpearson.automobile.desktop.core.storage.TableInfo
-import dev.jasonpearson.automobile.desktop.core.storage.parseKeyValue
-import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
@@ -40,6 +33,7 @@ class RealStorageDataSource(
   private val deviceId: String? = null,
   private val packageName: String? = null,
   private val platform: StoragePlatform = StoragePlatform.Android,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : StorageDataSource {
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -68,91 +62,11 @@ class RealStorageDataSource(
         }
 
     return try {
-      val client = provider()
-
-      // 1. List databases
-      val dbsUri = buildDatabasesUri(device, pkg)
-      LOG.info("getDatabases: Fetching from URI: $dbsUri")
-      val dbsContents = client.readResource(dbsUri)
-      val dbsText = dbsContents.firstOrNull()?.text ?: return Result.Success(emptyList())
-      val dbsResponse = json.decodeFromString(serializer<McpDatabasesResponse>(), dbsText)
-
-      if (dbsResponse.error != null) {
-        LOG.warn("getDatabases: Response error: ${dbsResponse.error}")
-        return Result.Error(
-          RuntimeException(dbsResponse.error),
-          dbsResponse.error,
-          dbsResponse.errorCode,
-          dbsResponse.errorReason,
-        )
-      }
-
-      LOG.info("getDatabases: Found ${dbsResponse.databases.size} databases")
-
-      // 2. For each database, get tables and their structure
-      val databases =
-        dbsResponse.databases.map { dbEntry ->
-          val tablesUri = buildTablesUri(device, dbEntry.path, pkg)
-          val tablesContents = client.readResource(tablesUri)
-          val tablesText = tablesContents.firstOrNull()?.text
-          val tableNames =
-            if (tablesText != null) {
-              val tablesResponse =
-                json.decodeFromString(serializer<McpTablesResponse>(), tablesText)
-              if (tablesResponse.error != null) {
-                return Result.Error(
-                  RuntimeException(tablesResponse.error),
-                  tablesResponse.error,
-                  tablesResponse.errorCode,
-                  tablesResponse.errorReason,
-                )
-              }
-              tablesResponse.tables
-            } else {
-              emptyList()
-            }
-
-          LOG.info("getDatabases: DB ${dbEntry.name} has ${tableNames.size} tables")
-
-          // 3. For each table, get structure
-          val tables = tableNames.map { tableName ->
-            val structUri = buildTableStructureUri(device, dbEntry.path, tableName, pkg)
-            val structContents = client.readResource(structUri)
-            val structText = structContents.firstOrNull()?.text
-            val columns =
-              if (structText != null) {
-                val structResponse =
-                  json.decodeFromString(serializer<McpTableStructureResponse>(), structText)
-                structResponse.columns.map { col ->
-                  ColumnInfo(
-                    name = col.name,
-                    type = col.type,
-                    isPrimaryKey = col.primaryKey,
-                    isNullable = col.nullable,
-                    defaultValue = col.defaultValue,
-                  )
-                }
-              } else {
-                emptyList()
-              }
-            TableInfo(name = tableName, rowCount = 0, columns = columns)
-          }
-
-          DatabaseInfo(
-            name = dbEntry.name,
-            path = dbEntry.path,
-            sizeBytes = dbEntry.sizeBytes,
-            tables = tables,
-          )
-        }
-
-      LOG.info("getDatabases: Returning ${databases.size} databases")
-      Result.Success(databases)
+      StorageResourceReader(provider(), device, pkg, platform, json).getDatabases()
     } catch (e: McpConnectionException) {
       LOG.warn("getDatabases: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: kotlinx.serialization.SerializationException) {
       LOG.warn("getDatabases: Exception: ${e.message}", e)
       Result.Error(e, "Failed to load databases: ${e.message}")
     }
@@ -173,7 +87,17 @@ class RealStorageDataSource(
 
     return try {
       val client = provider()
-      val uri = buildTableDataUri(device, databasePath, table, pkg, limit, offset)
+      val uri =
+        buildTableDataUri(
+          dev.jasonpearson.automobile.desktop.core.datasource.StorageTablePage(
+            device,
+            databasePath,
+            table,
+            pkg,
+            limit,
+            offset,
+          ),
+        )
       LOG.info("getTableData: Fetching from URI: $uri")
       val contents = client.readResource(uri)
       val text =
@@ -198,8 +122,7 @@ class RealStorageDataSource(
     } catch (e: McpConnectionException) {
       LOG.warn("getTableData: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: kotlinx.serialization.SerializationException) {
       LOG.warn("getTableData: Exception: ${e.message}", e)
       Result.Error(e, "Failed to load table data: ${e.message}")
     }
@@ -251,8 +174,7 @@ class RealStorageDataSource(
     } catch (e: McpConnectionException) {
       LOG.warn("executeSQL: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: kotlinx.serialization.SerializationException) {
       LOG.warn("executeSQL: Exception: ${e.message}", e)
       Result.Error(e, "Failed to execute SQL: ${e.message}")
     }
@@ -285,90 +207,11 @@ class RealStorageDataSource(
         }
 
     return try {
-      val client = provider()
-      LOG.info("getKeyValueFiles: Got client: ${client::class.simpleName}")
-
-      // First, get the list of storage files
-      val filesUri = buildStorageFilesUri(device, pkg)
-      LOG.info("getKeyValueFiles: Fetching files from URI: $filesUri")
-      val filesContents = client.readResource(filesUri)
-      LOG.info("getKeyValueFiles: Got ${filesContents.size} content items")
-      val filesText = filesContents.firstOrNull()?.text
-      if (filesText == null) {
-        LOG.warn("getKeyValueFiles: No text content in response")
-        return Result.Success(emptyList())
-      }
-      LOG.info("getKeyValueFiles: Response text (first 500 chars): ${filesText.take(500)}")
-
-      val filesResponse = json.decodeFromString(serializer<McpStorageFilesResponse>(), filesText)
-      LOG.info(
-        "getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}",
-      )
-
-      // Check for error in response
-      if (filesResponse.error != null) {
-        LOG.warn("getKeyValueFiles: Response contains error: ${filesResponse.error}")
-        return Result.Error(
-          RuntimeException(filesResponse.error),
-          filesResponse.error,
-          filesResponse.errorCode,
-          filesResponse.errorReason,
-        )
-      }
-
-      // For each file, fetch its entries
-      val keyValueFiles =
-        filesResponse.files.map { file ->
-          val entriesUri = buildStorageEntriesUri(device, pkg, file.name)
-          LOG.info("getKeyValueFiles: Fetching entries for ${file.name} from: $entriesUri")
-          val entriesContents = client.readResource(entriesUri)
-          val entriesText = entriesContents.firstOrNull()?.text
-
-          val entries =
-            if (entriesText != null) {
-              val entriesResponse =
-                json.decodeFromString(
-                  serializer<McpStorageEntriesResponse>(),
-                  entriesText,
-                )
-              LOG.info(
-                "getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries",
-              )
-              if (entriesResponse.error != null) {
-                return Result.Error(
-                  RuntimeException(entriesResponse.error),
-                  entriesResponse.error,
-                  entriesResponse.errorCode,
-                  entriesResponse.errorReason,
-                )
-              }
-              entriesResponse.entries.map { entry ->
-                KeyValueEntry(
-                  key = entry.key,
-                  value = parseValue(entry.value, entry.type),
-                  type = mapKeyValueType(entry.type),
-                )
-              }
-            } else {
-              LOG.warn("getKeyValueFiles: No entries text for ${file.name}")
-              emptyList()
-            }
-
-          KeyValueFile(
-            name = file.name,
-            path = file.path,
-            platform = platform,
-            entries = entries,
-          )
-        }
-
-      LOG.info("getKeyValueFiles: Returning ${keyValueFiles.size} files")
-      Result.Success(keyValueFiles)
+      StorageResourceReader(provider(), device, pkg, platform, json).getKeyValueFiles()
     } catch (e: McpConnectionException) {
       LOG.warn("getKeyValueFiles: MCP connection error: ${e.message}", e)
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: kotlinx.serialization.SerializationException) {
       LOG.warn("getKeyValueFiles: Exception during fetch: ${e.message}", e)
       Result.Error(e, "Failed to load storage data: ${e.message}")
     }
@@ -387,24 +230,26 @@ class RealStorageDataSource(
 
     return try {
       val client = provider()
-      withContext(Dispatchers.IO) {
+      withContext(ioDispatcher) {
         val result =
           client.setKeyValue(
-            device,
-            pkg,
-            fileName,
-            key,
-            value,
-            type.protocolName,
-            platform.protocolName,
+            input =
+              SetKeyValueRequest(
+                deviceId = device,
+                appId = pkg,
+                fileName = fileName,
+                key = key,
+                value = value,
+                type = type.protocolName,
+                platform = platform.protocolName,
+              ),
           )
         if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
       }
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: kotlinx.serialization.SerializationException) {
       Result.Error(e, "Failed to set key value: ${e.message}")
     }
   }
@@ -420,15 +265,24 @@ class RealStorageDataSource(
 
     return try {
       val client = provider()
-      withContext(Dispatchers.IO) {
-        val result = client.removeKeyValue(device, pkg, fileName, key, platform.protocolName)
+      withContext(ioDispatcher) {
+        val result =
+          client.removeKeyValue(
+            input =
+              RemoveKeyValueRequest(
+                deviceId = device,
+                appId = pkg,
+                fileName = fileName,
+                key = key,
+                platform = platform.protocolName,
+              ),
+          )
         if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to remove key value"))
       }
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: kotlinx.serialization.SerializationException) {
       Result.Error(e, "Failed to remove key value: ${e.message}")
     }
   }
@@ -441,188 +295,15 @@ class RealStorageDataSource(
 
     return try {
       val client = provider()
-      withContext(Dispatchers.IO) {
+      withContext(ioDispatcher) {
         val result = client.clearKeyValueFile(device, pkg, fileName, platform.protocolName)
         if (result.success) Result.Success(StorageMutationResult(result.warning))
         else Result.Error(RuntimeException(result.message ?: "Failed to clear key value file"))
       }
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
+    } catch (e: kotlinx.serialization.SerializationException) {
       Result.Error(e, "Failed to clear key value file: ${e.message}")
     }
   }
-
-  private fun buildDatabasesUri(deviceId: String, packageName: String): String {
-    val encodedPackage = encodeResourceUriComponent(packageName)
-    return "automobile:devices/$deviceId/databases?appId=$encodedPackage"
-  }
-
-  private fun buildTablesUri(deviceId: String, databasePath: String, packageName: String): String {
-    val encodedPath = encodeResourceUriComponent(databasePath)
-    val encodedPackage = encodeResourceUriComponent(packageName)
-    return "automobile:devices/$deviceId/databases/$encodedPath/tables?appId=$encodedPackage"
-  }
-
-  private fun buildTableStructureUri(
-    deviceId: String,
-    databasePath: String,
-    table: String,
-    packageName: String,
-  ): String {
-    val encodedPath = encodeResourceUriComponent(databasePath)
-    val encodedTable = encodeResourceUriComponent(table)
-    val encodedPackage = encodeResourceUriComponent(packageName)
-    return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/structure?appId=$encodedPackage"
-  }
-
-  private fun buildTableDataUri(
-    deviceId: String,
-    databasePath: String,
-    table: String,
-    packageName: String,
-    limit: Int,
-    offset: Int,
-  ): String {
-    val encodedPath = encodeResourceUriComponent(databasePath)
-    val encodedTable = encodeResourceUriComponent(table)
-    val encodedPackage = encodeResourceUriComponent(packageName)
-    return "automobile:devices/$deviceId/databases/$encodedPath/tables/$encodedTable/data?appId=$encodedPackage&limit=$limit&offset=$offset"
-  }
-
-  private fun buildStorageFilesUri(deviceId: String, packageName: String): String {
-    val encodedPackage = encodeResourceUriComponent(packageName)
-    return "automobile:devices/$deviceId/storage/$encodedPackage/files"
-  }
-
-  private fun buildStorageEntriesUri(
-    deviceId: String,
-    packageName: String,
-    fileName: String,
-  ): String {
-    val encodedPackage = encodeResourceUriComponent(packageName)
-    val encodedFile = encodeResourceUriComponent(fileName)
-    return "automobile:devices/$deviceId/storage/$encodedPackage/$encodedFile/entries"
-  }
-
-  private fun jsonElementToAny(element: JsonElement): Any? {
-    return when (element) {
-      is JsonNull -> null
-      is JsonPrimitive ->
-        when {
-          element.isString -> element.content
-          element.content == "true" || element.content == "false" ->
-            element.content.toBooleanStrictOrNull() ?: element.content
-          element.content.toLongOrNull() != null -> element.content.toLong()
-          element.content.toDoubleOrNull() != null -> element.content.toDouble()
-          else -> element.content
-        }
-      else -> element.toString()
-    }
-  }
-
-  private fun mapKeyValueType(type: String): KeyValueType = KeyValueType.fromProtocolName(type)
-
-  private fun parseValue(jsonValue: String?, type: String): Any? =
-    parseKeyValue(jsonValue, mapKeyValueType(type))
 }
-
-// MCP response models for database resources
-
-@Serializable
-private data class McpDatabasesResponse(
-  val databases: List<McpDatabaseEntry> = emptyList(),
-  val error: String? = null,
-  val errorCode: String? = null,
-  val errorReason: String? = null,
-)
-
-@Serializable
-private data class McpDatabaseEntry(
-  val name: String,
-  val path: String,
-  val sizeBytes: Long = 0,
-)
-
-@Serializable
-private data class McpTablesResponse(
-  val tables: List<String> = emptyList(),
-  val error: String? = null,
-  val errorCode: String? = null,
-  val errorReason: String? = null,
-)
-
-@Serializable
-private data class McpTableStructureResponse(
-  val columns: List<McpColumnDef> = emptyList(),
-  val error: String? = null,
-)
-
-@Serializable
-private data class McpColumnDef(
-  val name: String,
-  val type: String,
-  val nullable: Boolean = true,
-  val primaryKey: Boolean = false,
-  val defaultValue: String? = null,
-)
-
-@Serializable
-private data class McpTableDataResponse(
-  val columns: List<String> = emptyList(),
-  val rows: List<List<JsonElement>> = emptyList(),
-  val total: Int = 0,
-  val error: String? = null,
-)
-
-@Serializable
-private data class McpSqlResult(
-  val type: String = "query",
-  val message: String? = null,
-  val columns: List<String> = emptyList(),
-  val rows: List<List<JsonElement>> = emptyList(),
-  val rowsAffected: Int? = null,
-  val error: String? = null,
-)
-
-// MCP response models for storage (key-value) resources
-
-@Serializable
-private data class McpStorageFilesResponse(
-  val deviceId: String? = null,
-  val packageName: String? = null,
-  val files: List<McpPreferenceFile> = emptyList(),
-  val totalCount: Int = 0,
-  val lastUpdated: String? = null,
-  val error: String? = null,
-  val errorCode: String? = null,
-  val errorReason: String? = null,
-)
-
-@Serializable
-private data class McpPreferenceFile(
-  val name: String,
-  val path: String,
-  val entryCount: Int = 0,
-)
-
-@Serializable
-private data class McpStorageEntriesResponse(
-  val deviceId: String? = null,
-  val packageName: String? = null,
-  val fileName: String? = null,
-  val entries: List<McpKeyValueEntry> = emptyList(),
-  val totalCount: Int = 0,
-  val lastUpdated: String? = null,
-  val error: String? = null,
-  val errorCode: String? = null,
-  val errorReason: String? = null,
-)
-
-@Serializable
-private data class McpKeyValueEntry(
-  val key: String,
-  val value: String? = null,
-  val type: String,
-)

@@ -1,3 +1,5 @@
+import { ProcessEnvironmentReader } from "./ProcessEnvironmentReader";
+import { ENV } from "../config/env";
 /**
  * Opt-in gate for provisioning (creating) simulators/emulators.
  *
@@ -19,7 +21,7 @@
  */
 
 /** Env var that enables device creation when no explicit flag is supplied. */
-export const DEVICE_CREATE_ENV_VAR = "AUTOMOBILE_ALLOW_DEVICE_CREATE";
+export const DEVICE_CREATE_ENV_VAR = ENV.ALLOW_DEVICE_CREATE.name;
 
 /** Values accepted as "on" for {@link DEVICE_CREATE_ENV_VAR}. */
 const TRUTHY_ENV_VALUES = new Set(["1", "true"]);
@@ -30,12 +32,6 @@ export const CREATED_DEVICE_NAME_PREFIX = "AutoMobile";
 /** Narrow read-only view of the environment, so tests never touch `process.env`. */
 export interface EnvironmentReader {
   get(name: string): string | undefined;
-}
-
-export class ProcessEnvironmentReader implements EnvironmentReader {
-  get(name: string): string | undefined {
-    return process.env[name];
-  }
 }
 
 export interface DeviceCreationGate {

@@ -23,26 +23,30 @@ class DeviceScreenCoordinateMapperTest {
   private val mapper = DeviceScreenCoordinateMapper
 
   /** A 1080x2340 device rendered 1:1 into a 540x1170 frame (frame is half device size). */
-  private fun geometry(
-    frameWidthPx: Float = 540f,
-    frameHeightPx: Float = 1170f,
-    scale: Float = 1f,
-    offsetX: Float = 0f,
-    offsetY: Float = 0f,
-    deviceWidth: Int = 1080,
-    deviceHeight: Int = 2340,
-  ) =
-    DeviceScreenGeometry(
-      frameWidthPx = frameWidthPx,
-      frameHeightPx = frameHeightPx,
-      scale = scale,
-      offsetX = offsetX,
-      offsetY = offsetY,
-      deviceWidth = deviceWidth,
-      deviceHeight = deviceHeight,
-    )
+  private data class GeometrySpec(
+    val frameWidthPx: Float = 540f,
+    val frameHeightPx: Float = 1170f,
+    val scale: Float = 1f,
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    val deviceWidth: Int = 1080,
+    val deviceHeight: Int = 2340,
+  )
 
-  // ---- Control-mode contract ------------------------------------------------
+  private fun geometry(spec: GeometrySpec = GeometrySpec()) =
+    with(spec) {
+      DeviceScreenGeometry(
+        frameWidthPx = frameWidthPx,
+        frameHeightPx = frameHeightPx,
+        scale = scale,
+        offsetX = offsetX,
+        offsetY = offsetY,
+        deviceWidth = deviceWidth,
+        deviceHeight = deviceHeight,
+      )
+
+      // ---- Control-mode contract ------------------------------------------------
+    }
 
   @Test
   fun `inspector is the default mode name ordering (opt-in control)`() {
@@ -56,7 +60,7 @@ class DeviceScreenCoordinateMapperTest {
   @Test
   fun `viewportToDevice maps frame pixels to device pixels at scale 1`() {
     // Frame is half device size, so the frame center (270,585) is the device center (540,1170).
-    val p = mapper.viewportToDevice(ViewportPoint(270f, 585f), geometry())
+    val p = mapper.viewportToDevice(ViewportPoint(270f, 585f), geometry(GeometrySpec()))
     assertEquals(540, p.x)
     assertEquals(1170, p.y)
     assertTrue(p.inBounds)
@@ -65,7 +69,7 @@ class DeviceScreenCoordinateMapperTest {
   @Test
   fun `viewportToDevice removes zoom scale`() {
     // At scale 2, a viewport point twice as far from the origin maps to the same device point.
-    val p = mapper.viewportToDevice(ViewportPoint(540f, 1170f), geometry(scale = 2f))
+    val p = mapper.viewportToDevice(ViewportPoint(540f, 1170f), geometry(GeometrySpec(scale = 2f)))
     assertEquals(540, p.x)
     assertEquals(1170, p.y)
   }
@@ -76,7 +80,10 @@ class DeviceScreenCoordinateMapperTest {
   fun `viewportToDevice removes pan offset`() {
     // Panned right/down by (100,50): the device origin now sits at viewport (100,50).
     val p =
-      mapper.viewportToDevice(ViewportPoint(100f, 50f), geometry(offsetX = 100f, offsetY = 50f))
+      mapper.viewportToDevice(
+        ViewportPoint(100f, 50f),
+        geometry(GeometrySpec(offsetX = 100f, offsetY = 50f)),
+      )
     assertEquals(0, p.x)
     assertEquals(0, p.y)
     assertTrue(p.inBounds)
@@ -84,7 +91,7 @@ class DeviceScreenCoordinateMapperTest {
 
   @Test
   fun `viewportToDevice combines pan and zoom`() {
-    val g = geometry(scale = 2f, offsetX = 100f, offsetY = 50f)
+    val g = geometry(GeometrySpec(scale = 2f, offsetX = 100f, offsetY = 50f))
     // frameX = (viewport - offset) / scale ; device = frameX * (1080/540) = frameX * 2
     // viewport (100 + 2*135, 50 + 2*292.5) -> frame (135, 292.5) -> device (270, 585)
     val p = mapper.viewportToDevice(ViewportPoint(100f + 270f, 50f + 585f), g)
@@ -160,10 +167,12 @@ class DeviceScreenCoordinateMapperTest {
     val frame = mapper.fitToViewport(2340, 1080, 1200f, 1200f) // landscape frame
     val g =
       geometry(
-        frameWidthPx = frame.widthPx,
-        frameHeightPx = frame.heightPx,
-        deviceWidth = 2340,
-        deviceHeight = 1080,
+        GeometrySpec(
+          frameWidthPx = frame.widthPx,
+          frameHeightPx = frame.heightPx,
+          deviceWidth = 2340,
+          deviceHeight = 1080,
+        ),
       )
     // Center of the frame maps to the center of the landscape device space.
     val p = mapper.viewportToDevice(ViewportPoint(frame.widthPx / 2f, frame.heightPx / 2f), g)
@@ -177,7 +186,7 @@ class DeviceScreenCoordinateMapperTest {
   @Test
   fun `viewportToDevice rounds to nearest integer with halves up`() {
     // frameToDevice = 1080/540 = 2. A viewport x of 0.25 -> device 0.5 -> rounds to 1 (half up).
-    val p = mapper.viewportToDevice(ViewportPoint(0.25f, 0f), geometry())
+    val p = mapper.viewportToDevice(ViewportPoint(0.25f, 0f), geometry(GeometrySpec()))
     assertEquals(1, p.x)
   }
 
@@ -185,7 +194,7 @@ class DeviceScreenCoordinateMapperTest {
 
   @Test
   fun `viewportToDevice flags points past the right and bottom edges`() {
-    val g = geometry()
+    val g = geometry(GeometrySpec())
     // deviceWidth is exclusive: exactly at width is out of bounds.
     val atWidth = mapper.viewportToDevice(ViewportPoint(540f, 585f), g) // device x = 1080
     assertEquals(1080, atWidth.x)
@@ -197,7 +206,7 @@ class DeviceScreenCoordinateMapperTest {
 
   @Test
   fun `viewportToDevice flags negative points and does not clamp`() {
-    val p = mapper.viewportToDevice(ViewportPoint(-10f, -10f), geometry())
+    val p = mapper.viewportToDevice(ViewportPoint(-10f, -10f), geometry(GeometrySpec()))
     assertTrue(p.x < 0)
     assertTrue(p.y < 0)
     assertFalse(p.inBounds)
@@ -205,7 +214,10 @@ class DeviceScreenCoordinateMapperTest {
 
   @Test
   fun `clampedTo pins an out-of-bounds point to the last addressable pixel`() {
-    val p = mapper.viewportToDevice(ViewportPoint(1000f, 2000f), geometry()).clampedTo(1080, 2340)
+    val p =
+      mapper
+        .viewportToDevice(ViewportPoint(1000f, 2000f), geometry(GeometrySpec()))
+        .clampedTo(1080, 2340)
     assertEquals(1079, p.x)
     assertEquals(2339, p.y)
   }
@@ -232,7 +244,7 @@ class DeviceScreenCoordinateMapperTest {
 
   @Test
   fun `deviceToViewport is the inverse of viewportToDevice`() {
-    val g = geometry(scale = 1.7f, offsetX = 42f, offsetY = 90f)
+    val g = geometry(GeometrySpec(scale = 1.7f, offsetX = 42f, offsetY = 90f))
     val original = ViewportPoint(321f, 654f)
     val device = mapper.viewportToDevice(original, g)
     val back = mapper.deviceToViewport(device.x, device.y, g)
@@ -286,7 +298,7 @@ class DeviceScreenCoordinateMapperTest {
       )
 
     // Frame is half device size; click at frame (275, 550) -> device (550, 1100), inside child.
-    val device = mapper.viewportToDevice(ViewportPoint(275f, 550f), geometry())
+    val device = mapper.viewportToDevice(ViewportPoint(275f, 550f), geometry(GeometrySpec()))
     val hit = LayoutInspectorMockData.findElementAt(root, device.x, device.y)
     assertNotNull(hit)
     assertEquals("child", hit.id)
@@ -313,7 +325,7 @@ class DeviceScreenCoordinateMapperTest {
         depth = 0,
       )
     // A click above/left of the frame maps to negative device coords -> no element (deselect).
-    val device = mapper.viewportToDevice(ViewportPoint(-5f, -5f), geometry())
+    val device = mapper.viewportToDevice(ViewportPoint(-5f, -5f), geometry(GeometrySpec()))
     assertFalse(device.inBounds)
     assertEquals(null, LayoutInspectorMockData.findElementAt(root, device.x, device.y))
   }

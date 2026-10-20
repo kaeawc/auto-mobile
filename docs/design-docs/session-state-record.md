@@ -36,7 +36,7 @@ Line numbers below are historical for the remaining manager fields. `U` = keyed 
 | Concern                | Field (line)                                                                                                                                                         | Key         |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
 | Published              | `sessions` (1614)                                                                                                                                                    | U           |
-| Device index           | `sessionDeviceMap` (1615), `deviceSessionMap` (1616)                                                                                                                 | U / device  |
+| Device index           | `deviceSessionMap` (1616)                                                                                                                                            | U / device  |
 | Assignment             | `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                                                                         | U           |
 | Creation               | `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                                                               | U / S       |
 | Rebind                 | `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                                                               | U           |
@@ -309,7 +309,7 @@ Rules:
   `FinalizationRegistry` mechanism, so a long-lived daemon does not accumulate UUIDs. A `fenced`
   record is not evicted by GC: a terminal fence is permanent until lifted, as
   `terminalReleaseSnapshots` is today. That unbounded growth is inherited and out of scope.
-- The device index (`sessionDeviceMap`, `deviceSessionMap`) stays beside the store, maintained by
+- The device index (`deviceSessionMap`) stays beside the store, maintained by
   the same transitions, because it is keyed by device.
 
 ### 3.1 Legal transitions
@@ -321,7 +321,7 @@ production.
 | From                          | To                                          | Cause (today's code)                                                                                                                                                                         |
 | ----------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | absent                        | `assigning`                                 | automatic device assignment starts                                                                                                                                                           |
-| absent                        | `creating`                                  | `createSession` (3557)                                                                                                                                                                       |
+| absent                        | `creating`                                  | `createSession`                                                                                                                                                                              |
 | absent                        | `fenced`                                    | startup or peer journal intent (1957, 2088); a refused creation or an expired persisted row terminalized at admission (`terminalizeExpiredPersistedSession`, 4296; journal use at 4018-4026) |
 | `assigning`                   | `creating`                                  | device chosen, creation write starts                                                                                                                                                         |
 | `assigning` / `creating`      | absent                                      | assignment or creation failed or abandoned (`abandoned`, 946)                                                                                                                                |
@@ -447,7 +447,7 @@ or transition table was changed. These four coarse observations follow paths alr
 | Hook           | Observed pair         | Legal path / evidence                                                                                             |
 | -------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | published      | absent -> live        | absent -> creating -> live; already-published shadow-probe fixture (not a runtime failure)                        |
-| assignment-end | assigning -> fenced   | assigning -> absent -> fenced; refused acquisition / admission fencing (`sessionManager.test.ts`)                 |
+| assignment-end | assigning -> fenced   | assigning -> absent -> fenced; refused acquisition / admission fencing (`sessionManager.terminalRelease.test.ts`) |
 | creation-end   | creating -> fenced    | creating -> absent -> fenced; cancelled client-chosen creation (`sessionManager.cancelledClientChosenId.test.ts`) |
 | unpublished    | releasing -> creating | releasing -> ended -> creating; covering creation resurfaces (`sessionSlots.agreement.test.ts`)                   |
 
@@ -455,15 +455,15 @@ The following pairs are not allowed by §3.1. Each remains **debug+count even in
 scoped to exactly the hook listed; other illegal pairs throw under test. These are reported
 findings, not new legal transitions:
 
-| Hook             | Observed pair          | Existing behavior / evidence                                                                                                          |
-| ---------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| assignment-start | ended -> assigning     | Revival first assigns a device (`sessionSlots.agreement.test.ts`, three forced reincarnations).                                       |
-| assignment-end   | assigning -> ended     | Failed assignment reveals an older finalized identity (`sessionSlots.agreement.test.ts`).                                             |
-| creation-end     | creating -> assigning  | Creation clears before the covering assignment's finally (`sessionSlots.agreement.test.ts`).                                          |
-| creation-end     | creating -> ended      | Failed creation reveals an older finalized identity (`sessionSlots.agreement.test.ts`).                                               |
-| unpublished      | releasing -> assigning | Removing the published incarnation reveals a covering assignment (`sessionSlots.agreement.test.ts`).                                  |
-| release-end      | ended -> fenced        | Terminal upgrade of an already finalized non-terminal release (`sessionManager.test.ts`, `deviceRestartRecoveryReservation.test.ts`). |
-| release-end      | ended -> live          | `daemonShutdownSessionRelease.test.ts` directly injects a replacement into `sessions`, bypassing publication; test-only observation.  |
+| Hook             | Observed pair          | Existing behavior / evidence                                                                                                                          |
+| ---------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| assignment-start | ended -> assigning     | Revival first assigns a device (`sessionSlots.agreement.test.ts`, three forced reincarnations).                                                       |
+| assignment-end   | assigning -> ended     | Failed assignment reveals an older finalized identity (`sessionSlots.agreement.test.ts`).                                                             |
+| creation-end     | creating -> assigning  | Creation clears before the covering assignment's finally (`sessionSlots.agreement.test.ts`).                                                          |
+| creation-end     | creating -> ended      | Failed creation reveals an older finalized identity (`sessionSlots.agreement.test.ts`).                                                               |
+| unpublished      | releasing -> assigning | Removing the published incarnation reveals a covering assignment (`sessionSlots.agreement.test.ts`).                                                  |
+| release-end      | ended -> fenced        | Terminal upgrade of an already finalized non-terminal release (`sessionManager.terminalRelease.test.ts`, `deviceRestartRecoveryReservation.test.ts`). |
+| release-end      | ended -> live          | `daemonShutdownSessionRelease.test.ts` directly injects a replacement into `sessions`, bypassing publication; test-only observation.                  |
 
 `sessionManager.waitOutSettled.test.ts` pins native microtask turns using FakeTimer and both
 controlled issuer continuations and real gated manager operations. All six cases passed before
@@ -545,7 +545,7 @@ New code goes in proposed modules (SessionSlots and SessionRowWriter) so
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | S1  | Types, transition table and pure `deriveSlotTag(legacyView)` in the proposed SessionSlots module. No wiring.                                                                                                                                                                                                                                                                                                         | S (~300 new lines)     | Table-driven: every legal transition accepted, every other rejected; derivation for each tag from hand-built legacy views.                                                                           |
 | S2  | Shadow probe: `SessionManager.lifecycleTagOf(uuid)` derived from legacy maps, plus a random-interleaving agreement test (create / rebind / release / force / supersede / restart) under `FakeTimer`, seeded, asserting derived tag and the six predicates agree after every await.                                                                                                                                   | M (~400 test, ~40 src) | The property test is the PR. Seed corpus pinned; 100 ms per case by capping steps. Also run against the `sessionManager.rowInvariant` scenarios.                                                     |
-| S3  | `SessionSlots` becomes the store for the assignment and creation group (`pendingSessionAssignments`, `sharedSessionAssignments`, `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows`, `pendingSessionReleases`). Legacy maps deleted in the same PR.                                                                                                                                   | M                      | `sessionManager.test.ts`, `cancelledClientChosenId` and rehydration tests unchanged; S2 stays green.                                                                                                 |
+| S3  | `SessionSlots` becomes the store for the assignment and creation group (`pendingSessionAssignments`, `sharedSessionAssignments`, `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows`, `pendingSessionReleases`). Legacy maps deleted in the same PR.                                                                                                                                   | M                      | the `sessionManager.*.test.ts` suites, `cancelledClientChosenId` and rehydration tests unchanged; S2 stays green.                                                                                    |
 | S4  | Rebind group (`pendingSessionRebinds`, `deferredRebindCleanups`).                                                                                                                                                                                                                                                                                                                                                    | S                      | `sessionManager.rebindTtlRestoreShield`, rebind tests; S2.                                                                                                                                           |
 | S5  | Release group: `releasePromises`, `activeReleasePromises`, `releasingSessions`, `forcedNonTerminalReleases` collapse into `releasing.op` and `retiring`. Highest risk: every await in `releaseSessionInternal` re-reads these.                                                                                                                                                                                       | L                      | `releasePersistDeadline`, `releaseTeardownShield`, `releaseDeviceHold`, `abandonRestoreSingleBaseline`; S2 extended with forced and stuck releases; a new test for the single "releasing" invariant. |
 | S6  | Fence and identity group: `terminalReleaseSnapshots`, `terminalReleaseReasonStates`, `terminalReleaseReservations`, `latestFinalizedSessionIdentities`, recovered and adopted intents. `finalizedSessionReleases` stays a side table.                                                                                                                                                                                | L                      | `releasePersistDeadline` journal cases, `devicePool.recoveryShutdown`, terminal-reservation tests; GC test through a fake `FinalizationRegistry` seam.                                               |
@@ -565,7 +565,7 @@ throw under test and warn+count in production, with the reported §4 design gaps
 counting in both modes. Ended guard bookkeeping is discarded with weak-identity finalization.
 
 S9 landed: slot code reads no row-facet field; `SessionSlots.rowPending(uuid)` is the only row signal, wired to `SessionRowWriter.pending` in W2 (#11799).
-S8 landed (#12581): `findSession` is the pure lookup; `expireIfDue` keeps lazy expiry at the retained admission/routing sites; the in-class readers listed in test/lint/findSessionNoRelease.test.ts are the retained set; external callers of getSession migrate directory by directory.
+S8 landed (#12581): `findSession` is the pure lookup; `expireIfDue` keeps lazy expiry at the retained admission/routing sites; the in-class readers listed in test/lint/findSessionNoRelease.test.ts are the retained set; external callers of getSession migrate directory by directory; batch 1 migrated the src/server device reads, ratcheted by RETAINED_SERVER_EXPIRY_READERS in the same test.
 
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
 so they merge serially. S8 can ship any time after S2 and is tracked separately.
@@ -576,6 +576,10 @@ W2 adapter implemented: SessionRowWriter owns the drain-write set (formerly late
 terminal retry scheduling and the non-terminal snapshot map. Production uses the adapter surface:
 `noteRelease`, `noteLive`, `canIssueRelease`, `scheduleRetry`, drain-write tracking, and the
 non-terminal map. In production `pending(uuid)` means only "retry owed".
+
+W3 (first slice) moved the create/rebind upsert, activity and ownership statements behind `SessionRowWriter.upsertLive`, `recordLiveActivity` and `replaceLiveOwnership`: pass-through, same promises and await sequence, no new serialization; the superseded-row fields and `OwedSupersededRowReassert` remain until a later slice.
+
+W3 (second slice) moved the superseded-row state into the writer: `SessionRowWriter.superseded` (`src/daemon/supersededRowReasserts.ts`) now holds the remembered superseded reasons, release-reason predecessors, refused release writes, the pending-rewrite counts and reasons being rewritten, the rows under pending non-terminal releases, and the owed rewrites (`OwedSupersededRowReassert`) with their backoff, timers and drain attempt, keyed off the writer's drain flag (the manager's `releaseDrainStarted` is gone). Row policy stays with the manager as per-entry callbacks (`retry`, `retryDuringDrain`), so every read, statement and await keeps its order; the rewrite chain itself is deleted in W5.
 
 The per-UUID desire/settled/drain engine in `sessionRowWriter.ts` is exercised by tests; production
 first-attempt writes do not yet use it and stay manager-side until W3/W4. The owner decision that

@@ -5,6 +5,17 @@ device with `getAndroid`, `getApple` or `startDevice` creates the session and
 returns its `sessionUuid`; the session holds the device until it is released
 (idle timeout, lost heartbeat, or an explicit release).
 
+## Session key on the MCP layer
+
+The daemon's MCP layer holds no transport session. A call is tied to its session by an
+explicit key, not by the connection it arrived on: the `sessionUuid` argument where a tool
+takes one, otherwise the `x-auto-mobile-mcp-session-id` header (or the in-band
+`__mcpSessionId` argument). The socket server sends the header for proxy and CLI
+connections, and the desktop app sends one generated id per app session. A client that calls
+the daemon's HTTP endpoint directly and sends neither gets no implicit binding and must name
+`sessionUuid`. Landed in #4678 (#13047, #13049, #13046); see
+[the design record](../design-docs/mcp/sdk-v2-stateless-migration.md).
+
 ## What is refused
 
 A call that acts on a held device is refused with the typed code
@@ -357,9 +368,12 @@ acquisitions as anonymous (#11096):
   `src/models/deviceSessionRecovery.ts`, #11098), with `idle: true` beside the
   release reason after an idle release. Acquire a new session with
   `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
-- Booted-device discovery that did not complete (adb or simctl failed, or a
-  running emulator's AVD identity has not resolved) is refused with the retryable
-  code `discovery_incomplete` instead of booting or adopting a device blind. Retry
+- Booted-device discovery that did not complete (adb or simctl failed, or an
+  unresolved running emulator could be the requested AVD) is refused with the
+  retryable code `discovery_incomplete` instead of booting or adopting a device
+  blind. `provisionDevice` skips the unresolved-sibling guard for an AVD it just
+  created; otherwise it retries identity discovery within the caller's deadline
+  before refusing with the unresolved serials. Retry
   the acquisition. `setActiveDevice` answers it for a device it cannot find only
   when the discovery that could have listed that device failed, and names that
   platform: an iOS UDID while simctl failed is iOS discovery, and an id whose

@@ -1,14 +1,19 @@
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
+import { EventEmitter } from "node:events";
+import {
+  DevicePool,
+  type DevicePoolDependencies,
+  type PooledDevice,
+} from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
+import type { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { getAbortSignal } from "../../src/utils/AbortContext";
@@ -251,13 +256,45 @@ export class ThrowingDiscoveryFakeDeviceManager extends FakeDeviceManager {
   }
 }
 
-export class FakeChildProcess extends EventEmitter {
+/** Null stdio preserves the pool fixtures' no-output process behavior. */
+class PoolChildProcess extends EventEmitter implements ChildProcess {
+  stdin = null;
+  stdout = null;
+  stderr = null;
+  stdio: ChildProcess["stdio"] = [null, null, null, undefined, undefined];
+  spawnargs: string[] = [];
+  spawnfile = "";
   pid = 12345;
-  exitCode: number | null | undefined = undefined;
-  signalCode: NodeJS.Signals | null | undefined = undefined;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  connected = false;
+  channel: ChildProcess["channel"] = undefined;
+  disconnect(): void {}
+  send(): boolean {
+    return false;
+  }
+  ref(): this {
+    return this;
+  }
+  unref(): this {
+    return this;
+  }
+  kill(): boolean {
+    return false;
+  }
+  [Symbol.dispose](): void {}
+}
+
+export class FakeChildProcess extends PoolChildProcess implements ChildProcess {
+  pid = 12345;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   killCount = 0;
   kill(): boolean {
     this.killCount++;
+    this.exitCode = 0;
+    this.emit("exit", 0, null);
     return true;
   }
 }
@@ -390,10 +427,10 @@ export class FakeDeviceManagerWithFailingRecoveryStart extends FakeDeviceManager
   }
 }
 
-export class StubbornChildProcess extends EventEmitter {
+export class StubbornChildProcess extends PoolChildProcess implements ChildProcess {
   readonly pid = 12345;
-  readonly exitCode = null;
-  readonly signalCode = null;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   readonly signals: Array<NodeJS.Signals | number | undefined> = [];
 
   kill(signal?: NodeJS.Signals | number): boolean {
@@ -410,7 +447,7 @@ export class FakeDeviceManagerWithStubbornProcess extends FakeDeviceManager {
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 }
 
@@ -556,7 +593,7 @@ export class DeferredLivenessRecoveryDeviceManager extends FakeDeviceManager {
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
     this.startedDevices.push(device);
     this.resolveRecoveryStarted();
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 
   override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
@@ -578,13 +615,7 @@ export class DeferredLivenessRecoveryDeviceManager extends FakeDeviceManager {
 // Hands back a spawned handle from startDevice, then fails readiness — used to
 // assert the pool cancels a hung boot via handle.kill() (issue #3952). Reuses
 // FakeChildProcess, adding only a kill counter.
-export class KillTrackingChildProcess extends FakeChildProcess {
-  killCount = 0;
-  override kill(): boolean {
-    this.killCount++;
-    return true;
-  }
-}
+export class KillTrackingChildProcess extends FakeChildProcess {}
 
 export class FakeDeviceManagerWithFailingReadiness extends FakeDeviceManager {
   readonly childProcess = new KillTrackingChildProcess();
@@ -594,7 +625,7 @@ export class FakeDeviceManagerWithFailingReadiness extends FakeDeviceManager {
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 
   async waitForDeviceReady(): Promise<BootedDevice> {
@@ -610,7 +641,7 @@ export class FakeDeviceManagerWithPendingReadiness extends FakeDeviceManager {
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 
   override async waitForDeviceReady(
@@ -703,20 +734,8 @@ export function devicePoolSuiteActions(context: DevicePoolSuiteContext) {
     const { sessionManager } = context();
     const createSession = sessionManager.createSession.bind(sessionManager);
     let sessionCreates = 0;
-    sessionManager.createSession = async (
-      sessionId,
-      deviceId,
-      platform,
-      timeoutMs,
-      heartbeatTimeoutMs,
-    ) => {
-      const session = await createSession(
-        sessionId,
-        deviceId,
-        platform,
-        timeoutMs,
-        heartbeatTimeoutMs,
-      );
+    sessionManager.createSession = async (sessionId, deviceId, platform, options) => {
+      const session = await createSession(sessionId, deviceId, platform, options);
       sessionCreates++;
       if (sessionCreates === 1) {
         configure();
@@ -780,4 +799,67 @@ export function androidDeviceImage(
   extra: Partial<DeviceInfo> = {},
 ): DeviceInfo {
   return { name, platform: "android", isRunning: false, deviceId, ...extra };
+}
+
+/**
+ * Turn on reboot-on-death recovery for the current test and return the function that puts the
+ * environment back. Call the restore function in a `finally`.
+ */
+export function enableRebootOnDeath(): () => void {
+  const original = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+  process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+  return () => {
+    if (original === undefined) {
+      delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+    } else {
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = original;
+    }
+  };
+}
+
+/** The pooled device for `deviceId`, failing the test clearly when it is not in the pool. */
+export function requirePooledDevice(pool: DevicePool, deviceId: string): PooledDevice {
+  const pooled = pool.getDevice(deviceId);
+  if (!pooled) {
+    throw new Error("expected pooled device");
+  }
+  return pooled;
+}
+
+/** The not-running local "Pixel 8" AVD image that pool tests start devices from. */
+export function pixel8Source(): DeviceInfo {
+  return { name: "Pixel 8", platform: "android", isRunning: false, source: "local" };
+}
+
+/** Run `run` with reboot-on-death recovery enabled, restoring the environment afterwards. */
+export async function withRebootOnDeath(run: () => Promise<void>): Promise<void> {
+  const restore = enableRebootOnDeath();
+  try {
+    await run();
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * The ready/removed pool callbacks the daemon wires to a session registry. `getPool` is lazy
+ * because the pool being built is the one the callbacks read from.
+ */
+export function registryDeviceHooks(
+  registry: DeviceSessionRegistry,
+  getPool: () => DevicePool,
+): Pick<DevicePoolOverrides, "onDeviceReady" | "onDeviceRemoved"> {
+  return {
+    onDeviceReady: (deviceId) => {
+      const pooled = getPool().getDevice(deviceId);
+      if (pooled) {
+        registry.onDeviceConnected({
+          deviceId: pooled.id,
+          platform: pooled.platform,
+          incarnation: pooled.incarnation,
+        });
+      }
+    },
+    onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
+  };
 }

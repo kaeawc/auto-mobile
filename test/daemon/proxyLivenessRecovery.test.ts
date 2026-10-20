@@ -263,7 +263,7 @@ describe("LivenessRecovery states", () => {
     expect(h.recovery.busyEpisode()).not.toBe(first);
   });
 
-  test.each([DAEMON_STALLED_CODE, PROXY_STALLED_CODE])(
+  test.each([DAEMON_STALLED_CODE, PROXY_STALLED_CODE] satisfies LivenessStallCode[])(
     "%s: a session-awaited answer ends recovery without a handover",
     async (code) => {
       const h = harness({ outcomeFor: () => "session-awaited" });
@@ -664,9 +664,8 @@ describe("a proxy never stops or restarts the daemon (#10053)", () => {
   });
 
   test("the proxy's recovery methods never reach the daemon manager", () => {
-    const recovery = factsOf("src/daemon/daemonMcpProxy.ts", {
-      between: ["createLivenessRecovery", "heartbeatHeldSession"],
-    });
+    // daemonMcpProxy recovery now lives in this collaborator.
+    const recovery = factsOf("src/daemon/mcpProxy/ProxyLiveness.ts");
 
     expect(recovery.identifierNames.filter((name) => lifecycleIdentifier.test(name))).toEqual([]);
     for (const call of ["restart", "kill"]) {

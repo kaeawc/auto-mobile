@@ -13,19 +13,27 @@ import os
         // MARK: - Swipe Gestures
 
         public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
+            _ = try swipeReportingRoute(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+        }
+
+        public func swipeReportingRoute(
+            startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+        )
+            throws -> SwipeDispatchReport?
+        {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
             let target = gestureApplicationTarget()
             if try deliverToUnpinnedForegroundApp(
                 kind: .swipe, target: target, forced: nil, start: GesturePoint(x: startX, y: startY),
                 end: GesturePoint(x: endX, y: endY), duration: duration
             ) {
-                return
+                return .unpinnedSynthesized(duration: duration)
             }
             guard let app = gestureApplication(for: target) else {
                 throw GestureError.noApplication
             }
 
-            try catchingObjCException {
+            return try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
                 let factory = try DisplayGestureFactory(
                     provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
@@ -48,6 +56,7 @@ import os
                     factory.annotate(&sample, delivery: delivery)
                     logger.warning("\(sample.logLine(gesture: "swipe"), privacy: .public)")
                 }
+                return SwipeDispatchReport.forDelivery(route: delivery.route, distance: distance, duration: duration)
             }
         }
 
@@ -56,6 +65,16 @@ import os
             startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
         )
             throws
+        {
+            _ = try lockScreenSwipeReportingRoute(
+                startX: startX, startY: startY, endX: endX, endY: endY, duration: duration
+            )
+        }
+
+        public func lockScreenSwipeReportingRoute(
+            startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+        )
+            throws -> SwipeDispatchReport?
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
             // No XCUIApplication is resolved: the lock screen may leave the tracked app stale.
@@ -76,10 +95,10 @@ import os
                 }
                 return false
             }
-            if !synthesized {
-                // Availability fallback retains the existing XCUITest behavior and phase name.
-                try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
-            }
+            if synthesized { return .lockScreenSynthesized(duration: duration) }
+            // Availability fallback retains the existing XCUITest behavior and phase name; the
+            // report names the route the fallback really took.
+            return try swipeReportingRoute(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
         }
 
         public func multiFingerSwipe(
@@ -128,6 +147,36 @@ import os
                             symbolsUnavailable: symbolsUnavailable.boolValue,
                             underlying: errorMessage as String? ?? "multi-finger swipe synthesis failed"
                         )
+                    )
+                }
+            }
+        }
+
+        // MARK: - Path Gestures
+
+        public func path(points: [PathGesturePoint]) throws {
+            guard application != nil else {
+                throw GestureError.noApplication
+            }
+            let cgPoints = points.map { CGPoint(x: $0.x, y: $0.y) }
+            let offsets = points.map { TimeInterval($0.offsetMs) / 1000.0 }
+            try catchingObjCException {
+                let orientation = DeviceRotation.currentGestureInterfaceOrientation()
+                var errorMessage: NSString?
+                var symbolsUnavailable: ObjCBool = false
+                let succeeded = ObjCExceptionCatcher_synthesizePath(
+                    cgPoints, offsets, UInt(points.count), orientation.rawValue,
+                    &symbolsUnavailable, &errorMessage
+                )
+                if !succeeded {
+                    // No public XCUITest API follows an arbitrary polyline with timing, so there is
+                    // no degraded fallback; report the OS/XCTest gap clearly.
+                    let underlying = errorMessage as String? ?? "path gesture synthesis failed"
+                    throw GestureError.gestureFailed(
+                        symbolsUnavailable.boolValue
+                            ? "private XCTest touch synthesis unavailable on this OS/XCTest version, "
+                            + "and no public XCUITest API can follow a timed path. \(underlying)"
+                            : underlying
                     )
                 }
             }

@@ -1,7 +1,11 @@
+import type {
+  ObservedActionResult,
+  ObservedEnvelope,
+} from "../../src/features/action/observedInteractionTypes";
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { cancellationHandlers, cancellationTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
-import type WebSocket from "ws";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { Keyboard } from "../../src/features/action/Keyboard";
 import { HomeScreen } from "../../src/features/action/HomeScreen";
@@ -12,12 +16,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { CtrlProxyKeyboard } from "../../src/features/observe/ios/CtrlProxyKeyboard";
 import { CtrlProxyGestures } from "../../src/features/observe/ios/CtrlProxyGestures";
 import type { DelegateContext } from "../../src/features/observe/ios/types";
-import {
-  setKeyboardFactory,
-  resetKeyboardFactory,
-  setOpenUrlFactory,
-  resetOpenUrlFactory,
-} from "../../src/server/interactionTools";
+import { type InteractionToolDependencies } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   setSystemTrayDependencies,
@@ -29,7 +28,9 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeKeyboardHierarchyProvider } from "../fakes/FakeKeyboardHierarchyProvider";
 import { FakeDeviceUrlLauncher } from "../fakes/FakeDeviceUrlLauncher";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
+const interactionDeps: InteractionToolDependencies = {};
 const android: BootedDevice = { platform: "android", deviceId: "slice4-android", name: "Test" };
 const ios: BootedDevice = {
   platform: "ios",
@@ -47,6 +48,8 @@ const captured = JSON.parse(
 ) as Pick<ObserveResult, "viewHierarchy">;
 // Keep the captured notification rows; adapt only the platform's tray identity.
 const observation: ObserveResult = {
+  observationId: "test-observation",
+  display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: 0,
   screenSize: { width: 1080, height: 2316 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -59,27 +62,28 @@ const observation: ObserveResult = {
   },
 };
 const restores: Array<() => void> = [];
-const handler = cancellationHandlers(["keyboard", "openLink", "systemTray", "homeScreen"]);
+const handler = cancellationHandlers(
+  ["keyboard", "openLink", "systemTray", "homeScreen"],
+  interactionDeps,
+);
 
 const test = cancellationTests(() => {
   for (const restore of restores.splice(0)) {
     restore();
   }
-  resetKeyboardFactory();
-  resetOpenUrlFactory();
+  delete interactionDeps.keyboardFactory;
+  delete interactionDeps.openUrlFactory;
   resetSystemTrayDependencies();
   ToolRegistry.clearTools();
 });
 
 function profileClient() {
-  const client = AndroidCtrlProxyClient.createForTesting(
-    android,
-    new FakeAdbExecutor(),
-    () => {
+  const client = AndroidCtrlProxyClient.createForTesting(android, new FakeAdbExecutor(), {
+    webSocketFactory: () => {
       throw new Error("Unexpected socket connection");
     },
-    new FakeTimer(),
-  );
+    timer: new FakeTimer(),
+  });
   const supports = spyOn(client, "supportsCommand").mockResolvedValue(true);
   const set = spyOn(client, "setKeyboardProfile").mockResolvedValue({
     success: true,
@@ -175,7 +179,7 @@ function delayedConnection() {
   const context: DelegateContext = {
     timer,
     requestManager: manager,
-    getWebSocket: () => socket as WebSocket,
+    getWebSocket: () => socket,
     ensureConnected: () => {
       started.resolve();
       return connected.promise;
@@ -190,7 +194,7 @@ function delayedConnection() {
     },
     timer,
   );
-  const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const instance = spyOnIosClientInstance(client);
   restores.push(
     () => instance.mockRestore(),
     () => sent.mockRestore(),
@@ -229,15 +233,12 @@ test.each(["open", "close", "detect", "close follow-up detect"] as const)(
       },
     );
     restores.push(() => delegate.mockRestore());
-    setKeyboardFactory(
-      () =>
-        new Keyboard(
-          ios,
-          { create: () => new FakeAdbExecutor() },
-          new FakeKeyboardHierarchyProvider(),
-          h.timer,
-        ),
-    );
+    interactionDeps.keyboardFactory = () =>
+      new Keyboard(ios, {
+        adbFactory: { create: () => new FakeAdbExecutor() },
+        hierarchyProvider: new FakeKeyboardHierarchyProvider(),
+        timer: h.timer,
+      });
     const controller = new AbortController();
     const pending = handler("keyboard")(
       ios,
@@ -261,9 +262,12 @@ test.each(["open", "close", "detect", "close follow-up detect"] as const)(
 );
 
 class UnobservedOpenURL extends OpenURL {
+  override observedInteraction<R extends ObservedActionResult>(
+    block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+  ): Promise<R & ObservedEnvelope>;
   override async observedInteraction(
-    block: Parameters<OpenURL["observedInteraction"]>[0],
-  ): Promise<unknown> {
+    block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+  ): Promise<ObservedActionResult & ObservedEnvelope> {
     return block(observation);
   }
 }
@@ -279,7 +283,8 @@ test("physical iOS openLink forwards cancellation to devicectl", async () => {
     },
   );
   restores.push(() => launch.mockRestore());
-  setOpenUrlFactory(() => new UnobservedOpenURL(ios, new FakeAdbExecutor(), null, launcher, timer));
+  interactionDeps.openUrlFactory = () =>
+    new UnobservedOpenURL(ios, new FakeAdbExecutor(), null, launcher, timer);
   await expect(
     handler("openLink")(ios, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");
@@ -298,32 +303,16 @@ test.each(["tap", "dismiss"])(
       timer: new FakeTimer(),
       observeScreenFactory: () => ({ execute: async () => observation }),
       iosClientFactory: () => ({
-        requestTapCoordinates: async (
-          _x,
-          _y,
-          _duration?: number,
-          _timeout?: number,
-          _perf?: unknown,
-          _frame?: string,
-          signal?: AbortSignal,
-        ) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { signal } = request;
+
           received = signal;
           dispatches++;
           started.resolve();
           await finish.promise;
           return { success: true };
         },
-        requestSwipe: async (
-          _x1,
-          _y1,
-          _x2,
-          _y2,
-          _duration,
-          _timeout?: number,
-          _perf?: unknown,
-          _frame?: string,
-          signal?: AbortSignal,
-        ) => {
+        requestSwipe: async ({ signal }) => {
           received = signal;
           dispatches++;
           started.resolve();
@@ -423,7 +412,7 @@ test("homeScreen cancels during iOS foreground verification", async () => {
     };
   });
   const observe = spyOn(HomeScreen.prototype, "observedInteraction").mockImplementation(
-    async (block) => block(observation),
+    unobservedInteraction,
   );
   restores.push(
     () => press.mockRestore(),
@@ -439,3 +428,12 @@ test("homeScreen cancels during iOS foreground verification", async () => {
   expect(press).toHaveBeenCalledTimes(1);
   expect(hierarchy).toHaveBeenCalledTimes(1);
 });
+
+function unobservedInteraction<R extends ObservedActionResult>(
+  block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+): Promise<R & ObservedEnvelope>;
+async function unobservedInteraction(
+  block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+): Promise<ObservedActionResult & ObservedEnvelope> {
+  return block(observation);
+}

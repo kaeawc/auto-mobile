@@ -4,8 +4,6 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { errorMessage } from "../../utils/describeUnknownError";
 import {
   ActionableError,
   AndroidUser,
@@ -18,7 +16,6 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../db/installedAppsRepository";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/types";
-import { AndroidCtrlProxyClient } from "./android";
 import type { A11yInstalledPackagesResult, InstalledPackageRecord } from "./android/types";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
@@ -39,6 +36,8 @@ import {
   type AndroidAppCatalog,
   type AndroidAppCatalogEntry,
 } from "./androidAppCatalog";
+import { CtrlProxyInstalledPackageSource } from "./CtrlProxyInstalledPackageSource";
+import { findDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 
 /** Label + launchability per Android user id; launchability is a per-user fact. */
 type AndroidAppCatalogByUser = Map<number, AndroidAppCatalog>;
@@ -102,80 +101,6 @@ export interface AndroidPackagesA11yClient {
   ): Promise<A11yInstalledPackagesResult>;
 }
 
-/** Production source: one request against the on-device accessibility service. */
-export class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageSource {
-  private readonly device: BootedDevice;
-  private readonly a11yClient?: AndroidPackagesA11yClient;
-
-  constructor(device: BootedDevice, a11yClient?: AndroidPackagesA11yClient) {
-    this.device = device;
-    this.a11yClient = a11yClient;
-  }
-
-  private async requestFromClient(
-    client: AndroidPackagesA11yClient,
-    signal?: AbortSignal,
-  ): Promise<A11yInstalledPackagesResult> {
-    signal?.throwIfAborted();
-    if (!signal) {
-      return client.requestInstalledPackages(true, undefined, 4000);
-    }
-
-    const request = client.requestInstalledPackages(true, undefined, 4000);
-    void request.then(
-      () => {
-        if (signal.aborted) {
-          // The request settled after cancellation won the race, so its result is safe to ignore.
-          logger.debug(
-            `[ListInstalledApps] ignoring late installed_packages response for device ${this.device.deviceId}`,
-          );
-        }
-      },
-      (error) => {
-        if (signal.aborted) {
-          // The request settled after cancellation won the race, so its failure is safe to ignore.
-          logger.debug(
-            `[ListInstalledApps] ignoring late installed_packages failure for device ${this.device.deviceId}: ${errorMessage(error)}`,
-          );
-        }
-      },
-    );
-    return await raceWithDeadline(request, {
-      timer: defaultTimer,
-      signal,
-      label: "Installed packages request",
-      relabelDefaultAbort: false,
-    });
-  }
-
-  async requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackagesRequest> {
-    try {
-      const client = this.a11yClient ?? AndroidCtrlProxyClient.getInstance(this.device);
-      const result = await this.requestFromClient(client, signal);
-      signal?.throwIfAborted();
-      if (result.success) {
-        return { available: true, result: { userId: result.userId, packages: result.packages } };
-      }
-      const reason = result.error ?? "unknown error";
-      // The caller folds this reason into one warn only when a non-namesOnly catalog fallback runs.
-      logger.debug(
-        `[ListInstalledApps] installed_packages request failed for device ${this.device.deviceId}: ${reason}`,
-      );
-      return { available: false, reason };
-    } catch (error) {
-      if (signal?.aborted) {
-        throw signal.reason ?? error;
-      }
-      const reason = errorMessage(error);
-      // The caller folds this reason into one warn only when a non-namesOnly catalog fallback runs.
-      logger.debug(
-        `[ListInstalledApps] installed_packages request threw for device ${this.device.deviceId}: ${reason}`,
-      );
-      return { available: false, reason };
-    }
-  }
-}
-
 export interface DetailedListingOptions {
   /**
    * Skip the label/launchability catalog (#6798). A names-only caller does not
@@ -215,7 +140,7 @@ interface ListInstalledAppsOptions {
 
 export class ListInstalledApps {
   private adb: AdbExecutor;
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "listAppsOrThrow">;
   private device: BootedDevice;
   private installedAppsRepository: InstalledAppsStore;
   private cacheEnabled: boolean;
@@ -233,7 +158,7 @@ export class ListInstalledApps {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    simctl: SimCtlClient | null = null,
+    simctl: Pick<SimCtlClient, "listAppsOrThrow"> | null = null,
     options: ListInstalledAppsOptions = {},
   ) {
     this.adb = adbFactory.create(device);
@@ -628,8 +553,6 @@ export class ListInstalledApps {
       timestampMs: this.timer.now(),
       foregroundApp: null,
     };
-    let hadUserErrors = false;
-
     // Get all users on the device
     logger.info("[ListInstalledApps] Getting list of users...");
     const users = await this.adb.listUsers(signal);
@@ -639,14 +562,55 @@ export class ListInstalledApps {
     );
     if (users.length === 0) {
       logger.warn("[ListInstalledApps] No users reported; skipping cache update");
-      return { apps: installedApps, successful: false };
+      return {
+        apps: installedApps,
+        successful: false,
+        error: new ActionableError(
+          `No users reported for ${this.device.deviceId}; retry the installed-app listing.`,
+        ),
+      };
     }
 
     // Get the current foreground app
     accumulator.foregroundApp = await this.adb.getForegroundApp(signal);
     signal?.throwIfAborted();
 
+    const { hadUserErrors, error } = await this.collectPackagesForUsers(
+      accumulator,
+      users,
+      signal,
+      options,
+    );
+
+    installedApps.system = Array.from(systemAppsMap.values());
+    const profileAppCount = Object.values(installedApps.profiles).reduce(
+      (count, apps) => count + apps.length,
+      0,
+    );
+
+    logger.info(
+      `Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`,
+    );
+
+    if (this.cacheEnabled) {
+      await this.persistRebuiltCache(cacheGeneration, cacheEntries, hadUserErrors);
+    }
+
+    return hadUserErrors
+      ? { apps: installedApps, successful: false, error }
+      : { apps: installedApps, successful: true };
+  }
+
+  /** Collect partial inventory while preserving the first, preferably transport, failure. */
+  private async collectPackagesForUsers(
+    accumulator: InventoryAccumulator,
+    users: AndroidUser[],
+    signal: AbortSignal | undefined,
+    options: DetailedListingOptions,
+  ): Promise<{ hadUserErrors: boolean; error?: unknown }> {
     const proxyRequest = await this.fetchCtrlProxyPackages(signal);
+    let hadUserErrors = false;
+    let firstUserError: unknown;
 
     // List packages for each user
     for (const user of users) {
@@ -670,27 +634,19 @@ export class ListInstalledApps {
         this.collectSystemPackages(accumulator, user, systemPackages, catalog);
       } catch (error) {
         signal?.throwIfAborted();
+        if (
+          !hadUserErrors ||
+          (!findDeviceTransportUnavailable(firstUserError) && findDeviceTransportUnavailable(error))
+        ) {
+          firstUserError = error;
+        }
         hadUserErrors = true;
         logger.warn(`Failed to list packages for user ${user.userId}:`, error);
         // Continue with other users
       }
     }
 
-    installedApps.system = Array.from(systemAppsMap.values());
-    const profileAppCount = Object.values(installedApps.profiles).reduce(
-      (count, apps) => count + apps.length,
-      0,
-    );
-
-    logger.info(
-      `Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`,
-    );
-
-    if (this.cacheEnabled) {
-      await this.persistRebuiltCache(cacheGeneration, cacheEntries, hadUserErrors);
-    }
-
-    return { apps: installedApps, successful: !hadUserErrors };
+    return { hadUserErrors, error: firstUserError };
   }
 
   /**

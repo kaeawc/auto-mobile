@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import {
   MAX_PLAN_TOOL_RESULTS_CHARS,
   MAX_STEP_TOOL_RESULT_CHARS,
@@ -32,10 +32,10 @@ const markDevice = (name: string) => {
 };
 
 describe("PlanExecutor toolResults (#10090)", () => {
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
 
   beforeEach(() => {
-    executor = new DefaultPlanExecutor(new FakeTimer());
+    executor = createDefaultPlanExecutor(new FakeTimer());
     ToolRegistry.register(pickTool, "Pick a random row", stepSchema, async (params) =>
       createStructuredToolResponse({
         success: true,
@@ -241,10 +241,10 @@ describe("boundStepToolResult / StepToolResultCollector", () => {
 describe("PlanExecutor toolResults edge shapes (#10090)", () => {
   const bareTool = "toolResultsBare";
   const trackTool = "toolResultsTrack";
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
 
   beforeEach(() => {
-    executor = new DefaultPlanExecutor(new FakeTimer());
+    executor = createDefaultPlanExecutor(new FakeTimer());
     ToolRegistry.register(bareTool, "Unwrapped payload", stepSchema, async () => ({
       success: true,
       selectedElement: { text: "bare" },

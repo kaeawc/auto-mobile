@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SendKeys } from "../../../src/features/action/SendKeys";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
@@ -10,11 +11,7 @@ import {
   ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV,
   OBSERVE_SETTLED_SCREENSHOT_ENV,
 } from "../../../src/features/observe/automaticScreenshotPolicy";
-import type {
-  ObserveScreenExecuteOptions,
-  ObserveScreen,
-} from "../../../src/features/observe/interfaces/ObserveScreen";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
@@ -65,7 +62,7 @@ class CountingObserveScreen extends FakeObserveScreen {
   }
 
   override async captureScreenshot(
-    ...args: Parameters<NonNullable<ObserveScreen["captureScreenshot"]>>
+    ...args: Parameters<FakeObserveScreen["captureScreenshot"]>
   ): Promise<void> {
     this.captures.push(this.phase);
     return super.captureScreenshot(...args);
@@ -94,7 +91,7 @@ class PhaseCtrlProxy extends FakeCtrlProxy {
 function screen(key: string): ObserveResult {
   return {
     observationId: `observe-${key}`,
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: {
       key,
@@ -117,16 +114,18 @@ function screen(key: string): ObserveResult {
       screenWidth: 200,
       screenHeight: 200,
     },
-  } as ObserveResult;
+  } satisfies ObserveResult;
 }
 
 function adb(): FakeAdbExecutor {
   const result = new FakeAdbExecutor();
-  result.setCommandResponse("cmd display get-displays", {
-    stdout:
+  result.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 200 x 200}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   return result;
 }
 
@@ -173,7 +172,7 @@ const actions: Record<string, Run> = {
     return action.execute({ text: "Settings", action: "tap", display: key });
   },
   swipeOn: async (key, executor, observe) =>
-    new SwipeOn(device, executor as unknown as AdbClient, {
+    new SwipeOn(device, executor, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: rendered(key),
@@ -222,15 +221,9 @@ describe("explicit-display pre-dispatch read", () => {
     async (key) => {
       const observe = new CountingObserveScreen();
       observe.setObserveResult(screen(key));
-      await prepareTargetDisplayAction(
-        device,
-        key,
-        observe,
-        adb(),
-        rendered(key),
-        undefined,
-        undefined,
-      );
+      await prepareTargetDisplayAction(device, key, observe, adb(), {
+        lastRenderedObservation: rendered(key),
+      });
       expect(observe.captures).toEqual([]);
       expect(observe.audits).toEqual([]);
       expect(observe.reads).toHaveLength(1);
@@ -289,15 +282,9 @@ describe("explicit-display pre-dispatch read", () => {
         timer,
       );
       try {
-        const prepared = await prepareTargetDisplayAction(
-          target,
-          key,
-          screen,
-          adb(),
-          rendered(key),
-          undefined,
-          undefined,
-        );
+        const prepared = await prepareTargetDisplayAction(target, key, screen, adb(), {
+          lastRenderedObservation: rendered(key),
+        });
         expect(prepared.observation.display.key).toBe(key);
         expect(prepared.displayId).toBe(displayId);
         expect(recorder.startCalls + recorder.captureCalls).toBe(0);
@@ -319,10 +306,12 @@ describe("explicit-display pre-dispatch read", () => {
         const observe = new CountingObserveScreen();
         observe.setObserveResult(screen(key));
         const spy = markDispatch(executor, observe);
-        const proxy = new PhaseCtrlProxy(observe) as AndroidCtrlProxyClient;
+        const proxy = new PhaseCtrlProxy(observe);
+        const existing = AndroidCtrlProxyClient.createForTesting(device, executor);
+        existing.invalidateCache = (...args) => proxy.invalidateCache(...args);
         proxySpies.push(
           spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy),
-          spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(proxy),
+          spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(existing),
         );
         const result = await actions[name]!(key, executor, observe);
         spy.mockRestore();

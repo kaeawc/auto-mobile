@@ -1,8 +1,6 @@
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   notifyDatabaseChanged,
   registerDatabaseResources,
@@ -11,6 +9,8 @@ import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { ProviderUnavailableError } from "../../src/features/storage/ProviderUnavailableError";
 
 // Minimal MCP-server stand-in, matching the pattern in
@@ -32,42 +32,51 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
 
   const base = "automobile:devices/ios-1/databases/%2Fapp%2FDocuments%2Fapp.db/tables/notes/data";
 
-  let originalGetInstance: typeof IOSCtrlProxyClient.getInstance;
+  let iosClient: IOSCtrlProxyClient;
+  let getInstanceSpy: ReturnType<typeof spyOn<typeof IOSCtrlProxyClient, "getInstance">>;
 
   beforeEach(() => {
     ResourceRegistry.clearResources();
     ResourceRegistry.clearServersForTesting();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
-    originalGetInstance = IOSCtrlProxyClient.getInstance;
+    const timer = new FakeTimer();
+    iosClient = IOSCtrlProxyClient.createForTesting(
+      device,
+      8765,
+      () => {
+        throw new Error("database resource tests stub the client methods and never open a socket");
+      },
+      timer,
+    );
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(iosClient);
   });
 
-  afterEach(() => {
-    IOSCtrlProxyClient.getInstance = originalGetInstance;
+  afterEach(async () => {
+    getInstanceSpy.mockRestore();
+    await iosClient.close();
     ResourceRegistry.clearResources();
     ResourceRegistry.clearServersForTesting();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
   });
 
-  function setupDevice(getTableDataForIos: (...args: unknown[]) => Promise<unknown>): void {
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      getTableDataForIos,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: mock(async (platform: string) => (platform === "ios" ? [device] : [])),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+  function setupDevice(getTableDataForIos: IOSCtrlProxyClient["getTableDataForIos"]): void {
+    spyOn(iosClient, "getTableDataForIos").mockImplementation(getTableDataForIos);
+    registerBootedIosDevice();
+  }
+
+  function registerBootedIosDevice(): void {
+    const deviceManager = new FakeDeviceManager();
+    deviceManager.bootedDevices = [device];
+    PlatformDeviceManagerFactory.setInstance(deviceManager);
   }
 
   test("database resource retains typed provider failure fields", async () => {
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      listDatabasesForIos: async () => {
-        throw new ProviderUnavailableError("Could not find provider");
-      },
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: mock(async (platform: string) => (platform === "ios" ? [device] : [])),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    spyOn(iosClient, "listDatabasesForIos").mockRejectedValue(
+      new ProviderUnavailableError("Could not find provider"),
+    );
+    registerBootedIosDevice();
     registerDatabaseResources();
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/ios-1/databases?appId=com.example.nondebug",
@@ -313,9 +322,9 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     expect(content.uri).toBe(canonicalUri);
 
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    ResourceRegistry.registerWithServer(server);
     try {
-      const subscribeHandler = server.server.handlersBySchema.get(SubscribeRequestSchema);
+      const subscribeHandler = server.server.handlersBySchema.get("resources/subscribe");
       expect(subscribeHandler).toBeDefined();
       // Client subscribes to the exact URI it was handed back.
       await subscribeHandler!({ params: { uri: content.uri } });

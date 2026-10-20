@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { deriveAndroidScreenIdentity } from "../../../../src/features/observe/android/AndroidScreenIdentity";
 import { deriveSdkNavigationScreenIdentity } from "../../../../src/features/observe/sdkScreenIdentity";
-import type { ObserveResult, ViewHierarchyNode } from "../../../../src/models";
+import type { ObserveResult, ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
+import { isViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
+import { observeResultFromFixture } from "../../../helpers/observeFixture";
 import playgroundCapture from "../../../fixtures/android-enabled/playground-disabled-control-api36.json";
 import prototypeCapture from "../../../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
 import imeCapture from "../../../fixtures/android-ime-window/playground-gboard-api36.json";
@@ -10,13 +12,27 @@ const PLAYGROUND = "dev.jasonpearson.automobile.playground";
 
 /** A fresh copy of a captured observation, so a test can annotate it without leaking. */
 function capture(source: unknown): ObserveResult {
-  return structuredClone(source) as ObserveResult;
+  return observeResultFromFixture(structuredClone(source), "android-screen-identity");
+}
+
+/** A fresh copy of a captured bare hierarchy (no observation envelope), validated at the boundary. */
+function captureHierarchy(source: unknown): ViewHierarchyResult {
+  const hierarchy = structuredClone(source);
+  if (!isViewHierarchyResult(hierarchy)) {
+    throw new Error("fixture is not a captured ViewHierarchyResult");
+  }
+  return hierarchy;
 }
 
 /** The captured root of window `windowId`. */
-function windowRoot(observation: ObserveResult, windowId: number): ViewHierarchyNode {
+function windowRoot(
+  observation: Pick<ObserveResult, "viewHierarchy">,
+  windowId: number,
+): ViewHierarchyNode {
   const roots = observation.viewHierarchy!.hierarchy.node as ViewHierarchyNode[];
-  return roots.find((root) => root.windowId === windowId)!;
+  return roots.find(
+    (root) => Object.getOwnPropertyDescriptor(root, "windowId")?.value === windowId,
+  )!;
 }
 
 /** The first child of the captured window root: where Compose would attach `paneTitle` semantics. */
@@ -95,7 +111,7 @@ describe("deriveAndroidScreenIdentity", () => {
     firstChild(windowRoot(prototype, 174))["pane-title"] = "Prototype";
     expect(deriveAndroidScreenIdentity(prototype.viewHierarchy)).toBeUndefined();
 
-    const ime = { viewHierarchy: structuredClone(imeCapture) } as unknown as ObserveResult;
+    const ime = { viewHierarchy: captureHierarchy(imeCapture) };
     firstChild(windowRoot(ime, 550))["pane-title"] = "Keyboard";
     expect(deriveAndroidScreenIdentity(ime.viewHierarchy)).toBeUndefined();
   });

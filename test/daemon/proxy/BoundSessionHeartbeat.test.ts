@@ -4,10 +4,8 @@ import {
   BoundSessionHeartbeat,
   type BoundSessionHeartbeatPort,
 } from "../../../src/daemon/proxy/BoundSessionHeartbeat";
-import {
-  DaemonBoundSessionExpiredError,
-  daemonInternalErrors,
-} from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import { HeldSessionNotFoundError } from "../../../src/daemon/proxy/HeldSessionNotFoundError";
 import type { LatestHeartbeatAsk } from "../../../src/daemon/proxy/ProxySessionState";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
 import {
@@ -22,7 +20,6 @@ import {
 } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const { HeldSessionNotFoundError } = daemonInternalErrors;
 const LEASH_MS = 10_000;
 
 function harness() {

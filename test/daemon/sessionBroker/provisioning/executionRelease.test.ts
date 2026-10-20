@@ -9,7 +9,7 @@ import type { KeepAwakeRestoreReport } from "../../../../src/utils/KeepScreenAwa
 import { FakeDbWriteBarrier } from "../../../fakes/FakeDbWriteBarrier";
 import type { BindingKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/daemon/sessionBroker/provisioning/executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/models/managedExecutionLiveness";
 import { logger } from "../../../../src/utils/logger";
 import { SessionManager } from "../../../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
@@ -425,7 +425,9 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       expect(timer.now() - start).toBeGreaterThanOrEqual(CAP_MS + 5 * SLOW_POLL_MS);
       expect(polls.filter((ms) => ms === SLOW_POLL_MS).length).toBeGreaterThanOrEqual(4);
       expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("did not settle")),
+        warn.mock.calls.filter(([message]: unknown[]) =>
+          String(message).includes("did not settle"),
+        ),
       ).toHaveLength(1);
     });
 
@@ -605,12 +607,10 @@ describe("managed execution release wiring", () => {
       status: "restored_to_baseline" as const,
       settings: [{ setting: "svc_stayon" as const, value: "false" }],
     };
-    const manager = new SessionManager(
-      new FakeTimer(),
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => report }),
-    );
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => report }),
+    });
     manager.stopCleanupTimer();
     try {
       await manager.createSession(S1, DEVICE, "android");

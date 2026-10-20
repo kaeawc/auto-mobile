@@ -1,7 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
-import type { DaemonManager } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
+import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+import {
+  buildSession,
+  ScriptedDevicePool,
+  ScriptedSessionManager,
+  unexpected,
+} from "./helpers/cliDaemonState";
 
 describe("in-daemon CLI release caller ordering", () => {
   test.each(["success", "session", "pool"] as const)(
@@ -10,31 +16,30 @@ describe("in-daemon CLI release caller ordering", () => {
       const events: unknown[][] = [];
       const error = new Error(`${failure} failed`);
       const exited = new Error("command exited");
-      class Manager {
-        getDaemonState() {
-          return {
-            isInitialized: () => true,
-            getSessionManager: () => ({
-              getSession: () => ({ assignedDevice: "d1" }),
-              releaseSession: async (...args: unknown[]) => {
-                events.push(["session.releaseSession", ...args]);
-                if (failure === "session") {
-                  throw error;
-                }
-                return "different-returned-device";
-              },
-            }),
-            getDevicePool: () => ({
-              releaseDevice: async (...args: unknown[]) => {
-                events.push(["pool.releaseDevice", ...args]);
-                if (failure === "pool") {
-                  throw error;
-                }
-              },
-            }),
-          } as unknown as DaemonStateLike;
-        }
-      }
+      const sessions = new ScriptedSessionManager({
+        getSession: () => buildSession({ assignedDevice: "d1" }),
+        releaseSession: async (...args) => {
+          events.push(["session.releaseSession", ...args]);
+          if (failure === "session") {
+            throw error;
+          }
+          return "different-returned-device";
+        },
+      });
+      const pool = new ScriptedDevicePool(sessions, {
+        releaseDevice: async (...args) => {
+          events.push(["pool.releaseDevice", ...args]);
+          if (failure === "pool") {
+            throw error;
+          }
+        },
+      });
+      const state: DaemonStateLike = {
+        isInitialized: () => true,
+        getSessionManager: () => sessions,
+        getDevicePool: () => pool,
+        getDeviceSessionRegistry: unexpected,
+      };
       const log = spyOn(console, "log").mockImplementation((...args) => {
         events.push(["printReleased", ...args]);
       });
@@ -49,8 +54,8 @@ describe("in-daemon CLI release caller ordering", () => {
         const command = runDaemonCommand(
           "release-session",
           ["s1"],
-          {},
-          Manager as unknown as new () => DaemonManager,
+          { stateProvider: () => state },
+          SafeDaemonManager,
         );
         if (failure === "success") {
           await command;

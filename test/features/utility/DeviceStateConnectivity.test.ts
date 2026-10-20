@@ -20,7 +20,7 @@ import {
   DEVICE_STATE_WRITABLE_FIELDS,
 } from "../../../src/features/utility/DeviceState";
 import { setDeviceStateSchema } from "../../../src/server/utilityTools";
-import { addDeviceTargetingToSchema } from "../../../src/server/toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "../../../src/utils/schemaHelpers";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 

@@ -11,6 +11,8 @@ import { logger } from "../../utils/logger";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultDeviceSetRoot } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { ExpiringControllerVersionMemory } from "./ExpiringControllerVersionMemory";
+export { ExpiringControllerVersionMemory } from "./ExpiringControllerVersionMemory";
 
 /**
  * Host bridge to the macOS Network Extension controller (#10590, plan #6298).
@@ -36,37 +38,10 @@ export const NETWORK_FILTER_CONTRACT_VERSION = 4;
 export const NETWORK_FILTER_LEGACY_CONTRACT_VERSION = 3;
 export const NETWORK_FILTER_UPGRADE_COMMAND = "auto-mobile --ios-network-filter install --upgrade";
 
-export const NETWORK_FILTER_LEGACY_MEMORY_TTL_MS = 60_000;
-
 export interface ControllerVersionMemory {
   isLegacy(controllerPath: string, nowMs: number): boolean;
   markLegacy(controllerPath: string, nowMs: number): void;
   clear(controllerPath: string): void;
-}
-
-/** Shared by production bridges; tests inject a fresh instance. */
-export class ExpiringControllerVersionMemory implements ControllerVersionMemory {
-  private readonly legacySince = new Map<string, number>();
-
-  isLegacy(controllerPath: string, nowMs: number): boolean {
-    const markedAt = this.legacySince.get(controllerPath);
-    if (markedAt === undefined) {
-      return false;
-    }
-    if (nowMs - markedAt < NETWORK_FILTER_LEGACY_MEMORY_TTL_MS) {
-      return true;
-    }
-    this.clear(controllerPath);
-    return false;
-  }
-
-  markLegacy(controllerPath: string, nowMs: number): void {
-    this.legacySince.set(controllerPath, nowMs);
-  }
-
-  clear(controllerPath: string): void {
-    this.legacySince.delete(controllerPath);
-  }
 }
 
 const defaultControllerVersionMemory = new ExpiringControllerVersionMemory();

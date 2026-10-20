@@ -29,10 +29,7 @@ describe("legacy waitForObservation device clock floor", () => {
     const outcome = await waitForObservation(
       screen,
       { activeWindow: { appId: "com.example" }, timeout: 500 },
-      undefined,
-      false,
-      timer,
-      "android",
+      { skipBackStack: false, timer, platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -51,10 +48,7 @@ describe("legacy waitForObservation device clock floor", () => {
     const outcome = await waitForObservation(
       screen,
       { activeWindow: { appId: "com.example" }, timeout: 500 },
-      undefined,
-      false,
-      timer,
-      "android",
+      { skipBackStack: false, timer, platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -74,10 +68,7 @@ describe("legacy waitForObservation device clock floor", () => {
     const outcome = await waitForObservation(
       screen,
       { activeWindow: { appId: "com.example" }, timeout: 500 },
-      undefined,
-      false,
-      timer,
-      "android",
+      { skipBackStack: false, timer, platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -100,10 +91,7 @@ describe("legacy waitForObservation device clock floor", () => {
     const outcome = await waitForObservation(
       screen,
       { activeWindow: { appId: "com.example" }, timeout: 500 },
-      undefined,
-      false,
-      timer,
-      "android",
+      { skipBackStack: false, timer, platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -125,10 +113,7 @@ describe("legacy waitForObservation device clock floor", () => {
     const outcome = await waitForObservation(
       screen,
       { activeWindow: { appId: "com.example" }, timeout: 500 },
-      undefined,
-      false,
-      timer,
-      "android",
+      { skipBackStack: false, timer, platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -186,10 +171,7 @@ describe("waitFor settled gate device clock floor", () => {
         settled: { quietPeriodMs: 500 },
         timeoutMs: 5000,
       },
-      undefined,
-      false,
-      timer,
-      platform,
+      { skipBackStack: false, timer, platform },
     );
     return { outcome, screen };
   };

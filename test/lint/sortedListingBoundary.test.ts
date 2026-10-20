@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 import { sortedReaddirEntriesSync } from "../../src/utils/io";
-import { blankComments } from "./blankComments";
+
+import { parseGuardSource, unwrapCallee, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 
 // Issue #10689: raw directory listings come back in filesystem order (hash order on ext4,
 // roughly alphabetical on APFS/NTFS), so code and tests that observe them behave differently per
@@ -13,25 +14,63 @@ const HELPER_FILE = path.join("utils", "io.ts");
 /** Per-file exceptions, each with the reason raw listing order cannot reach any output. */
 export const ALLOW_LIST: Readonly<Record<string, string>> = {};
 
-const RAW_LISTING_PATTERNS: readonly RegExp[] = [
-  /(?<![\w.])(?:readdirSync|opendirSync|opendir|globSync)\s*\(/,
-  /(?<![\w.])(?:fs|nodeFs|fsp|fsPromises|promises)\.(?:readdir|readdirSync|opendir|opendirSync|glob|globSync)\b/,
-  // A bare imported `readdir(dir)` call; method declarations (`readdir(path: string)`) carry a type.
-  /(?<![\w.])readdir\((?![^)]*:)/,
-  /\bnew\s+(?:Bun\.)?Glob\s*\(/,
-];
+const LISTING_CALLS = new Set(["readdirSync", "opendirSync", "opendir", "globSync", "readdir"]);
+const FS_NAMESPACES = new Set(["fs", "nodeFs", "fsp", "fsPromises", "promises"]);
+const FS_LISTING_MEMBERS = new Set([
+  "readdir",
+  "readdirSync",
+  "opendir",
+  "opendirSync",
+  "glob",
+  "globSync",
+]);
 
-export function findRawListings(source: string): number[] {
-  // Cheap prefilter: parsing every file for comments is slow, so only files that mention a
-  // listing API at all are blanked and scanned line by line.
+/** 1-based lines of raw directory listings: bare listing calls, `fs.*` members and `new Glob`. */
+export function findRawListings(source: string, file = "fixture.ts"): number[] {
+  // Cheap prefilter: parsing every file is slow, so only files that mention a listing API at
+  // all are parsed.
   if (!/readdir|opendir|[gG]lob/.test(source)) {
     return [];
   }
-  return blankComments(source)
-    .split(/\r?\n/)
-    .flatMap((line, index) =>
-      RAW_LISTING_PATTERNS.some((pattern) => pattern.test(line)) ? [index + 1] : [],
-    );
+  const lineStarts = [0];
+  for (const match of source.matchAll(/\n/g)) {
+    lineStarts.push(match.index + 1);
+  }
+  const lineOf = (offset: number) => lineStarts.findLastIndex((start) => start <= offset) + 1;
+  const lines = new Set<number>();
+  new Visitor({
+    CallExpression(node) {
+      const callee = unwrapCallee(node.callee);
+      if (callee.type === "Identifier" && LISTING_CALLS.has(callee.name)) {
+        lines.add(lineOf(node.start));
+      }
+    },
+    MemberExpression(node) {
+      if (
+        node.object.type === "Identifier" &&
+        FS_NAMESPACES.has(node.object.name) &&
+        !node.computed &&
+        node.property.type === "Identifier" &&
+        FS_LISTING_MEMBERS.has(node.property.name)
+      ) {
+        lines.add(lineOf(node.start));
+      }
+    },
+    NewExpression(node) {
+      const callee = node.callee;
+      if (
+        (callee.type === "Identifier" && callee.name === "Glob") ||
+        (callee.type === "MemberExpression" &&
+          callee.object.type === "Identifier" &&
+          callee.object.name === "Bun" &&
+          callee.property.type === "Identifier" &&
+          callee.property.name === "Glob")
+      ) {
+        lines.add(lineOf(node.start));
+      }
+    },
+  }).visit(parseGuardSource(file, source));
+  return [...lines].sort((a, b) => a - b);
 }
 
 function sourceFiles(directory: string): string[] {
@@ -57,7 +96,7 @@ describe("sorted listing boundary (issue #10689)", () => {
       if (relative === HELPER_FILE || relative in ALLOW_LIST) {
         return [];
       }
-      return findRawListings(readFileSync(file, "utf8")).map((line) => `src/${relative}:${line}`);
+      return findRawListings(readGuardFile(file), file).map((line) => `src/${relative}:${line}`);
     });
   }, 30_000);
 
@@ -82,7 +121,11 @@ describe("sorted listing boundary (issue #10689)", () => {
     expect(findRawListings("const g = new Bun.Glob('**/*.ts');")).toEqual([1]);
     expect(findRawListings("await sortedReaddir(dir);")).toEqual([]);
     expect(findRawListings("await this.fileSystem.readdir(dir);")).toEqual([]);
-    expect(findRawListings("  readdir(dirPath: string): Promise<string[]>;")).toEqual([]);
+    expect(findRawListings("interface F { readdir(dirPath: string): Promise<string[]>; }")).toEqual(
+      [],
+    );
     expect(findRawListings("// readdirSync(dir)")).toEqual([]);
+    expect(findRawListings("const note = 'readdirSync(dir)';")).toEqual([]);
+    expect(findRawListings("const a = 1;\n\nconst b = fsPromises.readdir(dir);")).toEqual([3]);
   });
 });

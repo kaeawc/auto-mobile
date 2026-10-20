@@ -1,6 +1,7 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BindingRegistryUpgradePendingError } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
-import type { DeviceInfo } from "../../src/models/DeviceInfo";
 import type { BindingRegistry } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -16,13 +17,10 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
@@ -49,15 +47,11 @@ describe("DevicePool binding exclusion", () => {
     open: () => Promise<BindingRegistry> = async () => registry,
   ) => {
     manager.bootedDevices = devices;
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "broker-binding-exclusion", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        bindingExclusion: new RegistryBindingExclusion(open, timer),
-      }),
-    );
+    pool = makePool(sessions, "broker-binding-exclusion", {
+      timer,
+      deviceManager: manager,
+      bindingExclusion: new RegistryBindingExclusion(open, timer),
+    });
     await pool.initializeWithDevices(devices);
   };
 
@@ -118,13 +112,7 @@ describe("DevicePool binding exclusion", () => {
       { platform: "ios", name: "Local image", deviceId: "IMAGE", isRunning: false },
       { platform: "ios", name: "amslot-leftover", deviceId: "LEGACY", isRunning: false },
     ];
-    const internals = pool as unknown as {
-      tryAssignDevice(
-        sessionId: string,
-        platform: "ios",
-      ): Promise<{ success: boolean; deviceId?: string }>;
-      getStartableDeviceImageCandidates(platform: "ios"): Promise<DeviceInfo[]>;
-    };
+    const internals = pool.testHooks;
     expect(await internals.tryAssignDevice("local-session", "ios")).toMatchObject({
       success: true,
       deviceId: "LOCAL",
@@ -204,7 +192,7 @@ describe("DevicePool binding exclusion", () => {
     await setUp([ios("SIM-SLOT")]);
 
     const error = await pool
-      .bindOrReuseDeviceSession("generic", "SIM-SLOT", "ios")
+      .bindOrReuseDeviceSession({ sessionId: "generic", deviceId: "SIM-SLOT", platform: "ios" })
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(DeviceAssignedToBindingError);
@@ -224,7 +212,11 @@ describe("DevicePool binding exclusion", () => {
       await assignBindingDevice(registry, "ios", stableId, "runner-a", "slot-exec");
       await setUp([{ ...ios("SIM-SLOT"), name: stableId }]);
 
-      await pool.bindOrReuseDeviceSession("slot-exec", "SIM-SLOT", "ios");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "slot-exec",
+        deviceId: "SIM-SLOT",
+        platform: "ios",
+      });
 
       expect(pool.getDevice("SIM-SLOT")?.sessionId).toBe("slot-exec");
     },
@@ -294,10 +286,16 @@ describe("DevicePool binding exclusion", () => {
     await setUp([android("emulator-5554")]);
 
     const error = await pool
-      .bindOrReuseDeviceSession("generic", "emulator-5554", "android", {
-        name: "slot-avd",
+      .bindOrReuseDeviceSession({
+        sessionId: "generic",
+        deviceId: "emulator-5554",
         platform: "android",
-        source: "local",
+        sourceImage: {
+          name: "slot-avd",
+          platform: "android",
+          source: "local",
+          isRunning: false,
+        },
       })
       .catch((caught: unknown) => caught);
 
@@ -308,7 +306,11 @@ describe("DevicePool binding exclusion", () => {
     "auto-start skips unregistered product AVD %s",
     async (name) => {
       await setUp([android("d1")]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
       manager.deviceImages = [
         { name, platform: "android", isRunning: false },
         { name: "spare-avd", platform: "android", isRunning: false },
@@ -333,7 +335,7 @@ describe("DevicePool binding exclusion", () => {
   test("auto-start never boots a stopped AVD a binding holds", async () => {
     await assignBindingDevice(registry, "android", "slot-avd");
     await setUp([android("d1")]);
-    await pool.bindOrReuseDeviceSession("base", "d1", "android");
+    await pool.bindOrReuseDeviceSession({ sessionId: "base", deviceId: "d1", platform: "android" });
     manager.deviceImages = [
       { name: "slot-avd", platform: "android", isRunning: false },
       { name: "spare-avd", platform: "android", isRunning: false },
@@ -380,8 +382,8 @@ describe("DevicePool binding exclusion", () => {
     await sessions.createSession("existing", "SIM-HELD", "ios");
     // Seed control that predates registry discovery without taking a device through its gate.
     const held = pool.getDevice("SIM-HELD")!;
-    held.sessionId = "existing";
-    held.status = "assigned";
+    patchDeviceBinding(held, { sessionId: "existing" });
+    patchDeviceBinding(held, { status: "busy" });
     registry.snapshotManagedDevices = async () => {
       throw new Error("registry never readable");
     };
@@ -407,7 +409,9 @@ describe("DevicePool binding exclusion", () => {
   test("a plain caller cannot take a device absent from the retained snapshot", async () => {
     await setUp([ios("SIM-FREE")]);
     await failAfterSnapshot();
-    await expect(pool.bindOrReuseDeviceSession("plain", "SIM-FREE", "ios")).rejects.toMatchObject({
+    await expect(
+      pool.bindOrReuseDeviceSession({ sessionId: "plain", deviceId: "SIM-FREE", platform: "ios" }),
+    ).rejects.toMatchObject({
       code: BINDING_DISCOVERY_INCOMPLETE_CODE,
       retryable: true,
     });
@@ -468,8 +472,8 @@ describe("DevicePool binding exclusion", () => {
     await assignBindingDevice(registry, "ios", "SIM-SLOT", "runner", "peer");
     await setUp([ios("SIM-SLOT")]);
     const held = pool.getDevice("SIM-SLOT")!;
-    held.sessionId = "local";
-    held.status = "assigned";
+    patchDeviceBinding(held, { sessionId: "local" });
+    patchDeviceBinding(held, { status: "busy" });
     await expect(
       pool.assertNotAssignedToBinding({
         action: "tapOn",
@@ -482,7 +486,11 @@ describe("DevicePool binding exclusion", () => {
 
   test("an existing unmanaged holder keeps control and inventory remains available", async () => {
     await setUp([ios("SIM-FREE")]);
-    await pool.bindOrReuseDeviceSession("existing", "SIM-FREE", "ios");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "existing",
+      deviceId: "SIM-FREE",
+      platform: "ios",
+    });
     await failAfterSnapshot();
     await pool.assertNotAssignedToBinding({
       action: "tapOn",

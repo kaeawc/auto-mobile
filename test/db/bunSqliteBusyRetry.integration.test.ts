@@ -1,7 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import type { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery } from "kysely";
-import { BunSqliteConnectionState } from "../../src/db/bunSqliteDialect";
+import { BunSqliteConnectionState, type BunSqliteHandle } from "../../src/db/bunSqliteDialect";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { Random } from "../../src/utils/Random";
@@ -36,7 +35,7 @@ interface StatementScript {
  * The script drives what each prepared-statement invocation does.
  */
 function fakeDatabase(script: StatementScript): {
-  db: BunDatabase;
+  db: BunSqliteHandle;
   invocations: () => number;
 } {
   let calls = 0;
@@ -58,11 +57,11 @@ function fakeDatabase(script: StatementScript): {
     get: (..._params: unknown[]) => ({ schema_version: 0 }),
     finalize: () => {},
   });
-  const db = {
+  const db: BunSqliteHandle = {
     prepare: (_sql: string) => makeStatement(),
     exec: (_sql: string) => {},
     close: () => {},
-  } as unknown as BunDatabase;
+  };
   return { db, invocations: () => calls };
 }
 
@@ -88,9 +87,9 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    const result = await state.executeQuery(SELECT, Symbol("owner"));
+    const result = await state.executeQuery<{ v: number }>(SELECT, Symbol("owner"));
 
-    expect(result.rows).toEqual([{ v: 1 }] as any);
+    expect(result.rows).toEqual([{ v: 1 }]);
     expect(invocations()).toBe(2); // one failure + one success
     expect(timer.getSleepHistory().length).toBe(1); // exactly one backoff sleep
   });
@@ -108,7 +107,7 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    await state.executeQuery(SELECT, Symbol("owner"));
+    await state.executeQuery<{ v: number }>(SELECT, Symbol("owner"));
     expect(invocations()).toBe(2);
   });
 
@@ -155,7 +154,7 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    await state.executeQuery(SELECT, Symbol("owner"));
+    await state.executeQuery<{ v: number }>(SELECT, Symbol("owner"));
     expect(invocations()).toBe(2);
   });
 
@@ -171,7 +170,9 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    const error = await state.executeQuery(SELECT, Symbol("owner")).catch((e) => e as Error);
+    const error = await state
+      .executeQuery<{ v: number }>(SELECT, Symbol("owner"))
+      .catch((e) => e as Error);
     expect(error).toBeInstanceOf(Error);
     // The #2793 cause-identity contract: the original SqliteError is reachable.
     expect((error as Error).cause).toBe(busy);
@@ -214,7 +215,7 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    await expect(state.executeQuery(SELECT, Symbol("owner"))).rejects.toThrow();
+    await expect(state.executeQuery<{ v: number }>(SELECT, Symbol("owner"))).rejects.toThrow();
     expect(invocations()).toBe(1);
   });
 });

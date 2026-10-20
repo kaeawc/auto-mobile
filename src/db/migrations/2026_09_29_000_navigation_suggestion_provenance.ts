@@ -2,7 +2,7 @@ import { type Kysely, sql } from "kysely";
 
 /** Per-reach provenance for uncorrelated fingerprints (#5001). Old suggestions
  * deliberately have no observations: their historical build/device is unknown. */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("navigation_suggestion_observations")
     .ifNotExists()
@@ -36,6 +36,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("navigation_suggestion_observations").ifExists().execute();
 }

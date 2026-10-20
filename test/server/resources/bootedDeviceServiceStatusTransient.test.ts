@@ -9,7 +9,7 @@ import {
   type ServiceStatusProbe,
 } from "../../../src/server/bootedDeviceResources";
 import type { DeviceServiceStatus } from "../../../src/server/bootedDeviceResources";
-import { describeDevice } from "../../../src/server/deviceDescription";
+import { describeDevice } from "../../../src/daemon/deviceDescription";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../../src/utils/logger";
 import {
@@ -21,6 +21,7 @@ import {
   IOS_RUNNER_COMMAND_APPLICABILITY,
   getMissingIosRunnerFeatureCommands,
 } from "../../../src/features/observe/ios/iosRunnerFeatureCommands";
+import { spyOnIosExistingInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("iOS service status command applicability", () => {
   for (const isVirtual of [true, false, undefined]) {
@@ -48,9 +49,7 @@ describe("iOS service status command applicability", () => {
         );
         const installed = spyOn(manager, "isInstalled").mockResolvedValue(true);
         const running = spyOn(manager, "checkRunningWithReason").mockResolvedValue({ ok: true });
-        const cachedClient = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-          client,
-        );
+        const cachedClient = spyOnIosExistingInstance(client);
         const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_voiceover_state"];
         const advertised = commands.filter((command) => command !== missing);
         const cachedCommands = spyOn(client, "getCachedSupportedCommands").mockReturnValue(
@@ -104,13 +103,21 @@ describe("iOS service status command applicability", () => {
 // A booted iOS simulator entry as the resource builds it from discovery, before service-status
 // enrichment. `readiness.unknown` and `capabilities.automation === null` are the freshly-discovered
 // defaults; a transient probe failure must leave them untouched (#7053).
-function bootedIosDevice(deviceId: string) {
+function bootedIosDevice(deviceId: string): ReturnType<typeof describeDevice> & {
+  source: "local";
+  deviceId: string;
+  recoveryEligibility: null;
+  identityUnresolved: boolean;
+  serviceStatusDiagnostic?: import("../../../src/server/bootedDeviceResources").ServiceStatusDiagnostic;
+} {
   const description = describeDevice({
     kind: "booted",
     device: { name: "iPhone 15 Pro", platform: "ios", deviceId },
   });
   return {
     ...description,
+    deviceId,
+    source: "local",
     recoveryEligibility: null,
     identityUnresolved: false,
   };
@@ -151,12 +158,13 @@ describe("booted iOS service-status transient handling (#7053)", () => {
   });
 
   test("omits iOS version identity when installation is unconfirmed despite a running tunnel", async () => {
-    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-      isInstalled: async () => false,
-      isRunning: async () => true,
-      checkRunningWithReason: async () => ({ ok: true }),
-      getForcedRestartBudget: () => ({ snapshot: () => ({ state: "idle", attempts: 0 }) }),
-    } as unknown as IOSCtrlProxyManager);
+    const spies = [
+      spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(false),
+      spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(true),
+      spyOn(IOSCtrlProxyManager.prototype, "checkRunningWithReason").mockResolvedValue({
+        ok: true,
+      }),
+    ];
     try {
       const status = await queryDeviceServiceStatus(
         { name: "iPhone", platform: "ios", deviceId: "SIM-A" },
@@ -169,7 +177,8 @@ describe("booted iOS service-status transient handling (#7053)", () => {
       expect(status).not.toHaveProperty("versionInfo");
       expect(status).not.toHaveProperty("version");
     } finally {
-      managerSpy.mockRestore();
+      spies.forEach((spy) => spy.mockRestore());
+      IOSCtrlProxyManager.resetInstances();
     }
   });
 

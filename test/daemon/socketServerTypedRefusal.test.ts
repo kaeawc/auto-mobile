@@ -1,4 +1,4 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { expect, test } from "bun:test";
 import { daemonResponseError } from "../../src/daemon/client";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
@@ -10,9 +10,9 @@ import {
   SessionSuspectError,
   TerminalSessionError,
 } from "../../src/daemon/sessionManager";
-import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { DeviceOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
@@ -193,7 +193,7 @@ test("a suspect-session refusal is the retryable suspect refusal on the frame", 
     details: { sessionUuid: "quiet-session", remainingMs: 2_500 },
   });
   // The MCP error is the same fields plus the message, which the frame carries as `error`.
-  expect({ ...frameFields(error), message: error.message }).toEqual(mcp.error);
+  expect(mcp.error).toEqual({ ...frameFields(error), message: error.message });
 });
 
 test("a terminal-session refusal is session_ownership_lost on the frame", () => {

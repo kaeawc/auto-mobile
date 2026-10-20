@@ -3,6 +3,7 @@ import {
   DeviceDataStreamSocketServer,
   type NavigationGraphStreamData,
 } from "../../src/daemon/deviceDataStreamSocketServer";
+import type { StreamAuthorizeInput } from "../../src/daemon/streamSocketAuth";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -15,7 +16,7 @@ const graph: NavigationGraphStreamData = {
 };
 
 function setup(authorizationFails = false) {
-  const authorizations: Array<{ sessionUuid?: string; deviceId?: string }> = [];
+  const authorizations: StreamAuthorizeInput[] = [];
   const apps: Array<string | null | undefined> = [];
   const timer = new FakeTimer();
   timer.setCurrentTime(123);
@@ -43,7 +44,7 @@ function setup(authorizationFails = false) {
         ...fields,
       }),
     );
-    return socket.getWrittenMessages<Record<string, unknown>>();
+    return socket.getWrittenMessages();
   };
   return { server, socket, send, authorizations, apps };
 }

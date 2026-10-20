@@ -1,9 +1,10 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { loggerCallsWithPrefix } from "../../../helpers/loggerCallsWithPrefix";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../../src/ctrlProxy/constants";
-import { DefaultAccessibilityDetector } from "../../../../src/features/accessibility/AccessibilityDetector";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import { DefaultAccessibilityDetector } from "../../../../src/ctrlProxy/accessibility/AccessibilityDetector";
+import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { AccessibilityStateDetector } from "../../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import { invalidateReadinessForDisabledAccessibility } from "../../../../src/server/observeTools";
@@ -22,9 +23,9 @@ const talkBack =
   "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService";
 const thirdParty = "com.example.reader/com.example.reader.ReaderService";
 const device: BootedDevice = { deviceId: "readiness-device", name: "Pixel", platform: "android" };
-const flags = {
+const flags: FeatureFlagReader = {
   isEnabled: (key: string) => key === "accessibility-auto-detect",
-} as FeatureFlagService;
+};
 
 function harness(featureFlags = flags) {
   const adb = new FakeAdbExecutor();
@@ -45,7 +46,7 @@ function harness(featureFlags = flags) {
       calls.push(`invalidate:${session}:${reason}`),
   };
   const setOutput = (stdout: string) =>
-    adb.setCommandResponse("enabled_accessibility_services", { stdout, stderr: "" });
+    adb.setCommandResponse("enabled_accessibility_services", createExecResult(stdout, ""));
   const observe = async () => {
     const result = {} as ObserveResult;
     await audit.run(result, new NoOpPerformanceTracker());
@@ -157,10 +158,10 @@ describe("observe CtrlProxy readiness regression", () => {
   test("a returned adb error is unknown, even with empty stdout", async () => {
     spyOn(logger, "warn").mockImplementation(() => {});
     const h = harness();
-    h.adb.setCommandResponse("enabled_accessibility_services", {
-      stdout: "",
-      stderr: "ADB read failed",
-    });
+    h.adb.setCommandResponse(
+      "enabled_accessibility_services",
+      createExecResult("", "ADB read failed"),
+    );
     const execute = h.adb.executeCommand.bind(h.adb);
     const command = spyOn(h.adb, "executeCommand").mockImplementation(async (...args) => ({
       ...(await execute(...args)),
@@ -206,7 +207,7 @@ describe("observe CtrlProxy readiness regression", () => {
   });
 
   test("skipped detection, missing state and non-Android observations do not consult readiness", async () => {
-    const h = harness({ isEnabled: () => false } as FeatureFlagService);
+    const h = harness({ isEnabled: () => false });
     const read = spyOn(h.detector, "isCtrlProxyServiceEnabled");
     expect(await h.observe()).toEqual({
       enabled: false,
@@ -309,9 +310,9 @@ describe("detector CtrlProxy signal", () => {
   test("feature flags cannot synthesize evidence of CtrlProxy loss or health", async () => {
     const h = harness();
     for (const force of [false, true]) {
-      const featureFlags = {
+      const featureFlags: FeatureFlagReader = {
         isEnabled: (key: string) => key === "force-accessibility-mode" && force,
-      } as FeatureFlagService;
+      };
       expect(
         await h.detector.isCtrlProxyServiceEnabled(device.deviceId, h.adb, featureFlags),
       ).toBeNull();

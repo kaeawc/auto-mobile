@@ -8,9 +8,8 @@ import {
   getDeviceStateResultSchema,
   setDeviceStateResultSchema,
 } from "../../src/server/toolOutputSchemas";
-import type { DeviceStateResult } from "../../src/features/utility/DeviceState";
 import { describe, expect, test } from "bun:test";
-import { toJSONSchema } from "zod/v4";
+import { toJSONSchema, type z } from "zod/v4";
 import {
   elementBoundsSchema,
   freshnessSchema,
@@ -29,7 +28,7 @@ import {
 test("freshness schema accepts bounded machine-readable unavailability", () => {
   const fields = {
     isFresh: false,
-    unavailableReason: "device_locked",
+    unavailableReason: "device_locked" as const,
     unavailableDetail: "Unlock the device",
   };
   expect(freshnessSchema.parse(fields)).toEqual(fields);
@@ -38,12 +37,17 @@ test("freshness schema accepts bounded machine-readable unavailability", () => {
 });
 
 test("observe advertises optional typed per-panel observations", () => {
-  const stamp = { key: "cover", role: "cover", posture: "unknown", generation: 0 };
+  const stamp = {
+    key: "cover",
+    role: "cover" as const,
+    posture: "unknown" as const,
+    generation: 0,
+  };
   const entry = {
     display: stamp,
     screenSize: { width: 100, height: 100 },
     skeleton: [],
-    freshness: { isFresh: false, unavailableReason: "request_timed_out" },
+    freshness: { isFresh: false, unavailableReason: "request_timed_out" as const },
   };
   const result = { observationId: "capture", deviceId: "android", displays: [entry] };
   expect(observeResultSchema.parse(result).displays).toEqual([entry]);
@@ -69,14 +73,15 @@ test("full action observation advertises the optional freshness reason fields", 
   expect(JSON.stringify(freshness)).toContain("unavailableReason");
   expect(JSON.stringify(freshness)).toContain("unavailableDetail");
 });
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
+import { schemaProperty, schemaPropertyDescription } from "../helpers/toolResponse";
 
 test("crop raster description documents upright output without changing full screenshot metadata", () => {
-  expect(toJSONSchema(observeCropResultSchema).properties?.imageSize.description).toBe(
-    "Pixel dimensions of the upright output crop PNG.",
-  );
   expect(
-    toJSONSchema(observeResultSchema).properties?.screenshotImageSize.description,
+    schemaPropertyDescription(toJSONSchema(observeCropResultSchema).properties, "imageSize"),
+  ).toBe("Pixel dimensions of the upright output crop PNG.");
+  expect(
+    schemaPropertyDescription(toJSONSchema(observeResultSchema).properties, "screenshotImageSize"),
   ).toBeUndefined();
 });
 
@@ -84,7 +89,7 @@ test("full screenshot geometry accepts shared crop scalars and rejects invalid r
   const fields = {
     screenshotImageSize: { width: 1080, height: 2400 },
     screenshotPixelsPerNativeUnit: { x: 1, y: 1 },
-    screenshotScaleProvenance: "raster-dimensions",
+    screenshotScaleProvenance: "raster-dimensions" as const,
   };
   const schema = observeResultSchema.pick({
     screenshotImageSize: true,
@@ -186,7 +191,7 @@ describe("screenSizeSchema coordinate units (#7371)", () => {
  */
 describe("elementBoundsSchema: object + compact tuple (#2990)", () => {
   const objectBounds = { left: 0, top: 10, right: 1080, bottom: 1920 };
-  const tupleBounds = [0, 10, 1080, 1920];
+  const tupleBounds: [number, number, number, number] = [0, 10, 1080, 1920];
 
   test("accepts the default object form", () => {
     expect(elementBoundsSchema.parse(objectBounds)).toEqual(objectBounds);
@@ -265,7 +270,7 @@ describe("tool output artifact metadata schema (#3480)", () => {
   const metadata = {
     artifact: {
       path: "/tmp/auto-mobile/123-tapOn-id.json",
-      format: "json",
+      format: "json" as const,
       payload: "ObserveResult",
       bytes: 123,
       tool: "tapOn",
@@ -378,7 +383,9 @@ describe("elementBoundsSchema: fractional iOS point coordinates (#3206)", () => 
   });
 
   test("accepts a fractional compact tuple", () => {
-    const tuple = [16.333333333333332, 786.5, 201.66666666666666, 823.5];
+    const tuple: [number, number, number, number] = [
+      16.333333333333332, 786.5, 201.66666666666666, 823.5,
+    ];
     expect(elementBoundsSchema.parse(tuple)).toEqual(tuple);
   });
 
@@ -484,10 +491,10 @@ describe("observationOutputSchema: discriminated union of full observation vs di
       changed: [],
     };
     const parsed = observeDiffSchema.parse(diff);
-    expect(parsed.added[0].attributes["resource-id"]).toBe("com.example:id/new");
+    expect(parsed.added?.[0]?.attributes["resource-id"]).toBe("com.example:id/new");
     // Internal key still validates (it's a plain string) but is documented
     // as non-selector — see the schema's own `.describe()`.
-    expect(parsed.added[0].key).toBe("\u0000109,837,971,1424\u0000\u00000");
+    expect(parsed.added?.[0]?.key).toBe("\u0000109,837,971,1424\u0000\u00000");
   });
 
   test("a diff's `changed` entries carry a real `selector` distinct from the internal `key`", () => {
@@ -554,7 +561,9 @@ describe("observationSummarySchema: truncation reasons (#6601)", () => {
     };
 
     const parsed = observationOutputSchema.parse(full);
-    expect(parsed.viewHierarchy?.truncationReasons).toEqual(full.viewHierarchy.truncationReasons);
+    expect(schemaProperty(parsed.viewHierarchy, "truncationReasons")).toEqual(
+      full.viewHierarchy.truncationReasons,
+    );
 
     const json = toJSONSchema(observationSummarySchema) as Record<string, any>;
     const viewHierarchy = json.properties.viewHierarchy as Record<string, any>;
@@ -734,7 +743,7 @@ test.each(lifecycleSchemas)(
   },
 );
 
-const fieldVariants: Array<Partial<DeviceStateResult>> = [
+const fieldVariants: Array<Partial<z.output<typeof getDeviceStateResultSchema>>> = [
   { clock: { supported: false, capability: "unsupported", error: "unsupported" } },
   { clock: { supported: true, capability: "full", error: "probe failed" } },
   ...(["changed", "unchanged", "restored"] as const).map((outcome) => ({
@@ -867,7 +876,7 @@ test.each(fieldVariants)("device-state field variant validates (%j)", (fields) =
     message: "Result",
     success: true,
     deviceId: "fake",
-    platform: "android",
+    platform: "android" as const,
     ...fields,
   };
   expect(getDeviceStateResultSchema.parse(payload)).toEqual(payload);
@@ -905,9 +914,9 @@ test("observationDiff declares an optional string hint and preserves reason enum
     "unrenderable_hierarchy",
     "disabled",
     "stripped_by_actions_no_observe",
-  ];
+  ] as const;
   for (const reason of reasons) {
-    const metadata = { mode: "full", reason, hint: "Pass sessionUuid to receive diffs" };
+    const metadata = { mode: "full" as const, reason, hint: "Pass sessionUuid to receive diffs" };
     expect(metadataSchema.parse(metadata)).toEqual(metadata);
     expect(metadataSchema.safeParse({ mode: "full", reason }).success).toBe(true);
   }
@@ -924,17 +933,18 @@ test("observationDiff declares an optional string hint and preserves reason enum
   const schema = toJSONSchema(metadataSchema);
   expect(schema.properties?.hint).toEqual({ type: "string" });
   expect(schema.required ?? []).not.toContain("hint");
-  expect(schema.properties?.reason).toEqual({ type: "string", enum: reasons });
+  expect(schema.properties?.reason).toEqual({ type: "string", enum: [...reasons] });
 });
 
 // Walk every declared action output, including per-tool unions, without registry/DB setup.
 interface CompactMetadataJsonSchema {
-  properties?: Record<string, CompactMetadataJsonSchema>;
+  properties?: Record<string, CompactMetadataJsonSchema | undefined>;
   required?: string[];
   anyOf?: CompactMetadataJsonSchema[];
   oneOf?: CompactMetadataJsonSchema[];
   allOf?: CompactMetadataJsonSchema[];
   additionalProperties?: unknown;
+  [key: string]: unknown;
 }
 function schemaArms(schema: CompactMetadataJsonSchema): CompactMetadataJsonSchema[] {
   return [

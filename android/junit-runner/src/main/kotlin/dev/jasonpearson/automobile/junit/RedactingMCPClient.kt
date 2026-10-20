@@ -44,9 +44,23 @@ internal class RedactingMCPClient(
     try {
       SecretRedactor.redact(delegate.callTool(toolName, parameters), secretValues)
     } catch (e: Exception) {
-      throw RuntimeException(SecretRedactor.redact(e.message ?: e.toString(), secretValues))
+      throw redactedMcpToolFailure(e, secretValues)
     }
 
   override fun listAvailableTools(): List<AutoMobileAgent.MCPToolDefinition> =
     delegate.listAvailableTools()
+}
+
+/**
+ * Both recovery clients expose the same sanitized failure contract: log only redacted text and
+ * throw an IllegalStateException without the original cause, which may contain on-screen secrets.
+ */
+internal fun redactedMcpToolFailure(
+  error: Exception,
+  secretValues: List<String>,
+): IllegalStateException {
+  println("Recovery MCP tool failure: " + SecretRedactor.redact(error.toString(), secretValues))
+  return IllegalStateException(
+    SecretRedactor.redact(error.message ?: error.toString(), secretValues),
+  )
 }

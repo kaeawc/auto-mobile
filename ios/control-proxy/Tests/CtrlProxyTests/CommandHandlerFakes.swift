@@ -104,9 +104,12 @@ final class FakeGesturePerformer: GesturePerforming {
     var lockScreenSwipeCalls = 0
     var swipeCalls = 0
     var onSwipe: (() -> Void)?
+    /// Route report handed back by the `*ReportingRoute` swipes; nil models an older performer.
+    var swipeReport: SwipeDispatchReport?
     var onPressKey: (() -> Void)?
     var multiFingerSwipeCalls = 0
     var pinchCalls = 0
+    var pathCalls: [[PathGesturePoint]] = []
     var setTextCalls = 0
     var clearTextCalls = 0
     var selectAllCalls = 0
@@ -178,6 +181,24 @@ final class FakeGesturePerformer: GesturePerforming {
         onSwipe?()
     }
 
+    func swipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    )
+        throws -> SwipeDispatchReport?
+    {
+        try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+        return swipeReport
+    }
+
+    func lockScreenSwipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    )
+        throws -> SwipeDispatchReport?
+    {
+        try lockScreenSwipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+        return swipeReport
+    }
+
     func multiFingerSwipe(
         startX _: Double, startY _: Double, endX _: Double, endY _: Double,
         fingerCount _: Int, fingerSpacing _: Double, duration _: TimeInterval
@@ -188,6 +209,7 @@ final class FakeGesturePerformer: GesturePerforming {
         pressDuration _: TimeInterval, dragDuration _: TimeInterval, holdDuration _: TimeInterval
     )
         throws {}
+    func path(points: [PathGesturePoint]) throws { pathCalls.append(points) }
     func pinch(
         centerX _: Double, centerY _: Double, distanceStart _: Double, distanceEnd _: Double,
         rotationDegrees _: Double, duration _: TimeInterval

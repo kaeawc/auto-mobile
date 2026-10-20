@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import {
@@ -242,6 +242,7 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
 });
 
 describe("#4758 committed baseline JSON + reader", () => {
+  const baselineScratch = useScratchRoot("android-baseline-");
   test("the committed benchmark/webrtc/android-video-baseline.json is structurally valid", () => {
     const parsed = JSON.parse(
       readFileSync(path.join(repoRoot, "benchmark/webrtc/android-video-baseline.json"), "utf8"),
@@ -258,14 +259,9 @@ describe("#4758 committed baseline JSON + reader", () => {
   });
 
   test("readAndroidVideoBaseline rejects a malformed baseline", async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "android-baseline-"));
-    try {
-      const bad = path.join(dir, "bad.json");
-      writeFileSync(bad, JSON.stringify({ version: "1", metrics: {} }));
-      await expect(readAndroidVideoBaseline(bad)).rejects.toThrow(/Malformed/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const bad = path.join(baselineScratch.next(), "bad.json");
+    writeFileSync(bad, JSON.stringify({ version: "1", metrics: {} }));
+    await expect(readAndroidVideoBaseline(bad)).rejects.toThrow(/Malformed/);
   });
 
   test("isAndroidVideoBaseline rejects a threshold missing its direction", () => {
@@ -281,11 +277,9 @@ describe("#4758 committed baseline JSON + reader", () => {
 
 describe("#4758 gate over a fixture artifacts directory", () => {
   let dir: string;
+  const scratch = useScratchRoot("android-gate-");
   beforeEach(() => {
-    dir = mkdtempSync(path.join(tmpdir(), "android-gate-"));
-  });
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    dir = scratch.next();
   });
 
   test("reads records recursively and evaluates the whole set", async () => {

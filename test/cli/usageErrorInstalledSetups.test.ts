@@ -1,9 +1,10 @@
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import type { SpawnOptions } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { parseArgs } from "../../src/cli/parseArgs";
 
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
@@ -38,7 +39,7 @@ function childArgv(spawnArgs: string[]): string[] {
 }
 
 describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("usage-error-spawn-argv-");
   let previousEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
@@ -57,10 +58,6 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
         process.env[key] = value;
       }
     }
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
   });
 
   // Runs the real DaemonManager.start against a fake spawner and returns the args it
@@ -72,23 +69,14 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
       args: ["--daemon-mode"],
     }),
   ): Promise<string[]> {
-    const stateDir = mkdtempSync(join(tmpdir(), "usage-error-spawn-argv-"));
-    tempDirs.push(stateDir);
+    const stateDir = scratch.next();
     process.env.AUTOMOBILE_DATA_DIR = stateDir;
 
     let captured: string[] | undefined;
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, args: string[], _options: SpawnOptions) => {
         captured = [...args];
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeChildProcess(new FakeTimer());
       },
     };
 
@@ -108,18 +96,14 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-      undefined,
-      resolveLaunch,
-    );
+      launchCommandResolver: resolveLaunch,
+    });
     await manager.start(options);
     expect(captured).toBeDefined();
     return captured ?? [];

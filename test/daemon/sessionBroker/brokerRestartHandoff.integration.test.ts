@@ -100,7 +100,8 @@ describe("session broker provider restart handoff", () => {
     if (scope.kind !== "ready") {
       throw new Error("Missing scope");
     }
-    const store = opened.sessionBrokerStore(scope.scope.scopeKey, new CountingIdGenerator("res"));
+    const { scopeKey } = scope.scope;
+    const store = opened.sessionBrokerStore(scopeKey, new CountingIdGenerator("res"));
     // Native devices outlive any one daemon process.
     const devices = new FakeNativePort(opened, new CountingIdGenerator("session"), FIRST);
 
@@ -125,7 +126,7 @@ describe("session broker provider restart handoff", () => {
       });
       const service = new SessionBrokerService(
         broker,
-        scope.scope.scopeKey,
+        scopeKey,
         { acquire: () => {}, release: () => {} },
         timer,
       );
@@ -140,16 +141,13 @@ describe("session broker provider restart handoff", () => {
       const assigner: SessionDeviceAssigner = {
         async assignDeviceToSession(id, _platform, target) {
           return (
-            await next.sessions.createSession(
-              id,
-              target?.deviceId ?? "sim-fake",
-              "ios",
-              target?.liveness?.sessionTimeoutMs,
-              target?.liveness?.heartbeatTimeoutMs,
-              target?.stableDeviceId,
-              target?.liveness,
-              target?.initialOwnership,
-            )
+            await next.sessions.createSession(id, target?.deviceId ?? "sim-fake", "ios", {
+              timeoutMs: target?.liveness?.sessionTimeoutMs,
+              heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+              initialOwnership: target?.initialOwnership,
+            })
           ).assignedDevice;
         },
       };

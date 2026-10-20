@@ -7,12 +7,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { formatLockContent, parseLockContent } from "../../src/utils/fileLock";
 
-interface HolderReader {
-  readStartupLockHolder(): {
-    present: boolean;
-    livePid: number | undefined;
-    token: string | undefined;
-  };
+/** SafeDaemonManager exposing the protected startup-lock holder read. */
+class HolderReadingManager extends SafeDaemonManager {
+  holder() {
+    return this.readStartupLockHolder();
+  }
 }
 
 describe("startup lock holder generation", () => {
@@ -29,35 +28,23 @@ describe("startup lock holder generation", () => {
     } else {
       probe.verdict = verdict;
     }
-    const manager = new SafeDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      lockPath,
-      join(root, "pid"),
-      join(root, "socket"),
-      { findDaemonProcesses: () => [], isProcessRunning: () => true },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "linux",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      probe,
-    );
+    const manager = new HolderReadingManager({
+      timer: new FakeTimer(),
+      lockFilePath: lockPath,
+      pidFilePath: join(root, "pid"),
+      socketPath: join(root, "socket"),
+      processFinder: { findDaemonProcesses: () => [], isProcessRunning: () => true },
+      platform: "linux",
+      lockOwnerGenerationProbe: probe,
+    });
     const body = formatLockContent(9999, "old-owner", "", generation || undefined);
     writeFileSync(lockPath, body);
-    return { manager, reader: manager as unknown as HolderReader, lockPath, body, probe };
+    return { manager, lockPath, body, probe };
   }
 
   test("reads a provably different live generation as dead, then reclaims with the same probe", () => {
-    const { manager, reader, lockPath, probe } = fixture("different");
-    expect(reader.readStartupLockHolder()).toEqual({
+    const { manager, lockPath, probe } = fixture("different");
+    expect(manager.holder()).toEqual({
       present: false,
       livePid: undefined,
       token: "old-owner",
@@ -78,8 +65,8 @@ describe("startup lock holder generation", () => {
   });
 
   test.each(["same", "unknown", "throws"] as const)("keeps a live holder on %s", (verdict) => {
-    const { manager, reader, lockPath, body, probe } = fixture(verdict);
-    expect(reader.readStartupLockHolder()).toMatchObject({
+    const { manager, lockPath, body, probe } = fixture(verdict);
+    expect(manager.holder()).toMatchObject({
       present: true,
       livePid: 9999,
       token: "old-owner",
@@ -90,8 +77,8 @@ describe("startup lock holder generation", () => {
   });
 
   test("a legacy lock without line 4 keeps PID-only behavior", () => {
-    const { manager, reader, lockPath, body, probe } = fixture("different", "");
-    expect(reader.readStartupLockHolder()).toMatchObject({
+    const { manager, lockPath, body, probe } = fixture("different", "");
+    expect(manager.holder()).toMatchObject({
       present: true,
       livePid: 9999,
       token: "old-owner",

@@ -23,9 +23,31 @@ const fixtures: Record<string, Node> = {
   },
   prototype_data_model_v1: { ...label, text: "{data:/x}" },
   prototype_text_field_options_v1: { type: "textField", stateKey: "name", label: "Name" },
+  prototype_text_field_actions_v1: {
+    type: "textField",
+    stateKey: "name",
+    imeAction: "done",
+    onSubmit: [{ type: "emit", name: "submit" }],
+  },
+  prototype_text_field_leading_icon_v1: {
+    type: "textField",
+    stateKey: "name",
+    leadingIcon: "search",
+  },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
+  prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },
+  prototype_refresh_v1: {
+    type: "scroll",
+    refresh: { stateKey: "refreshing", onRefresh: [{ type: "emit", name: "refresh" }] },
+    child: label,
+  },
+  prototype_swipe_actions_v1: {
+    type: "row",
+    swipeActions: { end: [{ label: "Delete", onTap: [{ type: "emit", name: "delete" }] }] },
+    children: [label],
+  },
   prototype_search_bar_v1: {
     type: "searchBar",
     stateKey: "query",
@@ -48,6 +70,18 @@ const fixtures: Record<string, Node> = {
     label: "Save",
     enabledWhen: { key: "liked", equals: true },
   },
+  prototype_data_actions_v1: {
+    ...label,
+    onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
+  },
+  prototype_network_v1: {
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
+  },
+  prototype_network_device_v1: {
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
+  },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -64,7 +98,7 @@ const containers: {
     prefix: "root.child",
     wrap: (child: Node) => ({ root: { type, child } }),
   })),
-  ...["box", "row", "column", "flow", "grid", "card", "pager"].map((type) => ({
+  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager"].map((type) => ({
     name: type,
     field: "children",
     prefix: "root.children[0]",
@@ -83,13 +117,28 @@ const containers: {
   },
 ];
 
-test("every capability gate has a container fixture", () => {
-  expect(Object.keys(fixtures).sort()).toEqual(
+// Gates on a root-level spec field, not a node: no container can hold them, so they get a
+// dedicated test below instead of a container fixture.
+const ROOT_LEVEL_GATES = ["prototype_storage_v1"];
+
+test("every capability gate has a container fixture or is a root-level gate", () => {
+  expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability).sort(),
   );
 });
 
-for (const gate of PROTOTYPE_SPEC_CAPABILITY_GATES) {
+test("the storage gate reports the root-level storage block", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_storage_v1",
+  )!;
+  const spec = { root: label, state: { a: 1 }, storage: { version: 1, keys: ["state:a"] } };
+  expect(gate.fields(spec)).toEqual(["storage"]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+for (const gate of PROTOTYPE_SPEC_CAPABILITY_GATES.filter(
+  (entry) => !ROOT_LEVEL_GATES.includes(entry.capability),
+)) {
   for (const container of containers) {
     test(`${gate.capability} covers ${container.name}`, () => {
       const spec = container.wrap(fixtures[gate.capability]!);

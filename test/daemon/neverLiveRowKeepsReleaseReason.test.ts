@@ -42,7 +42,7 @@ describe("rows released before their latest incarnation was handed out", () => {
     // The fake uses the repository's expiry helper and mirrors its conditional row writes.
     repo = new FakeDeviceSessionPersistence();
     registry = new ObserverSessionRegistry(timer, 10_000);
-    manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-a");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-a"]));
@@ -154,7 +154,7 @@ describe("rows released before their latest incarnation was handed out", () => {
         status: "released",
         release_reason: reason,
       });
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       expect(await wire("daemon/sessionInfo")).toMatchObject({
         success: true,
         result: { sessionId: SESSION, assignedDevice: DEVICE },

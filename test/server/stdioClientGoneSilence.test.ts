@@ -1,10 +1,10 @@
+import type { Transport } from "@modelcontextprotocol/server";
 import { PassThrough } from "node:stream";
 import { once } from "node:events";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { OutputGatedTransport } from "../../src/server/outputGatedTransport";
+import { createStdioServerTransport } from "../../src/server/stdioServerTransport";
 import { ProcessLifecycleHandlers, type ShutdownSignal } from "../../src/processLifecycle";
 import { DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_RELEASE_SESSION_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
@@ -27,7 +27,7 @@ function createHarness() {
   const chunks: Buffer[] = [];
   const logs: string[] = [];
   stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-  const gate = new OutputGatedTransport(new StdioServerTransport(stdin, stdout), (message) =>
+  const gate = new OutputGatedTransport(createStdioServerTransport(stdin, stdout), (message) =>
     logs.push(message),
   );
   const release = Promise.withResolvers<unknown>();
@@ -375,9 +375,15 @@ describe("stdio client-gone silence (#11951)", () => {
     const bytes = rig.byteCount();
     let writes = 0;
     const write = rig.stdout.write.bind(rig.stdout);
-    rig.stdout.write = (...args: Parameters<typeof write>) => {
+    rig.stdout.write = (
+      chunk: Uint8Array | string,
+      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+      callback?: (error?: Error | null) => void,
+    ) => {
       writes++;
-      return write(...args);
+      return typeof encodingOrCallback === "string"
+        ? write(chunk, encodingOrCallback, callback)
+        : write(chunk, encodingOrCallback);
     };
     rig.stdout.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
     rig.client.emitNotification("notifications/tools/list_changed");

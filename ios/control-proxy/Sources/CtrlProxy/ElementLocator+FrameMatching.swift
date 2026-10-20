@@ -75,9 +75,9 @@ extension ElementLocator {
     }
 
     private nonisolated static func centerDistanceSquared(_ lhs: ElementBounds, _ rhs: ElementBounds) -> Int {
-        let dx = (lhs.left + lhs.right) - (rhs.left + rhs.right)
-        let dy = (lhs.top + lhs.bottom) - (rhs.top + rhs.bottom)
-        return (dx * dx + dy * dy) / 4
+        let horizontalDelta = (lhs.left + lhs.right) - (rhs.left + rhs.right)
+        let verticalDelta = (lhs.top + lhs.bottom) - (rhs.top + rhs.bottom)
+        return (horizontalDelta * horizontalDelta + verticalDelta * verticalDelta) / 4
     }
 
     private nonisolated static func sizeDifference(_ lhs: ElementBounds, _ rhs: ElementBounds) -> Int {

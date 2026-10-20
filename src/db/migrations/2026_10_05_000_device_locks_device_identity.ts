@@ -14,7 +14,7 @@ import { type Kysely, sql } from "kysely";
  * is unknown, so they are never replayed and the next successful `pin` unlock
  * re-records them with an identity.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   const existingColumn = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('device_locks') WHERE name = 'device_identity'
   `.execute(db);
@@ -23,6 +23,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.alterTable("device_locks").dropColumn("device_identity").execute();
 }

@@ -9,8 +9,8 @@ import {
   resetRecordingTeardownRecoveryNeeded,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
-import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+} from "../../src/daemon/recordingSessionCleanup";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
 import { exponentialBackoff } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -58,11 +58,9 @@ describe("two recorder teardown failures on one device share one health recovery
   beforeEach(() => {
     timer = new FakeTimer();
     repo = new FakeVideoRecordingRepository();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     manager.stopCleanupTimer();
     markers = new InMemoryDeviceHealthMarkers(timer);
     // The pool's rule: recovery acts only on a device with no cleanup in flight.

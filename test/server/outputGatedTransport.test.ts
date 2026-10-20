@@ -1,12 +1,16 @@
-import { describe, expect, test } from "bun:test";
 import type {
+  MessageExtraInfo,
   Transport,
   TransportSendOptions,
-} from "@modelcontextprotocol/sdk/shared/transport.js";
+} from "@modelcontextprotocol/server";
+import { describe, expect, test } from "bun:test";
 import { EarlyStartTransport } from "../../src/server/earlyStartTransport";
 import { OutputGatedTransport } from "../../src/server/outputGatedTransport";
 
 type Message = Parameters<Transport["send"]>[0];
+const EXTRA_INFO: MessageExtraInfo = {
+  authInfo: { token: "extra", clientId: "client", scopes: [] },
+};
 
 class FakeTransport implements Transport {
   onmessage?: Transport["onmessage"];
@@ -90,8 +94,8 @@ describe("OutputGatedTransport", () => {
       closes++;
     };
     expect(gate.onmessage).toBe(callback);
-    expect(gate.onerror).toBe(inner.onerror);
-    expect(gate.onclose).toBe(inner.onclose);
+    expect<unknown>(gate.onerror).toBe(inner.onerror);
+    expect<unknown>(gate.onclose).toBe(inner.onclose);
     gate.stopSending("stdin closed");
     inner.onmessage?.(initialize);
     const error = new Error("read failed");
@@ -299,11 +303,11 @@ describe("answers-only EOF gate (#12049)", () => {
     await early.start();
     const callback: Transport["onmessage"] = (message, extra) => {
       received.push(message);
-      expect(extra).toEqual({ sessionId: "extra" });
+      expect(extra).toEqual(EXTRA_INFO);
     };
     gate.onmessage = callback;
     expect(gate.onmessage).toBe(callback);
-    inner.onmessage?.({ jsonrpc: "2.0", id: 2, method: "ping" }, { sessionId: "extra" });
+    inner.onmessage?.({ jsonrpc: "2.0", id: 2, method: "ping" }, EXTRA_INFO);
     const done = gate.answerReceivedThenStop("stdin closed");
     await gate.send({ jsonrpc: "2.0", id: 1, result: {} });
     await gate.send({ jsonrpc: "2.0", id: 2, result: {} });

@@ -345,6 +345,24 @@ const noUnknownCastRule = {
   },
 };
 
+const noAsAnyRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      asAny:
+        "Avoid `as any` (and `<any>x`): it switches the type checker off for the expression. Use a typed fake or builder, a `Pick<Interface, ...>` view, `satisfies`, or a type guard.",
+    },
+  },
+  create(context) {
+    const report = (node) => {
+      if (node.typeAnnotation?.type === "TSAnyKeyword") {
+        context.report({ node, messageId: "asAny" });
+      }
+    };
+    return { TSAsExpression: report, TSTypeAssertion: report };
+  },
+};
+
 // Building a collection by mutating it inside a callback. These are the forms
 // that have a direct declarative replacement (map/filter/flatMap), as opposed to
 // a callback that logs or recurses, where the only rewrite is a loop.
@@ -394,6 +412,41 @@ const noAccumulatorForEachRule = {
         ) {
           context.report({ node, messageId: "accumulation" });
         }
+      },
+    };
+  },
+};
+
+// The ElementSelector service has one entry point, `select(capture, query, options)`. The older
+// per-field adapters survive only for ResolverElementSelector's own tests until they move (issue #11838).
+const SELECTOR_FACADE_METHODS = new Set([
+  "selectByText",
+  "selectByResourceId",
+  "selectByTestTag",
+  "selectClickable",
+  "selectClickableSiblingOfText",
+  "selectClickableSiblingOfResourceId",
+]);
+const SELECTOR_FACADE_ALLOWED_FILES =
+  /(?:^|\/)src\/features\/utility\/ResolverElementSelector\.ts$/;
+const noDeprecatedSelectorFacadeRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      facade:
+        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only ResolverElementSelector, which defines them, may use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
+    },
+  },
+  create(context) {
+    const filename = context.filename.replaceAll("\\", "/");
+    if (!/(?:^|\/)src\//.test(filename) || SELECTOR_FACADE_ALLOWED_FILES.test(filename)) return {};
+    return {
+      CallExpression(node) {
+        if (
+          node.callee?.type === "MemberExpression" &&
+          SELECTOR_FACADE_METHODS.has(propertyName(node.callee.property))
+        )
+          context.report({ node, messageId: "facade" });
       },
     };
   },
@@ -970,7 +1023,7 @@ const RAW_ACCESSOR_NAMES = new Set([
 ]);
 // Files whose raw-accessor use is hint extraction / diagnostics, not selection.
 const RAW_ACCESSOR_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|systemTrayHelpers)|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
+  /(?:^|\/)src\/features\/(?:systemTray\/(?:notificationHints|helpers\/(?:hierarchy|matching|groupExpansion|dismissal))|action\/(?:AndroidHierarchyFallback|LongPressMetadataDetector))\.ts$/;
 const noRawSelectorFieldReadRule = {
   meta: {
     type: "problem",
@@ -1630,6 +1683,48 @@ function isEnvCoercionCallee(callee) {
   );
 }
 
+const DEFAULT_MAX_CLASS_LINES = 1000;
+
+// Non-blank lines in a class body cannot be gamed by reformatting; oxlint has no built-in class
+// length rule (#11784). Ratcheted like max-lines-per-function: WARN plus a count baseline.
+const maxClassLinesRule = {
+  meta: {
+    type: "suggestion",
+    messages: {
+      classTooLong:
+        "Class has too many lines. Split it into collaborators; the file-size and class-size ratchets only allow shrinking.",
+    },
+    schema: [
+      {
+        type: "object",
+        properties: { max: { type: "integer", minimum: 1 } },
+        additionalProperties: false,
+      },
+    ],
+  },
+  create(context) {
+    const max = context.options?.[0]?.max ?? DEFAULT_MAX_CLASS_LINES;
+    const text = context.sourceCode?.text ?? context.getSourceCode?.().text ?? "";
+    const check = (node) => {
+      const start = node.range?.[0] ?? node.start;
+      const end = node.range?.[1] ?? node.end;
+      if (typeof start !== "number" || typeof end !== "number") {
+        return;
+      }
+      let lines = 0;
+      for (const line of text.slice(start, end).split("\n")) {
+        if (/\S/.test(line)) {
+          lines++;
+        }
+      }
+      if (lines > max) {
+        context.report({ node, messageId: "classTooLong" });
+      }
+    };
+    return { ClassDeclaration: check, ClassExpression: check };
+  },
+};
+
 const noRawEnvNumberParseRule = {
   meta: {
     type: "problem",
@@ -1750,6 +1845,7 @@ const plugin = {
     "no-inline-error-normalize": noInlineErrorNormalizeRule,
     "no-caught-error-interpolation": noCaughtErrorInterpolationRule,
     "no-unknown-cast": noUnknownCastRule,
+    "no-as-any": noAsAnyRule,
     "no-accumulator-foreach": noAccumulatorForEachRule,
     "no-bare-expect": noBareExpectRule,
     "stress-explicit-timeout": stressExplicitTimeoutRule,
@@ -1758,9 +1854,11 @@ const plugin = {
     "no-direct-bun-spawn": noDirectBunSpawnRule,
     "no-raw-timer": noRawTimerRule,
     "no-raw-selector-field-read": noRawSelectorFieldReadRule,
+    "no-deprecated-selector-facade": noDeprecatedSelectorFacadeRule,
     "no-structured-content-read": noStructuredContentReadRule,
     "naming-convention": namingConventionRule,
     "no-raw-env-number-parse": noRawEnvNumberParseRule,
+    "max-class-lines": maxClassLinesRule,
   },
 };
 

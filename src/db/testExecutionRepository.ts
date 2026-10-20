@@ -153,9 +153,14 @@ export class TestExecutionRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
 
-  constructor(timer: Timer = defaultTimer, db?: Kysely<Database>) {
+  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
     this.timer = timer;
     this.db = db ?? null;
+  }
+
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return { pruneToRowCap: (maxRows?: number) => this.pruneToRowCap(maxRows) };
   }
 
   private getDb(): Kysely<Database> {

@@ -1,12 +1,17 @@
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
-import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
+import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { SessionConfigError } from "../../src/devices/sessionConfig";
+import { AndroidIdentityUnresolvedError } from "../../src/devices/AndroidIdentityUnresolvedError";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
@@ -32,7 +37,7 @@ import {
   SessionCreationTimeoutError,
   RetryableDeviceAcquisitionError,
   SessionReleasedDuringCreationError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { unsupportedIosButtonResult } from "../../src/features/action/PressButton";
@@ -42,27 +47,17 @@ import {
   McpTimeoutError,
   McpOverloadError,
 } from "../../src/daemon/McpTimeoutError";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
 import {
-  DaemonRestartDeferredError,
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
-} from "../../src/daemon/daemonRestartAdmission";
+} from "../../src/daemon/daemonRestartPending";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  daemonResponseError,
-  DaemonHandshakeMismatchError,
-  DaemonBoundSessionLostError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  DaemonRequestNotDeliveredError,
-} from "../../src/daemon/client";
-import {
-  DeviceControlTransportError,
-  LoopbackMcpConnectionError,
-} from "../../src/daemon/deviceControlTransportFailure";
-import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
+import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client";
+import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
+import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
@@ -118,20 +113,23 @@ import {
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
-import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+} from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import { PlanExecutionInProgressError } from "../../src/daemon/planExecutionInProgressRefusal";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import {
   createToolErrorResponse,
   PooledAvdIdentityError,
   ProvisionDeviceRollbackError,
 } from "../../src/server/deviceTools";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import {
+  noActiveDeviceSessionPayload,
+  sessionOwnershipLostPayload,
+} from "../../src/daemon/deviceSessionResult";
 import {
   mcpOverloadResult,
   noActiveDeviceSessionResult,
-  noActiveDeviceSessionPayload,
   deviceControlTransportFailureResult,
   ambiguousSessionSelectorResult,
 } from "../../src/server/proxyServer";
@@ -141,8 +139,8 @@ import {
 } from "../../src/devices/exactDeviceProvisioning";
 import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { deviceLossOutcomeFromError } from "../../src/server/deviceLossOutcome";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { deviceLossOutcomeFromError } from "../../src/utils/deviceLossOutcome";
 import { logger } from "../../src/utils/logger";
 
 /** How a runner reacts to a refusal; the vocabulary of `expectations.json`. */
@@ -232,13 +230,19 @@ function shaped(error: unknown): RefusalWireResult {
 /** The error the boot admission gate throws for an Android boot refused at capacity. */
 function bootCapacityRefusal(platform: "android" | "ios" = "android"): unknown {
   const ios = platform === "ios";
-  const decision = atCapacityDecision(2, { maxBooted: 2, source: "default" }, 5_000, {
+  const decision = atCapacityDecision(2, { maxBooted: 2, source: "derived" }, 5_000, {
     noun: ios ? "simulator" : "emulator",
     envName: ios ? IOS_SIM_MAX_BOOTED_ENV : "AUTO_MOBILE_MAX_BOOTED",
     externalDevices: [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
   });
   try {
-    assertBootCapacityGranted({ decision: decision! }, platform, ios ? "simulator" : "emulator");
+    if (!decision) {
+      throw new Error("expected a refusal at capacity");
+    }
+    // The captured wire contract predates the source label's rename to "derived".
+    // Preserve that historical message while constructing a valid current capacity decision.
+    decision.message = decision.message.replace("(derived)", "(default)");
+    assertBootCapacityGranted({ decision }, platform, ios ? "simulator" : "emulator");
   } catch (error) {
     return error;
   }
@@ -260,9 +264,12 @@ function provisionEnvelope(failure: ProvisionDeviceError): RefusalWireResult {
   driven(failure);
   // The provisionDevice failure envelope (`provisionDeviceErrorResponse` in
   // deviceToolsProvisioning) around the real ProvisionDeviceError.
-  return createToolErrorResponse(failure.code, failure.message, {
-    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
-  });
+  return {
+    ...createToolErrorResponse(failure.code, failure.message, {
+      error: { code: failure.code, message: failure.message, retryable: failure.retryable },
+    }),
+    isError: true,
+  };
 }
 
 type FixtureEntry = readonly [string, string, () => RefusalWireResult];
@@ -367,6 +374,17 @@ const BUILDERS: readonly FixtureEntry[] = [
             { deviceId: DEVICE, platform: "android" },
             { deviceId: "emulator-5556", platform: "android" },
           ],
+        ),
+      ),
+  ],
+  [
+    "device_transport_unavailable",
+    "AdbDeviceTransportUnavailableError via shapeToolCallError",
+    () =>
+      shaped(
+        new AdbDeviceTransportUnavailableError(
+          DEVICE,
+          new Error(`adb: device '${DEVICE}' not found`),
         ),
       ),
   ],
@@ -600,8 +618,6 @@ const BUILDERS: readonly FixtureEntry[] = [
           holder: "session_broker",
           scopeKey: "0123abcd",
           bindingIndex: 0,
-          scopeState: "valid",
-          execSessionUuid: null,
         }),
       ),
   ],
@@ -1104,6 +1120,14 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   string
 >([
   [
+    AndroidIdentityUnresolvedError,
+    "shared base for the AVD and device identity refusals; it is only ever constructed through those two subclasses, which both have fixtures.",
+  ],
+  [
+    UnknownToolError,
+    "daemon socket frame code (`daemon_unknown_tool`) only; clients still get the unchanged `Unknown tool:` text, not a typed refusal body.",
+  ],
+  [
     BindingConfigError,
     "Internal broker validation becomes a SessionBroker failure; slot launch and socket serializers were removed.",
   ],
@@ -1181,10 +1205,6 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
     "uncoded pre-dispatch transport failure used for safe proxy replay; shapeToolCallError returns plain 'Error: ...' text",
   ],
   [
-    LoopbackMcpConnectionError,
-    "uncoded loopback fetch cause; socketServer normalizes it into DeviceControlTransportError before the wire",
-  ],
-  [
     PooledAvdIdentityError,
     "uncoded pooled-identity failure; deviceToolsLifecycle maps it to target_identity_unresolved in a tool error response",
   ],
@@ -1198,6 +1218,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
   registry_schema_unsupported:
     "Internal registry-open code translated by the broker acquisition path; covered by broker handler tests.",
+  daemon_unknown_tool:
+    "a daemon socket response field the proxy classifies by (details.toolName); clients still see the unchanged `Unknown tool:` text",
+  daemon_session_not_active:
+    "a daemon socket response field the proxy classifies by; clients still see the unchanged `is not an active daemon session` text",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   DefaultForeignCtrlProxyForwardEvidence,
@@ -20,7 +21,7 @@ function harness() {
   const read = new DefaultForeignCtrlProxyForwardEvidence({
     adbFactory: {
       create: () => {
-        adb.setCommandResponse("forward --list", { stdout: rows, stderr: "" });
+        adb.setCommandResponse("forward --list", createExecResult(rows, ""));
         return adb;
       },
     },
@@ -67,12 +68,9 @@ describe("foreign CtrlProxy forward evidence", () => {
     const first = new FakeAdbExecutor();
     first.setCommandError("forward --list", new Error("first device offline"));
     const second = new FakeAdbExecutor();
-    second.setCommandResponse("forward --list", {
-      stdout: "second tcp:52001 tcp:8765",
-      stderr: "",
-    });
+    second.setCommandResponse("forward --list", createExecResult("second tcp:52001 tcp:8765", ""));
     const evidence = new DefaultForeignCtrlProxyForwardEvidence({
-      adbFactory: { create: (device) => (device.deviceId === "first" ? first : second) },
+      adbFactory: { create: (device) => (device?.deviceId === "first" ? first : second) },
       clientProbe: { findClientPids: async () => [4242] },
       ownership: () => ({ ownsForward: () => false }),
       isProcessRunning: () => true,

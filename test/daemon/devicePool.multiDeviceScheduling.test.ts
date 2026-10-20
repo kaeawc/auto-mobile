@@ -1,17 +1,16 @@
+import { makePool } from "../helpers/makePool";
 import { clearDeviceError, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import type { Platform } from "../../src/models";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 for (const criteria of [false, true]) {
   describe(`${criteria ? "criteria" : "platform"} multi-device scheduling`, () => {
@@ -22,7 +21,7 @@ for (const criteria of [false, true]) {
     let pool: DevicePool;
     let markers: FakeDeviceHealthMarkers;
     const controllers: AbortController[] = [];
-    beforeEach(async () => {
+    async function arrangeHarness(): Promise<void> {
       timer = new FakeTimer();
       markers = new FakeDeviceHealthMarkers(timer);
       persistence = new FakeDeviceSessionPersistence();
@@ -35,17 +34,25 @@ for (const criteria of [false, true]) {
           platform: "android",
         })),
       );
-      pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "scheduling", {
-          timer,
-          deviceHealthMarkers: markers,
-          deviceManager: discovery,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          retryExecutor: new DefaultRetryExecutor(timer),
-        }),
-      );
+      pool = makePool(sessions, "scheduling", {
+        timer,
+        deviceHealthMarkers: markers,
+        deviceManager: discovery,
+      });
       await pool.initializeWithDevices(discovery.bootedDevices);
-    });
+    }
+
+    // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+    function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      test(
+        name,
+        async () => {
+          await arrangeHarness();
+          await fn();
+        },
+        timeout,
+      );
+    }
     afterEach(async () => {
       for (const controller of controllers.splice(0)) {
         controller.abort(new Error("test cleanup"));
@@ -88,12 +95,16 @@ for (const criteria of [false, true]) {
       await sessions.releaseSession(id);
       await pool.releaseDevice(device, id);
     };
-    test("idle Android pair bypasses blocked iOS head without advancing time", async () => {
+    arranged("idle Android pair bypasses blocked iOS head without advancing time", async () => {
       for (const deviceId of ["ios-a", "ios-b"]) {
         const device = { deviceId, name: deviceId, platform: "ios" as const };
         discovery.bootedDevices.push(device);
         await pool.addDevice(device);
-        await pool.bindOrReuseDeviceSession(`owner:${deviceId}`, deviceId, "ios");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: `owner:${deviceId}`,
+          deviceId,
+          platform: "ios",
+        });
       }
       const head = allocate(["h:a", "h:b"], "ios");
       await drainUntilQuiescent(timer);
@@ -102,25 +113,32 @@ for (const criteria of [false, true]) {
       expect(head.settled()).toBe(false);
       expect(follower.outcome()).toBeInstanceOf(Map);
     });
-    test("overlapping follower retains its deadline budget while waiting for a turn", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "b", "android");
-      const head = allocate(["h:a", "h:b"]);
-      await drainUntilQuiescent(timer);
-      const follower = allocate(["f:a", "f:b"], "android", 2_000);
-      await drainUntilQuiescent(timer);
-      timer.advanceTime(1_500);
-      await drainUntilQuiescent(timer);
-      expect(follower.settled()).toBe(false);
-      await release("owner");
-      await drainUntilQuiescent(timer);
-      expect(head.outcome()).toBeInstanceOf(Map);
-      await release("h:a");
-      await release("h:b");
-      await drainUntilQuiescent(timer);
-      expect(follower.outcome()).toBeInstanceOf(Map);
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-    });
-    test("preflight image discovery does not hold a FIFO ticket", async () => {
+    arranged(
+      "overlapping follower retains its deadline budget while waiting for a turn",
+      async () => {
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "b",
+          platform: "android",
+        });
+        const head = allocate(["h:a", "h:b"]);
+        await drainUntilQuiescent(timer);
+        const follower = allocate(["f:a", "f:b"], "android", 2_000);
+        await drainUntilQuiescent(timer);
+        timer.advanceTime(1_500);
+        await drainUntilQuiescent(timer);
+        expect(follower.settled()).toBe(false);
+        await release("owner");
+        await drainUntilQuiescent(timer);
+        expect(head.outcome()).toBeInstanceOf(Map);
+        await release("h:a");
+        await release("h:b");
+        await drainUntilQuiescent(timer);
+        expect(follower.outcome()).toBeInstanceOf(Map);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+    arranged("preflight image discovery does not hold a FIFO ticket", async () => {
       let finish = () => {};
       const gate = new Promise<void>((resolve) => {
         finish = resolve;
@@ -147,25 +165,32 @@ for (const criteria of [false, true]) {
         await head.result;
       }
     });
-    test("last device release wakes head before the next poll without session churn", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "b", "android");
-      const creates = spyOn(persistence, "upsertActiveSession");
-      try {
-        const head = allocate(["h:a", "h:b"]);
-        await drainUntilQuiescent(timer);
-        timer.advanceTime(250);
-        const writesWhileWaiting = creates.mock.calls.length;
-        await release("owner");
-        await drainUntilQuiescent(timer);
-        expect(head.outcome()).toBeInstanceOf(Map);
-        expect(writesWhileWaiting).toBe(0);
-        expect(timer.getPendingTimeoutCount()).toBe(0);
-      } finally {
-        creates.mockRestore();
-      }
-    });
+    arranged(
+      "last device release wakes head before the next poll without session churn",
+      async () => {
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "b",
+          platform: "android",
+        });
+        const creates = spyOn(persistence, "upsertActiveSession");
+        try {
+          const head = allocate(["h:a", "h:b"]);
+          await drainUntilQuiescent(timer);
+          timer.advanceTime(250);
+          const writesWhileWaiting = creates.mock.calls.length;
+          await release("owner");
+          await drainUntilQuiescent(timer);
+          expect(head.outcome()).toBeInstanceOf(Map);
+          expect(writesWhileWaiting).toBe(0);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          creates.mockRestore();
+        }
+      },
+    );
     if (criteria) {
-      test("capacity shortage waits for a matching device to join", async () => {
+      arranged("capacity shortage waits for a matching device to join", async () => {
         const head = allocate(["h:a", "h:b", "h:c"]);
         await drainUntilQuiescent(timer);
         expect(head.settled()).toBe(false);
@@ -179,50 +204,55 @@ for (const criteria of [false, true]) {
     }
 
     for (const restores of [false, true]) {
-      test(`round-2: errored singleton refreshes once and ${restores ? "recovers" : "rejects"} without waiting`, async () => {
-        await pool.removeDevice("b");
-        discovery.bootedDevices = discovery.bootedDevices.filter(
-          (device) => device.deviceId === "a",
-        );
-        const device = pool.getDevice("a")!;
-        markDeviceError(device);
-        const original = discovery.getBootedDevicesDetailed.bind(discovery);
-        const refresh = spyOn(discovery, "getBootedDevicesDetailed").mockImplementation(
-          async (platform) => {
-            // Model recovery completing during the allocation's inventory refresh.
-            if (platform === "either" && restores) {
-              clearDeviceError(device);
-            }
-            return original(platform);
-          },
-        );
-        try {
-          const head = allocate(["h:a"], "android", 300_000);
-          await drainUntilQuiescent(timer);
-          expect(head.settled()).toBe(true);
-          expect(timer.now()).toBe(0);
-          expect(refresh.mock.calls.filter(([platform]) => platform === "either")).toHaveLength(1);
-          if (restores) {
-            expect(head.outcome()).toEqual(new Map([["h:a", "a"]]));
-          } else {
-            expect(String(head.outcome())).toContain(
-              criteria ? "No matching devices are currently available" : "no devices available",
+      arranged(
+        `round-2: errored singleton refreshes once and ${restores ? "recovers" : "rejects"} without waiting`,
+        async () => {
+          await pool.removeDevice("b");
+          discovery.bootedDevices = discovery.bootedDevices.filter(
+            (device) => device.deviceId === "a",
+          );
+          const device = pool.getDevice("a")!;
+          markDeviceError(device);
+          const original = discovery.getBootedDevicesDetailed.bind(discovery);
+          const refresh = spyOn(discovery, "getBootedDevicesDetailed").mockImplementation(
+            async (platform) => {
+              // Model recovery completing during the allocation's inventory refresh.
+              if (platform === "either" && restores) {
+                clearDeviceError(device);
+              }
+              return original(platform);
+            },
+          );
+          try {
+            const head = allocate(["h:a"], "android", 300_000);
+            await drainUntilQuiescent(timer);
+            expect(head.settled()).toBe(true);
+            expect(timer.now()).toBe(0);
+            expect(refresh.mock.calls.filter(([platform]) => platform === "either")).toHaveLength(
+              1,
             );
-            expect(statusOf(device)).toBe("error");
+            if (restores) {
+              expect(head.outcome()).toEqual(new Map([["h:a", "a"]]));
+            } else {
+              expect(String(head.outcome())).toContain(
+                criteria ? "No matching devices are currently available" : "no devices available",
+              );
+              expect(statusOf(device)).toBe("error");
+            }
+            expect(timer.getPendingTimeoutCount()).toBe(0);
+          } finally {
+            refresh.mockRestore();
           }
-          expect(timer.getPendingTimeoutCount()).toBe(0);
-        } finally {
-          refresh.mockRestore();
-        }
-      });
+        },
+      );
     }
 
-    test("round-2: a removed busy candidate rejects within one poll", async () => {
+    arranged("round-2: a removed busy candidate rejects within one poll", async () => {
       await pool.removeDevice("b");
       discovery.bootedDevices = discovery.bootedDevices.filter((device) => device.deviceId === "a");
       // A busy pool entry can outlive its session during disconnect handling.
       const device = pool.getDevice("a")!;
-      device.status = "busy";
+      patchDeviceBinding(device, { status: "busy" });
       const head = allocate(["h:a"], "android", 300_000);
       await drainUntilQuiescent(timer);
       expect(head.settled()).toBe(false);
@@ -237,78 +267,91 @@ for (const criteria of [false, true]) {
       expect(timer.getPendingTimeoutCount()).toBe(0);
     });
 
-    test("round-2: mixed health idle capacity waits without repeated session claims", async () => {
-      markers.mark("b", pool.getDeviceIncarnation("b")!, "network-condition");
-      const claims = spyOn(sessions, "createSession");
-      try {
-        const head = allocate(["h:a", "h:b"]);
-        await drainUntilQuiescent(timer);
-        expect(head.settled()).toBe(false);
-        expect(claims.mock.calls.length).toBe(0);
-        for (let poll = 0; poll < 3; poll++) {
-          timer.advanceTime(1_000);
+    arranged(
+      "round-2: mixed health idle capacity waits without repeated session claims",
+      async () => {
+        markers.mark("b", pool.getDeviceIncarnation("b")!, "network-condition");
+        const claims = spyOn(sessions, "createSession");
+        try {
+          const head = allocate(["h:a", "h:b"]);
           await drainUntilQuiescent(timer);
           expect(head.settled()).toBe(false);
           expect(claims.mock.calls.length).toBe(0);
+          for (let poll = 0; poll < 3; poll++) {
+            timer.advanceTime(1_000);
+            await drainUntilQuiescent(timer);
+            expect(head.settled()).toBe(false);
+            expect(claims.mock.calls.length).toBe(0);
+          }
+          timer.advanceTime(1_000);
+          await drainUntilQuiescent(timer);
+          expect(String(head.outcome())).toContain("Timed out allocating devices after 4s");
+          expect(claims.mock.calls.length).toBe(0);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          claims.mockRestore();
         }
-        timer.advanceTime(1_000);
-        await drainUntilQuiescent(timer);
-        expect(String(head.outcome())).toContain("Timed out allocating devices after 4s");
-        expect(claims.mock.calls.length).toBe(0);
-        expect(timer.getPendingTimeoutCount()).toBe(0);
-      } finally {
-        claims.mockRestore();
-      }
-    });
+      },
+    );
 
-    test("round-2: mixed health platform-disjoint waiters do not wake each other into claim churn", async () => {
-      for (const deviceId of ["ios-a", "ios-b"]) {
-        const device = { deviceId, name: deviceId, platform: "ios" as const };
-        discovery.bootedDevices.push(device);
-        await pool.addDevice(device);
-      }
-      markers.mark("b", pool.getDeviceIncarnation("b")!, "network-condition");
-      markers.mark("ios-b", pool.getDeviceIncarnation("ios-b")!, "network-condition");
-      const claims = spyOn(sessions, "createSession");
-      try {
-        const android = allocate(["android:a", "android:b"]);
-        const ios = allocate(["ios:a", "ios:b"], "ios");
-        // Bound the drain even if the old source continually wakes its peer.
-        await drainMicrotasks(1_000);
-        const initiallyWaiting = !android.settled() && !ios.settled();
-        const initialClaims = claims.mock.calls.length;
-        timer.advanceTime(1_000);
-        await drainMicrotasks(1_000);
-        const laterClaims = claims.mock.calls.length;
-        // Finish both deadlines before asserting so even a churning old source
-        // leaves no active allocation when the regression assertion fails.
-        timer.advanceTime(3_000);
-        await drainMicrotasks(1_000);
-        const outcomes = await Promise.all([android.result, ios.result]);
-        expect(initiallyWaiting).toBe(true);
-        expect(initialClaims).toBe(0);
-        expect(laterClaims).toBe(0);
-        for (const outcome of outcomes) {
-          expect(String(outcome)).toContain("Timed out allocating devices after 4s");
+    arranged(
+      "round-2: mixed health platform-disjoint waiters do not wake each other into claim churn",
+      async () => {
+        for (const deviceId of ["ios-a", "ios-b"]) {
+          const device = { deviceId, name: deviceId, platform: "ios" as const };
+          discovery.bootedDevices.push(device);
+          await pool.addDevice(device);
         }
-        expect(timer.getPendingTimeoutCount()).toBe(0);
-      } finally {
-        claims.mockRestore();
-      }
-    });
+        markers.mark("b", pool.getDeviceIncarnation("b")!, "network-condition");
+        markers.mark("ios-b", pool.getDeviceIncarnation("ios-b")!, "network-condition");
+        const claims = spyOn(sessions, "createSession");
+        try {
+          const android = allocate(["android:a", "android:b"]);
+          const ios = allocate(["ios:a", "ios:b"], "ios");
+          // Bound the drain even if the old source continually wakes its peer.
+          await drainMicrotasks(1_000);
+          const initiallyWaiting = !android.settled() && !ios.settled();
+          const initialClaims = claims.mock.calls.length;
+          timer.advanceTime(1_000);
+          await drainMicrotasks(1_000);
+          const laterClaims = claims.mock.calls.length;
+          // Finish both deadlines before asserting so even a churning old source
+          // leaves no active allocation when the regression assertion fails.
+          timer.advanceTime(3_000);
+          await drainMicrotasks(1_000);
+          const outcomes = await Promise.all([android.result, ios.result]);
+          expect(initiallyWaiting).toBe(true);
+          expect(initialClaims).toBe(0);
+          expect(laterClaims).toBe(0);
+          for (const outcome of outcomes) {
+            expect(String(outcome)).toContain("Timed out allocating devices after 4s");
+          }
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          claims.mockRestore();
+        }
+      },
+    );
 
-    test("round-2: timeout reports required capacity without a rolled-back allocation count", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "b", "android");
-      const head = allocate(["h:a", "h:b"], "android", 2_000);
-      await drainUntilQuiescent(timer);
-      for (let poll = 0; poll < 2; poll++) {
-        timer.advanceTime(1_000);
+    arranged(
+      "round-2: timeout reports required capacity without a rolled-back allocation count",
+      async () => {
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: "b",
+          platform: "android",
+        });
+        const head = allocate(["h:a", "h:b"], "android", 2_000);
         await drainUntilQuiescent(timer);
-      }
-      expect(String(head.outcome())).toContain("Timed out allocating devices after 2s");
-      expect(String(head.outcome())).toContain("Required: 2 devices\n");
-      expect(String(head.outcome())).not.toContain("allocated:");
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-    });
+        for (let poll = 0; poll < 2; poll++) {
+          timer.advanceTime(1_000);
+          await drainUntilQuiescent(timer);
+        }
+        expect(String(head.outcome())).toContain("Timed out allocating devices after 2s");
+        expect(String(head.outcome())).toContain("Required: 2 devices\n");
+        expect(String(head.outcome())).not.toContain("allocated:");
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
   });
 }

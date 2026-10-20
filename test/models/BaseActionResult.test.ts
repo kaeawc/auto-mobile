@@ -60,6 +60,7 @@ const EXTENDS_TYPES: Record<string, string> = {
   ClearAppDataResult: "packageName",
   CrashAppResult: "supported",
   DragAndDropResult: "distance",
+  DragPathResult: "points",
   ExitDialogResult: "elementFound",
   InstallAppResult: "artifactPath",
   LaunchAppResult: "packageName",
@@ -143,7 +144,9 @@ describe("with-extras results extend BaseActionResult", () => {
     test(`${name} extends BaseActionResult and keeps '${extraField}'`, () => {
       const src = read(name);
       expect(src).toMatch(
-        new RegExp(`import\\s+\\{[^}]*BaseActionResult[^}]*\\}\\s+from\\s+"\\./BaseActionResult"`),
+        new RegExp(
+          `import\\s+(?:type\\s+)?\\{[^}]*BaseActionResult[^}]*\\}\\s+from\\s+"\\./BaseActionResult"`,
+        ),
       );
       expect(src).toMatch(new RegExp(`interface ${name} extends BaseActionResult`));
       // The shared trio moved to the base — no inline redeclaration in THIS

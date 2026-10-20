@@ -1,7 +1,7 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
-import { Daemon } from "../../src/daemon/daemon";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
   OWNER_DISCONNECT_GRACE_MS,
@@ -10,8 +10,8 @@ import {
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { executionTracker } from "../../src/daemon/executionTracker";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
@@ -20,6 +20,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 
 const DEVICE: BootedDevice = {
   name: "Pixel_8_API_35",
@@ -30,18 +31,20 @@ const OWNER = "provisional-key-owner";
 const SEED = "provisional-key-released-seed";
 const TOOL = "__untargeted_provisional_key_control__";
 
-/** The same subscription and teardown that the daemon runs in start() and stop(). */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 describe("untargeted calls cannot abandon a different provisional autolock key (#11381)", () => {
   let restoreHermeticServer: () => void;
   let previousAutolock: string | undefined;
   let fixture: McpTestFixture;
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: DaemonLifecycleHarness;
+
+  async function autolockOwnerDevice(): Promise<string> {
+    const session = await daemon.getDevicePool().autolockDevice(DEVICE.deviceId, "android", OWNER);
+    if (!session) {
+      throw new Error("autolockDevice did not return a session");
+    }
+    return session;
+  }
   let consulted: Array<{ mcp: string; sessionUuid: string | undefined }>;
   let handlerSession: string | undefined;
   let handlerHasExplicitExecution: boolean;
@@ -77,26 +80,35 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
     resetDbWriteBarrier();
     restoreHermeticServer = installHermeticServerFixture();
     timer = new FakeTimer();
-    daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+    const deviceManager = new FakeDeviceManager();
+    deviceManager.bootedDevices = [DEVICE];
+    // Inject before construction: the pool's manager is fixed when the daemon builds the pool.
+    const poolFactory = spyOn(DevicePool, "create").mockImplementation(
+      (deps) => new DevicePool({ ...deps, deviceManager }),
     );
+    try {
+      daemon = new DaemonLifecycleHarness(
+        {},
+        {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer,
+          deviceSessionRepository: new FakeDeviceSessionRepository(),
+        },
+      );
+    } finally {
+      poolFactory.mockRestore();
+    }
     daemon.getSessionManager().stopCleanupTimer();
     releaseReasons = [];
     daemon.getSessionManager().onSessionRelease((_sessionId, _deviceId, reason) => {
       releaseReasons.push(reason);
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon.subscribeToolCallEnd();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
     );
     const pool = daemon.getDevicePool();
-    const deviceManager = new FakeDeviceManager();
-    deviceManager.bootedDevices = [DEVICE];
-    Object.assign(pool, { deviceManager });
     await pool.initializeWithDevices([DEVICE]);
     consulted = [];
     executionTracker.setAutolockSessionResolver({
@@ -140,7 +152,7 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
       autolockSessionForMcpSession: (mcp) =>
         daemon.getDevicePool().captureAutolockSessionForMcpSession(mcp),
     });
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon.stopTimers();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -169,7 +181,7 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
 
   test("an ordinary live route starts explicitly under its session without consulting the resolver", async () => {
     await arrange();
-    const session = await daemon.getDevicePool().autolockDevice(DEVICE.deviceId, "android", OWNER);
+    const session = await autolockOwnerDevice();
     const { call } = await startBlockedCall();
 
     // Ordinary routing picks the execution key before startExecution, so there is no provisional key.
@@ -189,7 +201,7 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
     expect(pool.resolveAutolockSessionForMcpSession(OWNER)).toBeUndefined();
     expect(pool.captureAutolockSessionForMcpSession(OWNER)).toBeUndefined();
 
-    const session = await pool.autolockDevice(DEVICE.deviceId, "android", OWNER);
+    const session = await autolockOwnerDevice();
     expect(pool.resolveAutolockSessionForMcpSession(OWNER)).toBe(session);
     expect(pool.captureAutolockSessionForMcpSession(OWNER)).toBe(session);
     await daemon.getSessionManager().releaseSession(session);
@@ -200,7 +212,7 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
 
   test("a released loopback seed rekeys to the same autolock id and ends its deferred release exactly once", async () => {
     await arrange(true);
-    const session = await daemon.getDevicePool().autolockDevice(DEVICE.deviceId, "android", OWNER);
+    const session = await autolockOwnerDevice();
     SessionReleaseBroadcaster.emit(SEED, "test");
     const { call } = await startBlockedCall();
 

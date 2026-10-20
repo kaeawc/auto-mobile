@@ -1,0 +1,36 @@
+{
+  "id": "refresh",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "refreshing": false
+  },
+  "root": {
+    "type": "scroll",
+    "refresh": {
+      "stateKey": "refreshing",
+      "onRefresh": [
+        {
+          "type": "emit",
+          "name": "refresh"
+        }
+      ]
+    },
+    "child": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Orders"
+        },
+        {
+          "type": "text",
+          "text": "Latte"
+        }
+      ]
+    }
+  }
+}

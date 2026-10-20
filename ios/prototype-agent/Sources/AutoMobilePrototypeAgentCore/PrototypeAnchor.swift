@@ -182,6 +182,7 @@ private let prototypeInlineContainerTypes: Set<String> = [
     "column",
     "flow",
     "grid",
+    "carousel",
     "scroll",
     "card",
     "pager",

@@ -1,7 +1,11 @@
+import { viewHierarchyFromFixture } from "../../helpers/observeFixture";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeGestureExecutor } from "../../fakes/FakeGestureExecutor";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -15,7 +19,6 @@ import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { prepareTargetDisplayAction } from "../../../src/features/action/TargetDisplayAction";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -51,18 +54,21 @@ type Scenario = (typeof cases)[number];
 
 function harness(scenario: Scenario, platform: "android" | "ios" = "android") {
   const transitions = new FakeDisplayTransitionReader();
-  const screen = {
+  const screen = buildObserveResult({
     ...observation(100, 200),
     displayRevision: 41,
     display: { key: "inner", role: "inner", posture: "opened", generation: scenario.stamp },
-  } as ObserveResult;
+  });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(screen);
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
+      'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
+      "",
+    ),
+  );
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const targetDevice = { ...device, platform };
@@ -189,7 +195,7 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
           h.transitions.transition(scenario.count);
         }
       };
-      const references = new SnapshotReferenceStore(new CountingIdGenerator("fence"));
+      const references = new SnapshotReferenceStore(h.timer, new CountingIdGenerator("fence"));
       if (site === "F-pre-dispatch") {
         spyOn(references, "staleReason").mockImplementation(() => {
           transition();
@@ -212,7 +218,7 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
         ...h.deps,
         snapshotReferences: references,
         androidClient: client,
-        iosClient: client,
+        iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
         dispatchAndroidCoordinateTap: dispatch,
         dispatchIosCoordinateTap: dispatch,
         dispatchIosDoubleTap: dispatch,
@@ -301,23 +307,17 @@ describe("typed explicit-display fences G", () => {
           if (scenario.count) {
             h.transitions.transition(scenario.count);
           }
-          return {
-            stdout:
-              'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
-            stderr: "",
-          };
+          return createExecResult(
+            'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
+            "",
+          );
         });
       }
       const run = async () => {
-        const target = await prepareTargetDisplayAction(
-          h.targetDevice,
-          "inner",
-          h.observe,
-          h.adb,
-          previous,
-          undefined,
-          h.transitions,
-        );
+        const target = await prepareTargetDisplayAction(h.targetDevice, "inner", h.observe, h.adb, {
+          lastRenderedObservation: previous,
+          transitions: h.transitions,
+        });
         if (site === "dispatch" && scenario.count) {
           h.transitions.transition(scenario.count);
         }
@@ -350,15 +350,10 @@ describe("typed explicit-display fences G", () => {
   test("G still requires observation of the requested panel", async () => {
     const h = harness(cases[4]);
     await expect(
-      prepareTargetDisplayAction(
-        device,
-        "inner",
-        h.observe,
-        h.adb,
-        () => undefined,
-        undefined,
-        h.transitions,
-      ),
+      prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+        lastRenderedObservation: () => undefined,
+        transitions: h.transitions,
+      }),
     ).rejects.toThrow(
       'Coordinates for display "inner" require a prior observation of that panel. Re-observe display "inner" and retry.',
     );
@@ -415,22 +410,17 @@ async function caughtAction(
       return action.execute({ action: "tap" });
     }
     case "swipeOn": {
-      const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, h.deps);
+      const action = new SwipeOn(h.targetDevice, h.adb, h.deps);
       action.observeScreen = h.observe;
       return action.execute({ direction: "up", autoTarget: false });
     }
     case "dragAndDrop": {
-      const action = new DragAndDrop(
-        h.targetDevice,
-        h.adb as unknown as AdbClient,
-        h.timer,
-        h.deps,
-      );
+      const action = new DragAndDrop(h.targetDevice, h.adb, h.timer, h.deps);
       action.observeScreen = h.observe;
       return action.execute({ source: { text: "Source" }, target: { text: "Target" } });
     }
     case "pinchOn": {
-      const action = new PinchOn(h.targetDevice, h.adb as unknown as AdbClient, {
+      const action = new PinchOn(h.targetDevice, h.adb, {
         ...h.deps,
         capture: new FakeHierarchyCapture(async () => h.screen.viewHierarchy!),
       });
@@ -487,7 +477,7 @@ async function caughtExplicitAction(
       const action = new TapAtCoordinate(h.targetDevice, h.adb, {
         ...deps,
         androidClient: client,
-        iosClient: client,
+        iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
       });
       action.observeScreen = h.observe;
       return action.execute({ x: 1, y: 2, display: "inner" });
@@ -498,12 +488,12 @@ async function caughtExplicitAction(
       return action.execute({ action: "tap", text: "Target", display: "inner" });
     }
     case "swipeOn": {
-      const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, deps);
+      const action = new SwipeOn(h.targetDevice, h.adb, deps);
       action.observeScreen = h.observe;
       return action.execute({ direction: "up", display: "inner" });
     }
     case "dragAndDrop": {
-      const action = new DragAndDrop(h.targetDevice, h.adb as unknown as AdbClient, h.timer, deps);
+      const action = new DragAndDrop(h.targetDevice, h.adb, h.timer, deps);
       action.observeScreen = h.observe;
       return action.execute({
         source: { text: "Source" },
@@ -512,7 +502,7 @@ async function caughtExplicitAction(
       });
     }
     case "pinchOn": {
-      const action = new PinchOn(h.targetDevice, h.adb as unknown as AdbClient, deps);
+      const action = new PinchOn(h.targetDevice, h.adb, deps);
       action.observeScreen = h.observe;
       return action.execute({ direction: "in", display: "inner" });
     }
@@ -564,11 +554,11 @@ describe("tapOn fresh hierarchy transition fence", () => {
 function staleCallerHarness(platform: "android" | "ios") {
   const h = harness(cases[0], platform);
   h.transitions.transition(1);
-  const fresh = {
+  const fresh = buildObserveResult({
     ...h.screen,
     displayRevision: h.transitions.fullRevision,
     display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
-  } as ObserveResult;
+  });
   return { h, fresh };
 }
 
@@ -653,12 +643,10 @@ describe("selector tools retry once after a fold", () => {
   const restores: Array<{ mockRestore(): void }> = [];
   beforeEach(() => {
     restores.push(
-      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-        isAvailable: async () => true,
-      } as unknown as AndroidCtrlProxyManager),
-      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+        FakeCtrlProxyManager.withAvailability(true),
       ),
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy()),
     );
   });
   afterEach(() => {
@@ -675,7 +663,7 @@ describe("selector tools retry once after a fold", () => {
       case "dragAndDrop":
         return caughtAction(name, h);
       case "swipeOn": {
-        const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+        const action = new SwipeOn(h.targetDevice, h.adb, {
           ...h.deps,
           executeGesture: new FakeGestureExecutor(),
           accessibilityDetector: new FakeAccessibilityDetector(),
@@ -716,7 +704,7 @@ describe("selector tools retry once after a fold", () => {
   test("a screen swipe without a selector keeps refusing", async () => {
     const { h, fresh } = staleCallerHarness("android");
     h.observe.setObserveResult(fresh);
-    const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, h.deps);
+    const action = new SwipeOn(h.targetDevice, h.adb, h.deps);
     action.observeScreen = h.observe;
     const result = await action.execute({ direction: "up", autoTarget: false });
     assertResult(result, 7, 8);
@@ -734,7 +722,7 @@ describe("selector tools retry once after a fold", () => {
     const action = new TapAtCoordinate(h.targetDevice, h.adb, {
       ...h.deps,
       androidClient: client,
-      iosClient: client,
+      iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
       dispatchAndroidCoordinateTap: dispatch,
       dispatchIosCoordinateTap: dispatch,
       invalidateIosCache: () => {},
@@ -757,26 +745,24 @@ describe("swipeOn lookFor and auto-target retry once after a fold", () => {
   function foldedSwipe() {
     const { h } = staleCallerHarness("android");
     // The cache still holds the pre-fold inner panel; only a fresh read sees the cover screen.
-    const fresh = {
+    const fresh = buildObserveResult({
       ...h.screen,
-      ...textCapture,
+      viewHierarchy: viewHierarchyFromFixture(textCapture.viewHierarchy),
       screenSize: { width: 1080, height: 2400 },
       systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
       displayRevision: h.transitions.fullRevision,
       display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
-    } as ObserveResult;
+    });
     h.observe.setObserveResult(fresh);
     restores.push(
       spyOn(h.observe, "getMostRecentCachedObserveResult").mockImplementation(async () => h.screen),
-      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-        isAvailable: async () => true,
-      } as unknown as AndroidCtrlProxyManager),
-      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeCtrlProxy(h.timer) as unknown as AndroidCtrlProxyClient,
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+        FakeCtrlProxyManager.withAvailability(true),
       ),
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(h.timer)),
     );
     const gesture = new FakeGestureExecutor();
-    const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+    const action = new SwipeOn(h.targetDevice, h.adb, {
       ...h.deps,
       observeScreen: h.observe,
       executeGesture: gesture,

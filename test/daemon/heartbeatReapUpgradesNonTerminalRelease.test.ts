@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
@@ -15,7 +16,6 @@ import {
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -48,6 +48,7 @@ const CLOCK_RESTORE_MS = 11_000;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 
@@ -88,18 +89,14 @@ describe("a non-terminal release whose teardown outlasts lease + grace, owner st
 
   beforeEach(async () => {
     timer = new FakeTimer();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => undefined }),
         // `adb unroot` restarts adbd; the restore finishes only once the device reconnects.
         clock: () => ({ restore: () => timer.sleep(CLOCK_RESTORE_MS) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     reaped = [];
     announced = [];
@@ -168,9 +165,11 @@ describe("a non-terminal release whose teardown outlasts lease + grace, owner st
 class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkUpsert: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkUpsert;
-    await super.upsertActiveSession(record);
+    return super.upsertActiveSession(...args);
   }
 }
 
@@ -191,17 +190,13 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     timer.setCurrentTime(0);
     callInFlight = false;
     persistence = new ParkablePersistence();
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => undefined }),
         clock: () => ({ restore: () => timer.sleep(SCAN_MS / 2) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     reaped = [];
     forcedAt = [];
@@ -226,7 +221,7 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     );
     await manager.createSession(SESSION, DEVICE, "android");
     expect(await manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION, { livenessOwnerToken: OWNER });
   });
 
   afterEach(async () => {
@@ -339,7 +334,7 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     // The same UUID is issued again and its release wedges, much later than the first one began.
     await timer.advanceTimeAsync(STUCK_REAP_WARN_MS / 2, () => drainMicrotasks(20));
     await manager.createSession(SESSION, DEVICE, "android");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     persistence.parkUpsert = new Promise<void>(() => undefined);
     void manager.rebindSession(SESSION, "emulator-5556", "android").catch(() => undefined);
     await drainMicrotasks(20);

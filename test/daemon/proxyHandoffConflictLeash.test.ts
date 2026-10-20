@@ -34,6 +34,7 @@ const INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const PROXY_LEASE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 
@@ -64,13 +65,10 @@ describe("#10701: a restarted harness's handoff waits out the daemon's lease for
   }
 
   async function setUp(daemonLeaseMs: number): Promise<void> {
-    await sessionManager.createSession(
-      SESSION,
-      "emulator-5554",
-      "android",
-      10 * 60_000,
-      daemonLeaseMs,
-    );
+    await sessionManager.createSession(SESSION, "emulator-5554", "android", {
+      timeoutMs: 10 * 60_000,
+      heartbeatTimeoutMs: daemonLeaseMs,
+    });
     // The old harness's proxy owns the session.
     expect((await heartbeat("old-harness", true)).success).toBe(true);
     const client = new FakeDaemonClient({

@@ -13,13 +13,18 @@ setup() {
 
   TEST_DIR="$(mktemp -d)"
   export OXLINT_BASELINE="$TEST_DIR/baseline.txt"
+  # The suppression comment scan reads this fixture tree, never the real src/.
+  export OXLINT_SCAN_ROOT="$TEST_DIR/scan"
+  mkdir -p "$OXLINT_SCAN_ROOT/src"
+  # The scan fails closed on an empty src/, so keep one directive-free file.
+  printf 'export const base = 1;\n' > "$OXLINT_SCAN_ROOT/src/base.ts"
 
   # A canned oxlint JSON report: two ratcheted diagnostics in one file plus one
   # in another, and two error-level diagnostics that must be ignored entirely.
   FIXTURE_JSON='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
     {\"code\":\"eslint(no-debugger)\",\"filename\":\"src/a.ts\"},
     {\"code\":\"auto-mobile(no-raw-promise-race)\",\"filename\":\"src/a.ts\"}
   ]}"'
@@ -50,10 +55,10 @@ teardown() {
 @test "check fails on a NEW file+rule pair" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local more='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/new.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/new.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$more" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
@@ -63,10 +68,10 @@ teardown() {
 @test "check fails on an INCREASED count for an existing pair" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local more='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$more" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
@@ -76,7 +81,7 @@ teardown() {
 @test "check passes when a violation is FIXED (lower count is fine)" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local fewer='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$fewer" run bash "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -86,10 +91,10 @@ teardown() {
 @test "update refuses to grow the baseline without --allow-grow" {
   OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
   local more='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/new.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/new.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$more" run bash "$SCRIPT" --update
   [ "$status" -eq 1 ]
@@ -105,9 +110,9 @@ teardown() {
   # src/c.ts complexity appears. An aggregate-only guard would accept this and
   # let the subsequent check pass over the new defect.
   local swap='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src/a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src/b.ts\"},
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src/c.ts\"}
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src/a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/b.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src/c.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$swap" run bash "$SCRIPT" --update
   [ "$status" -eq 1 ]
@@ -123,9 +128,9 @@ teardown() {
   # Same violations, but reported with Windows backslash paths (as oxlint may emit
   # on windows-latest). Without normalization every key would read as NEW.
   local win='printf "%s" "{\"diagnostics\":[
-    {\"code\":\"eslint(complexity)\",\"filename\":\"src\\\\a.ts\"},
-    {\"code\":\"eslint(max-depth)\",\"filename\":\"src\\\\a.ts\"},
-    {\"code\":\"auto-mobile(catch-convention)\",\"filename\":\"src\\\\b.ts\"}
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src\\\\a.ts\"},
+    {\"code\":\"typescript(no-misused-promises)\",\"filename\":\"src\\\\a.ts\"},
+    {\"code\":\"typescript(no-floating-promises)\",\"filename\":\"src\\\\b.ts\"}
   ]}"'
   OXLINT_JSON_CMD="$win" run bash "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -136,4 +141,194 @@ teardown() {
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"baseline missing"* ]]
+}
+
+# --- inline suppression ratchet (oxlint-disable comment scan) ---------------
+
+write_src() { # <name> <lines...>
+  local name="$1"
+  shift
+  printf '%s\n' "$@" > "$OXLINT_SCAN_ROOT/src/$name"
+}
+
+@test "baseline records oxlint-disable rows, normalising eslint/ and counting once per rule" {
+  write_src a.ts \
+    '// oxlint-disable-next-line max-params -- reason' \
+    '// eslint-disable-next-line eslint/complexity, max-depth -- reason' \
+    'const s = "// oxlint-disable-next-line max-params";'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable(max-params)')" "$OXLINT_BASELINE"
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable(complexity)')" "$OXLINT_BASELINE"
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable(max-depth)')" "$OXLINT_BASELINE"
+  ! grep -q 'eslint/complexity' "$OXLINT_BASELINE"
+  ! grep -v '^#' "$OXLINT_BASELINE" | grep -q 'no-reason'
+}
+
+@test "a NEW oxlint-disable fails the check like a new violation" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable(max-params)"* ]]
+
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to grow"* ]]
+
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update --allow-grow
+  [ "$status" -eq 0 ]
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "widening a baselined one-line disable to the unbounded form fails as a new row" {
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '/* oxlint-disable max-params -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(max-params)"* ]]
+}
+
+@test "dropping the enable that closes a baselined disable block fails as a new row" {
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-block(max-params)')" "$OXLINT_BASELINE"
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(max-params)"* ]]
+}
+
+@test "removing an oxlint-disable passes and --update shrinks the baseline" {
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -q 'oxlint-disable(max-params)' "$OXLINT_BASELINE"
+  write_src a.ts 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  ! grep -v '^#' "$OXLINT_BASELINE" | grep -q 'oxlint-disable'
+}
+
+@test "the scan fails closed when no linted files are found" {
+  rm -rf "$OXLINT_SCAN_ROOT/src"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no source files found"* ]]
+  [ ! -f "$OXLINT_BASELINE" ]
+}
+
+@test "a suppression in a TypeScript file outside the old roots is ratcheted" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  mkdir -p "$OXLINT_SCAN_ROOT/tools/deep"
+  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/tools/deep/t.ts"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in tools/deep/t.ts  oxlint-disable(max-params)"* ]]
+}
+
+@test "JavaScript files and ignorePatterns paths are not scanned" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  printf '{ // JSONC\n "ignorePatterns": ["vendor/**", "**/*.js",],\n}\n' > "$OXLINT_SCAN_ROOT/.oxlintrc.json"
+  mkdir -p "$OXLINT_SCAN_ROOT/vendor"
+  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/vendor/v.ts"
+  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/src/legacy.js"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "eslint/complexity and complexity share one key" {
+  write_src a.ts '// eslint-disable-next-line complexity -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '// oxlint-disable-next-line eslint/complexity -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "a NEW reason-less oxlint-disable fails even when it swaps for a reasoned one" {
+  write_src a.ts '// oxlint-disable-next-line max-params -- reason'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '// oxlint-disable-next-line max-params'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-no-reason(max-params)"* ]]
+}
+
+@test "an existing reason-less oxlint-disable stays tolerated once baselined" {
+  write_src a.ts '/* eslint-disable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -q 'oxlint-disable-no-reason(max-params)' "$OXLINT_BASELINE"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "narrowing a baselined file-wide disable to a closed block passes and --update needs no --allow-grow" {
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-file(max-params)')" "$OXLINT_BASELINE"
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-block(max-params)')" "$OXLINT_BASELINE"
+  ! grep -q 'oxlint-disable-file(max-params)' "$OXLINT_BASELINE"
+}
+
+@test "converting a baselined block back to file-wide still fails and --update refuses" {
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '/* eslint-disable max-params -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(max-params)"* ]]
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 1 ]
+}
+
+@test "narrowing a baselined bare disable through partial to block passes without --allow-grow" {
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-file(*)')" "$OXLINT_BASELINE"
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-partial(*)')" "$OXLINT_BASELINE"
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;' '/* eslint-enable max-params */' '/* eslint-enable */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-block(*)')" "$OXLINT_BASELINE"
+}
+
+@test "dropping the named enable of a baselined partial bare disable fails" {
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(*)"* ]]
+}
+
+@test "one freed file-wide count covers only one narrower row" {
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '/* eslint-disable -- reason */' '/* eslint-enable max-params */' '/* eslint-disable -- reason */' '/* eslint-enable */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-"* ]]
+}
+
+# --- source file with a parse error ------------------------------------------
+
+@test "a source file with a parse error is reported by name instead of exiting silently" {
+  # Real oxlint on a real parse-error input: it exits 1 and emits a code-less error diagnostic.
+  mkdir -p "$TEST_DIR/bad"
+  printf 'export const a = ;\n' > "$TEST_DIR/bad/bad.ts"
+  OXLINT_JSON_CMD="cd '$TEST_DIR/bad' && '$REPO_ROOT/node_modules/.bin/oxlint' --format json bad.ts" \
+    run bash "$SCRIPT" --update
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"oxlint parse error in bad.ts:1:18: Unexpected token"* ]]
 }

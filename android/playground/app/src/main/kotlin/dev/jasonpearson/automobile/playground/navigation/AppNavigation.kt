@@ -2,9 +2,7 @@ package dev.jasonpearson.automobile.playground.navigation
 
 import android.net.Uri
 import android.util.Log
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -12,38 +10,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
-import androidx.navigation3.runtime.*
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
-import androidx.navigation3.ui.*
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
-import dev.jasonpearson.automobile.demos.BugReproScreen
-import dev.jasonpearson.automobile.demos.ComposeSemanticLinksDemoScreen
-import dev.jasonpearson.automobile.demos.ContrastDemoScreen
-import dev.jasonpearson.automobile.demos.DemoIndexScreen
-import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
-import dev.jasonpearson.automobile.demos.NestedSelectionDemoScreen
-import dev.jasonpearson.automobile.demos.NetworkTestScreen
-import dev.jasonpearson.automobile.demos.PerformanceDetailScreen
-import dev.jasonpearson.automobile.demos.PerformanceListScreen
-import dev.jasonpearson.automobile.demos.StartupDemoScreen
-import dev.jasonpearson.automobile.demos.TapTargetsDemoScreen
-import dev.jasonpearson.automobile.demos.UxFlowDetailsScreen
-import dev.jasonpearson.automobile.demos.UxFlowStartScreen
-import dev.jasonpearson.automobile.demos.UxFlowSummaryScreen
-import dev.jasonpearson.automobile.demos.XmlSemanticLinksDemoScreen
-import dev.jasonpearson.automobile.design.system.demo.DesignSystemDemoScreen
-import dev.jasonpearson.automobile.home.HomeScreen
-import dev.jasonpearson.automobile.login.ui.LoginScreen
-import dev.jasonpearson.automobile.mediaplayer.VideoPlayerScreen
-import dev.jasonpearson.automobile.onboarding.OnboardingScreen
-import dev.jasonpearson.automobile.sdk.AutoMobileSDK
-import dev.jasonpearson.automobile.sdk.adapters.Navigation3Adapter
-import dev.jasonpearson.automobile.settings.SettingsScreen
-import dev.jasonpearson.automobile.slides.SlidesScreen
 import dev.jasonpearson.automobile.storage.AnalyticsTracker
-import dev.jasonpearson.automobile.storage.NavigationTracker
 import dev.jasonpearson.automobile.storage.UserPreferences
 
 /**
@@ -129,86 +101,13 @@ fun determineStartDestinationWithDeepLink(
     if (parsedDestination != null) {
       // Check if the user has proper auth state for the destination
       val finalDestination =
-        when (parsedDestination) {
-          is OnboardingDestination -> {
-            Log.d(TAG, "Deep link targets onboarding, allowing")
-            parsedDestination
-          }
-
-          is LoginDestination -> {
-            Log.d(TAG, "Deep link targets login, allowing")
-            parsedDestination
-          }
-          is HomeDestination,
-          is SlidesDestination,
-          is VideoPlayerDestination,
-          is SettingsDestination,
-          is DemoIndexDestination,
-          is DemoUxStartDestination,
-          is DemoUxDetailsDestination,
-          is DemoUxSummaryDestination,
-          is DemoStartupDestination,
-          is DemoPerformanceListDestination,
-          is DemoPerformanceDetailDestination,
-          is DemoContrastDestination,
-          is DemoTapTargetsDestination,
-          is DemoXmlSemanticLinksDestination,
-          is DemoComposeSemanticLinksDestination,
-          is DemoNestedSelectionDestination,
-          is DemoBugReproDestination,
-          is DemoHandledExceptionDestination,
-          is DemoNetworkTestDestination,
-          is DesignSystemDemoDestination -> {
-            // For protected destinations, ensure user is authenticated
-            when {
-              !hasCompletedOnboarding -> {
-                Log.d(
-                  TAG,
-                  "Deep link targets protected destination but user hasn't completed onboarding, redirecting to onboarding",
-                )
-                OnboardingDestination
-              }
-
-              !isAuthenticated -> {
-                Log.d(
-                  TAG,
-                  "Deep link targets protected destination but user not authenticated, redirecting to login",
-                )
-                LoginDestination
-              }
-
-              else -> {
-                Log.d(
-                  TAG,
-                  "Deep link targets protected destination and user is authenticated, allowing: $parsedDestination",
-                )
-                parsedDestination
-              }
-            }
-          }
-        }
+        authorizeStartDestination(parsedDestination, hasCompletedOnboarding, isAuthenticated)
       Log.d(TAG, "Final destination for deep link: $finalDestination")
       finalDestination
     } else {
       Log.d(TAG, "Failed to parse deep link, falling back to auth flow")
       // Fallback to auth flow if deep link parsing fails
-      val fallbackDestination =
-        when {
-          !hasCompletedOnboarding -> {
-            Log.d(TAG, "Fallback: user hasn't completed onboarding")
-            OnboardingDestination
-          }
-
-          !isAuthenticated -> {
-            Log.d(TAG, "Fallback: user not authenticated")
-            LoginDestination
-          }
-
-          else -> {
-            Log.d(TAG, "Fallback: user authenticated, going to home")
-            HomeDestination()
-          }
-        }
+      val fallbackDestination = fallbackStartDestination(hasCompletedOnboarding, isAuthenticated)
       Log.d(TAG, "Fallback destination: $fallbackDestination")
       fallbackDestination
     }
@@ -217,6 +116,74 @@ fun determineStartDestinationWithDeepLink(
     val standardDestination = determineStartDestination(hasCompletedOnboarding, isAuthenticated)
     Log.d(TAG, "Standard start destination: $standardDestination")
     standardDestination
+  }
+}
+
+private fun authorizeStartDestination(
+  parsedDestination: AppDestination,
+  hasCompletedOnboarding: Boolean,
+  isAuthenticated: Boolean,
+): AppDestination {
+  return when (parsedDestination) {
+    is OnboardingDestination -> {
+      Log.d(TAG, "Deep link targets onboarding, allowing")
+      parsedDestination
+    }
+
+    is LoginDestination -> {
+      Log.d(TAG, "Deep link targets login, allowing")
+      parsedDestination
+    }
+    else -> {
+      // For protected destinations, ensure user is authenticated
+      when {
+        !hasCompletedOnboarding -> {
+          Log.d(
+            TAG,
+            "Deep link targets protected destination but user hasn't completed onboarding, redirecting to onboarding",
+          )
+          OnboardingDestination
+        }
+
+        !isAuthenticated -> {
+          Log.d(
+            TAG,
+            "Deep link targets protected destination but user not authenticated, redirecting to login",
+          )
+          LoginDestination
+        }
+
+        else -> {
+          Log.d(
+            TAG,
+            "Deep link targets protected destination and user is authenticated, allowing: $parsedDestination",
+          )
+          parsedDestination
+        }
+      }
+    }
+  }
+}
+
+private fun fallbackStartDestination(
+  hasCompletedOnboarding: Boolean,
+  isAuthenticated: Boolean,
+): AppDestination {
+  return when {
+    !hasCompletedOnboarding -> {
+      Log.d(TAG, "Fallback: user hasn't completed onboarding")
+      OnboardingDestination
+    }
+
+    !isAuthenticated -> {
+      Log.d(TAG, "Fallback: user not authenticated")
+      LoginDestination
+    }
+
+    else -> {
+      Log.d(TAG, "Fallback: user authenticated, going to home")
+      HomeDestination()
+    }
   }
 }
 
@@ -239,104 +206,8 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
   // Create back stack using nav3 with state restoration
   val backStack = rememberNavBackStack(startDestination)
 
-  // Register a navigation listener to log all navigation events
-  LaunchedEffect(Unit) {
-    AutoMobileSDK.addNavigationListener { event ->
-      Log.d(
-        TAG,
-        "AutoMobileSDK Navigation Event: destination=${event.destination}, source=${event.source}, arguments=${event.arguments}, metadata=${event.metadata}",
-      )
-    }
-  }
-
-  // Re-fire current navigation destination on resume (after returning from background)
-  val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-  androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
-    val observer =
-      androidx.lifecycle.LifecycleEventObserver { _, event ->
-        if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-          val current = backStack.lastOrNull() ?: return@LifecycleEventObserver
-          val name = current::class.simpleName ?: return@LifecycleEventObserver
-          Navigation3Adapter.trackManually(name)
-        }
-      }
-    lifecycleOwner.lifecycle.addObserver(observer)
-    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-  }
-
-  // Set up the deep link callback for runtime navigation
-  LaunchedEffect(Unit) {
-    Log.d(TAG, "Setting up deep link callback")
-    onDeepLinkCallbackSet { uri ->
-      Log.d(TAG, "Deep link callback invoked with URI: $uri")
-      val parsedDestination = DeepLinkManager.parseDeepLink(uri)
-      Log.d(TAG, "Parsed destination: $parsedDestination")
-
-      if (parsedDestination != null) {
-        // Check if the user has proper auth state for the destination
-        val targetDestination =
-          when (parsedDestination) {
-            is OnboardingDestination -> parsedDestination
-            is LoginDestination -> parsedDestination
-            is HomeDestination,
-            is SlidesDestination,
-            is VideoPlayerDestination,
-            is SettingsDestination,
-            is DemoIndexDestination,
-            is DemoUxStartDestination,
-            is DemoUxDetailsDestination,
-            is DemoUxSummaryDestination,
-            is DemoStartupDestination,
-            is DemoPerformanceListDestination,
-            is DemoPerformanceDetailDestination,
-            is DemoContrastDestination,
-            is DemoTapTargetsDestination,
-            is DemoXmlSemanticLinksDestination,
-            is DemoComposeSemanticLinksDestination,
-            is DemoNestedSelectionDestination,
-            is DemoBugReproDestination,
-            is DemoHandledExceptionDestination,
-            is DemoNetworkTestDestination,
-            is DesignSystemDemoDestination -> {
-              // For protected destinations, ensure user is authenticated
-              when {
-                !userPreferences.hasCompletedOnboarding -> {
-                  Log.d(TAG, "User hasn't completed onboarding, redirecting to onboarding")
-                  OnboardingDestination
-                }
-
-                !userPreferences.isAuthenticated -> {
-                  Log.d(TAG, "User not authenticated, redirecting to login")
-                  LoginDestination
-                }
-
-                else -> {
-                  Log.d(TAG, "User authenticated, navigating to: $parsedDestination")
-                  parsedDestination
-                }
-              }
-            }
-          }
-
-        Log.d(TAG, "Navigating to destination: $targetDestination")
-        // Clear the back stack and navigate to the deep link destination
-        backStack.clear()
-        backStack.add(targetDestination)
-
-        // Track the deep link navigation
-        analyticsTracker.trackEvent(
-          "deep_link_navigation",
-          mapOf(
-            "uri" to uri.toString(),
-            "destination" to targetDestination.toString(),
-            "isRuntime" to "true",
-          ),
-        )
-      } else {
-        Log.w(TAG, "Failed to parse deep link destination: $uri")
-      }
-    }
-  }
+  val navigationState = NavigationState(backStack, userPreferences, analyticsTracker)
+  RegisterNavigationCallbacks(onDeepLinkCallbackSet, navigationState)
 
   NavDisplay(
     modifier = Modifier.semantics { testTagsAsResourceId = true },
@@ -349,464 +220,12 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
       ),
     entryProvider =
       entryProvider {
-        entry<OnboardingDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to OnboardingScreen")
-            analyticsTracker.trackScreenView("OnboardingScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<OnboardingDestination>()) {
-            OnboardingScreen(
-              onFinish = {
-                Log.d(TAG, "Onboarding finished, navigating to LoginScreen")
-                userPreferences.hasCompletedOnboarding = true
-                NavigationTracker.trackNavigation(
-                  "OnboardingScreen",
-                  "LoginScreen",
-                  "onboarding_finish",
-                )
-                backStack.clear()
-                backStack.add(LoginDestination)
-              },
-            )
-          }
-        }
-
-        entry<LoginDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to LoginScreen")
-            analyticsTracker.trackScreenView("LoginScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<LoginDestination>()) {
-            LoginScreen(
-              userPreferences = userPreferences,
-              onNavigateToHome = {
-                Log.d(TAG, "Login successful, navigating to HomeScreen")
-                NavigationTracker.trackNavigation(
-                  "LoginScreen",
-                  "HomeScreen",
-                  "login_success",
-                )
-                backStack.clear()
-                backStack.add(HomeDestination())
-              },
-              onGuestMode = {
-                Log.d(TAG, "Guest mode selected, navigating to HomeScreen")
-                userPreferences.isGuestMode = true
-                NavigationTracker.trackNavigation("LoginScreen", "HomeScreen", "guest_mode")
-                backStack.clear()
-                backStack.add(HomeDestination())
-              },
-            )
-          }
-        }
-
-        entry<HomeDestination> { homeDestination ->
-          val tabNames = listOf("Discover", "Demos", "Slides", "Settings")
-          Navigation3Adapter.TrackNavigation(
-            destination = homeDestination,
-            extractArguments = {
-              mapOf("tab" to (tabNames.getOrNull(it.selectedTab) ?: it.selectedTab))
-            },
-          )
-          LaunchedEffect(Unit) {
-            Log.d(
-              TAG,
-              "Navigated to HomeScreen with selectedTab: ${homeDestination.selectedTab}, selectedSubTab: ${homeDestination.selectedSubTab}",
-            )
-            analyticsTracker.trackScreenView("HomeScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<HomeDestination>()) {
-            HomeScreen(
-              initialSelectedTab = homeDestination.selectedTab,
-              initialSelectedSubTab = homeDestination.selectedSubTab,
-              onNavigateToVideoPlayer = { videoId ->
-                Log.d(TAG, "Navigating to VideoPlayerScreen with videoId: $videoId")
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "VideoPlayerScreen",
-                  "video_selection",
-                )
-                backStack.add(VideoPlayerDestination(videoId))
-              },
-              onNavigateToDemos = {
-                Log.d(TAG, "Navigating to DemoIndexScreen")
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "DemoIndexScreen",
-                  "demo_selection",
-                )
-                backStack.add(DemoIndexDestination)
-              },
-              onNavigateToSlides = { slideIndex ->
-                Log.d(TAG, "Navigating to SlidesScreen with slideIndex: $slideIndex")
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "SlidesScreen",
-                  "slides_selection",
-                )
-                backStack.add(SlidesDestination(slideIndex))
-              },
-              onLogout = {
-                Log.d(TAG, "Logout initiated, navigating to LoginScreen")
-                if (userPreferences.isGuestMode) {
-                  userPreferences.isGuestMode = false
-                } else {
-                  userPreferences.isAuthenticated = false
-                }
-                NavigationTracker.trackNavigation("HomeScreen", "LoginScreen", "logout")
-                backStack.clear()
-                backStack.add(LoginDestination)
-              },
-              onGuestModeNavigateToLogin = {
-                Log.d(TAG, "Guest mode to login, navigating to LoginScreen")
-                userPreferences.isGuestMode = false
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "LoginScreen",
-                  "guest_to_login",
-                )
-                backStack.clear()
-                backStack.add(LoginDestination)
-              },
-              modifier = Modifier.destinationSemanticModifier<HomeDestination>(),
-            )
-          }
-        }
-
-        entry<SlidesDestination> { slidesDestination ->
-          Navigation3Adapter.TrackNavigation(
-            destination = slidesDestination,
-            extractArguments = { mapOf("slideIndex" to it.slideIndex) },
-          )
-          LaunchedEffect(Unit) {
-            Log.d(
-              TAG,
-              "Navigated to SlidesScreen with slideIndex: ${slidesDestination.slideIndex}",
-            )
-            analyticsTracker.trackScreenView("SlidesScreen")
-          }
-          Box(
-            modifier =
-              Modifier.destinationSemanticModifier<SlidesDestination>(
-                "slide_${slidesDestination.slideIndex}",
-              ),
-          ) {
-            SlidesScreen(
-              initialSlideIndex = slidesDestination.slideIndex,
-              onNavigateBack = {
-                val destination = backStack.popOrGoHome(HomeDestination())
-                val screenName =
-                  destination::class.simpleName?.removeSuffix("Destination") + "Screen"
-                Log.d(TAG, "Navigating back from SlidesScreen to $screenName")
-                NavigationTracker.trackNavigation(
-                  "SlidesScreen",
-                  screenName,
-                  "back_navigation",
-                )
-              },
-            )
-          }
-        }
-
-        entry<VideoPlayerDestination> { videoPlayerDestination ->
-          Navigation3Adapter.TrackNavigation(
-            destination = videoPlayerDestination,
-            extractArguments = { mapOf("videoId" to it.videoId) },
-          )
-          LaunchedEffect(Unit) {
-            Log.d(
-              TAG,
-              "Navigated to VideoPlayerScreen with videoId: ${videoPlayerDestination.videoId}",
-            )
-            analyticsTracker.trackScreenView("VideoPlayerScreen")
-          }
-          Box(
-            modifier =
-              Modifier.destinationSemanticModifier<VideoPlayerDestination>(
-                "video_${videoPlayerDestination.videoId}",
-              ),
-          ) {
-            VideoPlayerScreen(
-              videoId = videoPlayerDestination.videoId,
-              onNavigateBack = {
-                val destination = backStack.popOrGoHome(HomeDestination())
-                val screenName =
-                  destination::class.simpleName?.removeSuffix("Destination") + "Screen"
-                Log.d(TAG, "Navigating back from VideoPlayerScreen to $screenName")
-                NavigationTracker.trackNavigation(
-                  "VideoPlayerScreen",
-                  screenName,
-                  "back_navigation",
-                )
-              },
-            )
-          }
-        }
-
-        entry<SettingsDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to SettingsScreen")
-            analyticsTracker.trackScreenView("SettingsScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<SettingsDestination>()) {
-            SettingsScreen(
-              onLogout = {
-                Log.d(TAG, "Logout initiated from settings, navigating to LoginScreen")
-                if (userPreferences.isGuestMode) {
-                  userPreferences.isGuestMode = false
-                } else {
-                  userPreferences.isAuthenticated = false
-                }
-                NavigationTracker.trackNavigation("SettingsScreen", "LoginScreen", "logout")
-                backStack.clear()
-                backStack.add(LoginDestination)
-              },
-              onGuestModeNavigateToLogin = {
-                Log.d(TAG, "Guest mode to login from settings, navigating to LoginScreen")
-                userPreferences.isGuestMode = false
-                NavigationTracker.trackNavigation(
-                  "SettingsScreen",
-                  "LoginScreen",
-                  "guest_to_login",
-                )
-                backStack.clear()
-                backStack.add(LoginDestination)
-              },
-            )
-          }
-        }
-
-        entry<DemoIndexDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to DemoIndexScreen")
-            analyticsTracker.trackScreenView("DemoIndexScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoIndexDestination>()) {
-            DemoIndexScreen(
-              onNavigateToUxFlow = { backStack.add(DemoUxStartDestination) },
-              onNavigateToStartup = { backStack.add(DemoStartupDestination) },
-              onNavigateToPerformanceList = { backStack.add(DemoPerformanceListDestination) },
-              onNavigateToContrast = { backStack.add(DemoContrastDestination) },
-              onNavigateToTapTargets = { backStack.add(DemoTapTargetsDestination) },
-              onNavigateToXmlSemanticLinks = { backStack.add(DemoXmlSemanticLinksDestination) },
-              onNavigateToComposeSemanticLinks = {
-                backStack.add(DemoComposeSemanticLinksDestination)
-              },
-              onNavigateToNestedSelection = { backStack.add(DemoNestedSelectionDestination) },
-              onNavigateToBugRepro = { backStack.add(DemoBugReproDestination) },
-              onNavigateToHandledException = {
-                backStack.add(DemoHandledExceptionDestination)
-              },
-              onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
-              onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DesignSystemDemoDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to DesignSystemDemoScreen")
-            analyticsTracker.trackScreenView("DesignSystemDemoScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DesignSystemDemoDestination>()) {
-            DesignSystemDemoScreen(onBackClick = { backStack.popOrGoHome(HomeDestination()) })
-          }
-        }
-
-        entry<DemoUxStartDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to DemoUxStartScreen")
-            analyticsTracker.trackScreenView("DemoUxStartScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoUxStartDestination>()) {
-            UxFlowStartScreen(
-              onNavigateNext = { backStack.add(DemoUxDetailsDestination) },
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoUxDetailsDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to DemoUxDetailsScreen")
-            analyticsTracker.trackScreenView("DemoUxDetailsScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoUxDetailsDestination>()) {
-            UxFlowDetailsScreen(
-              onNavigateNext = { backStack.add(DemoUxSummaryDestination) },
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoUxSummaryDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to DemoUxSummaryScreen")
-            analyticsTracker.trackScreenView("DemoUxSummaryScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoUxSummaryDestination>()) {
-            UxFlowSummaryScreen(
-              // Pop summary and details, stopping at a root for short deep-linked stacks.
-              onRestartFlow = { repeat(2) { backStack.popOrGoHome(HomeDestination()) } },
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoStartupDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to StartupDemoScreen")
-            analyticsTracker.trackScreenView("StartupDemoScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoStartupDestination>()) {
-            StartupDemoScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
-          }
-        }
-
-        entry<DemoPerformanceListDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to PerformanceListScreen")
-            analyticsTracker.trackScreenView("PerformanceListScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoPerformanceListDestination>()) {
-            PerformanceListScreen(
-              onNavigateToDetail = { itemId ->
-                backStack.add(DemoPerformanceDetailDestination(itemId))
-              },
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoPerformanceDetailDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(
-            destination = destination,
-            extractArguments = { mapOf("itemId" to it.itemId) },
-          )
-          LaunchedEffect(Unit) {
-            Log.d(
-              TAG,
-              "Navigated to PerformanceDetailScreen with itemId: ${destination.itemId}",
-            )
-            analyticsTracker.trackScreenView("PerformanceDetailScreen")
-          }
-          Box(
-            modifier =
-              Modifier.destinationSemanticModifier<DemoPerformanceDetailDestination>(
-                "item_${destination.itemId}",
-              ),
-          ) {
-            PerformanceDetailScreen(
-              itemId = destination.itemId,
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoContrastDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to ContrastDemoScreen")
-            analyticsTracker.trackScreenView("ContrastDemoScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoContrastDestination>()) {
-            ContrastDemoScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
-          }
-        }
-
-        entry<DemoTapTargetsDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to TapTargetsDemoScreen")
-            analyticsTracker.trackScreenView("TapTargetsDemoScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoTapTargetsDestination>()) {
-            TapTargetsDemoScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
-          }
-        }
-
-        entry<DemoNestedSelectionDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          Box(modifier = Modifier.destinationSemanticModifier<DemoNestedSelectionDestination>()) {
-            NestedSelectionDemoScreen(
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoXmlSemanticLinksDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to XmlSemanticLinksDemoScreen")
-            analyticsTracker.trackScreenView("XmlSemanticLinksDemoScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoXmlSemanticLinksDestination>()) {
-            XmlSemanticLinksDemoScreen(
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoComposeSemanticLinksDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to ComposeSemanticLinksDemoScreen")
-            analyticsTracker.trackScreenView("ComposeSemanticLinksDemoScreen")
-          }
-          Box(
-            modifier = Modifier.destinationSemanticModifier<DemoComposeSemanticLinksDestination>(),
-          ) {
-            ComposeSemanticLinksDemoScreen(
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoBugReproDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to BugReproScreen")
-            analyticsTracker.trackScreenView("BugReproScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoBugReproDestination>()) {
-            BugReproScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
-          }
-        }
-
-        entry<DemoHandledExceptionDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to HandledExceptionDemoScreen")
-            analyticsTracker.trackScreenView("HandledExceptionDemoScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoHandledExceptionDestination>()) {
-            HandledExceptionDemoScreen(
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
-            )
-          }
-        }
-
-        entry<DemoNetworkTestDestination> { destination ->
-          Navigation3Adapter.TrackNavigation(destination)
-          LaunchedEffect(Unit) {
-            Log.d(TAG, "Navigated to NetworkTestScreen")
-            analyticsTracker.trackScreenView("NetworkTestScreen")
-          }
-          Box(modifier = Modifier.destinationSemanticModifier<DemoNetworkTestDestination>()) {
-            NetworkTestScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
-          }
-        }
+        authNavigationEntries(navigationState)
+        homeNavigationEntry(navigationState)
+        mediaNavigationEntries(navigationState)
+        settingsNavigationEntry(navigationState)
+        demoFlowNavigationEntries(navigationState)
+        demoScenarioNavigationEntries(navigationState)
       },
   )
 }

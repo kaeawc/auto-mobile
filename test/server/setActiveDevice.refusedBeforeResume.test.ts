@@ -1,5 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { installFakeCtrlProxyManagers } from "../helpers/hermeticDeviceTools";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { maskRealCtrlProxyWebSocketOptIn } from "../helpers/maskRealCtrlProxyWebSocketOptIn";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -37,24 +36,19 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     deviceId: "emulator-5554",
     name: "Pixel_8_API_34",
     platform: "android",
-    isEmulator: true,
   };
   let timer: FakeTimer;
   /** The client's own clock, so stepping through restart backoff does not idle the holder out. */
   let clientTimer: FakeTimer;
   let sessions: SessionManager;
   let client: AndroidCtrlProxyClient;
-  let restoreProviders: () => void;
   let restoreFactory: () => void;
 
   const arrange = async (): Promise<void> => {
-    restoreProviders = installFakeCtrlProxyManagers();
     timer = new FakeTimer();
-    sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [device]);
     restoreFactory = snapshotPlatformDeviceManagerFactory();
@@ -68,12 +62,10 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     const adb = new FakeAdbExecutor();
     adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
     clientTimer = new FakeTimer();
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      createInstantFailureWebSocketFactory(clientTimer),
-      clientTimer,
-    );
+    client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(clientTimer),
+      timer: clientTimer,
+    });
     AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
     registerUtilityTools();
     // The holder takes the device through the same tool, before any budget state is set up.
@@ -90,13 +82,21 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     sessions.stopCleanupTimer();
     DaemonState.getInstance().reset();
     restoreFactory();
-    restoreProviders();
   };
-  beforeEach(arrange);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrange();
+        await fn();
+      },
+      timeout,
+    );
+  }
   afterEach(dispose);
 
-  const budget = (): ForcedRestartBudget =>
-    (client as unknown as { forcedRestartBudget: ForcedRestartBudget }).forcedRestartBudget;
+  const budget = (): ForcedRestartBudget => client.forcedRestartBudget;
 
   const intruderSelects = async (): Promise<unknown> =>
     ToolRegistry.getTool("setActiveDevice")!
@@ -115,7 +115,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     await dispose();
   });
 
-  test("an exhausted forced-restart budget stays exhausted", async () => {
+  arranged("an exhausted forced-restart budget stays exhausted", async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       budget().recordFailure("service recovery failed", budget().tryBeginAttempt()!);
       clientTimer.advanceTime(600_000);
@@ -128,7 +128,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     expect(client.getRestartBudgetSnapshot()).toMatchObject({ state: "exhausted", attempts: 3 });
   });
 
-  test("the holder's admitted recovery attempt keeps its token", async () => {
+  arranged("the holder's admitted recovery attempt keeps its token", async () => {
     const token = budget().tryBeginAttempt()!;
 
     const refusal = await intruderSelects();
@@ -138,7 +138,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     expect(budget().recordSuccess(token)).toBe(true);
   });
 
-  test("the holder selecting its own device again still re-arms the budget", async () => {
+  arranged("the holder selecting its own device again still re-arms the budget", async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       budget().recordFailure("service recovery failed", budget().tryBeginAttempt()!);
       clientTimer.advanceTime(600_000);

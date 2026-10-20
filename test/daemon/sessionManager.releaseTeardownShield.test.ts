@@ -78,6 +78,14 @@ class SignalAwareDevice {
       return { status: "restored" };
     };
   }
+
+  /** The same restore for a restorer whose contract returns no outcome. */
+  voidRestorer(kind: RestoreKind): () => Promise<void> {
+    const restore = this.restorer(kind);
+    return async () => {
+      await restore();
+    };
+  }
 }
 
 async function harness() {
@@ -85,14 +93,12 @@ async function harness() {
   timer.setCurrentTime(1000);
   const markers = new FakeDeviceHealthMarkers(timer);
   const fake = new SignalAwareDevice();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: fake.restorer("keep-awake") }),
-    () => ({ restore: fake.restorer("biometric") }),
-    () => ({ restore: fake.restorer("network") }),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: fake.restorer("keep-awake") }),
+    biometricEnrollmentRestorer: () => ({ restore: fake.voidRestorer("biometric") }),
+    restorers: { networkCondition: () => ({ restore: fake.voidRestorer("network") }) },
+  });
   managers.push(manager);
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [device]);
@@ -111,7 +117,11 @@ async function harness() {
 type Harness = Awaited<ReturnType<typeof harness>>;
 
 async function ownDevice(h: Harness, kinds: readonly RestoreKind[]): Promise<void> {
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   if (kinds.includes("keep-awake")) {
     h.manager.setKeepScreenAwake("old", { applied: true });
   }
@@ -331,15 +341,12 @@ describe("session release teardown is shielded from the caller's signal (#10198)
     expect(h.pool.getDevice(device.deviceId)?.status).toBe("busy");
     expect(h.pool.getStats().idle).toBe(0);
     await expect(
-      h.pool.bindOrReuseDeviceSession(
-        "next",
-        device.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        true,
-      ),
+      h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: device.deviceId,
+        platform: "android",
+        allowSessionRebind: true,
+      }),
     ).rejects.toThrow("cleanup");
 
     gate.resolve();

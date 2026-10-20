@@ -28,4 +28,13 @@ pluginManager.withPlugin("dev.detekt") {
     // variant classpath purely to feed detekt.
     ignoredBuildTypes = listOf("release")
   }
+
+  // The plain `detekt` task (what `check`/`build` runs) analyzes main and test
+  // sources together and reads only `detekt-baseline.xml`, while the committed
+  // baselines are per type-resolved task (`detekt-baseline-main.xml`,
+  // `-debug.xml`, ...). It therefore fails on every baselined finding and
+  // reddened `:desktop-core:build` on main. CI and prepush-android.sh gate the
+  // same sources and rules through `detektMain`/`detektTest`, which honour the
+  // baselines, so the unbaselined duplicate is disabled.
+  tasks.named("detekt") { enabled = false }
 }

@@ -5,8 +5,8 @@ import {
   type DaemonStateAccess,
 } from "../../../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../../../src/daemon/deviceSessionRegistry";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/models/managedExecutionLiveness";
 import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
   clampManagedExecutionIdleTimeoutMs,
   holdsOwnerHeartbeatLease,
   resolveManagedExecutionIdleTimeoutMs,
@@ -28,6 +28,13 @@ import { SUSPECT_GRACE_MS } from "../../../../src/daemon/livenessOwnerLease";
 
 // #11340: managed executions stay live until their held session is released.
 // The configured idle window stays stored; heartbeats and reads never move activity clocks.
+
+/** A real session manager that exposes how it rebuilds liveness from a persisted row. */
+class RecoveryLivenessProbe extends SessionManager {
+  livenessOf(row: Parameters<SessionManager["recoveryLivenessFromPersisted"]>[0]) {
+    return this.recoveryLivenessFromPersisted(row);
+  }
+}
 
 const SESSION = "managed-execution-session";
 const DEVICE = "emulator-5554";
@@ -80,6 +87,7 @@ describe("managed-execution session liveness", () => {
     getSessionManager: () => manager,
     getDevicePool: () => ({
       refreshDevices: async () => 0,
+      releaseDevice: async () => {},
       getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
     }),
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -135,14 +143,9 @@ describe("managed-execution session liveness", () => {
       },
       timer,
     );
-    await manager.createSession(
-      SESSION,
-      DEVICE,
-      "android",
-      undefined,
-      undefined,
-      "Pixel_managed_execution",
-    );
+    await manager.createSession(SESSION, DEVICE, "android", {
+      stableDeviceId: "Pixel_managed_execution",
+    });
     expect(await heartbeat({ claimLivenessOwnership: true })).toMatchObject({ success: true });
   });
 
@@ -433,14 +436,9 @@ describe("managed-execution session liveness", () => {
     await manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: 30 * MINUTE });
     const row = (await persistence.getSession!(SESSION))!;
 
-    const liveness = (
-      manager as unknown as {
-        recoveryLivenessFromPersisted(persisted: typeof row): {
-          livenessPolicy: string;
-          sessionTimeoutMs: number;
-        };
-      }
-    ).recoveryLivenessFromPersisted(row);
+    const probe = new RecoveryLivenessProbe(timer, persistence);
+    probe.stopCleanupTimer();
+    const liveness = probe.livenessOf(row);
 
     expect(liveness.livenessPolicy).toBe(MANAGED_EXECUTION_LIVENESS_POLICY);
     expect(liveness.sessionTimeoutMs).toBe(30 * MINUTE);
@@ -462,11 +460,13 @@ describe("managed-execution session liveness", () => {
             sessionId,
             target?.deviceId ?? DEVICE,
             "android",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
+            {
+              timeoutMs: target?.liveness?.sessionTimeoutMs,
+              heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+              initialOwnership: target?.initialOwnership,
+            },
           );
           return session.assignedDevice;
         },

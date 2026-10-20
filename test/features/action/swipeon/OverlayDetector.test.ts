@@ -9,11 +9,12 @@ import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { Element, ElementBounds } from "../../../../src/models";
-import type { ViewHierarchyResult } from "../../../../src/models";
+import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
 import { OverlayDetector } from "../../../../src/features/action/swipeon/OverlayDetector";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeElementParser } from "../../../fakes/FakeElementParser";
 import containerFixture from "../../../fixtures/observe/android-container-scope.json";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 
 describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)", () => {
   test("reads captured flat bounds while identifying the selected container", () => {
@@ -41,16 +42,24 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     right,
     bottom,
   });
-  const node = (bounds: ElementBounds, attrs: Record<string, string>, children: any[] = []) => ({
+  const node = (
+    bounds: ElementBounds,
+    attrs: Record<string, string>,
+    children: ViewHierarchyNode[] = [],
+  ): ViewHierarchyNode => ({
     $: { bounds, ...attrs },
     node: children,
   });
+  // The result's root is a single node: no roots is an empty hierarchy and several roots hang off
+  // one unattributed parent.
+  const tree = (...roots: ViewHierarchyNode[]): ViewHierarchyResult["hierarchy"] =>
+    roots.length === 0 ? {} : { node: roots.length === 1 ? roots[0] : { node: roots } };
   const LIST_BOUNDS = b(0, 0, 1000, 2000);
   const listElement: Element = {
     bounds: LIST_BOUNDS,
     "resource-id": "list",
     scrollable: true,
-  } as unknown as Element;
+  };
   // OverlayDetector resolves the selected container node itself (by
   // requiring a unique selector+exact-bounds match against the passed-in
   // containerElement — see resolveSelectedContainerNode) rather than
@@ -66,13 +75,13 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     const listNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }, [
       node(b(0, 0, 1000, 100), { "resource-id": "row", clickable: "true" }),
     ]);
-    const hierarchy = {
-      hierarchy: {
-        node: [node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [listNode])],
-      },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(
+        node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [listNode]),
+      ),
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     expect(overlays).toEqual([]);
   });
@@ -99,18 +108,16 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
   test("a genuine clickable sibling under a clickable root is still an overlay, and only it", () => {
     const fabBounds = b(800, 1700, 1000, 1900);
     const listNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          node(b(0, 0, 1000, 2000), { "resource-id": "root", focusable: "true" }, [
-            node(b(0, 0, 1000, 2000), { "resource-id": "card", clickable: "true" }, [listNode]),
-            node(fabBounds, { "resource-id": "fab", clickable: "true" }),
-          ]),
-        ],
-      },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(
+        node(b(0, 0, 1000, 2000), { "resource-id": "root", focusable: "true" }, [
+          node(b(0, 0, 1000, 2000), { "resource-id": "card", clickable: "true" }, [listNode]),
+          node(fabBounds, { "resource-id": "fab", clickable: "true" }),
+        ]),
+      ),
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(fabBounds);
@@ -124,8 +131,8 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // overlay covering the list) would be suppressed as an "ancestor".
     const popupBounds = b(100, 600, 900, 1400);
     const realListNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
-    const hierarchy = {
-      hierarchy: { node: [] },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(),
       windows: [
         {
           windowLayer: 0,
@@ -146,7 +153,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(popupBounds);
@@ -158,7 +165,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // popup's clickable root is still the one overlay in both variants.
     const popupBounds = b(100, 600, 900, 1400);
     const makeHierarchy = (lookAlikeAttrs: Record<string, string>) => ({
-      hierarchy: { node: [] },
+      hierarchy: tree(),
       windows: [
         {
           windowLayer: 0,
@@ -183,11 +190,9 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     });
 
-    for (const lookAlike of [{}, { bounds: "not-a-rect" }]) {
-      const overlays = detector().collectOverlayCandidates(
-        makeHierarchy(lookAlike) as any,
-        listElement,
-      );
+    const lookAlikes: Array<Record<string, string>> = [{}, { bounds: "not-a-rect" }];
+    for (const lookAlike of lookAlikes) {
+      const overlays = detector().collectOverlayCandidates(makeHierarchy(lookAlike), listElement);
 
       expect(overlays).toHaveLength(1);
       expect(overlays[0].bounds).toEqual(popupBounds);
@@ -206,10 +211,8 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // selector lookup always searches before any window — see
     // resolveSelectedContainerNode's main-first precedence.
     const realListNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
-    const hierarchy = {
-      hierarchy: {
-        node: [node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [realListNode])],
-      },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(node(b(0, 0, 1000, 2000), { "resource-id": "root" }, [realListNode])),
       windows: [
         {
           windowLayer: 5,
@@ -224,7 +227,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(LIST_BOUNDS);
@@ -247,17 +250,15 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     const cardBBounds = b(0, 900, 1000, 1300);
     const listBBounds = b(100, 950, 900, 1250);
 
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          node(cardABounds, { "resource-id": "cardA", clickable: "true" }, [
-            node(listABounds, { "resource-id": "list", scrollable: "true" }),
-          ]),
-          node(cardBBounds, { "resource-id": "cardB", clickable: "true" }, [
-            node(listBBounds, { "resource-id": "list", scrollable: "true" }),
-          ]),
-        ],
-      },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(
+        node(cardABounds, { "resource-id": "cardA", clickable: "true" }, [
+          node(listABounds, { "resource-id": "list", scrollable: "true" }),
+        ]),
+        node(cardBBounds, { "resource-id": "cardB", clickable: "true" }, [
+          node(listBBounds, { "resource-id": "list", scrollable: "true" }),
+        ]),
+      ),
     };
 
     // Mirrors what the area-ranked swipe-target resolution hands back as the
@@ -267,9 +268,9 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       bounds: listBBounds,
       "resource-id": "list",
       scrollable: true,
-    } as unknown as Element;
+    };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, selectedListElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, selectedListElement);
 
     // cardB truly contains listB and must be exempted as its ancestor, not
     // reported as a full-cover overlay that would block the swipe outright.
@@ -288,17 +289,15 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // clickable root is still reported as an overlay candidate rather than
     // risking exemption of the wrong node's ancestors.
     const mismatchedBounds = b(0, 0, 500, 500);
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
-            node(mismatchedBounds, { "resource-id": "list", scrollable: "true" }),
-          ]),
-        ],
-      },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(
+        node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
+          node(mismatchedBounds, { "resource-id": "list", scrollable: "true" }),
+        ]),
+      ),
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(b(0, 0, 1000, 2000));
@@ -310,18 +309,16 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // other, so identity is ambiguous. The safe fallback applies — no
     // ancestor is exempted — rather than risking anchoring to whichever tied
     // node happens to be visited.
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
-            node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
-            node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
-          ]),
-        ],
-      },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(
+        node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
+          node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
+          node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }),
+        ]),
+      ),
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     expect(overlays).toHaveLength(1);
     expect(overlays[0].bounds).toEqual(b(0, 0, 1000, 2000));
@@ -338,14 +335,10 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // removes, just for main-hierarchy-selected containers specifically.
     const realListNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
     const toastBounds = b(0, 1800, 1000, 2000);
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          node(b(0, 0, 1000, 2000), { "resource-id": "appRoot", clickable: "true" }, [
-            realListNode,
-          ]),
-        ],
-      },
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(
+        node(b(0, 0, 1000, 2000), { "resource-id": "appRoot", clickable: "true" }, [realListNode]),
+      ),
       windows: [
         {
           windowLayer: 5,
@@ -356,7 +349,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ],
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, listElement);
+    const overlays = detector().collectOverlayCandidates(hierarchy, listElement);
 
     // appRoot (the real, main-hierarchy ancestor) must be exempted; only the
     // genuine, unrelated window overlay (the toast) is reported.
@@ -377,20 +370,18 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       bounds: LIST_BOUNDS,
       "resource-id": "list",
       text: "Groceries",
-    } as unknown as Element;
-
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
-            node(LIST_BOUNDS, { "resource-id": "list", text: "Groceries", scrollable: "true" }),
-            node(LIST_BOUNDS, { "resource-id": "list", text: "Recents", scrollable: "true" }),
-          ]),
-        ],
-      },
     };
 
-    const overlays = detector().collectOverlayCandidates(hierarchy as any, selected);
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: tree(
+        node(b(0, 0, 1000, 2000), { "resource-id": "root", clickable: "true" }, [
+          node(LIST_BOUNDS, { "resource-id": "list", text: "Groceries", scrollable: "true" }),
+          node(LIST_BOUNDS, { "resource-id": "list", text: "Recents", scrollable: "true" }),
+        ]),
+      ),
+    };
+
+    const overlays = detector().collectOverlayCandidates(hierarchy, selected);
 
     // root is the real, uniquely-identified target's genuine ancestor and
     // must be exempted — not reported as a full-cover overlay.
@@ -409,7 +400,9 @@ describe("SwipeOn container overlays", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const createObserveResult = (viewHierarchy: any): ObserveResult => ({
-    timestamp: Date.now(),
+    updatedAt: Date.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy,
@@ -449,14 +442,14 @@ describe("SwipeOn container overlays", () => {
   });
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };
 

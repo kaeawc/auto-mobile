@@ -6,6 +6,8 @@ import { ActionableError, type BootedDevice } from "../../../src/models";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
 
 const device: BootedDevice = { deviceId: "ios-swipe", platform: "ios", name: "iPhone" };
 
@@ -24,21 +26,19 @@ class ScriptedSwipeClient extends FakeIOSCtrlProxy {
   }
 
   override async requestSwipe(
-    ...args: Parameters<IOSCtrlProxyClient["requestSwipe"]>
+    request: SwipeRequest,
   ): ReturnType<IOSCtrlProxyClient["requestSwipe"]> {
     this.calls++;
-    this.receivedSignal = args[8];
-    this.receivedOnDispatch = args[9];
-    return this.script(() => args[9]?.());
+    this.receivedSignal = request.signal;
+    this.receivedOnDispatch = request.onDispatch;
+    return this.script(() => request.onDispatch?.());
   }
 }
 
 let spy: ReturnType<typeof spyOn> | undefined;
 
 function use(client: FakeIOSCtrlProxy): void {
-  spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    client as unknown as IOSCtrlProxyClient,
-  );
+  spy = spyOnIosClientInstance(client);
 }
 
 afterEach(() => {
@@ -194,8 +194,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       3,
       4,
       { duration: 100 },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
 
     expect(result.success).toBe(true);
@@ -210,7 +209,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
     controller.abort(new ActionableError("caller cancelled"));
 
     await expect(
-      new ExecuteGesture(device).swipe(1, 2, 3, 4, {}, undefined, controller.signal),
+      new ExecuteGesture(device).swipe(1, 2, 3, 4, {}, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(client.calls).toBe(0);
   });
@@ -226,12 +225,12 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       })),
     );
 
-    expect(await new ExecuteGesture(device).swipe(1, 2, 3, 4, { duration: 90 })).toEqual({
+    expect(await new ExecuteGesture(device).swipe(1, 2, 10, 2, { duration: 90 })).toEqual({
       success: true,
       x1: 1,
       y1: 2,
-      x2: 3,
-      y2: 4,
+      x2: 10,
+      y2: 2,
       duration: 90,
       a11yTotalTimeMs: 42,
       a11yGestureTimeMs: 30,
@@ -240,24 +239,12 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
 });
 
 describe("ExecuteGesture iOS swipe over the real transport", () => {
-  /** Wires the real delegate, translating the facade's argument order to the delegate's. */
+  /** Wires the real delegate behind the client's request-object swipe. */
   function wire() {
     const h = createIosDelegateHarness();
     const gestures = new CtrlProxyGestures(h.context);
     const client = Object.assign(new FakeIOSCtrlProxy(h.timer), {
-      requestSwipe: (...args: Parameters<IOSCtrlProxyClient["requestSwipe"]>) =>
-        gestures.requestSwipe(
-          args[0],
-          args[1],
-          args[2],
-          args[3],
-          args[4],
-          args[5],
-          args[6],
-          args[7],
-          args[9],
-          args[8],
-        ),
+      requestSwipe: (request: SwipeRequest) => gestures.requestSwipe(request),
     });
     use(client);
     return h;
@@ -279,8 +266,7 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
         3,
         4,
         {},
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       await flush();
       expect(h.sentMessages).toHaveLength(1);
@@ -315,5 +301,64 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
     expect(result).toMatchObject({ success: false, error: "Not connected" });
     expect(result.outcomeIndeterminate).toBeUndefined();
     expect(h.sentMessages).toHaveLength(0);
+  });
+});
+
+describe("ExecuteGesture iOS XCUICoordinate velocity clamp (#12987)", () => {
+  test("a 3000 ms / 100 pt swipe reports the clamped duration and a warning", async () => {
+    use(new FakeIOSCtrlProxy());
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result).toMatchObject({ success: true, duration: 3000, effectiveDurationMs: 1000 });
+    expect(result.warnings?.[0]).toContain("clamped");
+  });
+
+  test("an in-range swipe carries no clamp report", async () => {
+    use(new FakeIOSCtrlProxy());
+    const result = await new ExecuteGesture(device).swipe(0, 0, 300, 0, { duration: 300 });
+    expect(result.effectiveDurationMs).toBeUndefined();
+    expect(result.warnings).toBeUndefined();
+  });
+});
+
+describe("ExecuteGesture iOS swipe reports the dispatch route that ran (#13145)", () => {
+  function usingReply(reply: Record<string, unknown>): void {
+    const client = new FakeIOSCtrlProxy();
+    client.setSwipeResult({ success: true, totalTimeMs: 5, ...reply });
+    use(client);
+  }
+
+  test("unpinned synthesis below 50 ms reports the runner's 50 ms floor, not the XCUICoordinate clamp", async () => {
+    usingReply({ swipeRoute: "unpinnedSynthesized", effectiveDurationMs: 50 });
+    const result = await new ExecuteGesture(device).swipe(0, 0, 300, 0, { duration: 10 });
+    expect(result).toMatchObject({
+      success: true,
+      duration: 10,
+      effectiveDurationMs: 50,
+      dispatchRoute: "unpinnedSynthesized",
+    });
+    expect(result.warnings?.[0]).toContain("unpinnedSynthesized");
+  });
+
+  test("a synthesized route is not clamped to 100-10000 pt/s", async () => {
+    // 100 pt in 3000 ms would be clamped to 1000 ms on XCUICoordinate; synthesis honours 3000.
+    usingReply({ swipeRoute: "lockScreenSynthesized", effectiveDurationMs: 3000 });
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result.effectiveDurationMs).toBeUndefined();
+    expect(result.warnings).toBeUndefined();
+    expect(result.dispatchRoute).toBe("lockScreenSynthesized");
+  });
+
+  test("the XCUICoordinate route reports the duration the runner computed", async () => {
+    usingReply({ swipeRoute: "xcuiCoordinate", effectiveDurationMs: 1000 });
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result).toMatchObject({ effectiveDurationMs: 1000, dispatchRoute: "xcuiCoordinate" });
+    expect(result.warnings?.[0]).toContain("clamped");
+  });
+
+  test("an older runner that reports no route keeps the XCUICoordinate assumption", async () => {
+    usingReply({});
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result).toMatchObject({ effectiveDurationMs: 1000 });
+    expect(result.dispatchRoute).toBeUndefined();
   });
 });

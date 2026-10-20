@@ -8,4 +8,5 @@ import Foundation
 public enum RunnerFeature: String, CaseIterable, Codable, Sendable {
     case doubleTapV1 = "double_tap_v1"
     case displayCutoutInfo = "display_cutout_info"
+    case pathGestureV1 = "path_gesture_v1"
 }

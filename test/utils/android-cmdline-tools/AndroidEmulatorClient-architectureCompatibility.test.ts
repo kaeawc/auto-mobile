@@ -5,17 +5,6 @@ import type { ExecResult } from "../../../src/models";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-interface ArchitectureCompatibilityResult {
-  compatible: boolean;
-  hostArch: string;
-  avdArch?: string;
-  reason?: string;
-}
-
-interface ArchitectureCompatibilityClient {
-  checkArchitectureCompatibility(avdName: string): Promise<ArchitectureCompatibilityResult>;
-}
-
 const result = (): ExecResult => ({
   stdout: "",
   stderr: "",
@@ -27,23 +16,20 @@ const result = (): ExecResult => ({
 function createClient(config: AvdConfig | null, hostArchitecture: string) {
   const commandCalls: string[][] = [];
   const reader = new FakeAvdConfigReader(config);
-  const client = new AndroidEmulatorClient(
-    async (_file, args) => {
+  const client = new AndroidEmulatorClient({
+    emulatorPathLocator: async () => "emulator",
+    execAsync: async (_file, args) => {
       commandCalls.push(args);
       return result();
     },
-    null,
-    new FakeTimer(),
-    undefined,
-    reader,
-    "linux",
+    timer: new FakeTimer(),
+    avdConfigReader: reader,
+    platform: "linux",
     hostArchitecture,
-  );
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
+  });
 
   return {
-    client: client as unknown as ArchitectureCompatibilityClient,
+    client,
     commandCalls,
     reader,
   };

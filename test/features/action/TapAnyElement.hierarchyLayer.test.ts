@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -28,9 +29,10 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
     new FakeAdbExecutor(),
     { timer, accessibilityDetector: detector },
   );
-  command.setRefreshViewHierarchyForTesting(async () => null);
-  command.observedInteraction = (action) =>
-    action(recordObservationRead(observationOf(viewHierarchy)));
+  command.testHooks.setRefreshViewHierarchy(async () => null);
+  command.observedInteraction = runBlockWith(() =>
+    recordObservationRead(observationOf(viewHierarchy)),
+  );
   return { command, service };
 }
 

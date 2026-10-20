@@ -1,14 +1,12 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Repro (adoptOnly gap from #7558): when the pool's tracked emulator child has
@@ -20,6 +18,17 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // rejects that ("already running", src/utils/deviceUtils.ts), which spends the
 // crash-loop budget, marks the incident exhausted, and releases the session
 // instead of adopting the live emulator (the new-serial variant adopts).
+
+/** A launcher process that already exited with code 1 and must never be signalled again. */
+function exitedLauncherProcess(): FakeChildProcess {
+  const process = new FakeChildProcess();
+  process.pid = 42;
+  process.exitCode = 1;
+  process.kill = () => {
+    throw new Error("An exited process must not be killed");
+  };
+  return process;
+}
 
 const original: BootedDevice = {
   name: "Pixel_8_API_35",
@@ -62,40 +71,26 @@ test("adoptOnly recovery does not relaunch an AVD still listed at the same seria
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new RealisticStartManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   try {
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     const captured = pool.getDevice(original.deviceId)!;
 
     // AutoMobile launched this emulator; its tracked child has since exited.
-    const exitedProcess = {
-      pid: 42,
-      exitCode: 1,
-      signalCode: null,
-      kill: () => {
-        throw new Error("An exited process must not be killed");
-      },
-    } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const exitedProcess = exitedLauncherProcess();
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     // Fresh discovery still lists the same AVD, resolved, at the same serial.
     manager.bootedDevices = [original];
@@ -130,38 +125,24 @@ test("adoptOnly recovery relaunches an AVD that really disappeared", async () =>
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new RealisticStartManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   try {
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     const captured = pool.getDevice(original.deviceId)!;
-    const exitedProcess = {
-      pid: 42,
-      exitCode: 1,
-      signalCode: null,
-      kill: () => {
-        throw new Error("An exited process must not be killed");
-      },
-    } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const exitedProcess = exitedLauncherProcess();
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     manager.bootedDevices = [];
     const result = await pool.recoverSessionBoundAndroidDeviceAfterLoss(

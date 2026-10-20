@@ -34,19 +34,19 @@ interface World {
 /** The base past its idle deadline and not yet scanned; its label well inside its own. */
 async function expiredUnscannedBase(): Promise<World> {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const released: string[] = [];
   manager.onSessionRelease((sessionId) => {
     released.push(sessionId);
   });
-  const base = await manager.createSession(BASE, "emulator-5554", "android", BASE_IDLE_MS);
+  const base = await manager.createSession(BASE, "emulator-5554", "android", {
+    timeoutMs: BASE_IDLE_MS,
+  });
   await asPlanAllocation(manager, BASE, [LABEL], () =>
-    manager.createSession(LABEL, "emulator-5556", "android", LABEL_IDLE_MS),
+    manager.createSession(LABEL, "emulator-5556", "android", { timeoutMs: LABEL_IDLE_MS }),
   );
   manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
   timer.advanceTime(BASE_IDLE_MS + 1);

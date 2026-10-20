@@ -8,7 +8,7 @@ import {
   platformSchema,
   withFieldAliases,
   withAppIdAliases,
-} from "../../src/server/toolSchemaHelpers";
+} from "../../src/utils/schemaHelpers";
 import { accessibilitySchema } from "../../src/server/accessibilityTools";
 import {
   crashAppSchema,
@@ -22,6 +22,8 @@ import { biometricAuthSchema } from "../../src/server/biometricTools";
 import { getDeepLinksSchema } from "../../src/server/deepLinkTools";
 import { highlightSchema } from "../../src/server/highlightTools";
 import {
+  tapAtSchema,
+  hitTestSchema,
   shakeSchema,
   keyboardSchema,
   dragAndDropSchema,
@@ -114,7 +116,7 @@ describe("addDeviceTargetingToSchema", () => {
     const withDefault = extendedWithPlatform.safeParse({ bundleId: "com.example.app" });
     expect(withDefault.success).toBe(true);
     if (withDefault.success) {
-      expect(withDefault.data.platform).toBe("android");
+      expect<unknown>(withDefault.data.platform).toBe("android");
     }
 
     const withExplicit = extendedWithPlatform.safeParse({
@@ -123,7 +125,7 @@ describe("addDeviceTargetingToSchema", () => {
     });
     expect(withExplicit.success).toBe(true);
     if (withExplicit.success) {
-      expect(withExplicit.data.platform).toBe("ios");
+      expect<unknown>(withExplicit.data.platform).toBe("ios");
     }
   });
 });
@@ -674,5 +676,33 @@ describe("skeleton selector contract documents the <ime> exception (#6871)", () 
         )
         .map((schema) => schema.name),
     ).toEqual([]);
+  });
+});
+
+describe("accessibility extras input control", () => {
+  test.each([true, false])(
+    "observe retains includeExtras: %s on deviceId reads",
+    (includeExtras) => {
+      const parsed = observeSchema.parse({ deviceId: "device", project: "full", includeExtras });
+      expect(parsed.includeExtras).toBe(includeExtras);
+      expect(parsed.project).toBe("full");
+    },
+  );
+
+  test("observe defaults off and rejects non-boolean values and unknown keys", () => {
+    expect(observeSchema.parse({ deviceId: "device" }).includeExtras).toBeUndefined();
+    expect(observeSchema.safeParse({ deviceId: "device", includeExtras: "true" }).success).toBe(
+      false,
+    );
+    expect(observeSchema.safeParse({ deviceId: "device", unknownField: true }).success).toBe(false);
+  });
+
+  test("tapAt accepts extras while hitTest keeps strict observation control exclusions", () => {
+    expect(tapAtSchema.parse({ x: 10, y: 20, raw: true, includeExtras: true }).includeExtras).toBe(
+      true,
+    );
+    for (const key of ["raw", "project", "includeExtras"]) {
+      expect(hitTestSchema.safeParse({ x: 10, y: 20, [key]: true }).success).toBe(false);
+    }
   });
 });

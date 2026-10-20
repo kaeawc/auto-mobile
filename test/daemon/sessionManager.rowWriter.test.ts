@@ -3,25 +3,23 @@ import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/se
 import { SerializedSessionRowWriter } from "../../src/daemon/sessionRowWriter";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
-import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeSessionRowWriter } from "../fakes/FakeSessionRowWriter";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { installSessionManagerCleanup, makeSessionManager } from "../helpers/sessionManagerSuite";
+
+installSessionManagerCleanup();
 
 test("manager slots read pending from the injected writer on every call", async () => {
   const timer = new FakeTimer();
   const writer = new FakeSessionRowWriter();
-  const manager = new SessionManager(
+  const manager = makeSessionManager({
     timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
-    {
+    fakeBarrier: true,
+    restorers: {
       networkCondition: () => ({ restore: () => Promise.resolve() }),
       clock: () => ({ restore: () => Promise.resolve() }),
     },
-  );
+  });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const slots = Reflect.get(manager, "sessionSlots") as SessionManager["sessionSlots"];
@@ -48,16 +46,12 @@ test("manager slots read pending from the injected writer on every call", async 
 
 test("the default writer stays idle through manager create and release", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = makeSessionManager({ timer, fakeBarrier: true });
   manager.stopCleanupTimer();
   const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
   const slots = Reflect.get(manager, "sessionSlots") as SessionManager["sessionSlots"];
   expect(writer).toBeInstanceOf(SerializedSessionRowWriter);
-  await manager.createSession("idle-writer", "fake-device", "android", 60_000);
+  await manager.createSession("idle-writer", "fake-device", "android", { timeoutMs: 60_000 });
   expect(slots.rowPending("idle-writer")).toBe(false);
   await manager.releaseSession("idle-writer", "explicit-release");
   expect(slots.rowPending("idle-writer")).toBe(false);
@@ -68,11 +62,7 @@ test("the default writer stays idle through manager create and release", async (
 test("manager delegates drain tracking and awaits writes added during the drain", async () => {
   const timer = new FakeTimer();
   const writer = new FakeSessionRowWriter();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = makeSessionManager({ timer, fakeBarrier: true });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const track = Reflect.get(manager, "trackReleaseDrainWrite") as (write: Promise<void>) => void;
@@ -109,11 +99,7 @@ test("manager drain excludes settled identities from its next writer snapshot", 
     // A third read ends a broken loop so the assertion fails without a timeout or real sleep.
     return new Set(reads <= 2 ? [completed] : []);
   };
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = makeSessionManager({ timer, fakeBarrier: true });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   expect(await manager.drainReleasePromises(1000)).toBe(true);
@@ -124,11 +110,7 @@ test("manager drain excludes settled identities from its next writer snapshot", 
 
 test("manager retry callbacks retain instance dispatch and enter on the timer's turn", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = makeSessionManager({ timer, fakeBarrier: true });
   manager.stopCleanupTimer();
   manager.setTerminalReleaseRetryBackoff({ delayForAttempt: () => 37 });
   const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
@@ -164,11 +146,7 @@ test("manager retry callbacks retain instance dispatch and enter on the timer's 
 
 test("manager stop clears writer handles and drain retains the original retry promise", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = makeSessionManager({ timer, fakeBarrier: true });
   manager.stopCleanupTimer();
   const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
   const snapshot: SessionReleaseSnapshot = {
@@ -210,11 +188,7 @@ test("manager stop clears writer handles and drain retains the original retry pr
 
 test("startup replay retains its fence without lifting a successor writer desire", async () => {
   const writer = new FakeSessionRowWriter();
-  const manager = new SessionManager(
-    new FakeTimer(),
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = makeSessionManager({ fakeBarrier: true });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const snapshot: SessionReleaseSnapshot = {
@@ -250,11 +224,7 @@ test("startup replay retains its fence without lifting a successor writer desire
 });
 
 test("non-terminal commit without a fence does not resolve or reload the journal", async () => {
-  const manager = new SessionManager(
-    new FakeTimer(),
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = makeSessionManager({ fakeBarrier: true });
   manager.stopCleanupTimer();
   const journal = new FileTerminalReleaseJournal(
     "/in-memory/unused.jsonl",
@@ -262,7 +232,7 @@ test("non-terminal commit without a fence does not resolve or reload the journal
   );
   manager.attachTerminalReleaseJournal(journal);
   const resolve = spyOn(journal, "resolve");
-  await manager.createSession("no-fence", "fake-device", "android", 60_000);
+  await manager.createSession("no-fence", "fake-device", "android", { timeoutMs: 60_000 });
   await manager.releaseSession("no-fence", "plan-auto-release");
   expect(resolve).not.toHaveBeenCalled();
 });

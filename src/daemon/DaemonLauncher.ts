@@ -1,8 +1,8 @@
-import {
-  execFileSync as nodeExecFileSync,
-  type ChildProcess,
-  type SpawnOptions,
-} from "node:child_process";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
+import type {
+  HostChildProcess as ChildProcess,
+  HostSpawnOptions as SpawnOptions,
+} from "../utils/HostCommandExecutor";
 import {
   closeSync,
   constants as fsConstants,
@@ -16,6 +16,10 @@ import { ActionableError } from "../models";
 import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
 import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { releaseVersion } from "../utils/mcpVersion";
+export {
+  runDaemonProcessCommand,
+  type DaemonProcessCommandRunner,
+} from "../utils/daemonProcessCommand";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -191,26 +195,6 @@ export interface DaemonLaunchedProcess extends TrackedChildProcess {
   stderr: Pick<NonNullable<ChildProcess["stderr"]>, "on" | "off" | "pause" | "resume"> | null;
 }
 
-/** Injectable synchronous argv-first boundary for bounded daemon process probes. */
-export type DaemonProcessCommandRunner = (
-  command: string,
-  args: readonly string[],
-  options: { timeout: number; env: NodeJS.ProcessEnv },
-) => string;
-
-/**
- * Runs a bounded daemon process probe without a shell.
- *
- * Daemon execution belongs here so callers retain narrow test seams without
- * introducing direct child-process invocations elsewhere in `src/daemon`.
- */
-export const runDaemonProcessCommand: DaemonProcessCommandRunner = (command, args, options) =>
-  nodeExecFileSync(command, args, {
-    encoding: "utf-8",
-    timeout: options.timeout,
-    env: options.env,
-  });
-
 /** Signals or probes the dedicated process group created by a detached POSIX spawn. */
 export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals | 0) => void;
 
@@ -258,7 +242,10 @@ function resolvePackageSpecifier(version: string): string {
 }
 
 function pathEntries(environment: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
-  const path = platform === "win32" ? (environment.Path ?? environment.PATH) : environment.PATH;
+  const path =
+    platform === "win32"
+      ? (environment.Path ?? readEnvRaw(AMBIENT_ENV.PATH, environment))
+      : readEnvRaw(AMBIENT_ENV.PATH, environment);
   return path?.split(platform === "win32" ? ";" : posix.delimiter).filter(Boolean) ?? [];
 }
 
@@ -269,9 +256,9 @@ function resolveBunxPath(
 ): string | undefined {
   const extensions =
     platform === "win32"
-      ? (environment.PATHEXT?.split(";").filter((extension) =>
-          /\.(?:com|exe)/i.test(extension),
-        ) ?? [".COM", ".EXE"])
+      ? (readEnvRaw(AMBIENT_ENV.PATHEXT, environment)
+          ?.split(";")
+          .filter((extension) => /\.(?:com|exe)/i.test(extension)) ?? [".COM", ".EXE"])
       : [""];
   const pathJoin = platform === "win32" ? win32.join : posix.join;
   for (const directory of pathEntries(environment, platform)) {
@@ -496,11 +483,10 @@ export class DaemonLauncher {
       deadlineHandle = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
     });
     try {
-      // oxlint-disable-next-line auto-mobile/no-raw-promise-race -- Reuse the group grace deadline; another timer would change its expiry.
-      const wrapperExited = await Promise.race([
-        exitPromise.then(() => true),
-        deadline.then(() => false),
-      ]);
+      const wrapperExited = await raceWithDeadline(
+        [exitPromise.then(() => true), deadline.then(() => false)],
+        { timer: this.timer, label: "Daemon process group grace deadline" },
+      );
 
       // A `bunx`/`bun x` wrapper can exit while its daemon remains in the same
       // detached group. Keep the grace timer alive when that group still exists.

@@ -1,16 +1,18 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
-  Resource,
-  ResourceTemplate,
-  ReadResourceRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-  McpError,
-} from "@modelcontextprotocol/sdk/types.js";
+  type ReadResourceResult,
+  type Resource,
+  type ResourceTemplateType as ResourceTemplate,
+} from "@modelcontextprotocol/server";
+import { McpError } from "../daemon/mcpError";
+import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
-import { ListChangedBroadcaster, ResourceUpdatedBroadcaster } from "./listChangedBroadcast";
+import { setDefaultResourceNotifier } from "../utils/NetworkState";
+import { registerResourceUpdateNotifier } from "../daemon/resourceUpdateNotifier";
+import {
+  ListChangedBroadcaster,
+  ResourceUpdatedBroadcaster,
+  type ServerRegistrationOptions,
+} from "../daemon/listChangedBroadcast";
 import { MALFORMED_URI_SEGMENT_MESSAGE, MalformedResourceUriError } from "./resourceUriSegments";
 
 export interface ResourceReadContext {
@@ -254,11 +256,43 @@ class ResourceRegistryClass {
   // all live sessions, resource updates reach subscribed sessions. A single
   // retained server would be last-writer-wins (issue #3223). Entries and their
   // subscriptions are pruned when a session's transport closes.
-  private servers: Set<McpServer> = new Set();
+  private servers: Set<ResourceRegistryHost> = new Set();
+  // Per-request servers (#4678), tracked only until they close and never sent
+  // notifications; see ServerRegistrationOptions.
+  private ephemeralServers: Set<ResourceRegistryHost> = new Set();
   // Tail of each session's pending notification chain (per-session ordering).
-  private deliveryTails: Map<McpServer, Promise<void>> = new Map();
-  private subscriptions: Map<McpServer, Set<string>> = new Map();
-  private readContexts = new Map<McpServer, (signal: AbortSignal) => ResourceReadContext>();
+  private deliveryTails: Map<ResourceRegistryHost, Promise<void>> = new Map();
+  private subscriptions: Map<ResourceRegistryHost, Set<string>> = new Map();
+  private readContexts = new Map<
+    ResourceRegistryHost,
+    (signal: AbortSignal) => ResourceReadContext
+  >();
+  // Bumped when the registered set is cleared, so a registration skipped while the set
+  // was intact runs again afterwards (#13068).
+  private clearEpoch = 0;
+  // Run before every resources/list reply so a source that only changes outside
+  // AutoMobile (devices booted by hand) can refresh the roster it contributes.
+  private listRefreshers = new Map<string, () => Promise<void>>();
+
+  get clearEpochForRegistration(): number {
+    return this.clearEpoch;
+  }
+
+  /** Register (or replace) a named hook awaited before each resources/list reply. */
+  registerListRefresher(name: string, refresh: () => Promise<void>): void {
+    this.listRefreshers.set(name, refresh);
+  }
+
+  /** Await every registered list refresher; the resources/list handler calls this before replying. */
+  async refreshBeforeList(): Promise<void> {
+    for (const [name, refresh] of this.listRefreshers) {
+      try {
+        await refresh();
+      } catch (error) {
+        logger.warn(`[ResourceRegistry] List refresher ${name} failed: ${error}`);
+      }
+    }
+  }
 
   // Register a new resource
   register(
@@ -378,38 +412,57 @@ class ResourceRegistryClass {
   // transport closes. The underlying Protocol preserves a pre-set `onclose`
   // (both the transport's and the server's), so chaining here cannot clobber
   // other lifecycle hooks (e.g. ToolRegistry's identical prune hook).
-  private trackServer(server: McpServer): void {
-    if (this.servers.has(server)) {
+  private trackServer(server: ResourceRegistryHost, ephemeral: boolean): void {
+    if (this.servers.has(server) || this.ephemeralServers.has(server)) {
       return;
     }
-    this.servers.add(server);
+    const tracked = ephemeral ? this.ephemeralServers : this.servers;
+    tracked.add(server);
     const underlying = server.server;
     const existingOnClose = underlying.onclose;
     underlying.onclose = () => {
-      this.servers.delete(server);
+      tracked.delete(server);
       this.subscriptions.delete(server);
       this.readContexts.delete(server);
       existingOnClose?.();
     };
   }
 
+  /**
+   * Stop tracking a server without waiting for its transport to close. A server
+   * closed before it ever connected has no transport, so the SDK never fires its
+   * `onclose` and the prune hook installed by `trackServer` would not run.
+   */
+  untrackServer(server: ResourceRegistryHost): void {
+    this.servers.delete(server);
+    this.ephemeralServers.delete(server);
+    this.subscriptions.delete(server);
+    this.readContexts.delete(server);
+  }
+
   // Register all resources with an MCP server
   registerWithServer(
-    server: McpServer,
+    server: ResourceRegistryHost,
     getReadContext: (signal: AbortSignal) => ResourceReadContext = () => ({}),
+    options: ServerRegistrationOptions = {},
   ): void {
-    this.trackServer(server);
-    this.readContexts.set(server, getReadContext);
+    const ephemeral = options.ephemeral === true;
+    this.trackServer(server, ephemeral);
+    // Only notified servers need a context to resolve resource-update ownership.
+    if (!ephemeral) {
+      this.readContexts.set(server, getReadContext);
+    }
 
     // Set handler for listing resources
-    server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    server.server.setRequestHandler("resources/list", async () => {
+      await this.refreshBeforeList();
       return {
         resources: this.getResourceDefinitions(),
       };
     });
 
     // Set handler for reading resource content
-    server.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+    server.server.setRequestHandler("resources/read", async (request, ctx) => {
       const { uri } = request.params;
       logger.info(`[ResourceRegistry] ReadResource request for URI: ${uri}`);
 
@@ -433,10 +486,10 @@ class ResourceRegistryClass {
       // First, try to find an exact match resource
       const resource = this.getResource(uri);
       if (resource) {
-        const content = await resource.handler(getReadContext(extra.signal));
+        const content = await resource.handler(getReadContext(ctx.mcpReq.signal));
         return {
           contents: [content],
-        };
+        } as ReadResourceResult;
       }
 
       // If not found, try to match a template
@@ -446,11 +499,11 @@ class ResourceRegistryClass {
         try {
           const content =
             "handlerWithReadContext" in template
-              ? await template.handlerWithReadContext(params, getReadContext(extra.signal))
+              ? await template.handlerWithReadContext(params, getReadContext(ctx.mcpReq.signal))
               : await template.handler(params);
           return {
             contents: [content],
-          };
+          } as ReadResourceResult;
         } catch (error) {
           throw malformedUriToMcpError(error, uri);
         }
@@ -471,14 +524,14 @@ class ResourceRegistryClass {
     });
 
     // Set handler for listing resource templates
-    server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+    server.server.setRequestHandler("resources/templates/list", async () => {
       return {
         resourceTemplates: this.getTemplateDefinitions(),
       };
     });
 
     // Set handler for subscribe
-    server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    server.server.setRequestHandler("resources/subscribe", async (request) => {
       const { uri } = request.params;
       if (!this.servers.has(server)) {
         return {};
@@ -491,7 +544,7 @@ class ResourceRegistryClass {
     });
 
     // Set handler for unsubscribe
-    server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    server.server.setRequestHandler("resources/unsubscribe", async (request) => {
       const { uri } = request.params;
       this.subscriptions.get(server)?.delete(uri);
       logger.info(`[ResourceRegistry] Client unsubscribed from: ${uri}`);
@@ -590,7 +643,7 @@ class ResourceRegistryClass {
   // Per-session FIFO: two notifications to the same session are never reordered,
   // while different sessions proceed independently. A failing task never poisons
   // the tail (tasks catch their own errors; the chain logs any remainder).
-  private enqueueForServer(server: McpServer, task: () => Promise<void>): Promise<void> {
+  private enqueueForServer(server: ResourceRegistryHost, task: () => Promise<void>): Promise<void> {
     const previous = this.deliveryTails.get(server) ?? Promise.resolve();
     const tail = previous.then(task).catch((error) => {
       logger.warn(`[ResourceRegistry] Notification delivery failed unexpectedly: ${error}`);
@@ -605,7 +658,7 @@ class ResourceRegistryClass {
   }
 
   private ownsUpdateSession(
-    server: McpServer,
+    server: ResourceRegistryHost,
     sessionUuid?: string,
     unboundSessionUuid?: string,
   ): boolean {
@@ -620,7 +673,10 @@ class ResourceRegistryClass {
     );
   }
 
-  private async notifySubscribedServer(server: McpServer, targetUris: string[]): Promise<void> {
+  private async notifySubscribedServer(
+    server: ResourceRegistryHost,
+    targetUris: string[],
+  ): Promise<void> {
     for (const targetUri of targetUris) {
       if (!this.servers.has(server)) {
         return;
@@ -679,13 +735,35 @@ class ResourceRegistryClass {
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+    this.ephemeralServers.clear();
     this.deliveryTails.clear();
     this.readContexts.clear();
     this.subscriptions.clear();
   }
 
+  /** Test-only: how many live servers are tracked, so suites can prove none leak. */
+  trackedServerCountsForTesting(): { notified: number; ephemeral: number } {
+    return { notified: this.servers.size, ephemeral: this.ephemeralServers.size };
+  }
+
+  /** Test-only: copy of the registered resources and templates, for {@link restoreForTesting}. */
+  snapshotForTesting(): {
+    resources: Map<string, RegisteredResource>;
+    templates: Map<string, RegisteredResourceTemplate>;
+  } {
+    return { resources: new Map(this.resources), templates: new Map(this.templates) };
+  }
+
+  /** Test-only: put back what {@link snapshotForTesting} captured, replacing current entries. */
+  restoreForTesting(snapshot: ReturnType<ResourceRegistryClass["snapshotForTesting"]>): void {
+    this.resources = new Map(snapshot.resources);
+    this.templates = new Map(snapshot.templates);
+  }
+
   // Clear all registered resources, templates, and subscriptions (for testing)
   clearResources(): void {
+    this.clearEpoch++;
+    this.listRefreshers.clear();
     this.resources.clear();
     this.templates.clear();
     this.subscriptions.clear();
@@ -694,3 +772,12 @@ class ResourceRegistryClass {
 
 // Export a singleton instance
 export const ResourceRegistry = new ResourceRegistryClass();
+
+registerResourceUpdateNotifier((uris) => ResourceRegistry.notifyResourcesUpdated(uris));
+
+// NetworkState (a lower layer) notifies through this registry by default.
+setDefaultResourceNotifier({
+  notifyResourceUpdated(uri: string): void {
+    void ResourceRegistry.notifyResourceUpdated(uri);
+  },
+});

@@ -50,6 +50,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_swipe",
   "request_two_finger_swipe",
   "request_multi_finger_swipe",
+  "request_path_gesture",
   "request_drag",
   "request_pinch",
   "request_set_text",
@@ -173,7 +174,7 @@ function readSwiftRequestTypeRawValues(): string[] {
 
 describe("iOS control-proxy — RequestType contract coverage", () => {
   test("IOS_KNOWN_REQUEST_TYPES matches the transcribed Swift rawValue list", () => {
-    expect([...IOS_KNOWN_REQUEST_TYPES].sort()).toEqual([...SWIFT_REQUEST_TYPES].sort());
+    expect<unknown>([...IOS_KNOWN_REQUEST_TYPES].sort()).toEqual([...SWIFT_REQUEST_TYPES].sort());
   });
 
   test("no duplicate discriminators", () => {

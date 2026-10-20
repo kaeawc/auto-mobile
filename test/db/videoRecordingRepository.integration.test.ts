@@ -89,7 +89,7 @@ describe("VideoRecordingRepository", () => {
   });
 
   test("display migration tolerates both columns already existing", async () => {
-    await addDisplayColumns(db as unknown as Kysely<unknown>);
+    await addDisplayColumns(db);
     await repo.insertRecording(makeRecord({ recordedPanel: { key: "11", role: "inner" } }));
     expect((await repo.getRecording("rec-1"))?.recordedPanel?.key).toBe("11");
   });
@@ -162,7 +162,7 @@ describe("VideoRecordingRepository", () => {
         highlights: [
           {
             description: "second insert highlight",
-            shape: { type: "circle", cx: 12, cy: 34, r: 5 },
+            shape: { type: "circle", bounds: { x: 7, y: 29, width: 10, height: 10 } },
             timeline: { appearedAtSeconds: 1.5 },
           },
         ],
@@ -220,7 +220,7 @@ describe("VideoRecordingRepository", () => {
         highlights: [
           {
             description: "first insert highlight",
-            shape: { type: "circle", cx: 100, cy: 200, r: 30 },
+            shape: { type: "circle", bounds: { x: 70, y: 170, width: 60, height: 60 } },
             timeline: { appearedAtSeconds: 1.0 },
           },
         ],
@@ -258,7 +258,7 @@ describe("VideoRecordingRepository", () => {
       highlights: [
         {
           description: "button tap",
-          shape: { type: "circle", cx: 100, cy: 200, r: 30 },
+          shape: { type: "circle", bounds: { x: 70, y: 170, width: 60, height: 60 } },
           timeline: { appearedAtSeconds: 1.0, disappearedAtSeconds: 2.0 },
         },
       ],
@@ -450,7 +450,7 @@ describe("VideoRecordingRepository", () => {
       highlights: [
         {
           description: "swipe gesture",
-          shape: { type: "circle", cx: 50, cy: 50, r: 20 },
+          shape: { type: "circle", bounds: { x: 30, y: 30, width: 40, height: 40 } },
           timeline: { appearedAtSeconds: 0.5 },
         },
       ],
@@ -459,5 +459,51 @@ describe("VideoRecordingRepository", () => {
     const result = await repo.getRecording("rec-1");
     expect(result!.highlights).toHaveLength(1);
     expect(result!.highlights![0].description).toBe("swipe gesture");
+  });
+
+  describe("behaviour-driving JSON columns are validated on read (#11859)", () => {
+    async function rawUpdate(values: {
+      highlights_json?: string;
+      recorded_panel_json?: string;
+      display_transitions_json?: string;
+    }): Promise<void> {
+      await db
+        .updateTable("video_recordings")
+        .set(values)
+        .where("recording_id", "=", "rec-1")
+        .execute();
+    }
+
+    test("drops highlight entries without a usable timeline and keeps valid ones", async () => {
+      await repo.insertRecording(makeRecord());
+      const good = {
+        shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+        timeline: { appearedAtSeconds: 1 },
+      };
+      await rawUpdate({
+        highlights_json: JSON.stringify([
+          good,
+          null,
+          { shape: good.shape },
+          { shape: good.shape, timeline: { appearedAtSeconds: "soon" } },
+        ]),
+      });
+
+      expect((await repo.getRecording("rec-1"))!.highlights).toEqual([good]);
+    });
+
+    test("reads a recorded panel with an unknown role as undefined", async () => {
+      await repo.insertRecording(makeRecord());
+      await rawUpdate({ recorded_panel_json: JSON.stringify({ key: "11", role: "sideways" }) });
+
+      expect((await repo.getRecording("rec-1"))!.recordedPanel).toBeUndefined();
+    });
+
+    test("reads malformed display transitions as undefined", async () => {
+      await repo.insertRecording(makeRecord());
+      await rawUpdate({ display_transitions_json: JSON.stringify([{ atMs: "late" }]) });
+
+      expect((await repo.getRecording("rec-1"))!.transitions).toBeUndefined();
+    });
   });
 });

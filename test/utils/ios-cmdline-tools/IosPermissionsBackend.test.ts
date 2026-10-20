@@ -63,7 +63,7 @@ describe("IosPermissionsBackend", () => {
     ["", "physical"],
     [` ${simulatorUdid}`, "physical"],
     ["G1B2C3D4-E5F6-7890-ABCD-EF1234567890", "physical"],
-  ])("preserves historical kind resolution for %s", (deviceId, kind) => {
+  ] as const)("preserves historical kind resolution for %s", (deviceId, kind) => {
     const simctl = new FakeSimctl();
     expect(resolveIosDeviceKind({ deviceId })).toBe(kind);
     expect(resolveIosPermissionsBackend({ deviceId, simctl }).kind).toBe(kind);

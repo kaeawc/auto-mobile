@@ -101,8 +101,22 @@ struct PrototypeEmitContext: Decodable {
     }
 
     private static func fits(_ context: [String: JSONValue]) -> Bool {
-        guard let count = jsonByteCount(.object(context)) else { return false }
+        fits(.object(context))
+    }
+
+    /// Whether the compact JSON of `value` fits one emit payload (`maxEmitPayloadBytes`).
+    static func fits(_ value: JSONValue) -> Bool {
+        guard let count = jsonByteCount(value) else { return false }
         return count <= PrototypeLimits.maxEmitPayloadBytes
+    }
+
+    private static func objectByteCount(_ fields: [String: JSONValue]) -> Int? {
+        var count = 2 + max(0, fields.count - 1)
+        for (key, item) in fields {
+            guard let keyBytes = jsonByteCount(.string(key)), let bytes = jsonByteCount(item) else { return nil }
+            count += keyBytes + 1 + bytes
+        }
+        return count
     }
 
     /// Foundation supplies JSON string escaping; number sizes follow the host's JSON.stringify.
@@ -122,17 +136,12 @@ struct PrototypeEmitContext: Decodable {
             }
             return count
         case let .object(fields):
-            var count = 2 + max(0, fields.count - 1)
-            for (key, item) in fields {
-                guard let keyBytes = jsonByteCount(.string(key)), let bytes = jsonByteCount(item) else { return nil }
-                count += keyBytes + 1 + bytes
-            }
-            return count
+            return objectByteCount(fields)
         case let .string(value): return quotedByteCount(value)
         }
     }
 
-    private static func quotedByteCount(_ value: String) -> Int? {
+    static func quotedByteCount(_ value: String) -> Int? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .withoutEscapingSlashes
         return (try? encoder.encode(value))?.count

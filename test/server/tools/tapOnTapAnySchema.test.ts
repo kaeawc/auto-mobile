@@ -1,23 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
+  type InteractionToolDependencies,
   tapOnSchema,
   tapAnySchema,
   pinchOnSchema,
   tapOnHandler,
   tapAnyHandler,
-  setTapOnElementFactory,
-  resetTapOnElementFactory,
-  setTapAnyElementFactory,
-  resetTapAnyElementFactory,
 } from "../../../src/server/interactionTools";
 
 import { selectedElementSchema } from "../../../src/server/toolOutputSchemas";
-import { resolverSelectionStrategySchema } from "../../../src/server/elementSelectorSchemas";
-import { applyJsonSchemaOverride } from "../../../src/server/toolSchemaHelpers";
+import { resolverSelectionStrategySchema } from "../../../src/models/elementSelectorSchemas";
+import { applyJsonSchemaOverride } from "../../../src/utils/schemaHelpers";
 
 import type { TapOnElementOptions, TapAnyElementOptions } from "../../../src/models";
+import { toolIsError, toolJson } from "../../helpers/toolResponse";
 
+const interactionDeps: InteractionToolDependencies = {};
 // P4 (issue #4181, rank 10): the removed-field rejections used bare
 // `.toThrow()`, which passes even when the schema throws for an UNRELATED
 // reason. Capture the ZodError and assert exactly WHICH key was rejected via
@@ -475,47 +474,70 @@ test("handlers forward the complete nested scope and unique strategy", async () 
   };
   const container = { elementId: "item_42", index: 1, container: { elementId: "cart_A" } };
   const device = { name: "fake", deviceId: "fake", platform: "android" as const };
-  setTapOnElementFactory(() => ({ execute }));
-  setTapAnyElementFactory(() => ({ execute }));
+  interactionDeps.tapOnElementFactory = () => ({ execute });
+  interactionDeps.tapAnyElementFactory = () => ({ execute });
   try {
-    await tapOnHandler(device, {
-      action: "tap",
-      platform: "android",
-      selector: { elementId: "remove" },
-      container,
-      selectionStrategy: "unique",
-    });
-    await tapAnyHandler(device, {
-      action: "tap",
-      platform: "android",
-      container,
-      selectionStrategy: "unique",
-    });
+    await tapOnHandler(
+      device,
+      {
+        action: "tap",
+        platform: "android",
+        selector: { elementId: "remove" },
+        container,
+        selectionStrategy: "unique",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
+    await tapAnyHandler(
+      device,
+      {
+        action: "tap",
+        platform: "android",
+        container,
+        selectionStrategy: "unique",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(requests).toHaveLength(2);
     for (const request of requests) {
       expect(request).toMatchObject({ container, selectionStrategy: "unique" });
     }
   } finally {
-    resetTapOnElementFactory();
-    resetTapAnyElementFactory();
+    delete interactionDeps.tapOnElementFactory;
+    delete interactionDeps.tapAnyElementFactory;
   }
 });
 
 test("tapAny accepts and forwards display exactly like tapOn", async () => {
   expect(tapAnySchema.parse({ display: "cover" })).toMatchObject({ display: "cover" });
   const requests: TapAnyElementOptions[] = [];
-  setTapAnyElementFactory(() => ({
+  interactionDeps.tapAnyElementFactory = () => ({
     execute: async (options) => {
       requests.push(options);
-      return { success: false, error: "injected failure", element: {} };
+      return {
+        success: false,
+        action: "tap",
+        error: "injected failure",
+        element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+      };
     },
-  }));
+  });
   try {
     const args = { action: "tap" as const, display: "cover" };
-    await tapAnyHandler({ name: "fake", deviceId: "fake", platform: "android" }, args);
+    await tapAnyHandler(
+      { name: "fake", deviceId: "fake", platform: "android" },
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(requests[0]).toMatchObject({ display: "cover" });
   } finally {
-    resetTapAnyElementFactory();
+    delete interactionDeps.tapAnyElementFactory;
   }
 });
 
@@ -525,22 +547,30 @@ for (const error of [
   undefined,
 ]) {
   test(`tapAny failure message has one prefix: ${error}`, async () => {
-    setTapAnyElementFactory(() => ({
-      execute: async () => ({ success: false, error, element: {} }),
-    }));
+    interactionDeps.tapAnyElementFactory = () => ({
+      execute: async () => ({
+        success: false,
+        action: "tap",
+        error,
+        element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+      }),
+    });
     try {
       const response = await tapAnyHandler(
         { name: "fake", deviceId: "fake", platform: "android" },
         { action: "tap" },
+        undefined,
+        undefined,
+        interactionDeps,
       );
-      const payload = JSON.parse(response.content[0].text!);
+      const payload = toolJson(response);
       expect(payload.message).toBe(
         `Failed to tap clickable element: ${error ? "No clickable element found" : "unknown error"}`,
       );
       expect(payload.error).toBe(error);
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
     } finally {
-      resetTapAnyElementFactory();
+      delete interactionDeps.tapAnyElementFactory;
     }
   });
 }

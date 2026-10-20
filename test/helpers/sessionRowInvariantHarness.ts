@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import type { Kysely } from "kysely";
 import { isTerminalReleaseReason } from "../../src/daemon/releaseReasons";
 import {
@@ -166,7 +167,7 @@ class MemoryJournal implements TerminalReleaseJournal {
   }
 }
 
-type ReleaseReason = string;
+type ReleaseReason = SessionReleaseReason;
 
 /** One issue of the session id: the session the manager held for it, and what was asked of it. */
 interface Incarnation {
@@ -175,7 +176,7 @@ interface Incarnation {
   /** The release reasons announced for it, in order. */
   notified: string[];
   /** The release reasons asked of it. */
-  requested: Set<ReleaseReason>;
+  requested: Set<string>;
   /** Releases whose persistence failed: their owner issues them again (see `retryFailedReleases`). */
   failedReleases: Set<ReleaseReason>;
   deviceLossCommitted: boolean;
@@ -305,7 +306,9 @@ export async function runSessionRowInterleaving(
   const timer = new FakeTimer();
   timer.setCurrentTime(1_000);
   const repository = new ChaoticRepository(db, timer, random);
-  const manager = new SessionManager(timer, repository, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, repository, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   manager.setSupersededRowReassertBackoff(fixedBackoff(REASSERT_RETRY_DELAY_MS));
   manager.setTerminalReleaseRetryBackoff(fixedBackoff(TERMINAL_RETRY_DELAY_MS));
@@ -383,29 +386,22 @@ export async function runSessionRowInterleaving(
   };
   const poolOf = (owner: SessionManager): SessionDeviceAssigner => ({
     async assignDeviceToSession(id, _platform, target): Promise<string> {
-      const session = await owner.createSession(
-        id,
-        target?.deviceId ?? DEVICES[0],
-        "android",
-        target?.liveness?.sessionTimeoutMs ?? IDLE_WINDOW_MS,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId ?? STABLE_DEVICE_ID,
-        target?.liveness,
-        target?.initialOwnership,
-      );
+      const session = await owner.createSession(id, target?.deviceId ?? DEVICES[0], "android", {
+        timeoutMs: target?.liveness?.sessionTimeoutMs ?? IDLE_WINDOW_MS,
+        heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: target?.stableDeviceId ?? STABLE_DEVICE_ID,
+        recoveredLiveness: target?.liveness,
+        initialOwnership: target?.initialOwnership,
+      });
       return session.assignedDevice;
     },
   });
 
   // Created over a database that answers: the interleaving starts from a live, persisted session.
-  const created = manager.createSession(
-    sessionId,
-    DEVICES[0],
-    "android",
-    IDLE_WINDOW_MS,
-    undefined,
-    extended ? STABLE_DEVICE_ID : undefined,
-  );
+  const created = manager.createSession(sessionId, DEVICES[0], "android", {
+    timeoutMs: IDLE_WINDOW_MS,
+    stableDeviceId: extended ? STABLE_DEVICE_ID : undefined,
+  });
   for (let step = 0; step < 4; step++) {
     await settleMicrotasks(50);
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
@@ -426,7 +422,7 @@ export async function runSessionRowInterleaving(
     background(
       "device-loss release",
       manager
-        .releaseSessionUnlessSuperseded(sessionId, deviceLoss, () => !superseded)
+        .releaseSessionUnlessSuperseded(sessionId, deviceLoss, { commitFence: () => !superseded })
         .then(
           (release) => {
             if (!release.superseded && release.deviceId !== null) {
@@ -743,12 +739,7 @@ export async function runSessionRowInterleaving(
   /** The row work still owed for the id, through each owner's public surface. */
   const armedRetries = (): string[] => {
     const armed: string[] = [];
-    const owed = (
-      Reflect.get(manager, "owedSupersededRowReasserts") as Map<
-        string,
-        { session: unknown; handle?: unknown }
-      >
-    ).get(sessionId);
+    const owed = (Reflect.get(manager, "rowWriter") as SessionRowWriter).superseded.owed(sessionId);
     if (owed && owed.session !== live()) {
       armed.push("a live-row rewrite is owed to a session that ended");
     } else if (owed?.handle !== undefined) {
@@ -902,7 +893,7 @@ export async function runSessionRowInterleaving(
       "daemon-restart",
       liveDaemons,
     );
-    const next = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    const next = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     next.stopCleanupTimer();
     next.attachDaemonSessionId(RESTARTED_DAEMON);
     next.attachLiveDaemonSessionIds(() => liveDaemons);

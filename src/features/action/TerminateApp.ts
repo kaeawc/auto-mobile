@@ -4,9 +4,13 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { ActionableError, BootedDevice, ObserveResult, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
@@ -112,30 +116,30 @@ export interface TerminateAppCall extends ActionCall {
   userId?: number;
 }
 
-export interface TerminateAppOptions {
-  simctl?: SimCtlClient;
+export interface TerminateAppOptions extends DisplayFenceDependencies {
+  simctl?: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   timer?: Timer;
   deviceTerminator?: DeviceAppTerminator;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 
 export class TerminateApp extends BaseVisualChange {
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   private deviceTerminator: DeviceAppTerminator;
   private cacheInvalidator: DeviceWindowCacheInvalidator;
 
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbClient instance for testing
+   * @param adb - Optional AdbExecutor instance for testing
    * @param options - Optional simulator, timer, physical-device terminator, and cache invalidator dependencies
    */
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     options: TerminateAppOptions = {},
   ) {
-    super(device, adb, options.timer ?? defaultTimer);
+    super(device, adb, options.timer ?? defaultTimer, undefined, options);
     this.device = device;
     this.simctl = options.simctl ?? new SimCtlClient(device);
     this.deviceTerminator = options.deviceTerminator ?? new DeviceAppManager();

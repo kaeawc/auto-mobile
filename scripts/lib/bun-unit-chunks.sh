@@ -22,7 +22,7 @@
 set -euo pipefail
 root="$1" runner_os="$2" chunk_files="$3" report_dir="$4" shard="$5"
 shift 5
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$root/scripts/lib/bun-unit-test.sh"
 
 has_separator=0
@@ -75,7 +75,6 @@ fi
 
 current_label=""
 current_log=""
-# shellcheck disable=SC2317,SC2329 # Invoked through the TERM trap below.
 interrupted() {
   # The shard watchdog sends TERM to this group: surface the chunk it cut short.
   printf 'INTERRUPTED: coverage shard %s chunk %s was running when the shard budget expired; log tail:\n' \
@@ -83,7 +82,9 @@ interrupted() {
   if [[ -n "$current_log" && -f "$current_log" ]]; then tail -n 60 "$current_log"; fi
   exit 143
 }
-if [[ -n "$coverage_root" ]]; then trap interrupted TERM; fi
+# Static reference for indirect callers; this branch never executes.
+if false; then interrupted "$@"; fi
+if [[ -n "$coverage_root" ]]; then trap 'interrupted' TERM; fi
 
 status=0
 for ((chunk = 0; chunk < total; chunk += 1)); do

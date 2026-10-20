@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { concreteCtrlProxyClient } from "../../../helpers/concreteCtrlProxyClient";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { invalidateDisplayCaches } from "../../../../src/features/observe/DisplayTransition";
 import {
@@ -20,10 +21,12 @@ test("backward clock jump clears the cached hierarchy and accepts a newly pushed
   const timer = new FakeTimer();
   const cache = new FakeObserveCacheStore(timer);
   setObserveCacheStore(cache);
-  const client = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+  const client = concreteCtrlProxyClient(
+    AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
+  );
   const connected = spyOn(client, "ensureConnected").mockResolvedValue(true);
   const now = Date.parse("2030-01-01T12:00:00Z");
-  const newer = { updatedAt: now, packageName: "" };
+  const newer = { hierarchy: {}, updatedAt: now, packageName: "" };
   client.handleHierarchyUpdate(newer);
   expect(client.hasCachedHierarchy()).toBe(true);
   const adapter = new FakeDeviceClockAdapter();
@@ -44,7 +47,7 @@ test("backward clock jump clears the cached hierarchy and accepts a newly pushed
     expect(client.hasCachedHierarchy()).toBe(false);
     expect(cache.currentGeneration(device.deviceId)).toBeGreaterThan(generation);
     // The first read after the jump must request fresh data, never return newer.
-    const older = { updatedAt: now - 3_600_000, packageName: "" };
+    const older = { hierarchy: {}, updatedAt: now - 3_600_000, packageName: "" };
     const read = await client.getLatestHierarchy(false, 10, undefined, true, older.updatedAt);
     expect(read.hierarchy).toBeNull();
     client.handleHierarchyUpdate(older);

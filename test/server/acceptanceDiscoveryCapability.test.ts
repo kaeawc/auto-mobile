@@ -1,3 +1,5 @@
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
@@ -11,8 +13,6 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
   DAEMON_VERSION,
@@ -22,7 +22,8 @@ import {
 import { DaemonClient } from "../../src/daemon/client";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { toolField } from "../helpers/toolResponse";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -116,7 +117,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       },
     });
 
-    expect(getStructuredField(result, "receivedOrder")).toBeNull();
+    expect(toolField(result, "receivedOrder")).toBeNull();
   });
 
   test("a daemon without the harness capability ignores a normal caller argument", async () => {
@@ -128,7 +129,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       },
     });
 
-    expect(getStructuredField(result, "receivedOrder")).toBeNull();
+    expect(toolField(result, "receivedOrder")).toBeNull();
   });
 
   test("the live harness proxy overwrites a client-forged order and authenticates every acceptance call", async () => {
@@ -212,7 +213,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       },
     });
 
-    expect(getStructuredField(result, "receivedOrder")).toBe("reverse");
+    expect(toolField(result, "receivedOrder")).toBe("reverse");
   });
 
   test("retains no-schema structuredContent only for an authenticated acceptance request", async () => {

@@ -8,14 +8,16 @@ import * as path from "path";
 
 const OUTPUT_DIR = path.join(__dirname, "screenshots");
 
+type JimpImage = InstanceType<typeof Jimp>;
+
 interface TestImage {
-  filename: string;
+  filename: `${string}.${string}`;
   width: number;
   height: number;
   textColor: number; // Jimp hex color
   backgroundColor: number;
   description: string;
-  render?: (image: Jimp) => Promise<void>;
+  render?: (image: JimpImage) => Promise<void>;
   textInset?: number;
 }
 
@@ -91,7 +93,7 @@ const testImages: TestImage[] = [
     textColor: 0x333333ff,
     backgroundColor: 0xffffffff,
     description: "Dark text over a light-to-dark vertical gradient",
-    render: async (image: Jimp) => {
+    render: async (image: JimpImage) => {
       const { width, height } = image.bitmap;
       for (let y = 0; y < height; y++) {
         const t = y / (height - 1);
@@ -111,7 +113,7 @@ const testImages: TestImage[] = [
     backgroundColor: 0x101010ff,
     description: "Semi-transparent overlay over dark base with opaque text",
     textInset: 24,
-    render: async (image: Jimp) => {
+    render: async (image: JimpImage) => {
       const overlayColor = 0xffffff80; // 50% white overlay
       const overlayLeft = 20;
       const overlayTop = 10;
@@ -132,7 +134,7 @@ const testImages: TestImage[] = [
     backgroundColor: 0x000000ff,
     description: "Full-screen semi-transparent overlay with no opaque pixels",
     textInset: 24,
-    render: async (image: Jimp) => {
+    render: async (image: JimpImage) => {
       const overlayColor = 0xffffff80; // 50% white overlay
       for (let x = 0; x < image.bitmap.width; x++) {
         for (let y = 0; y < image.bitmap.height; y++) {
@@ -149,7 +151,7 @@ const testImages: TestImage[] = [
     backgroundColor: 0xf5f5f5ff,
     description: "Low-contrast text with a dark shadow halo",
     textInset: 18,
-    render: async (image: Jimp) => {
+    render: async (image: JimpImage) => {
       const shadowColor = 0x222222ff;
       const shadowInset = 16;
       for (let x = shadowInset - 2; x < image.bitmap.width - shadowInset + 2; x++) {
@@ -188,8 +190,7 @@ async function generateTestImages(): Promise<void> {
       }
     }
 
-    const outputPath = path.join(OUTPUT_DIR, img.filename);
-    await image.write(outputPath);
+    await image.write(`${OUTPUT_DIR}/${img.filename}`);
     console.log(`✓ ${img.filename} - ${img.description}`);
   }
 

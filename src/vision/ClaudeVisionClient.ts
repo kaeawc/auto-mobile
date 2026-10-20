@@ -15,8 +15,11 @@ import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
-export function parseClaudeResponse(response: Anthropic.Message): ClaudeVisionAnalysis {
+export function parseClaudeResponse(
+  response: Pick<Anthropic.Message, "content">,
+): ClaudeVisionAnalysis {
   let responseText = "";
   for (const block of response.content) {
     if (block.type === "text") {
@@ -131,7 +134,7 @@ export class ClaudeVisionClient {
 
   constructor(apiKey?: string, model: string = "claude-sonnet-4-5", timer: Timer = defaultTimer) {
     this.client = new Anthropic({
-      apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
+      apiKey: apiKey || readEnvRaw(AMBIENT_ENV.ANTHROPIC_API_KEY),
     });
     this.model = model;
     this.timer = timer;

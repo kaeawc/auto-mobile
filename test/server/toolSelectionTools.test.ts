@@ -9,6 +9,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("applyToolSelection", () => {
   const readOnlyService = {

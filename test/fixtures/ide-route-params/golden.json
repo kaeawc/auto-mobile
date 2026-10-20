@@ -1,0 +1,767 @@
+[
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "valid",
+    "outcome": "PAST_CHECK [\"ide/setFeatureFlag\"]"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "valid false",
+    "outcome": "PAST_CHECK [\"ide/setFeatureFlag\"]"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "config null",
+    "outcome": "PAST_CHECK [\"ide/setFeatureFlag\"]"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "key undefined",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "key \"\"",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "key 0",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "key null",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "key false",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "key number passes",
+    "outcome": "PAST_CHECK [\"ide/setFeatureFlag\"]"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "enabled undefined",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "enabled \"true\"",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "enabled 1",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "enabled null",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "enabled 0",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "params array",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "params string",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "params number",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "empty object",
+    "outcome": "setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "valid",
+    "outcome": "PAST_CHECK [\"ide/setSessionToolEnabled\",{\"requesterSessionUuid\":\"s1\"}]"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "valid disabled",
+    "outcome": "PAST_CHECK [\"ide/setSessionToolEnabled\",{\"requesterSessionUuid\":\"s1\"}]"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "sessionUuid undefined",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "sessionUuid \"\"",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "sessionUuid 0",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "sessionUuid null",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "sessionUuid false",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName undefined",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName \"\"",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName 0",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName null",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName false",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName \"nope\"",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName \"observe\"",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "toolName \"setToolEnabled\"",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "enabled undefined",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "enabled \"true\"",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "enabled 1",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "enabled null",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "params array",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "params string",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "params number",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "empty object",
+    "outcome": "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "valid android",
+    "outcome": "PAST_CHECK [\"android\",\"emulator-5554\"]"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "valid ios force",
+    "outcome": "PAST_CHECK [\"ios\",\"u\"]"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "deviceId undefined",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "deviceId \"\"",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "deviceId 0",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "deviceId null",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "deviceId false",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform undefined",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform \"\"",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform 0",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform null",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform false",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform \"web\"",
+    "outcome": "Invalid platform: web. Must be 'android' or 'ios'."
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform \"iOS\"",
+    "outcome": "Invalid platform: iOS. Must be 'android' or 'ios'."
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform 5",
+    "outcome": "Invalid platform: 5. Must be 'android' or 'ios'."
+  },
+  {
+    "route": "ide/updateService",
+    "label": "platform checked after presence",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "params array",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "params string",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "params number",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "empty object",
+    "outcome": "updateService requires 'deviceId' (string) and 'platform' (string) params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "valid",
+    "outcome": "PAST_CHECK [\"d\",\"setKeyValue\"]"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "valid null value",
+    "outcome": "PAST_CHECK [\"d\",\"setKeyValue\"]"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "valid platform",
+    "outcome": "PAST_CHECK [\"d\",\"setKeyValue\"]"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "deviceId undefined",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "deviceId \"\"",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "deviceId 0",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "deviceId null",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "deviceId false",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "appId undefined",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "appId \"\"",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "appId 0",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "appId null",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "appId false",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "fileName undefined",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "fileName \"\"",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "fileName 0",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "fileName null",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "fileName false",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "key undefined",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "key \"\"",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "key 0",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "key null",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "key false",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "type undefined",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "type \"\"",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "type 0",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "type null",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "type false",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "deviceId number passes",
+    "outcome": "PAST_CHECK [5,\"setKeyValue\"]"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "params array",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "params string",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "params number",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "empty object",
+    "outcome": "setKeyValue requires deviceId, appId, fileName, key, and type params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "valid",
+    "outcome": "PAST_CHECK [\"d\",\"removeKeyValue\"]"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "valid platform",
+    "outcome": "PAST_CHECK [\"d\",\"removeKeyValue\"]"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "deviceId undefined",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "deviceId \"\"",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "deviceId 0",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "deviceId null",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "deviceId false",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "appId undefined",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "appId \"\"",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "appId 0",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "appId null",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "appId false",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "fileName undefined",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "fileName \"\"",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "fileName 0",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "fileName null",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "fileName false",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "key undefined",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "key \"\"",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "key 0",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "key null",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "key false",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "params array",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "params string",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "params number",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "empty object",
+    "outcome": "removeKeyValue requires deviceId, appId, fileName, and key params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "valid",
+    "outcome": "PAST_CHECK [\"d\",\"clearKeyValueFile\"]"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "valid platform",
+    "outcome": "PAST_CHECK [\"d\",\"clearKeyValueFile\"]"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "deviceId undefined",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "deviceId \"\"",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "deviceId 0",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "deviceId null",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "deviceId false",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "appId undefined",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "appId \"\"",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "appId 0",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "appId null",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "appId false",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "fileName undefined",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "fileName \"\"",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "fileName 0",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "fileName null",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "fileName false",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "params array",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "params string",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "params number",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "empty object",
+    "outcome": "clearKeyValueFile requires deviceId, appId, and fileName params"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "params undefined",
+    "outcome": "undefined is not an object (evaluating 'args.key')"
+  },
+  {
+    "route": "ide/setFeatureFlag",
+    "label": "params null",
+    "outcome": "null is not an object (evaluating 'args.key')"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "params undefined",
+    "outcome": "undefined is not an object (evaluating 'args.sessionUuid')"
+  },
+  {
+    "route": "ide/setSessionToolEnabled",
+    "label": "params null",
+    "outcome": "null is not an object (evaluating 'args.sessionUuid')"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "params undefined",
+    "outcome": "undefined is not an object (evaluating 'args.deviceId')"
+  },
+  {
+    "route": "ide/updateService",
+    "label": "params null",
+    "outcome": "null is not an object (evaluating 'args.deviceId')"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "params undefined",
+    "outcome": "undefined is not an object (evaluating 'args.deviceId')"
+  },
+  {
+    "route": "ide/setKeyValue",
+    "label": "params null",
+    "outcome": "null is not an object (evaluating 'args.deviceId')"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "params undefined",
+    "outcome": "undefined is not an object (evaluating 'args.deviceId')"
+  },
+  {
+    "route": "ide/removeKeyValue",
+    "label": "params null",
+    "outcome": "null is not an object (evaluating 'args.deviceId')"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "params undefined",
+    "outcome": "undefined is not an object (evaluating 'args.deviceId')"
+  },
+  {
+    "route": "ide/clearKeyValueFile",
+    "label": "params null",
+    "outcome": "null is not an object (evaluating 'args.deviceId')"
+  }
+]

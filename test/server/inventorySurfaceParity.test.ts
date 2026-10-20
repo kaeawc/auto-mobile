@@ -1,3 +1,5 @@
+import { z } from "zod/v4";
+import { toolJson } from "../helpers/toolResponse";
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import {
@@ -5,19 +7,21 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState, type DaemonStateLike } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice } from "../../src/models";
 import {
+  type BootedDevicesResourceContent,
   getBootedDevicesForPlatforms,
   resetBootedDevicesResourceCache,
   setDeviceManager,
 } from "../../src/server/bootedDeviceResources";
 import {
+  listDevicesOutputSchema,
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
@@ -26,6 +30,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { type DiscoverySource, discoverySourceFor } from "../../src/utils/discoverySource";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
@@ -40,6 +45,19 @@ import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
+const inventoryToolResponseSchema = listDevicesOutputSchema.extend({
+  discovery: z
+    .object({
+      complete: z.boolean(),
+      notApplicableSources: z.array(z.string()).optional(),
+      failedSources: z.array(z.string()).optional(),
+    })
+    .passthrough(),
+});
 
 // Inventory contract: every inventory surface describes the same device the same way. The
 // listDevices tool and the booted-devices resource are built from different code paths, so this
@@ -65,7 +83,7 @@ const RESOURCE_ONLY_FIELDS = [
  */
 const TOOL_ONLY_FIELDS = ["transportAliases"];
 
-type Entry = Record<string, unknown> & { runtime: Record<string, unknown> };
+type Entry = BootedDevicesResourceContent["devices"][number];
 
 interface Scenario {
   name: string;
@@ -81,7 +99,7 @@ interface ScenarioContext {
   manager: FakeDeviceUtils;
 }
 
-function poolFor(ctx: ScenarioContext, extra: Record<string, unknown> = {}): DevicePool {
+function poolFor(ctx: ScenarioContext, extra: Partial<DevicePoolDependencies> = {}): DevicePool {
   return new DevicePool(
     createDevicePoolDependencies(ctx.sessions, "parity", {
       timer: ctx.timer,
@@ -198,7 +216,7 @@ const scenarios: Scenario[] = [
           }
           throw new Error("usb transport has no identity");
         },
-      } as unknown as FakeAdbClientFactory;
+      } satisfies AdbClientFactory;
       const pool = poolFor(ctx, { androidAdbFactory: factory });
       await pool.initializeWithDevices([usb]);
       const rows = [usb, wifi];
@@ -306,7 +324,7 @@ describe("listDevices tool and booted resource describe a device identically", (
     manager.setBootedDevices("android", discovered);
     if (scenario.adbOffline) {
       (manager as PlatformDeviceManager).getAndroidListedDeviceStates = async (ids) =>
-        new Map(ids.map((id) => [id, "offline"]));
+        new Map(Array.from(ids, (id) => [id, "offline"]));
     }
     DaemonState.getInstance().initialize(sessions, pool);
     setDeviceToolsDependencies({
@@ -317,18 +335,15 @@ describe("listDevices tool and booted resource describe a device identically", (
 
     const resource = await getBootedDevicesForPlatforms(["android"], timer);
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = inventoryToolResponseSchema.parse(toolJson(response));
 
-    const fromResource = describeEntry(
-      resource.devices as unknown as Entry[],
-      scenario.focus ?? android.deviceId,
-    );
-    const fromTool = describeEntry(payload.devices as Entry[], scenario.focus ?? android.deviceId);
+    const fromResource = describeEntry(resource.devices, scenario.focus ?? android.deviceId);
+    const fromTool = describeEntry(payload.devices, scenario.focus ?? android.deviceId);
 
     // One status authority: every row either surface publishes carries the pool's own bucket.
     const surfaces = {
-      resource: resource.devices as unknown as Entry[],
-      tool: payload.devices as Entry[],
+      resource: resource.devices,
+      tool: payload.devices,
     };
     for (const [surface, rows] of Object.entries(surfaces)) {
       for (const row of rows) {
@@ -349,9 +364,7 @@ describe("listDevices tool and booted resource describe a device identically", (
     // The CLI `available-devices` counts and `getStats` are the same buckets as the rows, whenever
     // every pooled device is published with its pool context.
     const stats = pool.getStats();
-    const pooledRows = (resource.devices as unknown as Entry[]).filter(
-      (row) => row.runtime.poolStatus !== null,
-    );
+    const pooledRows = resource.devices.filter((row) => row.runtime.poolStatus !== null);
     if (pooledRows.length === stats.total) {
       expect(resource.poolStatus).toMatchObject({
         idle: stats.idle,
@@ -492,10 +505,7 @@ async function readSurfaces(
   const response = await ToolRegistry.getTool("listDevices")!.handler({
     platform: scenario.platform,
   });
-  const tool = JSON.parse(response.content?.[0]?.text ?? "{}") as {
-    devices: Entry[];
-    discovery?: { complete?: boolean };
-  };
+  const tool = inventoryToolResponseSchema.parse(toolJson(response));
   const state: DaemonStateAccess = {
     isInitialized: () => true,
     getSessionManager: () => sessions as never,
@@ -529,7 +539,7 @@ async function readSurfaces(
   );
   return {
     tool: tool.devices,
-    resource: resource.devices as unknown as Entry[],
+    resource: resource.devices,
     resourcePool: resource.poolStatus,
     resourceComplete: resource.observationComplete,
     toolComplete: tool.discovery?.complete,
@@ -570,11 +580,11 @@ describe("a held device in a transitional platform state is one row and one coun
     manager.setBootedDevices(scenario.platform, [scenario.device]);
     await pool.initializeWithDevices([scenario.device]);
     if (scenario.held) {
-      await pool.bindOrReuseDeviceSession(
-        "session-held",
-        scenario.device.deviceId,
-        scenario.platform,
-      );
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-held",
+        deviceId: scenario.device.deviceId,
+        platform: scenario.platform,
+      });
     }
     scenario.transition(manager);
     DaemonState.getInstance().initialize(sessions, pool);
@@ -595,14 +605,17 @@ describe("a held device in a transitional platform state is one row and one coun
         continue;
       }
       expect({ surface, present: row !== undefined }).toEqual({ surface, present: true });
-      expect(row!.runtime.poolStatus).toBe(scenario.row.poolStatus);
+      expect<unknown>(row!.runtime.poolStatus).toBe(scenario.row.poolStatus);
       expect((row!.runtime.session as { sessionUuid: string }).sessionUuid).toBe("session-held");
       expect(row!.runtime.readiness).toEqual({ state: "not_ready" });
       if (scenario.row.lifecycle) {
-        expect(row!.runtime.lifecycle).toEqual({ state: scenario.row.lifecycle, known: true });
+        expect<unknown>(row!.runtime.lifecycle).toEqual({
+          state: scenario.row.lifecycle,
+          known: true,
+        });
       }
-      expect(row!.runtime.simulatorState).toBe(scenario.row.simulatorState);
-      expect(row!.runtime.connection).toEqual(scenario.row.connection);
+      expect<unknown>(row!.runtime.simulatorState).toBe(scenario.row.simulatorState);
+      expect<unknown>(row!.runtime.connection).toEqual(scenario.row.connection);
     }
 
     if (scenario.counts === "unknown") {
@@ -835,7 +848,11 @@ describe("every inventory surface gives one answer per discovery-source outcome 
     const pool = poolFor({ timer, sessions: activeSessions, manager });
     await pool.initializeWithDevices(device ? [device] : []);
     if (device && held) {
-      await pool.bindOrReuseDeviceSession("session-held", device.deviceId, device.platform);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-held",
+        deviceId: device.deviceId,
+        platform: device.platform,
+      });
       // Discovery stops listing the held device: it is transitional, offline, or its tool is gone.
       manager.setBootedDevices(device.platform, []);
     }
@@ -863,8 +880,8 @@ describe("every inventory surface gives one answer per discovery-source outcome 
 
     const resource = await getBootedDevicesForPlatforms(["android", "ios"], timer);
     const resourceText = JSON.stringify(resource);
-    const listed = JSON.parse(
-      (await ToolRegistry.getTool("listDevices")!.handler({})).content?.[0]?.text ?? "{}",
+    const listed = inventoryToolResponseSchema.parse(
+      toolJson(await ToolRegistry.getTool("listDevices")!.handler({})),
     );
     const codeOf = (error: unknown) => (error as { code?: string }).code ?? "untyped";
     const daemonState = DaemonState.getInstance();
@@ -877,11 +894,7 @@ describe("every inventory surface gives one answer per discovery-source outcome 
         getDeviceSessionRegistry: () => ({ list: () => [] }),
       },
     );
-    const ideLookup = (
-      UnixSocketServer.prototype as unknown as {
-        listBootedDevicesForIdeAction(p: "android" | "ios", serial: string): Promise<unknown>;
-      }
-    ).listBootedDevicesForIdeAction;
+    const ideServer = createHarnessServer("unused", daemonState, new FakeTimer());
     const select = createSetActiveDeviceHandler({
       resumeCtrlProxy: async () => {},
       transportWait: {
@@ -931,8 +944,8 @@ describe("every inventory surface gives one answer per discovery-source outcome 
       ideRefusesAbsentSerialOf: (
         await Promise.all(
           ALL_SOURCES.map((source) =>
-            ideLookup
-              .call({ daemonState }, source === "android" ? "android" : "ios", ABSENT[source])
+            ideServer
+              .lookupBootedDevicesForIde(source === "android" ? "android" : "ios", ABSENT[source])
               .then(
                 () => [],
                 (error: unknown) => [`${source}:${codeOf(error)}`],

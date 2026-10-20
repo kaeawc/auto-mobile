@@ -69,6 +69,7 @@ lifecycleViewmodelNavigation3Android = "2.11.0"
 # Network and server libraries
 ktor = "3.6.0"
 okhttp = "5.5.0"
+retrofit = "3.0.0"
 
 # Publishing
 mavenpublish = "0.37.0"
@@ -187,6 +188,10 @@ ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negoti
 # OkHttp libraries
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-sse = { module = "com.squareup.okhttp3:okhttp-sse", version.ref = "okhttp" }
+okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
+
+# Retrofit: the typed device client for prototype `request` actions (no converters)
+retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
 
 # Libraries can be bundled together for easier import
 [bundles]

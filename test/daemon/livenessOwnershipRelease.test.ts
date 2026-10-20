@@ -60,7 +60,7 @@ describe("deliberate liveness ownership release", () => {
   beforeEach(async () => {
     timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     state = {
       isInitialized: () => true,
       getSessionManager: () => manager,
@@ -83,7 +83,10 @@ describe("deliberate liveness ownership release", () => {
       },
       timer,
     );
-    await manager.createSession(SESSION, DEVICE, "android", 60_000, undefined, "Pixel_8_API_35");
+    await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: 60_000,
+      stableDeviceId: "Pixel_8_API_35",
+    });
     expect((await claim(OWNER)).success).toBe(true);
   });
   afterEach(async () => {
@@ -397,14 +400,22 @@ describe("deliberate liveness ownership release", () => {
       if (lapsed) {
         timer.advanceTime(LEASE + SUSPECT_GRACE_MS + 1);
       }
-      const method = releaseFirst ? "releaseLivenessOwnership" : "claimLivenessOwnership";
-      const original = manager[method].bind(manager);
-      const spy = spyOn(manager, method).mockImplementation(async (...args) => {
-        const result = await original(...args);
+      // Suspends the first operation's response after it has taken effect.
+      const suspend = async <T>(result: Promise<T>): Promise<T> => {
+        const value = await result;
         entered.resolve();
         await resume.promise;
-        return result;
-      });
+        return value;
+      };
+      const originalRelease = manager.releaseLivenessOwnership.bind(manager);
+      const originalClaim = manager.claimLivenessOwnership.bind(manager);
+      const spy = releaseFirst
+        ? spyOn(manager, "releaseLivenessOwnership").mockImplementation((...args) =>
+            suspend(originalRelease(...args)),
+          )
+        : spyOn(manager, "claimLivenessOwnership").mockImplementation((...args) =>
+            suspend(originalClaim(...args)),
+          );
       try {
         const first = releaseFirst ? release() : claim("next");
         await entered.promise;

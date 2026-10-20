@@ -1,7 +1,16 @@
+import type {
+  CallToolRequest,
+  ReadResourceRequest,
+  CallToolResult,
+  ReadResourceResult,
+  ServerContext,
+} from "@modelcontextprotocol/server";
+import { readToolResponse } from "../helpers/toolResponse";
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { Client, ProtocolError } from "@modelcontextprotocol/client";
+import { InMemoryTransport, Server } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   DeviceControlTransportError,
   type DeviceControlTransportFailure,
@@ -17,7 +26,6 @@ import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { DaemonRestartDeferredError } from "../../src/daemon/daemonMcpProxy";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
-import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ActionableError } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -68,7 +76,16 @@ describe("proxy server device-control transport errors", () => {
   ] as const)("resources/read preserves %s error handling", async (_name, failure, aborted) => {
     // Invoke the registered handler directly: the SDK suppresses responses for
     // aborted requests, so a transport round trip cannot expose the thrown value.
-    const registration = spyOn(Server.prototype, "setRequestHandler");
+    const registrationTarget: {
+      setRequestHandler(
+        method: "tools/call" | "resources/read",
+        handler: (
+          request: CallToolRequest | ReadResourceRequest,
+          context: ServerContext,
+        ) => CallToolResult | ReadResourceResult | Promise<CallToolResult | ReadResourceResult>,
+      ): void;
+    } = Server.prototype;
+    const registration = spyOn(registrationTarget, "setRequestHandler");
     const fakeClient = new FakeDaemonClient();
     const daemonManager = new FakeDaemonManager();
     const { server, proxy } = createProxyMcpServer({
@@ -80,8 +97,8 @@ describe("proxy server device-control transport errors", () => {
         autoStartDaemon: false,
       },
     });
-    const handler = registration.mock.calls.find(
-      ([schema]) => schema === ReadResourceRequestSchema,
+    const handler = registration.mock.calls.findLast(
+      ([schema]) => schema === "resources/read",
     )?.[1];
     registration.mockRestore();
     const daemonRead = spyOn(fakeClient, "readResource").mockRejectedValue(failure);
@@ -98,20 +115,13 @@ describe("proxy server device-control transport errors", () => {
     const uri = "automobile:devices/booted";
     try {
       expect(handler).toBeDefined();
-      if (!handler) {
+      if (typeof handler !== "function") {
         throw new Error("resources/read handler was not registered");
       }
       const result = Promise.resolve(
         handler(
           { method: "resources/read", params: { uri } },
-          {
-            signal: controller.signal,
-            requestId: 1,
-            sendNotification: async () => {},
-            sendRequest: async () => {
-              throw new Error("unexpected server request");
-            },
-          },
+          fakeServerContext({ signal: controller.signal, id: 1 }),
         ),
       );
       const error: unknown = await result.catch((caught: unknown) => caught);
@@ -194,7 +204,7 @@ describe("proxy server device-control transport errors", () => {
         retryAfterMs: 1_000,
       },
     });
-    expect(result.isError).toBe(true);
+    expect(readToolResponse(result).isError).toBe(true);
   });
 
   test("returns a retryable structured result when the daemon is overloaded", () => {
@@ -216,7 +226,7 @@ describe("proxy server device-control transport errors", () => {
         retryAfterMs: 250,
       },
     });
-    expect(result.isError).toBe(true);
+    expect(readToolResponse(result).isError).toBe(true);
   });
 
   test("returns a structured McpError when a resource read hits daemon overload", () => {
@@ -297,8 +307,8 @@ describe("proxy server device-control transport errors", () => {
         await request(client);
         throw new Error("expected list request to reject");
       } catch (error) {
-        expect(error).toBeInstanceOf(McpError);
-        expect((error as McpError).data).toMatchObject({
+        expect(error).toBeInstanceOf(ProtocolError);
+        expect((error as ProtocolError).data).toMatchObject({
           error: {
             code: "daemon_overloaded",
             retryable: true,

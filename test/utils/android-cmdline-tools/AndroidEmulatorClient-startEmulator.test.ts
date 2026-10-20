@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { SpawnFn } from "../../../src/utils/HostCommandExecutor";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -22,9 +23,9 @@ const noopExec = async (): Promise<ExecResult> => createExecResult("", "");
  * `startEmulator` takes an adopt path INSTEAD of spawning, so a regression must
  * fail loudly rather than launch a real emulator.
  */
-const forbiddenSpawn = (() => {
+const forbiddenSpawn: SpawnFn = () => {
   throw new Error("startEmulator spawned an emulator when it should have adopted one");
-}) as never;
+};
 
 function clientWithAvd(
   avdName: string,
@@ -35,20 +36,16 @@ function clientWithAvd(
   adb.setCommandResponse("emu avd name", createExecResult(`${avdName}\n`));
   const adbFactory: AdbClientFactory = { create: (): AdbExecutor => adb };
   const advertisements = new FakeRunningAvdAdvertisementReader();
-  const client = new AndroidEmulatorClient(
-    noopExec,
-    forbiddenSpawn,
-    new FakeTimer(),
+  const client = new AndroidEmulatorClient({
+    emulatorPathLocator: async () => "emulator",
+    execAsync: noopExec,
+    spawnFn: forbiddenSpawn,
+    timer: new FakeTimer(),
     adbFactory,
-    undefined,
-    undefined,
-    undefined,
-    { isPortAvailable: () => true },
-    advertisements,
-  );
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+    hostPortAvailabilityChecker: { isPortAvailable: () => true },
+    runningAvdAdvertisementReader: advertisements,
+  });
+  client.listAvds = async () => [
     { name: avdName, platform: "android", isRunning: false } as DeviceInfo,
   ];
   return { client, advertisements };

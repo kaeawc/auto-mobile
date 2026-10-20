@@ -24,6 +24,7 @@ const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 
@@ -68,7 +69,7 @@ describe("heartbeat monitor on a monotonic clock that runs through host sleep", 
       timer,
       { maxCredibleStallMs: MAX_CREDIBLE_STALL_MS },
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", SESSION_IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: SESSION_IDLE_MS });
     expect((await heartbeat()).success).toBe(true);
     monitor.start();
   }

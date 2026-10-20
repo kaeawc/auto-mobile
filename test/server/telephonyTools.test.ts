@@ -122,9 +122,7 @@ describe("telephonyTools schemas", () => {
     // the permissive rows above should be updated together.
     const json = sendSmsSchema.parse({ phoneNumber: "5551234567", message: "hi" });
     expect(json).toBeDefined();
-    const messageDescription =
-      (sendSmsSchema as unknown as { shape?: { message?: { description?: string } } }).shape
-        ?.message?.description ?? "";
+    const messageDescription = sendSmsSchema.shape.message.description ?? "";
     expect(messageDescription).toContain("no newlines/NUL");
   });
 });

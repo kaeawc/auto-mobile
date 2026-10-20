@@ -1,6 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -11,13 +11,10 @@ import {
 import {
   createDeviceStateChangeNotifier,
   DEVICE_STATE_NOTIFY_DEBOUNCE_MS,
-} from "../../src/server/deviceStateChangeNotifier";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+} from "../../src/daemon/deviceStateChangeNotifier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: a device's status is the same on every surface, and a transition between
 // idle and assigned reaches subscribers (#11413). A health marker (an app-cleanup, clock, network
@@ -58,15 +55,11 @@ describe("health marker transitions reach the booted-devices resource", () => {
         notifications++;
       },
     });
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "hunt-health-marker", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        onDeviceStateChanged,
-      }),
-    );
+    const pool = makePool(sessionManager, "hunt-health-marker", {
+      timer,
+      deviceManager: manager,
+      onDeviceStateChanged,
+    });
     await pool.initializeWithDevices([android]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceManager(manager);

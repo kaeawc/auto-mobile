@@ -128,7 +128,7 @@ describe("cell 1: the idle window alone, and against the heartbeat lease (T2, T2
       scenario.proxyConnection,
     );
     expect(info.idleReleaseAt).toBe(lastCallAt + IDLE_WINDOW_MS);
-    expect((ack.result as { idleReleaseAt: number }).idleReleaseAt).toBe(info.idleReleaseAt);
+    expect(ack.result?.idleReleaseAt).toBe(info.idleReleaseAt);
 
     await scenario.idle(IDLE_WINDOW_MS);
     expect(scenario.isHeld(session)).toBe(true);
@@ -389,7 +389,7 @@ describe("cell 7: a plan ends while a label's device is transitional (plan auto-
     const plan = scenario.startLongCall(base);
     manager.setDeviceLabels(base, buildDeviceLabelMap(["A", "B"], base));
     await asPlanAllocation(manager, base, [label], () =>
-      pool.bindOrReuseDeviceSession(label, DEVICE_B, "android"),
+      pool.bindOrReuseDeviceSession({ sessionId: label, deviceId: DEVICE_B, platform: "android" }),
     );
     serverConfig.setPlanExecutionActive(true);
     await scenario.idle(DISCONNECT_POLL_MS);

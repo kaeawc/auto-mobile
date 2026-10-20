@@ -15,13 +15,7 @@ import type {
   SendKeysSemanticKey,
 } from "../SendKeys";
 
-export class SendKeysBudgetError extends Error {
-  constructor() {
-    super(
-      "sendKeys request budget exhausted; stopping to allow cancellation and keyboard restoration",
-    );
-  }
-}
+import { SendKeysBudgetError } from "./SendKeysBudgetError";
 
 export function isSendKeysBudgetExhausted(signal?: AbortSignal): boolean {
   return signal?.aborted === true && signal.reason instanceof SendKeysBudgetError;

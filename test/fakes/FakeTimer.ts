@@ -58,7 +58,9 @@ interface PendingInterval {
  * For tests that don't need time control, call enableAutoAdvance() to make
  * sleeps resolve asynchronously while preserving timer deadline order.
  */
-export class FakeTimer implements Timer {
+type FakeTimerContract = Pick<Timer, keyof Timer>;
+
+export class FakeTimer implements FakeTimerContract {
   private pendingSleeps: PendingSleep[] = [];
   private sleepHistory: number[] = [];
   private currentTime: number = 0;
@@ -411,7 +413,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: fires asynchronously at its scheduled fake time (but can be cancelled).
    */
   setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextTimeoutId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextTimeoutId, callback, () => this.clearTimeout(id));
     this.nextTimeoutId++;
     this.pendingTimeouts.push({
       id,
@@ -437,7 +439,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: reschedules itself at each fake interval until cancelled.
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextIntervalId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextIntervalId, callback, () => this.clearInterval(id));
     this.nextIntervalId++;
     this.pendingIntervals.push({
       id,
@@ -691,4 +693,40 @@ export class FakeTimer implements Timer {
 
 function flushNextTicks(): Promise<void> {
   return new Promise<void>((resolve) => process.nextTick(resolve));
+}
+
+type FakeTimerHandleContract = Pick<NodeJS.Timeout, keyof NodeJS.Timeout>;
+
+/** A structural Node handle; all scheduling remains on FakeTimer's clock. */
+class FakeTimerHandle implements FakeTimerHandleContract {
+  private referenced = true;
+  constructor(
+    private readonly id: number,
+    readonly _onTimeout: () => void,
+    private readonly cancel: () => void,
+  ) {}
+  close(): this {
+    this.cancel();
+    return this;
+  }
+  hasRef(): boolean {
+    return this.referenced;
+  }
+  ref(): this {
+    this.referenced = true;
+    return this;
+  }
+  unref(): this {
+    this.referenced = false;
+    return this;
+  }
+  refresh(): this {
+    return this;
+  }
+  [Symbol.toPrimitive](): number {
+    return this.id;
+  }
+  [Symbol.dispose](): void {
+    this.cancel();
+  }
 }

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
-import type { SessionManager } from "../../src/daemon/sessionManager";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   defaultRecordingSessionCleanupDeps,
@@ -13,7 +13,7 @@ import {
   type RecordingSessionCleanupDeps,
   type RecordingAcquisitionDeps,
   type RecordingTeardownGiveUp,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 
 import {
   getStoppedDeviceGestureRecording,
@@ -22,90 +22,20 @@ import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { VideoRecorderService } from "../../src/features/video";
 import {
   markVideoRecordingIncomplete,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
-
-type CleanupManager = Parameters<typeof registerRecordingSessionCleanup>[0] &
-  Parameters<typeof createOwnerlessRecordingAcquisitionCleanup>[0];
-type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
-type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
-
-class FakeSessionManager implements CleanupManager {
-  holders = new Map<string, string>();
-  getSessionForDevice(deviceId: string): string | null {
-    return this.holders.get(deviceId) ?? null;
-  }
-  releaseCallbacks: ReleaseCallback[] = [];
-  unboundCallbacks: UnboundCallback[] = [];
-  pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
-  acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown>; capMs?: number }> = [];
-
-  onSessionRelease(callback: ReleaseCallback): void {
-    this.releaseCallbacks.push(callback);
-  }
-  onSessionDeviceUnbound(callback: UnboundCallback): void {
-    this.unboundCallbacks.push(callback);
-  }
-  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>, capMs?: number): void {
-    this.pendingCleanups.push({ deviceId, cleanup, capMs });
-  }
-
-  registerAcquisitionDeviceCleanup(
-    deviceId: string,
-    cleanup: Promise<unknown>,
-    capMs?: number,
-  ): void {
-    this.acquisitionCleanups.push({ deviceId, cleanup, capMs });
-  }
-
-  release(
-    sessionId: string,
-    deviceId: string,
-    upgradeOnly = false,
-    deviceIdentityReplaced = false,
-  ): void {
-    for (const callback of this.releaseCallbacks) {
-      callback(
-        sessionId,
-        deviceId,
-        "idle-timeout",
-        {
-          sessionId,
-          deviceId,
-          releaseReason: "idle-timeout",
-          releasedAtMs: 0,
-          terminal: false,
-          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
-        },
-        { upgradeOnly, deviceIdentityReplaced },
-      );
-    }
-  }
-
-  async settle(): Promise<void> {
-    await Promise.all(
-      [...this.pendingCleanups, ...this.acquisitionCleanups].map((entry) => entry.cleanup),
-    );
-  }
-
-  unbound(sessionId: string, deviceId: string, deviceIdentityReplaced = false): void {
-    for (const callback of this.unboundCallbacks) {
-      callback(sessionId, deviceId, { deviceIdentityReplaced });
-    }
-  }
-}
 
 /** In-memory recording backend: one active recording per device, like the real manager. */
 class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitionDeps {
@@ -244,7 +174,7 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
 }
 
 function setup() {
-  const manager = new FakeSessionManager();
+  const manager = new FakeSessionCleanupManager({ releaseReason: "idle-timeout", terminal: false });
   const recordings = new FakeRecordings();
   registerRecordingSessionCleanup(manager, recordings);
   return { manager, recordings };
@@ -360,7 +290,7 @@ describe("registerRecordingSessionCleanup", () => {
     manager.release("session-a", "SIM-1");
     await manager.settle();
 
-    expect(manager.pendingCleanups.map((entry) => entry.capMs)).toEqual([125_000]);
+    expect(manager.pendingCleanups.map((entry) => entry.bound)).toEqual([125_000]);
   });
 
   test("release captures the recording ids it finalizes before stopping them, once", async () => {
@@ -442,7 +372,7 @@ describe("registerRecordingSessionCleanup", () => {
     try {
       manager.release("session-a", "SIM-1");
       await drainUntilQuiescent(recordings.timer);
-      expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+      expect(manager.pendingCleanups.map(({ bound }) => bound)).toEqual([125_000, 3_000]);
       let settled = false;
       const done = manager.settle().then(() => {
         settled = true;
@@ -559,7 +489,7 @@ describe("registerRecordingSessionCleanup", () => {
         if (retained) {
           expect(force).toHaveBeenCalledWith("rec-session-a");
           expect(settled).toBe(false);
-          expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+          expect(manager.pendingCleanups.map(({ bound }) => bound)).toEqual([125_000, 3_000]);
           await recordings.timer.advanceTimeAsync(2_999, () =>
             drainUntilQuiescent(recordings.timer),
           );
@@ -980,7 +910,7 @@ describe("registerRecordingSessionCleanup", () => {
       });
       await recordings.timer.advanceTimeAsync(120_000, () => drainUntilQuiescent(recordings.timer));
       await drainUntilQuiescent(recordings.timer);
-      expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+      expect(manager.pendingCleanups.map(({ bound }) => bound)).toEqual([125_000, 3_000]);
       await recordings.timer.advanceTimeAsync(2_999, () => drainUntilQuiescent(recordings.timer));
       expect(settled).toBe(false);
       expect(recordings.giveUps).toEqual([]);
@@ -1027,7 +957,10 @@ describe("registerRecordingSessionCleanup", () => {
 
   test("a segmented stage settling after the cap cannot stop the same session's replacement device gesture recording", async () => {
     const timer = new FakeTimer();
-    const manager = new FakeSessionManager();
+    const manager = new FakeSessionCleanupManager({
+      releaseReason: "idle-timeout",
+      terminal: false,
+    });
     const device = { deviceId: "emulator-5554", platform: "android" as const, name: "Fake" };
     const wedge = Promise.withResolvers<void>();
     const stops: string[] = [];
@@ -1111,7 +1044,10 @@ describe("registerRecordingSessionCleanup", () => {
     for (const wedgedStage of ["segmented", "video"] as const) {
       test(`a hung ${wedgedStage} stage stops the real test recorder and marks only unfinished videos incomplete`, async () => {
         const timer = new FakeTimer();
-        const manager = new FakeSessionManager();
+        const manager = new FakeSessionCleanupManager({
+          releaseReason: "idle-timeout",
+          terminal: false,
+        });
         const device = { deviceId: "SIM-1", platform: "android" as const, name: "Fake" };
         const repository = new FakeVideoRecordingRepository();
         await setVideoRecordingManagerDependencies({

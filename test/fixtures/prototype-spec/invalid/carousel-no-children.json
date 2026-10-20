@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "carousel",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "carousel",
+      "itemWidth": 100,
+      "children": []
+    }
+  },
+  "expectedPath": "root.children"
+}

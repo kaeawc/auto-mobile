@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -33,21 +34,17 @@ describe("shared label owner lease (#11722)", () => {
     timer.setCurrentTime(0);
     persistence = new FakeDeviceSessionPersistence();
     restoreMs = 0;
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => {} }),
         clock: () => ({ restore: () => (restoreMs ? timer.sleep(restoreMs) : Promise.resolve()) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     base = await manager.createSession(BASE, "fake-base-device", "android");
     expect(await manager.claimLivenessOwnership(BASE, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(BASE);
+    await deliverDaemonHeartbeat(manager, BASE, { livenessOwnerToken: OWNER });
     label = await asPlanAllocation(manager, BASE, [LABEL], () =>
       manager.createSession(LABEL, "fake-label-device", "android"),
     );
@@ -68,6 +65,7 @@ describe("shared label owner lease (#11722)", () => {
       getSessionManager: () => manager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(timer),
@@ -87,7 +85,7 @@ describe("shared label owner lease (#11722)", () => {
   async function keepBaseAlive(ms: number) {
     for (let elapsed = 0; elapsed < ms; elapsed += 2_000) {
       await advance(2_000);
-      manager.recordHeartbeat(BASE);
+      await deliverDaemonHeartbeat(manager, BASE, { livenessOwnerToken: OWNER });
     }
   }
 
@@ -219,7 +217,7 @@ describe("shared label owner lease (#11722)", () => {
     expect(await manager.claimLivenessOwnership(LABEL, "foreign-owner")).toBe("conflict");
     await advance(9_000);
     expect(await manager.claimLivenessOwnership(LABEL, "foreign-owner")).toBe("claimed");
-    manager.recordHeartbeat(BASE);
+    await deliverDaemonHeartbeat(manager, BASE, { livenessOwnerToken: OWNER });
     monitor.start();
     await keepBaseAlive(10_000);
     expect(reaped).toEqual([{ id: LABEL, reason: "heartbeat-timeout", at: 19_000 }]);

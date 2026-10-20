@@ -206,6 +206,10 @@ struct NodeView: View {
                         .accessibilityIdentifier(node.partIdentifier("error") ?? "")
                 }
             }
+        } else if let swipe = node.swipeActions {
+            PrototypeSwipeRowView(node: node, swipe: swipe, model: model) {
+                styled(content).disabled(!model.isEnabled(node))
+            }
         } else {
             styled(content).disabled(!model.isEnabled(node))
         }
@@ -305,6 +309,8 @@ struct NodeView: View {
             ) { children }
                 .clipped()
                 .animation(sizeAnimation, value: layoutSignature)
+        case "carousel":
+            PrototypeCarouselView(node: node, model: model)
         case "grid":
             PrototypeGridLayout(
                 columns: node.columns ?? .fixed(1), spacing: style?.spacing ?? 0, runSpacing: style?.runSpacing
@@ -336,8 +342,12 @@ struct NodeView: View {
         case "button":
             buttonView
         case "scroll":
-            ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
-                if let child = node.child { NodeView(node: child, model: model) }
+            if node.axis != "horizontal", let refresh = node.refresh {
+                PrototypeRefreshableScroll(node: node, refresh: refresh, model: model)
+            } else {
+                ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
+                    if let child = node.child { NodeView(node: child, model: model) }
+                }
             }
         case "stack":
             if let screen = node.currentScreen(stacks: model.stacks), let top = node.screens?[screen] {
@@ -540,6 +550,20 @@ struct NodeView: View {
             .modifier(SpanLinksModifier(runs: runs, spans: node.spans, model: model))
     }
 
+    private func spanWeight(_ value: Int) -> Font.Weight {
+        switch value {
+        case ..<200: .ultraLight
+        case ..<300: .thin
+        case ..<400: .light
+        case ..<500: .regular
+        case ..<600: .medium
+        case ..<700: .semibold
+        case ..<800: .bold
+        case ..<900: .heavy
+        default: .black
+        }
+    }
+
     /// The core supplies plain values; only this layer knows SwiftUI attribute types.
     private func attributedText(_ runs: [PrototypeTextRun]) -> AttributedString {
         let resolved = typography.resolve(style)
@@ -561,17 +585,7 @@ struct NodeView: View {
                 case .standard: .default
                 }
             }
-            let weight: Font.Weight = switch authored?.fontWeight ?? resolved.weight {
-            case ..<200: .ultraLight
-            case ..<300: .thin
-            case ..<400: .light
-            case ..<500: .regular
-            case ..<600: .medium
-            case ..<700: .semibold
-            case ..<800: .bold
-            case ..<900: .heavy
-            default: .black
-            }
+            let weight = spanWeight(authored?.fontWeight ?? resolved.weight)
             let size = UIFontMetrics.default.scaledValue(for: authored?.textSize ?? resolved.size)
             var font = Font.system(size: size, weight: weight, design: design)
             if (authored?.fontStyle ?? style?.fontStyle) == "italic" { font = font.italic() }
@@ -736,7 +750,7 @@ struct NodeView: View {
             Rectangle().fill(palette.placeholderFill.map { Color($0) } ?? Color.gray.opacity(0.3))
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
-        case .none:
+        case .absent:
             EmptyView()
         }
     }
@@ -1240,6 +1254,27 @@ struct PagerView: View {
     }
 
     var body: some View {
+        content.overlay(alignment: layout.vertical ? .trailing : .bottom) {
+            if PrototypeCarousel.showsIndicator(node) { indicator }
+        }
+    }
+
+    /// Page dots are decoration: they draw over the pages and stay out of the accessibility tree.
+    @ViewBuilder private var indicator: some View {
+        let dots = PrototypeCarousel.indicatorDots(count: pages.count, selected: selection.wrappedValue)
+        let layoutDots = layout.vertical
+            ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        layoutDots {
+            ForEach(Array(dots.enumerated()), id: \.offset) { _, filled in
+                Circle().fill(Color.primary.opacity(filled ? 1 : 0.38)).frame(width: 6, height: 6)
+            }
+        }
+        .padding(8)
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder private var content: some View {
         if !layout.legacy {
             optionsPager
         } else if fills {
@@ -1340,6 +1375,61 @@ private struct PrototypeBottomSheetView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .coordinateSpace(name: "prototypeBottomSheet")
             .onChange(of: heights) { _, _ in settledHeight = nil }
+        }
+    }
+}
+
+/// `carousel` on iOS: fixed-width items in a snapping horizontal scroll. Every variant draws the same
+/// way (no multiBrowse or hero size changes), and every item stays in the accessibility tree.
+private struct PrototypeCarouselView: View {
+    let node: PrototypeNode
+    let model: PrototypeModel
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: CGFloat(PrototypeCarousel.spacing(node))) {
+                ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                    NodeView(node: entry.node, model: model)
+                        .frame(width: CGFloat(PrototypeCarousel.itemWidth(node)))
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.viewAligned)
+        .scrollIndicators(.hidden)
+    }
+}
+
+/// A vertical scroll with `refresh`: the system refresh control runs the pull actions and stays up
+/// until the prototype writes false to the bound key. A key written true without a pull (an agent
+/// patch) shows a plain spinner instead, since SwiftUI cannot start `refreshable` programmatically.
+private struct PrototypeRefreshableScroll: View {
+    let node: PrototypeNode
+    let refresh: PrototypeScrollRefresh
+    let model: PrototypeModel
+    @State private var pulling = false
+
+    private var refreshing: Bool { model.state[refresh.stateKey]?.boolValue == true }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            if let child = node.child { NodeView(node: child, model: model) }
+        }
+        .refreshable {
+            guard !refreshing else { return }
+            pulling = true
+            model.run(PrototypeRefresh.actions(for: refresh))
+            await PrototypeRefresh.awaitCompletion(
+                isRefreshing: { model.state[refresh.stateKey]?.boolValue == true },
+                isCancelled: { Task.isCancelled },
+                sleep: { try? await Task.sleep(for: .milliseconds(100)) }
+            )
+            pulling = false
+        }
+        .overlay(alignment: .top) {
+            if refreshing, !pulling {
+                ProgressView().padding(.top, 8)
+            }
         }
     }
 }

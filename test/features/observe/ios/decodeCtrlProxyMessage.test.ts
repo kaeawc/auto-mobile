@@ -1,3 +1,9 @@
+function decodeRawMessage(raw: unknown) {
+  if (typeof raw !== "object" || raw === null || !("type" in raw) || typeof raw.type !== "string") {
+    throw new Error("Expected raw CtrlProxy message");
+  }
+  return decodeCtrlProxyMessage({ ...raw, type: raw.type });
+}
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -10,7 +16,7 @@ import type { WebSocketMessage } from "../../../../src/features/observe/ios/type
 const REQ = "req-1";
 
 /** Helper to build a WebSocketMessage with a requestId. */
-const msg = (partial: Partial<WebSocketMessage> & { type: string }): WebSocketMessage => ({
+const msg = <T extends { type: string }>(partial: T) => ({
   requestId: REQ,
   ...partial,
 });
@@ -237,6 +243,7 @@ describe("decodeCtrlProxyMessage", () => {
     "launch_app_result",
     "reset_permissions_result",
     "multi_finger_swipe_result",
+    "path_gesture_result",
   ];
 
   for (const type of baseResultTypes) {
@@ -550,7 +557,7 @@ describe("decodeCtrlProxyMessage", () => {
       valueType: "STRING",
       redacted: true,
     } as const;
-    expect(decodeCtrlProxyMessage(msg(response))?.result).toMatchObject({
+    expect(decodeRawMessage(msg(response))?.result).toMatchObject({
       entry: { key: "token", value: "hunter2", type: "STRING", redacted: true },
     });
   });
@@ -873,6 +880,7 @@ const EXPECTED_RESHAPED_RESPONSE_TYPES = [
   "list_tables_result",
   "magic_tap_result",
   "multi_finger_swipe_result",
+  "path_gesture_result",
   "pinch_result",
   "preference_files",
   "preferences",
@@ -927,8 +935,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "connected",
   ];
 
-  test("Swift ResponseType declares exactly 50 rawValues", () => {
-    expect(rawValues.length).toBe(50);
+  test("Swift ResponseType declares exactly 51 rawValues", () => {
+    expect(rawValues.length).toBe(51);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -941,9 +949,9 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly the 45 expected response types", () => {
+  test("the decoder explicitly reshapes exactly the 46 expected response types", () => {
     const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
-    expect(reshaped.length).toBe(45);
+    expect(reshaped.length).toBe(46);
     expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
@@ -1006,6 +1014,8 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
     verified: { value: true, types: ["press_key_result"] },
     text: { value: "clipboard text", types: ["clipboard_result"] },
     pinchPath: { value: "element-anchored", types: ["pinch_result"] },
+    swipeRoute: { value: "unpinnedSynthesized", types: ["swipe_result"] },
+    effectiveDurationMs: { value: 50, types: ["swipe_result"] },
     tapDiagnostics: { value: { requested: { x: 1, y: 2 } }, types: ["tap_coordinates_result"] },
     resolvedStore: {
       value: "standard",
@@ -1025,6 +1035,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
         "rotate_result",
         "pinch_result",
         "multi_finger_swipe_result",
+        "path_gesture_result",
       ],
     },
   };
@@ -1093,6 +1104,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "voiceover_state_result", expected: true },
     { type: "voiceover_set_result", expected: false },
     { type: "multi_finger_swipe_result", expected: true },
+    { type: "path_gesture_result", expected: true },
     { type: "clipboard_result", expected: true },
     { type: "highlight_response", expected: false },
     { type: "preference_files", expected: false },
@@ -1134,6 +1146,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     "ime_action_result",
     "action_result",
     "multi_finger_swipe_result",
+    "path_gesture_result",
     "clipboard_result",
   ];
 
@@ -1163,7 +1176,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 45 explicitly-decoded types", () => {
+  test("the default table covers all 46 explicitly-decoded types", () => {
     expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
       EXPECTED_RESHAPED_RESPONSE_TYPES,
     );
@@ -1204,8 +1217,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 44 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(44);
+  test("the passthrough set is the 45 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(45);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -1284,7 +1297,7 @@ describe("preference store resolution decoding", () => {
       `${type} preserves boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             resolvedStore: "standard",
             effectiveValueDiffers,
@@ -1296,7 +1309,7 @@ describe("preference store resolution decoding", () => {
       `${type} ignores non-boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             effectiveValueDiffers,
           })?.result,
@@ -1305,8 +1318,7 @@ describe("preference store resolution decoding", () => {
     );
     test(`${type} forwards only string resolvedStore values`, () => {
       expect(
-        decodeCtrlProxyMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })
-          ?.result,
+        decodeRawMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })?.result,
       ).toMatchObject({ resolvedStore: "standard" });
       for (const payload of [
         msg({ type, success: true }),
@@ -1355,5 +1367,33 @@ describe("decodeCtrlProxyMessage errorCode (#10161)", () => {
       decodeCtrlProxyMessage(msg({ type: "press_key_result", success: false, error: "boom" }))
         ?.result,
     ).not.toHaveProperty("errorCode");
+  });
+});
+
+describe("decodeCtrlProxyMessage swipe route report (#13145)", () => {
+  const decodeSwipe = (extra: Record<string, unknown>) =>
+    decodeCtrlProxyMessage(
+      msg({ type: "swipe_result", success: true, totalTimeMs: 5, ...extra } as never),
+    )?.result;
+
+  test("passes through the additive route and effective duration", () => {
+    expect(
+      decodeSwipe({ swipeRoute: "unpinnedSynthesized", effectiveDurationMs: 50 }),
+    ).toMatchObject({ swipeRoute: "unpinnedSynthesized", effectiveDurationMs: 50 });
+  });
+
+  test("an older runner reply carries neither field", () => {
+    const result = decodeSwipe({}) as Record<string, unknown>;
+    expect("swipeRoute" in result).toBe(false);
+    expect("effectiveDurationMs" in result).toBe(false);
+  });
+
+  test("malformed values are dropped", () => {
+    const result = decodeSwipe({ swipeRoute: 3, effectiveDurationMs: "50" }) as Record<
+      string,
+      unknown
+    >;
+    expect("swipeRoute" in result).toBe(false);
+    expect("effectiveDurationMs" in result).toBe(false);
   });
 });

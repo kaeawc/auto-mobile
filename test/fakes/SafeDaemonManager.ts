@@ -1,5 +1,4 @@
-import type { ChildProcess } from "node:child_process";
-import { DaemonManager } from "../../src/daemon/manager";
+import { DaemonManager, type DaemonManagerOptions } from "../../src/daemon/manager";
 import { FakeDaemonSpawner } from "./FakeDaemonSpawner";
 import { FakeTimer } from "./FakeTimer";
 import type { DaemonExitRecordFileSystem } from "../../src/daemon/daemonExitRecord";
@@ -25,31 +24,31 @@ export class FakeDaemonExitRecordFileSystem implements DaemonExitRecordFileSyste
 }
 
 /** Real manager behavior, with fake process I/O as the unit-test default. */
-export class SafeDaemonManager extends DaemonManager {
+type SafeDaemonManagerContract = Pick<DaemonManager, keyof DaemonManager>;
+
+export class SafeDaemonManager extends DaemonManager implements SafeDaemonManagerContract {
   readonly defaultSpawner: FakeDaemonSpawner;
   readonly defaultSignals: Array<{ pid: number; signal: NodeJS.Signals }>;
 
-  constructor(...args: ConstructorParameters<typeof DaemonManager>) {
+  constructor(options: DaemonManagerOptions = {}) {
     const spawner = new FakeDaemonSpawner();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    args[2] ??= new FakeTimer();
-    args[6] ??= {
-      findDaemonProcesses: () => [],
-      // Lock ownership still needs to recognize this test process.
-      isProcessRunning: (pid) => pid === process.pid,
-    };
-    args[7] ??= {
-      // The manager's legacy spawner seam uses ChildProcess; the launcher only
-      // consumes the process interface implemented by FakeDaemonProcess.
-      spawn: (...spawnArgs) => spawner.spawn(...spawnArgs) as unknown as ChildProcess,
-    };
-    args[10] ??= {
-      signal: (pid, signal) => {
-        signals.push({ pid, signal });
+    super({
+      ...options,
+      timer: options.timer ?? new FakeTimer(),
+      processFinder: options.processFinder ?? {
+        findDaemonProcesses: () => [],
+        // Lock ownership still needs to recognize this test process.
+        isProcessRunning: (pid) => pid === process.pid,
       },
-    };
-    super(...args);
-    this.exitRecordFileSystem = new FakeDaemonExitRecordFileSystem();
+      processSpawner: options.processSpawner ?? spawner,
+      processSignaler: options.processSignaler ?? {
+        signal: (pid, signal) => {
+          signals.push({ pid, signal });
+        },
+      },
+    });
+    this.seams.exitRecordFileSystem = new FakeDaemonExitRecordFileSystem();
     this.defaultSpawner = spawner;
     this.defaultSignals = signals;
   }

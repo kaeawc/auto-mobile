@@ -13,7 +13,7 @@
 #
 # Sourcing convention mirrors scripts/local-dev/lib/common.sh and
 # scripts/lib/tool-install.sh (issue #2822):
-#   # shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+#   # shellcheck source=scripts/lib/file-selection.sh
 #   source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
 #
 # Exports:
@@ -53,7 +53,7 @@
 : "${YELLOW:=\033[1;33m}"
 : "${NC:=\033[0m}"
 
-# shellcheck disable=SC1091 # Resolved relative to the helper's location.
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$(dirname "${BASH_SOURCE[0]}")/vcs-diff.sh"
 
 # True if <cmd> is on PATH. Guarded so we don't redefine a caller's copy.
@@ -90,8 +90,8 @@ collect_touched_files() {
   local project_root="$1"
   local regex="$2"
 
-  # shellcheck disable=SC2119 # The current workspace determines touched files.
-  vcs_touched_files \
+  set -- # No pathspec: collect the entire current workspace.
+  vcs_touched_files "$@" \
     | _filter_matching_files "$project_root" "$regex" | sort | uniq
 }
 
@@ -121,8 +121,8 @@ collect_touched_paths_including_deleted() {
   local touched_files
 
   : "$project_root"
-  # shellcheck disable=SC2119 # The current workspace determines touched files.
-  touched_files="$(vcs_touched_files_including_deleted)" || return $?
+  set -- # No pathspec: collect the entire current workspace.
+  touched_files="$(vcs_touched_files_including_deleted "$@")" || return $?
 
   printf '%s\n' "$touched_files" \
     | _filter_matching_paths "$regex" | sort | uniq

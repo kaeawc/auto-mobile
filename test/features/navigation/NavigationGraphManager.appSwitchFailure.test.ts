@@ -46,7 +46,7 @@ describe("NavigationGraphManager app switch when the app-row insert rejects (#99
     repository = new FlakyAppInsertRepository(harness.db);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       new FakeTimer(),
     );
   });

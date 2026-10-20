@@ -79,13 +79,11 @@ interface HarnessOptions {
 function harness(options: HarnessOptions = {}) {
   const timer = new FakeTimer();
   const devices = new FakeScreenReaderDevices();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => ({ status: "restored" as const }) }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
       ...(options.screenReaderBackoff ? { screenReaderBackoff: options.screenReaderBackoff } : {}),
@@ -99,7 +97,7 @@ function harness(options: HarnessOptions = {}) {
         },
       }),
     },
-  );
+  });
   /** The `accessibility` tool's recording: slot written in beforeChange, as accessibilityTools does. */
   const toggleInSession = (
     sessionUuid: string,
@@ -381,7 +379,7 @@ describe("session screen reader restoration (#10146)", () => {
         h.timer.advanceTime(1);
         await pending;
 
-        h.manager.retireScreenReaderRestoration(android.deviceId);
+        h.manager.retireRestorations(android.deviceId, "removal");
         await h.manager.createSession("s2", android.deviceId, "android");
 
         expect(h.devices.restoreCalls).toHaveLength(3);
@@ -429,7 +427,7 @@ describe("session screen reader restoration (#10146)", () => {
       const pending = h.manager.getPendingDeviceCleanup(android.deviceId);
       const calls = h.devices.restoreCalls.length;
 
-      h.manager.retireScreenReaderRestoration(android.deviceId);
+      h.manager.retireRestorations(android.deviceId, "removal");
       h.timer.advanceTime(250);
       await pending;
       await flush();

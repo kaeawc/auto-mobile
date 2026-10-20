@@ -1,11 +1,10 @@
+import { makePool } from "../helpers/makePool";
 import { expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Pins the post-await replacement guard in DevicePool.rollbackAssignments (#11802). If a replacement
 // session under the same id ever binds the same device while the rollback awaits
@@ -29,15 +28,16 @@ async function createContext(): Promise<Context> {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE];
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "rollback-guard-test", {
-      timer,
-      deviceManager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-    }),
-  );
+  const pool = makePool(manager, "rollback-guard-test", {
+    timer,
+    deviceManager,
+  });
   await pool.initializeWithDevices([DEVICE]);
-  await pool.bindOrReuseDeviceSession(SESSION_ID, DEVICE.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: SESSION_ID,
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+  });
   return { timer, manager, pool, allocated: manager.getSession(SESSION_ID)! };
 }
 
@@ -50,7 +50,7 @@ test("rollback releases the device when no replacement session appears", async (
   const context = await createContext();
   const { manager, pool, allocated } = context;
   try {
-    await pool["rollbackAssignments"](
+    await pool.testHooks.rollbackAssignments(
       new Map([[SESSION_ID, { deviceId: DEVICE.deviceId, session: allocated }]]),
     );
 
@@ -69,19 +69,16 @@ test("rollback keeps the device bound when a replacement session binds it during
   const releaseSpy = spyOn(manager, "releaseSession").mockImplementation(
     async (...args: Parameters<SessionManager["releaseSession"]>) => {
       const released = await originalRelease(...args);
-      replacement = await manager.createSession(
-        SESSION_ID,
-        DEVICE.deviceId,
-        "android",
-        1_000,
-        1_000,
-      );
+      replacement = await manager.createSession(SESSION_ID, DEVICE.deviceId, "android", {
+        timeoutMs: 1_000,
+        heartbeatTimeoutMs: 1_000,
+      });
       return released;
     },
   );
 
   try {
-    await pool["rollbackAssignments"](
+    await pool.testHooks.rollbackAssignments(
       new Map([[SESSION_ID, { deviceId: DEVICE.deviceId, session: allocated }]]),
     );
 
@@ -106,19 +103,16 @@ test("rollback still frees the device when the replacement session is bound to a
   const releaseSpy = spyOn(manager, "releaseSession").mockImplementation(
     async (...args: Parameters<SessionManager["releaseSession"]>) => {
       const released = await originalRelease(...args);
-      replacement = await manager.createSession(
-        SESSION_ID,
-        OTHER_DEVICE_ID,
-        "android",
-        1_000,
-        1_000,
-      );
+      replacement = await manager.createSession(SESSION_ID, OTHER_DEVICE_ID, "android", {
+        timeoutMs: 1_000,
+        heartbeatTimeoutMs: 1_000,
+      });
       return released;
     },
   );
 
   try {
-    await pool["rollbackAssignments"](
+    await pool.testHooks.rollbackAssignments(
       new Map([[SESSION_ID, { deviceId: DEVICE.deviceId, session: allocated }]]),
     );
 

@@ -1,6 +1,6 @@
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer, noActiveDeviceSessionResult } from "../../src/server/proxyServer";
 import {
   DaemonBoundSessionExpiredError,
@@ -208,6 +208,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -325,8 +326,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
           sessionId,
           deviceId,
           sessionId.startsWith("ios") ? "ios" : "android",
-          60_000,
-          LEASE_MS,
+          { timeoutMs: 60_000, heartbeatTimeoutMs: LEASE_MS },
         );
         session.ownership = "awaiting-owner";
         session.awaitingOwnerSince = baseTimer.now();
@@ -376,8 +376,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
         sessionId,
         deviceId,
         sessionId.startsWith("ios") ? "ios" : "android",
-        60_000,
-        LEASE_MS,
+        { timeoutMs: 60_000, heartbeatTimeoutMs: LEASE_MS },
       );
     }
     spies = [
@@ -616,13 +615,10 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
         recovery: { action: "acquire_replacement_session" },
       });
       acquiredAppleSessionUuid = "replacement-ios-session";
-      await sessionManager.createSession(
-        acquiredAppleSessionUuid,
-        DEVICES["ios-session"],
-        "ios",
-        60_000,
-        LEASE_MS,
-      );
+      await sessionManager.createSession(acquiredAppleSessionUuid, DEVICES["ios-session"], "ios", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: LEASE_MS,
+      });
       const acquired = await client.callTool({ name: "getApple", arguments: {} });
       expect(acquired.isError).toBeFalsy();
       expect(proxy.getTerminalSessionRelease()).toBeUndefined();

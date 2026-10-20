@@ -2,7 +2,6 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChildProcess } from "node:child_process";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
@@ -76,26 +75,22 @@ function harness() {
     readResource: async () => ({}),
     callDaemonMethod: async () => ({}),
   };
-  const manager = new SafeDaemonManager(
-    () => client,
-    undefined,
+  const manager = new SafeDaemonManager({
+    clientFactory: () => client,
     timer,
-    join(dir, "daemon.lock"),
-    pidPath,
+    lockFilePath: join(dir, "daemon.lock"),
+    pidFilePath: pidPath,
     socketPath,
-    table,
-    { spawn: (...args) => spawner.spawn(...args) as unknown as ChildProcess },
-    undefined,
-    () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-    undefined,
-    { next: () => "peer-rejoin-owner" },
-    reachability,
-    "linux",
-    { isPortFree: async () => true },
-    undefined,
-    async () => true,
-    identity,
-  );
+    processFinder: table,
+    processSpawner: spawner,
+    launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+    idGenerator: { next: () => "peer-rejoin-owner" },
+    peerSocketReachability: reachability,
+    platform: "linux",
+    portAvailabilityChecker: { isPortFree: async () => true },
+    daemonProtocolHealthProbe: async () => true,
+    identityRecoveryIO: identity,
+  });
   return {
     manager,
     table,

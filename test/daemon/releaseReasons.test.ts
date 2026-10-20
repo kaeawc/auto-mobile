@@ -16,6 +16,7 @@ import {
   outranksReleaseReason,
   releaseReasonFamiliesWhere,
   releasedRowStatus,
+  resolveReleaseReason,
   sessionReleaseReasonFamily,
   sessionReleaseReasonTraits,
 } from "../../src/daemon/releaseReasons";
@@ -44,7 +45,7 @@ describe("session release-reason table (#11258)", () => {
     });
     expect(isTerminalReleaseReason("replay-lease-expired")).toBe(false);
     expect(releaseReasonStrength("replay-lease-expired")).toBe(0);
-    expect(literalReleaseReasonsWhere("idle")).not.toContain("replay-lease-expired");
+    expect<string[]>(literalReleaseReasonsWhere("idle")).not.toContain("replay-lease-expired");
     expect(isIdleReleaseReason("session-not-found")).toBe(false);
   });
 
@@ -53,7 +54,7 @@ describe("session release-reason table (#11258)", () => {
   });
 
   test("idle releases are exactly the idle-window reasons", () => {
-    expect(literalReleaseReasonsWhere("idle").sort()).toEqual(
+    expect<string[]>(literalReleaseReasonsWhere("idle").sort()).toEqual(
       ["cleanup-expired", "cli-idle-timeout", "lazy-expiry", "expired"].sort(),
     );
     expect(releaseReasonFamiliesWhere("idle")).toEqual([]);
@@ -129,7 +130,7 @@ describe("session release-reason table (#11258)", () => {
   });
 
   test("expiry releases persist as expired; everything else as released", () => {
-    expect(literalReleaseReasonsWhere("expiry").sort()).toEqual(
+    expect<string[]>(literalReleaseReasonsWhere("expiry").sort()).toEqual(
       [
         "cleanup-expired",
         "cli-idle-timeout",
@@ -146,7 +147,7 @@ describe("session release-reason table (#11258)", () => {
   });
 
   test("terminal literal reasons", () => {
-    expect(literalReleaseReasonsWhere("terminal").sort()).toEqual(
+    expect<string[]>(literalReleaseReasonsWhere("terminal").sort()).toEqual(
       [
         "cleanup-expired",
         "cli-idle-timeout",
@@ -184,7 +185,7 @@ describe("session release-reason table (#11258)", () => {
   });
 
   test("recoverable handoffs are never terminal", () => {
-    expect(literalReleaseReasonsWhere("recoverable").sort()).toEqual([
+    expect<string[]>(literalReleaseReasonsWhere("recoverable").sort()).toEqual([
       "daemon-restart",
       "daemon-shutdown",
     ]);
@@ -263,12 +264,31 @@ describe("re-issuable-by-name category (#11418)", () => {
       ...literalReleaseReasonsWhere("recoverable"),
       ...releaseReasonFamiliesWhere("recoverable"),
     ];
-    expect(reissuable).toEqual([...recoverable, "plan-auto-release"].sort());
+    expect<string[]>(reissuable).toEqual([...recoverable, "plan-auto-release"].sort());
     expect(isRecoverableDaemonReleaseReason("plan-auto-release")).toBe(false);
     for (const reason of ["superseded", "allocation-rollback", "explicit-release", "expired"]) {
       expect(isReissuableByNameReleaseReason(reason)).toBe(false);
     }
     expect(isReissuableByNameReleaseReason("device-restart:Pixel")).toBe(true);
     expect(isTerminalReleaseReason("plan-auto-release")).toBe(false);
+  });
+});
+
+describe("resolveReleaseReason precedence (#11800)", () => {
+  test("device-killed always wins and is never displaced", () => {
+    expect(resolveReleaseReason("explicit-release", "device-killed")).toBe("device-killed");
+    expect(resolveReleaseReason("device-killed", "heartbeat-timeout")).toBe("device-killed");
+    expect(resolveReleaseReason("device-killed", "daemon-shutdown")).toBe("device-killed");
+  });
+
+  test("daemon-shutdown replaces only non-terminal reasons", () => {
+    expect(resolveReleaseReason("not-a-reason", "daemon-shutdown")).toBe("daemon-shutdown");
+    expect(resolveReleaseReason("heartbeat-timeout", "daemon-shutdown")).toBe("heartbeat-timeout");
+  });
+
+  test("other candidates follow outranksReleaseReason", () => {
+    expect(resolveReleaseReason("not-a-reason", "explicit-release")).toBe("explicit-release");
+    expect(resolveReleaseReason("heartbeat-timeout", "explicit-release")).toBe("heartbeat-timeout");
+    expect(resolveReleaseReason("explicit-release", "heartbeat-timeout")).toBe("explicit-release");
   });
 });

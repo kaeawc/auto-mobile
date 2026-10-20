@@ -7,6 +7,7 @@ import {
 } from "../../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { AndroidUser } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { createExecResult } from "../../../src/utils/execResult";
 
 const owner: AndroidUser = { userId: 0, name: "Owner", flags: 0x13, running: true };
 const pausedWork: AndroidUser = { userId: 11, name: "Paused work", flags: 0x30, running: false };
@@ -98,14 +99,14 @@ describe("AndroidUserTargetResolver.resolve", () => {
     const adb = new FakeAdbExecutor();
     adb.setUsers([owner, { ...work, userId: 10 }, pausedWork]);
     adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
-    adb.setCommandResponse("shell pm list packages --user 0", {
-      stdout: personal ? "package:com.example.app" : "package:com.example.other",
-      stderr: "",
-    });
-    adb.setCommandResponse("shell pm list packages --user 10", {
-      stdout: managed ? "package:com.example.app" : "package:com.example.other",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell pm list packages --user 0",
+      createExecResult(personal ? "package:com.example.app" : "package:com.example.other", ""),
+    );
+    adb.setCommandResponse(
+      "shell pm list packages --user 10",
+      createExecResult(managed ? "package:com.example.app" : "package:com.example.other", ""),
+    );
     const log = spyOn(logger, "info").mockImplementation(() => {});
     try {
       await expect(
@@ -168,7 +169,7 @@ describe("AndroidUserTargetResolver.resolve", () => {
     "installedOnly preserves $name without package listings",
     async ({ request, users, foreground, expected }) => {
       const adb = new FakeAdbExecutor();
-      adb.setUsers(users);
+      adb.setUsers([...users]);
       adb.setForegroundApp(foreground);
       const usersSpy = spyOn(adb, "listUsers");
       const foregroundSpy = spyOn(adb, "getForegroundApp");
@@ -212,7 +213,7 @@ describe("AndroidUserTargetResolver.resolve", () => {
   test.each(cases)("$name", async ({ request, users, foreground, expected }) => {
     const adb = new FakeAdbExecutor();
     if (users) {
-      adb.setUsers(users);
+      adb.setUsers([...users]);
     }
     if (foreground !== undefined) {
       adb.setForegroundApp(foreground);

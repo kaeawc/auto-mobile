@@ -30,7 +30,7 @@ import {
 } from "../features/observe/hierarchyLayer";
 import type { HierarchyLayer } from "../models/HierarchyLayer";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { logger } from "../utils/logger";
 import { type ScreenshotMode } from "../features/observe/automaticScreenshotPolicy";
 import { inlineScreenshotImage } from "../features/observe/screenshot/inlineScreenshotImage";
@@ -42,9 +42,9 @@ import {
   applyObserveScopeExperiments,
   buildObserveScopeConfig,
 } from "../features/observe/output/ObserveScopeExperiments";
-import { type WaitForObservationOutcome } from "./observeWaitEvaluation";
+import { type WaitForObservationOutcome } from "../features/observe/wait/WaitEvaluation";
 import type { ObserveArgs } from "./observeTools";
-import { assertActiveWindowWaitForSupportedOnPlatform } from "./observeWaitForSchemas";
+import { assertActiveWindowWaitForSupportedOnPlatform } from "../features/observe/wait/WaitForSchemas";
 
 export interface ObserveToolDependencies {
   crop?: ObserveCropDependencies;
@@ -120,11 +120,10 @@ export function screenForObserve(
     onAvailabilityLost:
       device.platform === "android"
         ? (reason) => {
-            const daemonState = DaemonState.getInstance();
-            if (args.sessionUuid && daemonState.isInitialized()) {
-              daemonState
-                .getSessionManager()
-                .invalidateAutomationReadiness(args.sessionUuid, reason);
+            if (args.sessionUuid) {
+              defaultDaemonContext
+                .sessionManager()
+                ?.invalidateAutomationReadiness(args.sessionUuid, reason);
             }
           }
         : undefined,

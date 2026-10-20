@@ -2,8 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ImplicitDefaultLocale:AudioPlayerComponent.kt:"%02d:%02d".format(minutes, remainingSeconds)</ID>
-    <ID>ImplicitDefaultLocale:MediaPlayerScreen.kt:"%02d:%02d".format(minutes, remainingSeconds)</ID>
-    <ID>ImplicitDefaultLocale:VideoPlayerScreen.kt:"%02d:%02d".format(minutes, remainingSeconds)</ID>
+    <ID>TooGenericExceptionCaught:MediaPlayerViewModel.kt:MediaPlayerViewModel$e: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>

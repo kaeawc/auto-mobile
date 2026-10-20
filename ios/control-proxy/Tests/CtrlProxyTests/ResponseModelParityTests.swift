@@ -18,7 +18,10 @@ final class ResponseModelParityTests: XCTestCase {
         // The handshake also advertises optional runner features (RunnerFeature.allCases,
         // sorted); the daemon reads it to gate feature use, so `display_cutout_info` is a
         // load-bearing wire identifier (#5787).
-        XCTAssertEqual(object["supportedFeatures"] as? [String], ["display_cutout_info", "double_tap_v1"])
+        XCTAssertEqual(
+            object["supportedFeatures"] as? [String],
+            ["display_cutout_info", "double_tap_v1", "path_gesture_v1"]
+        )
     }
 
     func testSdkCapabilitiesResponseDistinguishesRunnerSupportFromForegroundSdkAvailability() {
@@ -96,15 +99,15 @@ final class ResponseModelParityTests: XCTestCase {
                 error: DecodingError.typeMismatch(Int.self, .init(codingPath: [], debugDescription: "Expected Int"))
             ),
         ]
-        for (i, c) in cases.enumerated() {
+        for (i, testCase) in cases.enumerated() {
             guard let object = JSONGolden.object(
-                Responses.buildErrorResponse(requestId: c.requestId, error: c.error),
+                Responses.buildErrorResponse(requestId: testCase.requestId, error: testCase.error),
                 strippingTimestamp: true
             ) else { continue }
             XCTAssertEqual(object["type"] as? String, "error", "error response[\(i)] type")
             XCTAssertEqual(object["success"] as? Bool, false, "error response[\(i)] success")
             XCTAssertFalse((object["error"] as? String ?? "").isEmpty, "error response[\(i)] error text")
-            if let expectedId = c.requestId {
+            if let expectedId = testCase.requestId {
                 XCTAssertEqual(object["requestId"] as? String, expectedId, "error response[\(i)] requestId")
             }
         }

@@ -103,9 +103,20 @@ extension PrototypeNode {
         return nil
     }
 
+    private func menuTarget(named name: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
+        guard openWhen?.holds(state) ?? false, let index = Int(name), String(index) == name,
+              let menuItems, menuItems.indices.contains(index),
+              case let .item(item) = menuItems[index], item.enabled != false else { return nil }
+        return .menuItem(self, item)
+    }
+
     private func part(named wanted: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
         guard let identifier, wanted.hasPrefix(identifier + ".") else { return nil }
         let name = String(wanted.dropFirst(identifier.count + 1))
+        if let swipeActions, name.hasPrefix("swipe."), let index = Int(name.dropFirst("swipe.".count)) {
+            let entries = swipeActions.entries
+            return entries.indices.contains(index) ? .swipeAction(entries[index].action) : nil
+        }
         switch type {
         case "dialog", "snackbar":
             guard openWhen?.holds(state) ?? false else { return nil }
@@ -113,10 +124,9 @@ extension PrototypeNode {
         case "searchBar":
             return indexedButton(named: name, actions: trailingActions).map { .appBarButton($0) }
         case "menu":
-            guard openWhen?.holds(state) ?? false, let index = Int(name), String(index) == name,
-                  let menuItems, menuItems.indices.contains(index),
-                  case let .item(item) = menuItems[index], item.enabled != false else { return nil }
-            return .menuItem(self, item)
+            return menuTarget(named: name, state: state)
+        case "textField":
+            return name == "trailingIcon" ? trailingIcon.map { .appBarButton($0) } : nil
         case "topAppBar":
             return appBarButton(named: name).map { .appBarButton($0) }
         case "radioGroup", "segmentedButton", "select":
@@ -157,20 +167,26 @@ enum PrototypeTapTarget {
     case menuItem(PrototypeNode, PrototypeMenuEntry)
     /// A `topAppBar` navigation icon or action.
     case appBarButton(PrototypeAppBarAction)
+    /// A revealed `swipeActions` button of a row or listItem.
+    case swipeAction(PrototypeSwipeAction)
     /// One `radioGroup` or `segmentedButton` option.
     case option(PrototypeNode, PrototypeOption)
 }
 
 extension PrototypeSession {
+    private mutating func activateNode(_ node: PrototypeNode) -> [PrototypeEvent]? {
+        guard isEnabled(node) else { return [] }
+        if let key = node.toggleKey { return toggle(key: key, then: node.onTap ?? []) }
+        guard let actions = node.onTap, !actions.isEmpty else { return nil }
+        return run(actions)
+    }
+
     /// A tap on `target`, as the matching Android control handles its click. Nil when the target
     /// has nothing to do (a plain node without `onTap`, an app-bar button without actions).
     mutating func activate(_ target: PrototypeTapTarget) -> [PrototypeEvent]? {
         switch target {
         case let .node(node):
-            guard isEnabled(node) else { return [] }
-            if let key = node.toggleKey { return toggle(key: key, then: node.onTap ?? []) }
-            guard let actions = node.onTap, !actions.isEmpty else { return nil }
-            return run(actions)
+            return activateNode(node)
         case let .menuItem(node, item):
             guard item.enabled != false else { return nil }
             return closeModal(node, then: item.onTap ?? [])
@@ -179,6 +195,8 @@ extension PrototypeSession {
         case let .appBarButton(button):
             guard let actions = button.onTap, !actions.isEmpty else { return nil }
             return run(actions)
+        case let .swipeAction(action):
+            return run(action.onTap)
         case let .option(node, option):
             guard isEnabled(node) else { return [] }
             guard let key = node.stateKey else { return nil }
@@ -304,15 +322,15 @@ enum PrototypeTime {
 
     /// The 12-hour clock face (1...12) of a 24-hour `hour`.
     static func hour12(of hour: Int) -> Int {
-        let h = hour % 12
-        return h == 0 ? 12 : h
+        let hourValue = hour % 12
+        return hourValue == 0 ? 12 : hourValue
     }
 
     static func isPM(hour: Int) -> Bool { hour % 24 >= 12 }
 
     /// The 24-hour `hour` for a 12-hour face and meridiem.
-    static func hour24(hour12: Int, pm: Bool) -> Int {
-        (hour12 % 12) + (pm ? 12 : 0)
+    static func hour24(hour12: Int, pm isAfternoon: Bool) -> Int {
+        (hour12 % 12) + (isAfternoon ? 12 : 0)
     }
 
     /// Accessibility labels of the wheels, naming what each one sets as Android's picker does.

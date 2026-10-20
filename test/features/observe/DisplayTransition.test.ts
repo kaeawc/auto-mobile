@@ -1,3 +1,5 @@
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
+import { createExecResult } from "../../../src/utils/execResult";
 import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -18,14 +20,13 @@ import {
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
+
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { setObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { readFileSync } from "node:fs";
@@ -39,6 +40,7 @@ import {
   type ObservationFrameInvalidator,
 } from "../../../src/features/observe/ObservationFrameInvalidator";
 import { logger } from "../../../src/utils/logger";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 class FakeObservationFrameInvalidator implements ObservationFrameInvalidator {
   readonly deviceIds: string[] = [];
@@ -252,9 +254,9 @@ describe("display transitions", () => {
           updatedAt: 2,
         },
       ]);
-      const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const client = spyOnIosClientInstance({
         getLatestHierarchy: async () => ({ hierarchy: null }),
-      } as unknown as IOSCtrlProxyClient);
+      });
       try {
         const screen = new RealObserveScreen(
           rotatingDevice,
@@ -295,9 +297,9 @@ describe("display transitions", () => {
     hierarchy.configureHierarchy(captured);
     const cacheStore = new FakeObserveCacheStore(timer);
     setObserveCacheStore(cacheStore);
-    const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const client = spyOnIosClientInstance({
       getLatestHierarchy: async () => ({ hierarchy: null }),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const screen = new RealObserveScreen(
       duo,
       adbFactory,
@@ -320,14 +322,21 @@ describe("display transitions", () => {
     const executeSpy = spyOn(screen, "execute").mockImplementation((request) =>
       execute({ ...options, ...request }),
     );
-    const cachedSpy = spyOn(screen, "getMostRecentCachedObserveResult").mockResolvedValue(null);
+    const cachedSpy = spyOn(screen, "getMostRecentCachedObserveResult").mockResolvedValue({
+      observationId: "cache-miss",
+      updatedAt: 0,
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize: { width: 0, height: 0 },
+      systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+      freshness: { isFresh: false, warning: "test cache miss" },
+    });
     try {
       const before = displayTransitions.identityRevision(duo.deviceId);
       const observed = await screen.execute(options);
       const afterObserve = displayTransitions.identityRevision(duo.deviceId);
       const prepared = await screen.execute({ ...options, freshness: "cached-ok" });
       // values reported in issue #8379's 2026-10-01 device verification
-      const expectedSize = { width: 951, height: 669, units: "points" };
+      const expectedSize = { width: 951, height: 669, units: "points" as const };
       expect(observed.screenSize).toEqual(expectedSize);
       expect(prepared.screenSize).toEqual(expectedSize);
       for (const result of [observed, prepared]) {
@@ -648,10 +657,13 @@ describe("display transitions", () => {
   test("rotation does not wipe observe cache or repeat the lock sample", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 100}',
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 100}',
+        "",
+      ),
+    );
     const lockRead = spyOn(adb, "getDeviceLock");
     const cache = new FakeObserveCacheStore(timer);
     const hierarchy = new FakeViewHierarchy();
@@ -721,14 +733,14 @@ describe("display transitions", () => {
     const hierarchy = new FakeViewHierarchy();
     const cache = new FakeObserveCacheStore(timer);
     adb.setCommandResponseSequence("cmd display get-displays", [
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-        stderr: "",
-      },
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-        stderr: "",
-      },
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
     ]);
     adb.setDeviceLockSequence([
       { locked: false, keyguardShowing: false },
@@ -772,15 +784,18 @@ describe("display transitions", () => {
 
   test("tapOn rejects a fresh hierarchy captured on a different sized panel", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-      stderr: "",
-    });
-    const capture = {
-      capture: async () => ({
-        hierarchy: { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 },
-      }),
-    } as HierarchyCapture;
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
+    );
+    const capture = new FakeHierarchyCapture(() => ({
+      hierarchy: { node: {} },
+      screenWidth: 100,
+      screenHeight: 100,
+    }));
     const tap = new TapOnElement(device, adb, {
       timer: new FakeTimer(),
       hierarchyCapture: capture,
@@ -809,19 +824,21 @@ describe("display transitions", () => {
     };
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state state", {
-      stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"),
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: deviceStateFixture("foldpf-print-states.txt"),
-      stderr: "",
-    });
+        "",
+      ),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(deviceStateFixture("foldpf-5-after-reset-state.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(deviceStateFixture("foldpf-print-states.txt"), ""),
+    );
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchy({
       hierarchy: { node: {} },
@@ -843,16 +860,12 @@ describe("display transitions", () => {
       expect(observed.display).toMatchObject({ key: "external", posture: "closed" });
       const tap = new TapOnElement(focusedDevice, adb, {
         timer,
-        hierarchyCapture: {
-          capture: async () => ({
-            hierarchy: {
-              hierarchy: { node: {} },
-              displayId: 2,
-              screenWidth: 200,
-              screenHeight: 200,
-            },
-          }),
-        } as HierarchyCapture,
+        hierarchyCapture: new FakeHierarchyCapture(() => ({
+          hierarchy: { node: {} },
+          displayId: 2,
+          screenWidth: 200,
+          screenHeight: 200,
+        })),
       });
       await expect(tap.refreshViewHierarchy(10, observed.screenSize)).resolves.toBeDefined();
       expect(displayTransitions.revision(focusedDevice.deviceId)).toBe(0);
@@ -875,15 +888,18 @@ describe("display transitions", () => {
       },
     };
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
-    const capture = {
-      capture: async () => ({
-        hierarchy: { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
-      }),
-    } as HierarchyCapture;
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+    );
+    const capture = new FakeHierarchyCapture(() => ({
+      hierarchy: { node: {} },
+      screenWidth: 200,
+      screenHeight: 200,
+    }));
     const tap = new TapOnElement(sameSized, adb, {
       timer: new FakeTimer(),
       hierarchyCapture: capture,

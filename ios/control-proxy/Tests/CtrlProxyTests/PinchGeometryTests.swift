@@ -157,6 +157,104 @@ final class PinchGeometryTests: XCTestCase {
         }
     }
 
+    // MARK: - Arc path (issue #12996)
+
+    func testPureRotationKeepsAConstantRadiusAlongTheWholePath() {
+        // A straight chord between start and end shrinks the radius to cos(rotation / 2) of the
+        // original mid-gesture, so a rotation-only pinch zoomed.
+        let segments = Int(ObjCExceptionCatcher_pinchSegmentCount(90))
+        XCTAssertEqual(segments, 9)
+        for index in 0 ... segments {
+            let fingers = ObjCExceptionCatcher_computePinchFingersAt(
+                200, 400, 100, 100, 90, CGFloat(index) / CGFloat(segments)
+            )
+            XCTAssertEqual(hypot(fingers.finger1.x - 200, fingers.finger1.y - 400), 50, accuracy: accuracy)
+            XCTAssertEqual(hypot(fingers.finger2.x - 200, fingers.finger2.y - 400), 50, accuracy: accuracy)
+        }
+    }
+
+    func testSegmentCountFollowsRotationMagnitudeAndIsBounded() {
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(0), 1)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(5), 1)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(-90), 9)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(360), 36)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(350), 35)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(100_000), 36)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(.greatestFiniteMagnitude), 36)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(.infinity), 1)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(.nan), 1)
+    }
+
+    func testPathFractionsZeroAndOneEqualTheEndpointGeometry() {
+        let points = ObjCExceptionCatcher_computePinchPoints(540, 960, 100, 300, 45)
+        let start = ObjCExceptionCatcher_computePinchFingersAt(540, 960, 100, 300, 45, 0)
+        let end = ObjCExceptionCatcher_computePinchFingersAt(540, 960, 100, 300, 45, 1)
+        XCTAssertEqual(start.finger1.x, points.start1.x, accuracy: accuracy)
+        XCTAssertEqual(start.finger1.y, points.start1.y, accuracy: accuracy)
+        XCTAssertEqual(start.finger2.x, points.start2.x, accuracy: accuracy)
+        XCTAssertEqual(start.finger2.y, points.start2.y, accuracy: accuracy)
+        XCTAssertEqual(end.finger1.x, points.end1.x, accuracy: accuracy)
+        XCTAssertEqual(end.finger1.y, points.end1.y, accuracy: accuracy)
+        XCTAssertEqual(end.finger2.x, points.end2.x, accuracy: accuracy)
+        XCTAssertEqual(end.finger2.y, points.end2.y, accuracy: accuracy)
+    }
+
+    /// SHARED PATH GOLDEN TABLE — the single source of truth is
+    /// `test/fixtures/pinch-path-golden-vectors.json`; `test/parity/pinchGoldenVectorParity.test.ts`
+    /// verifies this table and the Android mirror (`path golden vectors match iOS parity`) against
+    /// it. Each row is (centerX, centerY, distanceStart, distanceEnd, rotationDegrees, fraction)
+    /// followed by the expected *unordered* pair of finger positions at that fraction.
+    func testPathGoldenVectorsMatchAndroidParity() {
+        struct PathVector {
+            let centerX: CGFloat
+            let centerY: CGFloat
+            let distanceStart: CGFloat
+            let distanceEnd: CGFloat
+            let rotationDegrees: CGFloat
+            let fraction: CGFloat
+            let expected: [CGPoint]
+        }
+        let pathVectors: [PathVector] = [
+            PathVector(
+                centerX: 200, centerY: 400, distanceStart: 100, distanceEnd: 100, rotationDegrees: 90, fraction: 0.5,
+                expected: [CGPoint(x: 235.355339, y: 435.355339), CGPoint(x: 164.644661, y: 364.644661)]
+            ),
+            PathVector(
+                centerX: 200, centerY: 400, distanceStart: 100, distanceEnd: 100, rotationDegrees: 90, fraction: 0.25,
+                expected: [CGPoint(x: 246.193977, y: 419.134172), CGPoint(x: 153.806023, y: 380.865828)]
+            ),
+            PathVector(
+                centerX: 300, centerY: 500, distanceStart: 200, distanceEnd: 80, rotationDegrees: -60, fraction: 0.5,
+                expected: [CGPoint(x: 360.621778, y: 465), CGPoint(x: 239.378222, y: 535)]
+            ),
+            PathVector(
+                centerX: 0, centerY: 0, distanceStart: 200, distanceEnd: 200, rotationDegrees: 0, fraction: 0.5,
+                expected: [CGPoint(x: 100, y: 0), CGPoint(x: -100, y: 0)]
+            ),
+            PathVector(
+                centerX: 540, centerY: 960, distanceStart: 100, distanceEnd: 300, rotationDegrees: 45, fraction: 1,
+                expected: [CGPoint(x: 646.066017, y: 1066.066017), CGPoint(x: 433.933983, y: 853.933983)]
+            ),
+            PathVector(
+                centerX: 540, centerY: 960, distanceStart: 100, distanceEnd: 300, rotationDegrees: 45, fraction: 0.5,
+                expected: [CGPoint(x: 632.387953, y: 998.268343), CGPoint(x: 447.612047, y: 921.731657)]
+            ),
+        ]
+
+        for vector in pathVectors {
+            let fingers = ObjCExceptionCatcher_computePinchFingersAt(
+                vector.centerX, vector.centerY, vector.distanceStart, vector.distanceEnd,
+                vector.rotationDegrees, vector.fraction
+            )
+            let actual = sortedPoints([fingers.finger1, fingers.finger2])
+            let expected = sortedPoints(vector.expected)
+            for (actualPoint, expectedPoint) in zip(actual, expected) {
+                XCTAssertEqual(actualPoint.x, expectedPoint.x, accuracy: accuracy, "x mismatch for \(vector)")
+                XCTAssertEqual(actualPoint.y, expectedPoint.y, accuracy: accuracy, "y mismatch for \(vector)")
+            }
+        }
+    }
+
     /// Deterministic order-independent sort so the golden comparison ignores finger labeling.
     /// Uses exact (x, then y) ordering — identical to the Kotlin mirror's
     /// `compareBy({ it.first }, { it.second })` — so the two platforms can never sort the same

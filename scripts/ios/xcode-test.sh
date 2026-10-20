@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+# shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.
@@ -142,7 +142,12 @@ find_simulator() {
     echo "${available_sim}"
 }
 
-SIMULATOR_ID=$(find_simulator)
+# Capture via a temp file rather than $(find_simulator): a function inside a
+# command substitution runs with errexit silently disabled (SC2311).
+simulator_id_file=$(mktemp)
+find_simulator > "${simulator_id_file}"
+SIMULATOR_ID=$(<"${simulator_id_file}")
+rm -f "${simulator_id_file}"
 if [ -z "${SIMULATOR_ID}" ]; then
     echo -e "${YELLOW}Warning: No iOS simulator available. Xcode tests will be skipped.${NC}"
     echo -e "${YELLOW}To run tests, create a simulator: xcrun simctl create 'iPhone 16' 'iPhone 16'${NC}"

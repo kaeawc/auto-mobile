@@ -24,7 +24,7 @@ class LiveVideoStreamTest {
 
     setContent {
       if (showLiveLayout.value) {
-        rememberLiveVideoFrame(source, "emulator-5554")
+        rememberLiveVideoFrame(LiveVideoFrameOptions(source, "emulator-5554"))
       }
     }
 
@@ -41,7 +41,7 @@ class LiveVideoStreamTest {
     var observedRotation: Int? = null
 
     setContent {
-      val liveFrame = rememberLiveVideoFrame(source, "emulator-5554")
+      val liveFrame = rememberLiveVideoFrame(LiveVideoFrameOptions(source, "emulator-5554"))
       SideEffect { liveFrame?.let { observedRotation = it.rotation } }
     }
 
@@ -56,7 +56,7 @@ class LiveVideoStreamTest {
     var observedFrame: androidx.compose.ui.graphics.ImageBitmap? = null
 
     setContent {
-      val liveFrame = rememberLiveVideoFrame(source, "emulator-5554")
+      val liveFrame = rememberLiveVideoFrame(LiveVideoFrameOptions(source, "emulator-5554"))
       SideEffect { observedFrame = liveFrame?.bitmap }
     }
 
@@ -82,10 +82,12 @@ class LiveVideoStreamTest {
     setContent {
       val liveFrame =
         rememberLiveVideoFrame(
-          source,
-          "emulator-5554",
-          autoReconnect = true,
-          reconnectInitialMs = 10,
+          LiveVideoFrameOptions(
+            source,
+            "emulator-5554",
+            autoReconnect = true,
+            reconnectInitialMs = 10,
+          ),
         )
       SideEffect { observedFrame = liveFrame?.bitmap }
     }
@@ -107,19 +109,21 @@ class LiveVideoStreamTest {
     // retry above cannot fire — frame progress ceasing is the only signal. The stall watchdog
     // must reconnect, and the stale frame must stay rendered while it does.
     val monotonic = { System.nanoTime() / 1_000_000L }
-    val source = FakeVideoStreamSource(nowMs = monotonic)
+    val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = monotonic))
     var observedFrame: androidx.compose.ui.graphics.ImageBitmap? = null
 
     setContent {
       val liveFrame =
         rememberLiveVideoFrame(
-          source,
-          "emulator-5554",
-          autoReconnect = true,
-          reconnectInitialMs = 10,
-          nowMs = monotonic,
-          stallReconnectMs = 100,
-          stallCheckIntervalMs = 20,
+          LiveVideoFrameOptions(
+            source,
+            "emulator-5554",
+            autoReconnect = true,
+            reconnectInitialMs = 10,
+            nowMs = monotonic,
+            stallReconnectMs = 100,
+            stallCheckIntervalMs = 20,
+          ),
         )
       SideEffect { observedFrame = liveFrame?.bitmap }
     }
@@ -144,16 +148,18 @@ class LiveVideoStreamTest {
       // frozen mainClock rather than Thread.sleep + wall time.
       val clock = java.util.concurrent.atomic.AtomicLong(0L)
       val nowMs = { clock.get() }
-      val source = FakeVideoStreamSource(nowMs = nowMs)
+      val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = nowMs))
       setContent {
         rememberLiveVideoFrame(
-          source,
-          "emulator-5554",
-          autoReconnect = true,
-          reconnectInitialMs = 10,
-          nowMs = nowMs,
-          stallReconnectMs = 100,
-          stallCheckIntervalMs = 20,
+          LiveVideoFrameOptions(
+            source,
+            "emulator-5554",
+            autoReconnect = true,
+            reconnectInitialMs = 10,
+            nowMs = nowMs,
+            stallReconnectMs = 100,
+            stallCheckIntervalMs = 20,
+          ),
         )
       }
       waitUntil { source.connectCalls >= 1 }
@@ -179,16 +185,18 @@ class LiveVideoStreamTest {
       // Control for the test above: without a heartbeat, one full stall window must reconnect.
       val clock = java.util.concurrent.atomic.AtomicLong(0L)
       val nowMs = { clock.get() }
-      val source = FakeVideoStreamSource(nowMs = nowMs)
+      val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = nowMs))
       setContent {
         rememberLiveVideoFrame(
-          source,
-          "emulator-5554",
-          autoReconnect = true,
-          reconnectInitialMs = 10,
-          nowMs = nowMs,
-          stallReconnectMs = 100,
-          stallCheckIntervalMs = 20,
+          LiveVideoFrameOptions(
+            source,
+            "emulator-5554",
+            autoReconnect = true,
+            reconnectInitialMs = 10,
+            nowMs = nowMs,
+            stallReconnectMs = 100,
+            stallCheckIntervalMs = 20,
+          ),
         )
       }
       waitUntil { source.connectCalls >= 1 }
@@ -208,16 +216,18 @@ class LiveVideoStreamTest {
   fun `a silent Streaming relay reconnects once per further stall window`() = runComposeUiTest {
     val clock = java.util.concurrent.atomic.AtomicLong(0L)
     val nowMs = { clock.get() }
-    val source = FakeVideoStreamSource(nowMs = nowMs)
+    val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = nowMs))
     setContent {
       rememberLiveVideoFrame(
-        source,
-        "emulator-5554",
-        autoReconnect = true,
-        reconnectInitialMs = 10,
-        nowMs = nowMs,
-        stallReconnectMs = 100,
-        stallCheckIntervalMs = 20,
+        LiveVideoFrameOptions(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          nowMs = nowMs,
+          stallReconnectMs = 100,
+          stallCheckIntervalMs = 20,
+        ),
       )
     }
     waitUntil { source.connectCalls >= 1 }
@@ -241,17 +251,19 @@ class LiveVideoStreamTest {
     // Deterministic per #7550: a frozen logical clock plus a single mainClock advance, no sleep.
     val clock = java.util.concurrent.atomic.AtomicLong(0L)
     val nowMs = { clock.get() }
-    val source = FakeVideoStreamSource(nowMs = nowMs)
+    val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = nowMs))
     setContent {
       rememberLiveVideoFrame(
-        source,
-        "ios-simulator",
-        autoReconnect = true,
-        reconnectInitialMs = 10,
-        nowMs = nowMs,
-        stallReconnectMs = null, // iOS
-        firstFrameTimeoutMs = 100,
-        stallCheckIntervalMs = 20,
+        LiveVideoFrameOptions(
+          source,
+          "ios-simulator",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          nowMs = nowMs,
+          stallReconnectMs = null, // iOS
+          firstFrameTimeoutMs = 100,
+          stallCheckIntervalMs = 20,
+        ),
       )
     }
     waitUntil { source.connectCalls >= 1 }
@@ -273,17 +285,20 @@ class LiveVideoStreamTest {
     // key-frame wedge; neither the Streaming-stall watchdog nor the Unavailable retry can see it.
     // The first-frame deadline must re-subscribe (#5255 review).
     val monotonic = { System.nanoTime() / 1_000_000L }
-    val source = FakeVideoStreamSource(nowMs = monotonic, holdConnecting = true)
+    val source =
+      FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = monotonic, holdConnecting = true))
     setContent {
       rememberLiveVideoFrame(
-        source,
-        "emulator-5554",
-        autoReconnect = true,
-        reconnectInitialMs = 10,
-        nowMs = monotonic,
-        stallReconnectMs = null,
-        firstFrameTimeoutMs = 100,
-        stallCheckIntervalMs = 20,
+        LiveVideoFrameOptions(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          nowMs = monotonic,
+          stallReconnectMs = null,
+          firstFrameTimeoutMs = 100,
+          stallCheckIntervalMs = 20,
+        ),
       )
     }
     waitUntil { source.connectCalls >= 1 }
@@ -298,7 +313,14 @@ class LiveVideoStreamTest {
     // the only path back to Streaming here, since the test never calls connect() again itself.
     val source = FakeVideoStreamSource()
     setContent {
-      rememberLiveVideoFrame(source, "emulator-5554", autoReconnect = true, reconnectInitialMs = 10)
+      rememberLiveVideoFrame(
+        LiveVideoFrameOptions(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+        ),
+      )
     }
     waitUntil { source.state.value is VideoStreamState.Streaming }
 
@@ -309,27 +331,32 @@ class LiveVideoStreamTest {
   @Test
   fun `auto-reconnect backs off across refused subscribes and resets after success`() =
     runComposeUiTest {
-      val source = FakeVideoStreamSource(refuseWith = "Subscribe refused", connectThenRefuse = true)
+      val source =
+        FakeVideoStreamSource(
+          FakeVideoStreamSource.Options(refuseWith = "Subscribe refused", connectThenRefuse = true),
+        )
       val requestedDelays = CopyOnWriteArrayList<Long>()
       val delayPermits = Channel<Unit>(Channel.UNLIMITED)
       val cancelledDelays = AtomicInteger()
       setContent {
         rememberLiveVideoFrame(
-          source,
-          "emulator-5554",
-          autoReconnect = true,
-          reconnectInitialMs = 10,
-          delayMs = { ms ->
-            requestedDelays += ms
-            try {
-              delayPermits.receive()
-            } catch (cancelled: CancellationException) {
-              cancelledDelays.incrementAndGet()
-              throw cancelled
-            }
-          },
-          stallReconnectMs = null,
-          firstFrameTimeoutMs = null,
+          LiveVideoFrameOptions(
+            source,
+            "emulator-5554",
+            autoReconnect = true,
+            reconnectInitialMs = 10,
+            delayMs = { ms ->
+              requestedDelays += ms
+              try {
+                delayPermits.receive()
+              } catch (cancelled: CancellationException) {
+                cancelledDelays.incrementAndGet()
+                throw cancelled
+              }
+            },
+            stallReconnectMs = null,
+            firstFrameTimeoutMs = null,
+          ),
         )
       }
 
@@ -350,9 +377,17 @@ class LiveVideoStreamTest {
 
   @Test
   fun `auto-reconnect resumes after Screen Recording is granted`() = runComposeUiTest {
-    val source = FakeVideoStreamSource(screenRecordingRequired = true)
+    val source =
+      FakeVideoStreamSource(FakeVideoStreamSource.Options(screenRecordingRequired = true))
     setContent {
-      rememberLiveVideoFrame(source, "ios-simulator", autoReconnect = true, reconnectInitialMs = 10)
+      rememberLiveVideoFrame(
+        LiveVideoFrameOptions(
+          source,
+          "ios-simulator",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+        ),
+      )
     }
     waitUntil { source.state.value is VideoStreamState.PermissionRequired }
 
@@ -364,7 +399,7 @@ class LiveVideoStreamTest {
   @Test
   fun `without auto-reconnect a dropped relay stays unavailable`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
-    setContent { rememberLiveVideoFrame(source, "emulator-5554") }
+    setContent { rememberLiveVideoFrame(LiveVideoFrameOptions(source, "emulator-5554")) }
     waitUntil { source.state.value is VideoStreamState.Streaming }
 
     source.becomeUnavailable("Live mirroring stopped")
@@ -380,7 +415,7 @@ class LiveVideoStreamTest {
     var observedFrame: androidx.compose.ui.graphics.ImageBitmap? = null
 
     setContent {
-      val liveFrame = rememberLiveVideoFrame(source, "emulator-5554")
+      val liveFrame = rememberLiveVideoFrame(LiveVideoFrameOptions(source, "emulator-5554"))
       SideEffect { observedFrame = liveFrame?.bitmap }
     }
 
@@ -401,18 +436,20 @@ class LiveVideoStreamTest {
     // zero elapsed no-progress time and never reconnects.
     val clock = java.util.concurrent.atomic.AtomicLong(0L)
     val nowMs = { clock.get() }
-    val source = FakeVideoStreamSource(nowMs = nowMs)
+    val source = FakeVideoStreamSource(FakeVideoStreamSource.Options(nowMs = nowMs))
     val streaming = mutableStateOf(true)
     setContent {
       rememberLiveVideoFrame(
-        source,
-        "emulator-5554",
-        autoReconnect = true,
-        streamingEnabled = streaming.value,
-        reconnectInitialMs = 10,
-        nowMs = nowMs,
-        stallReconnectMs = 100,
-        stallCheckIntervalMs = 20,
+        LiveVideoFrameOptions(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          streamingEnabled = streaming.value,
+          reconnectInitialMs = 10,
+          nowMs = nowMs,
+          stallReconnectMs = 100,
+          stallCheckIntervalMs = 20,
+        ),
       )
     }
     waitUntil { source.connectedDeviceId == "emulator-5554" }

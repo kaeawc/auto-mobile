@@ -1,42 +1,24 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerFailuresResources } from "../../src/server/failuresResources";
-import type { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
+import { FakeFailureAnalyticsRepository } from "../fakes/FakeFailureAnalyticsRepository";
+import type { TimeAggregation } from "../../src/daemon/failuresStreamSocketTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-type TimelineQuery = Parameters<FailureAnalyticsRepository["getTimelineData"]>[0];
 
 const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
-// A typed fake exposing exactly the two queries the resources issue; it records
-// every timeline query so tests can assert the repository was (not) called.
-class FakeFailuresRepository {
-  timelineQueries: TimelineQuery[] = [];
-
-  async getFailureGroups(): ReturnType<FailureAnalyticsRepository["getFailureGroups"]> {
-    return [];
-  }
-
-  async getTimelineData(
-    query: TimelineQuery,
-  ): ReturnType<FailureAnalyticsRepository["getTimelineData"]> {
-    this.timelineQueries.push(query);
-    return {
-      dataPoints: [{ label: "Oct 5", crashes: 1, anrs: 0, toolFailures: 0, nonfatals: 0 }],
-      previousPeriodTotals: { crashes: 2, anrs: 0, toolFailures: 0, nonfatals: 0 },
-    };
-  }
-}
-
 describe("failures timeline resource (#10119)", () => {
-  let repository: FakeFailuresRepository;
+  let repository: FakeFailureAnalyticsRepository;
 
   beforeEach(() => {
     const timer = new FakeTimer();
     timer.setCurrentTime(NOW);
-    repository = new FakeFailuresRepository();
+    repository = new FakeFailureAnalyticsRepository({
+      dataPoints: [{ label: "Oct 5", crashes: 1, anrs: 0, toolFailures: 0, nonfatals: 0 }],
+      previousPeriodTotals: { crashes: 2, anrs: 0, toolFailures: 0, nonfatals: 0 },
+    });
     registerFailuresResources(repository, timer);
   });
 
@@ -53,7 +35,7 @@ describe("failures timeline resource (#10119)", () => {
     return JSON.parse(content.text ?? "{}") as Record<string, unknown>;
   }
 
-  test.each([
+  const timelineRows: Array<[string, string, string, TimeAggregation, number]> = [
     ["the bare URI", "automobile:failures/timeline", "24h", "hour", DAY],
     ["dateRange alone", "automobile:failures/timeline?dateRange=7d", "7d", "hour", 7 * DAY],
     ["aggregation alone", "automobile:failures/timeline?aggregation=day", "24h", "day", DAY],
@@ -71,7 +53,8 @@ describe("failures timeline resource (#10119)", () => {
       "week",
       30 * DAY,
     ],
-  ])(
+  ];
+  test.each(timelineRows)(
     "%s resolves with defaults and queries the requested window",
     async (_name, uri, dateRange, aggregation, duration) => {
       const body = await read(uri);

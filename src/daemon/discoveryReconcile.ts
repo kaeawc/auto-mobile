@@ -1,4 +1,4 @@
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import type { DiscoveryReconcileOptions } from "./devicePool";
 import type { BootedDevice } from "../models";
 
@@ -28,9 +28,7 @@ export async function reconcileDiscoveryObservation(
   source: string,
   options: DiscoveryReconcileOptions = {},
 ): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
-    return;
-  }
-  await daemonState.getDevicePool().reconcileDiscoveryObservation(devices, source, options);
+  await defaultDaemonContext
+    .devicePoolWrites()
+    ?.reconcileDiscoveryObservation(devices, source, options);
 }

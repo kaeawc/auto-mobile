@@ -1,4 +1,4 @@
-import { setToolTransportRecovery } from "../../src/server/toolTransportRecovery";
+import { setToolTransportRecovery } from "../../src/daemon/toolTransportRecovery";
 import { afterAll, beforeAll } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -23,9 +23,9 @@ export function unregisterTemporaryTools(...names: string[]): void {
 
 /** Undo registrations made by one file, including overrides of existing tools. */
 export function preserveToolRegistry(): () => void {
-  const previous = new Map(ToolRegistry["tools"]);
+  const previous = new Map(ToolRegistry.getEveryRegisteredTool().map((tool) => [tool.name, tool]));
   return () => {
-    const current = ToolRegistry["tools"];
+    const current = new Map(ToolRegistry.getEveryRegisteredTool().map((tool) => [tool.name, tool]));
     for (const [name, tool] of current) {
       if (previous.get(name) !== tool) {
         ToolRegistry.unregister(name);
@@ -34,7 +34,7 @@ export function preserveToolRegistry(): () => void {
     for (const [name, tool] of previous) {
       if (current.get(name) !== tool) {
         ToolRegistry.unregister(name);
-        current.set(name, tool);
+        ToolRegistry.setRegisteredToolForTesting(tool);
         setToolTransportRecovery(name, tool.transportRecovery);
       }
     }

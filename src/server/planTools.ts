@@ -3,13 +3,17 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { Platform } from "../models";
-import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
+import { DEVICE_LABEL_DESCRIPTION } from "../utils/schemaHelpers";
 import { registerDeviceGestureRecordingTools } from "./deviceGestureRecordingTools";
 import { registerToolCallRecordingTools } from "./toolCallRecordingTools";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
 import { failedPlanSessionHoldable, planLifecycleSessionUuid } from "./deviceLabelMapping";
 import type { ExecutePlanResult } from "../models/ExecutePlanResult";
-import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
+import { holdTaskDeviceLeases } from "./tasks/runAsTask";
 import { planCallerContext } from "./planCallerIdentity";
 import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -250,6 +254,10 @@ const executePlanTool = async (
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ): Promise<any> => {
+  // As an MCP task (#13088) the plan outlives its request: hold the base session it names and
+  // the session it was routed to until the task settles. A multi-device plan's label sessions
+  // are held once allocated (registerDeviceLabelMap).
+  holdTaskDeviceLeases([params.sessionUuid, getToolSelectionContext()?.routingSessionUuid]);
   const orchestrator = new PlanExecutionOrchestrator({
     device,
     request: params,

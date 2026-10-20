@@ -8,23 +8,19 @@ test("an iOS runner supervisor restart starts only its own device", async () => 
   const timer = new FakeTimer();
   const deviceX: BootedDevice = { deviceId: "sim-x", name: "iPhone X", platform: "ios" };
   const deviceY: BootedDevice = { deviceId: "sim-y", name: "iPhone Y", platform: "ios" };
-  const managerX = IOSCtrlProxyManager.createForTestingWithDeps(
-    deviceX,
+  const managerX = IOSCtrlProxyManager.createForTestingWithDeps({
+    device: deviceX,
     timer,
-    undefined,
-    new FakeProcessExecutor(),
-  );
-  const managerY = IOSCtrlProxyManager.createForTestingWithDeps(
-    deviceY,
+    builder: undefined,
+    processExecutor: new FakeProcessExecutor(),
+  });
+  const managerY = IOSCtrlProxyManager.createForTestingWithDeps({
+    device: deviceY,
     timer,
-    undefined,
-    new FakeProcessExecutor(),
-  );
-  const supervisorX = (
-    managerX as unknown as {
-      processSupervisor: { start(): Promise<void>; processExited(): void; stop(): void };
-    }
-  ).processSupervisor;
+    builder: undefined,
+    processExecutor: new FakeProcessExecutor(),
+  });
+  const supervisorX = managerX.testHooks.processSupervisor;
   const startX = spyOn(managerX, "start").mockResolvedValue();
   const startY = spyOn(managerY, "start").mockResolvedValue();
   try {

@@ -1,5 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
@@ -9,13 +10,11 @@ import type { BootedDevice } from "../../src/models";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 
 interface Answers {
   availability: ReturnType<DevicePool["genericAvailability"]>;
@@ -51,11 +50,9 @@ describe("device hold current-behavior characterization (#11803)", () => {
     cleanups = [];
     foreignOwner = undefined;
     booted = { deviceId: "emulator-8621", name: "Read device", platform: "android" };
-    sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     markers = new InMemoryDeviceHealthMarkers(timer);
     brokerHeld = false;
     const bindings: BindingExclusion = {
@@ -86,19 +83,15 @@ describe("device hold current-behavior characterization (#11803)", () => {
     // Observe the actual predicate installed by wireSessionDeviceHealth, not a copy of it.
     const wiring = spyOn(sessions, "setDeviceHealthMarkers");
     try {
-      pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "hold-characterization", {
-          timer,
-          deviceManager: manager,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceHealthMarkers: markers,
-          bindingExclusion: bindings,
-          foreignDeviceOwnership: ownership,
-          lifecycleCoordinator: lifecycle,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionContinuityEnabled: true,
-        }),
-      );
+      pool = makePool(sessions, "hold-characterization", {
+        timer,
+        deviceManager: manager,
+        deviceHealthMarkers: markers,
+        bindingExclusion: bindings,
+        foreignDeviceOwnership: ownership,
+        lifecycleCoordinator: lifecycle,
+        deviceSessionContinuityEnabled: true,
+      });
       expect(wiring).toHaveBeenCalledTimes(1);
       canRecover = wiring.mock.calls[0]![2];
     } finally {
@@ -118,7 +111,19 @@ describe("device hold current-behavior characterization (#11803)", () => {
     }
   }
 
-  beforeEach(initializePool);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each<T>([...table])(
+        name,
+        async (row: T) => {
+          await initializePool();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
   afterEach(closePool);
   // Warm the allocation module path outside the per-test budget, as warmedTests does.
   // Every measured row still constructs a fresh pool and asserts literal current answers.
@@ -131,7 +136,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
     }
   });
 
-  const entry = () => pool.getDevice(booted.deviceId)!;
+  const entry = (): MutablePooledDevice => pool.getDevice(booted.deviceId)!;
   const rehydration = async () => {
     await pool.reserveDevicesForRehydration([
       {
@@ -484,7 +489,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
     },
   ];
 
-  test.each(rows)("$name", async ({ setup, expected, recoveryRequester }: HoldRow) => {
+  arrangedEach(rows)("$name", async ({ setup, expected, recoveryRequester }: HoldRow) => {
     await setup();
     expect({
       availability: pool.genericAvailability(booted.deviceId),

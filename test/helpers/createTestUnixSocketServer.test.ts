@@ -9,13 +9,10 @@ test("fake bind lock is immediately available and reusable", () => {
 });
 
 test("constructs with defaults and an explicit bind lock", () => {
-  expect(createTestUnixSocketServer(undefined, "http://localhost/mcp")).toBeInstanceOf(
-    UnixSocketServer,
-  );
+  expect(createTestUnixSocketServer(undefined)).toBeInstanceOf(UnixSocketServer);
   expect(
     createTestUnixSocketServer(
       undefined,
-      "http://localhost/mcp",
       undefined,
       undefined,
       undefined,

@@ -5,7 +5,7 @@ import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
-import { DeviceTransportOfflineError } from "./deviceAcquisitionRefusals";
+import { DeviceTransportOfflineError } from "../models/deviceAcquisitionRefusals";
 import { isTransitionalAdbState } from "./disconnectMonitor";
 
 export const TRANSITIONAL_ADB_BIND_WAIT_BUDGET_MS = 5_000;

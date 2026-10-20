@@ -6,11 +6,12 @@ import type { FileSystem } from "./filesystem/DefaultFileSystem";
 import { serverConfig } from "./ServerConfig";
 import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
 import { firstFlagValue } from "./cliArgs";
+import { ENV } from "../config/env";
 
 export const TOOL_OUTPUTS_DIR_FLAG = "--tool-outputs-dir";
 export const TOOL_OUTPUT_DIR_FLAG_ALIAS = "--tool-output-dir";
-export const TOOL_OUTPUTS_DIR_ENV = "AUTOMOBILE_TOOL_OUTPUTS_DIR";
-export const TOOL_OUTPUTS_DIR_ENV_ALIAS = "AUTO_MOBILE_TOOL_OUTPUTS_DIR";
+export const TOOL_OUTPUTS_DIR_ENV = ENV.TOOL_OUTPUTS_DIR.name;
+export const TOOL_OUTPUTS_DIR_ENV_ALIAS = ENV.TOOL_OUTPUTS_DIR.legacyName;
 
 export interface ToolOutputsDirValidationDeps extends Pick<FileSystem, "ensureDir"> {
   stat(dirPath: string): Promise<{ isDirectory(): boolean }>;

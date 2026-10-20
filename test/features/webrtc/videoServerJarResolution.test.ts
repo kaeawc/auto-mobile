@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import * as fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
@@ -35,8 +35,9 @@ describe("resolveVideoServerJar precedence + fail-modes (#3834)", function () {
   let buildCwd: string;
   let buildPath: string;
 
+  const scratch = useScratchRoot("video-jar-resolve-");
   beforeEach(async function () {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "video-jar-resolve-"));
+    root = scratch.next();
     overridePath = path.join(root, "override.jar");
     await fs.writeFile(overridePath, "override");
     buildCwd = path.join(root, "repo");
@@ -48,10 +49,6 @@ describe("resolveVideoServerJar precedence + fail-modes (#3834)", function () {
       "libs",
       "automobile-video.jar",
     );
-  });
-
-  afterEach(async function () {
-    await fs.rm(root, { recursive: true, force: true });
   });
 
   async function makeBuild(): Promise<void> {

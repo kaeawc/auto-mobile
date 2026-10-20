@@ -7,18 +7,29 @@ import dev.jasonpearson.automobile.experimentation.Experiment
 import dev.jasonpearson.automobile.experimentation.ExperimentRepository
 import dev.jasonpearson.automobile.experimentation.Treatment
 import dev.jasonpearson.automobile.storage.AnalyticsRepository
-import dev.jasonpearson.automobile.storage.UserProfile
 import dev.jasonpearson.automobile.storage.UserRepository
 import dev.jasonpearson.automobile.storage.UserStats
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class SettingsViewModel(
+class SettingsViewModel
+private constructor(
   private val experimentRepository: ExperimentRepository,
   private val userRepository: UserRepository,
   private val analyticsRepository: AnalyticsRepository,
-) : ViewModel() {
+  private val profile: SettingsProfileState,
+) : ViewModel(), SettingsProfile by profile {
+  constructor(
+    experimentRepository: ExperimentRepository,
+    userRepository: UserRepository,
+    analyticsRepository: AnalyticsRepository,
+  ) : this(
+    experimentRepository,
+    userRepository,
+    analyticsRepository,
+    SettingsProfileState(userRepository),
+  )
 
   private val _experiments = MutableStateFlow<List<Experiment<*>>>(emptyList())
   val experiments: StateFlow<List<Experiment<*>>> = _experiments.asStateFlow()
@@ -28,25 +39,13 @@ class SettingsViewModel(
   private val _trackingEnabled = MutableStateFlow(false)
   val trackingEnabled: StateFlow<Boolean> = _trackingEnabled.asStateFlow()
 
-  private val _email = MutableStateFlow("john.doe@example.com")
-  val email: StateFlow<String> = _email.asStateFlow()
-
-  private val _name = MutableStateFlow("John Doe")
-  val name: StateFlow<String> = _name.asStateFlow()
-
-  private val _isEditingEmail = MutableStateFlow(false)
-  val isEditingEmail: StateFlow<Boolean> = _isEditingEmail.asStateFlow()
-
-  private val _tempEmail = MutableStateFlow("")
-  val tempEmail: StateFlow<String> = _tempEmail.asStateFlow()
-
   private val _shouldNavigateToLogin = MutableStateFlow(false)
   val shouldNavigateToLogin: StateFlow<Boolean> = _shouldNavigateToLogin.asStateFlow()
 
   init {
     setupGuestModeCallback()
     loadExperiments()
-    loadUserData()
+    profile.loadUserData()
     loadAnalyticsData()
   }
 
@@ -62,20 +61,6 @@ class SettingsViewModel(
     _experiments.value = experimentRepository.getExperiments()
   }
 
-  private fun loadUserData() {
-    val userProfile = userRepository.getUserProfile()
-    if (userProfile == null) {
-      // Create default user profile
-      val defaultProfile = UserProfile("John Doe", "john.doe@example.com")
-      userRepository.saveUserProfile(defaultProfile)
-      _name.value = defaultProfile.name
-      _email.value = defaultProfile.email
-    } else {
-      _name.value = userProfile.name
-      _email.value = userProfile.email
-    }
-  }
-
   private fun loadAnalyticsData() {
     _trackingEnabled.value = analyticsRepository.isTrackingEnabled
   }
@@ -88,30 +73,6 @@ class SettingsViewModel(
   fun updateTrackingEnabled(enabled: Boolean) {
     analyticsRepository.isTrackingEnabled = enabled
     _trackingEnabled.value = enabled
-  }
-
-  fun startEmailEditing(currentEmail: String) {
-    _tempEmail.value = currentEmail
-    _isEditingEmail.value = true
-  }
-
-  fun updateTempEmail(email: String) {
-    _tempEmail.value = email
-  }
-
-  fun dismissEmailEdit() {
-    _isEditingEmail.value = false
-  }
-
-  fun saveEmail(email: String) {
-    userRepository.updateEmail(email)
-    _email.value = email
-    _isEditingEmail.value = false
-  }
-
-  fun updateName(name: String) {
-    userRepository.updateName(name)
-    _name.value = name
   }
 
   fun resetStats() {

@@ -10,6 +10,7 @@ import {
   type BrokerDaemonClient,
 } from "./brokerDaemonClient";
 import type { ProxySessionCommand, ProxySessionDeps } from "./proxy-session";
+import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { BrokerDeviceLedger } from "./brokerDeviceLedger";
 
 function deviceLedger(context: BrokerClientFiles, deps: ProxySessionDeps): BrokerDeviceLedger {
@@ -135,14 +136,34 @@ export async function closeBrokerSession(
     })
     .parse(JSON.parse(deps.readFile(join(context.dir, "init.json"))));
   const refused = init.session.outcome === "failed" && init.session.sessionUuid === null;
-  const release = await waitForBrokerRelease({
-    client,
+  // A refused attempt (e.g. daemon_unavailable) may have no daemon receipt at all, and a failed
+  // receipt never becomes released: settle immediately instead of waiting out the cleanup budget.
+  const missingReceipt: SessionBrokerResult = {
+    contractVersion: 1,
     requestId: config.requestId,
-    token,
-    timer: deps.timer,
-    requireReleased: !refused,
-    allowFailed: true,
-  });
+    outcome: "failed",
+    sessionUuid: null,
+    profile: null,
+    cleanupPending: false,
+  };
+  let release: SessionBrokerResult;
+  try {
+    release = await waitForBrokerRelease({
+      client,
+      requestId: config.requestId,
+      token,
+      timer: deps.timer,
+      requireReleased: !refused,
+      allowFailed: true,
+      missingReceipt: refused ? missingReceipt : undefined,
+    });
+  } catch (error) {
+    if (!refused) {
+      throw error;
+    }
+    deps.log(`Broker status unavailable for refused attempt: ${errorMessage(error)}`);
+    release = missingReceipt;
+  }
   if (
     refused
       ? release.outcome !== "failed" || release.sessionUuid !== null
@@ -167,10 +188,54 @@ export async function closeBrokerSession(
     { timer: deps.timer, timeoutMs: 5000, label: "Driver close evidence" },
   );
   const closed = z.record(z.unknown()).parse(JSON.parse(deps.readFile(path)));
-  deps.writeJson(path, { ...closed, release });
+  deps.writeJson(path, {
+    ...closed,
+    release: release === missingReceipt ? { ...release, receiptMissing: true } : release,
+  });
   if (!refused) {
     recordBrokerRelease(context, deps);
   }
+  await settleBrokerDriver(context, deps);
+}
+export const BROKER_DRIVER_EXIT_GRACE_MS = 5000;
+/**
+ * The driver publishes closed.json before it exits, and a resumed driver can outlive close. Join
+ * its exit so the next up/serve never sees "Previous attempt driver is alive". A driver that does
+ * not exit is signalled only when its recorded start identity still matches.
+ */
+export async function settleBrokerDriver(
+  context: BrokerClientFiles,
+  deps: ProxySessionDeps,
+): Promise<void> {
+  const pidPath = join(context.dir, "driver.pid");
+  const pid = deps.exists(pidPath) ? Number(deps.readFile(pidPath).trim()) : NaN;
+  if (!Number.isSafeInteger(pid) || pid <= 1 || pid === deps.pid || !deps.isPidAlive(pid)) {
+    return;
+  }
+  const waitForExit = async (ms: number): Promise<boolean> => {
+    const deadline = deps.timer.now() + ms;
+    while (deps.isPidAlive(pid) && deps.timer.now() < deadline) {
+      await deps.timer.sleep(50);
+    }
+    return !deps.isPidAlive(pid);
+  };
+  if (await waitForExit(BROKER_DRIVER_EXIT_GRACE_MS)) {
+    return;
+  }
+  const identityPath = join(context.dir, "driver-identity");
+  const identity = deps.exists(identityPath) ? deps.readFile(identityPath) : "";
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    if (!identity || !deps.signalPid || deps.compareOwnerIdentity?.(pid, identity) !== "same") {
+      throw new Error(
+        `Driver ${pid} is still alive after close and its start identity is unconfirmed; not signalling it.`,
+      );
+    }
+    deps.signalPid(pid, signal);
+    if (await waitForExit(1000)) {
+      return;
+    }
+  }
+  throw new Error(`Driver ${pid} did not exit after SIGKILL.`);
 }
 export async function runBrokerLifecycle(
   command: ProxySessionCommand,

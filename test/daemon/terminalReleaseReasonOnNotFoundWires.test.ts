@@ -27,6 +27,7 @@ const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+  releaseDevice: async () => {},
 };
 
 interface Rig {
@@ -81,7 +82,7 @@ export async function setUpRig(idleTimeoutMs: number): Promise<Rig> {
     getDevicePool: () => DEVICE_POOL,
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
-  await manager.createSession(SESSION, DEVICE, "android", idleTimeoutMs);
+  await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: idleTimeoutMs });
   monitor.start();
   const advance = (ms: number) => timer.setCurrentTime(timer.getCurrentTime() + ms);
   return {
@@ -144,7 +145,7 @@ describe("not-found answers for a session whose terminal release is still writin
     const r = rig;
     const labelId = `${SESSION}:B`;
     await asPlanAllocation(r.manager, SESSION, [labelId], () =>
-      r.manager.createSession(labelId, "emulator-5556", "android", 120_000),
+      r.manager.createSession(labelId, "emulator-5556", "android", { timeoutMs: 120_000 }),
     );
     r.manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
     await r.manager.releaseSession(SESSION, "explicit-release");
@@ -160,7 +161,7 @@ describe("not-found answers for a session whose terminal release is still writin
     const r = rig;
     const labelId = `${SESSION}:B`;
     await asPlanAllocation(r.manager, SESSION, [labelId], () =>
-      r.manager.createSession(labelId, "emulator-5556", "android", 120_000),
+      r.manager.createSession(labelId, "emulator-5556", "android", { timeoutMs: 120_000 }),
     );
     r.manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
     await r.manager.releaseSession(SESSION, "explicit-release");
@@ -234,7 +235,11 @@ describe("not-found answers for a session whose terminal release is still writin
   });
 });
 
-const bare = { success: false, error: `Session not found: ${SESSION}`, code: NOT_FOUND };
+const bare: DaemonMethodResult = {
+  success: false,
+  error: `Session not found: ${SESSION}`,
+  code: NOT_FOUND,
+};
 
 /** Poll both daemon wires at each write boundary; exact equality also checks for no idle key. */
 async function expectNotFoundWires(r: Rig, expected: DaemonMethodResult): Promise<void> {
@@ -332,7 +337,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
       const reason = "device-disconnected:emulator-5554";
       const gate = gateReleaseWrite(r);
       const release = commitFenced
-        ? r.manager.releaseSessionUnlessSuperseded(SESSION, reason, () => true)
+        ? r.manager.releaseSessionUnlessSuperseded(SESSION, reason, { commitFence: () => true })
         : r.manager.releaseSession(SESSION, reason);
       await settle();
       expect(r.manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe(reason);
@@ -351,7 +356,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     const release = r.manager.releaseSessionUnlessSuperseded(
       SESSION,
       "device-disconnected:emulator-5554",
-      () => true,
+      { commitFence: () => true },
     );
     await settle();
     await expectNotFoundWires(r, bare);
@@ -372,7 +377,7 @@ describe("device loss and commit-fenced releases stay bare while writing their r
     const release = r.manager.releaseSessionUnlessSuperseded(
       SESSION,
       "device-disconnected:emulator-5554",
-      () => shouldCommit,
+      { commitFence: () => shouldCommit },
     );
     await settle();
     expect(r.manager.getTerminalReleaseSnapshot(SESSION)).toBeDefined();
@@ -413,7 +418,11 @@ describe("terminal snapshot fallback without an in-flight operation", () => {
   test("a never-issued UUID stays plain not-found", async () => {
     rig = await setUpRig(120_000);
     const sessionId = "00000000-0000-4000-8000-000000000099";
-    const expected = { success: false, error: `Session not found: ${sessionId}`, code: NOT_FOUND };
+    const expected: DaemonMethodResult = {
+      success: false,
+      error: `Session not found: ${sessionId}`,
+      code: NOT_FOUND,
+    };
     for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
       expect(await rig.request(method, { sessionId })).toEqual(expected);
     }

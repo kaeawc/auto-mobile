@@ -1,17 +1,18 @@
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import {
   LocationRouteRegistry,
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
 import type { MockLocationClears } from "../../src/features/utility/MockLocationClear";
-import { registerPerformanceMonitorSessionCleanup } from "../../src/server/performanceMonitorSessionCleanup";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { registerPerformanceMonitorSessionCleanup } from "../../src/daemon/performanceMonitorSessionCleanup";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -85,7 +86,12 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
     return sessionA;
   }
 
-  for (const lateReason of ["device-killed", "explicit-release", "heartbeat-timeout"]) {
+  const lateReasons: SessionReleaseReason[] = [
+    "device-killed",
+    "explicit-release",
+    "heartbeat-timeout",
+  ];
+  for (const lateReason of lateReasons) {
     test(`a late ${lateReason} leaves B's route and sampling running`, async () => {
       const sessionA = await handOverToB();
 
@@ -111,7 +117,7 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
 
   test("a terminal release of a device-restart-released session leaves B's sampling running (#11206)", async () => {
     // A is released for a device restart; within its recovery window B takes the device.
-    await manager.createSession("A", DEVICE, "android", undefined, undefined, "Pixel");
+    await manager.createSession("A", DEVICE, "android", { stableDeviceId: "Pixel" });
     await manager.releaseSession("A", "device-restart:Pixel");
     await manager.createSession("B", DEVICE, "android");
     startRoute();
@@ -128,23 +134,26 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
   });
 });
 
-interface DaemonNavigationInternals {
-  navigationGraphListenerManagers: WeakSet<NavigationGraphManager>;
-  setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
+/** A real Daemon exposing its navigation-graph stream bridge. */
+class NavigationBridgeDaemon extends Daemon {
+  get bridge() {
+    return this.navigationGraphBridge;
+  }
 }
 
 describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: NavigationBridgeDaemon;
 
   // Building a daemon (and its database) is setup, not the behavior under test.
   beforeAll(async () => {
     timer = new FakeTimer();
-    daemon = new Daemon(
+    daemon = new NavigationBridgeDaemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(await createTestDatabase(), timer),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+      },
     );
   });
 
@@ -159,9 +168,8 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
 
   test("keep B's pin and the global navigation listener, and still broadcast the upgrade", async () => {
     const sessions = daemon.getSessionManager();
-    const internals = daemon as unknown as DaemonNavigationInternals;
     const globalNavigation = NavigationGraphManager.getInstance();
-    internals.setupNavigationGraphUpdateListener(globalNavigation);
+    daemon.bridge.attach(globalNavigation);
     const broadcasts: string[] = [];
     SessionReleaseBroadcaster.subscribe((sessionId, reason, _snapshot, extras) =>
       broadcasts.push(`${sessionId}:${reason}${extras?.upgradeOnly ? ":upgrade" : ""}`),
@@ -179,13 +187,13 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     await sessions.releaseSessionIfOwned("A", sessionA, DEVICE, "device-killed");
 
     expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
-    expect(internals.navigationGraphListenerManagers.has(globalNavigation)).toBe(true);
+    expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
     // Device-keyed broadcast listeners (prototype agents and events) skip the marked upgrade (#11206).
     expect(broadcasts).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
 
     // B's own release is a real one: it clears B's pin.
     await sessions.releaseSession("B", "explicit-release");
     expect(DeviceSessionManager.getInstance().getExplicitDevicePin()).toBeUndefined();
-    expect(internals.navigationGraphListenerManagers.has(globalNavigation)).toBe(true);
+    expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
   });
 });

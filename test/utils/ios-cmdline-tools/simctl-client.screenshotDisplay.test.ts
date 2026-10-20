@@ -137,12 +137,10 @@ function captureHarness(
       }
     },
   };
-  const simctl = new SimCtlClient(
-    device,
-    null,
+  const simctl = new SimCtlClient(device, null, {
     timer,
-    "darwin",
-    (_file, args, spawnOptions) => {
+    platform: "darwin",
+    spawnProcess: (_file, args, spawnOptions) => {
       calls.push(args);
       if (options.spawnError) {
         throw options.spawnError;
@@ -182,13 +180,8 @@ function captureHarness(
       return child;
     },
     fileSystem,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    new CountingIdGenerator("capture"),
-  );
+    idGenerator: new CountingIdGenerator("capture"),
+  });
   return { simctl, timer, calls, files, removed, events, started, children };
 }
 

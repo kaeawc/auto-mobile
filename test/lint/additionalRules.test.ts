@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import plugin from "../../oxlint-plugins/auto-mobile.mjs";
+import plugin, { type PluginRuleName } from "../../oxlint-plugins/auto-mobile.mjs";
 import { runRule } from "./oxlintRuleHarness";
 
 // Coverage for the custom rules that do not have a dedicated backstop file, so
 // that a typo or an incompatible AST shape in oxlint-plugins/auto-mobile.mjs
 // fails a test rather than silently disabling the ported enforcement.
 
-function fires(rule: string, code: string): boolean {
+function fires(rule: PluginRuleName, code: string): boolean {
   return runRule(plugin.rules[rule], code).length > 0;
 }
 
@@ -16,6 +16,18 @@ describe("auto-mobile/no-unknown-cast", () => {
   });
   test("does not flag a plain single assertion", () => {
     expect(fires("no-unknown-cast", "const x = (a as string);")).toBe(false);
+  });
+});
+
+describe("auto-mobile/no-as-any", () => {
+  test("flags an `as any` assertion", () => {
+    expect(fires("no-as-any", "const x = (a as any);")).toBe(true);
+  });
+  test("flags an angle-bracket `<any>` assertion", () => {
+    expect(fires("no-as-any", "const x = <any>a;")).toBe(true);
+  });
+  test("does not flag other assertions or an `any` annotation", () => {
+    expect(fires("no-as-any", "const x = (a as string); let y: any;")).toBe(false);
   });
 });
 
@@ -109,5 +121,34 @@ describe("auto-mobile/naming-convention", () => {
         "src/features/observe/ios/IOSCtrlProxyClient.ts",
       ),
     ).toHaveLength(0);
+  });
+});
+
+describe("auto-mobile/max-class-lines", () => {
+  const body = (lines: number) =>
+    Array.from({ length: lines }, (_, i) => `  m${i}() {}`).join("\n");
+  const klass = (lines: number) => `class Big {\n${body(lines)}\n}`;
+  const flagged = (code: string, max: number) =>
+    runRule(plugin.rules["max-class-lines"], code, "fixture.ts", [{ max }]).length;
+
+  test("flags a class declaration over the cap", () => {
+    expect(flagged(klass(6), 5)).toBe(1);
+  });
+  test("does not flag a class at the cap", () => {
+    // class line + 3 members + closing brace = 5 non-blank lines
+    expect(flagged(klass(3), 5)).toBe(0);
+  });
+  test("ignores blank lines", () => {
+    expect(flagged(`class Big {\n${body(3).split("\n").join("\n\n\n")}\n}`, 5)).toBe(0);
+  });
+  test("flags a class expression", () => {
+    expect(flagged(`const C = ${klass(6)};`, 5)).toBe(1);
+  });
+  test("counts each class separately", () => {
+    expect(flagged(`${klass(6)}\n${klass(2)}\n${klass(8)}`, 5)).toBe(2);
+  });
+  test("defaults to a 1000-line cap", () => {
+    expect(runRule(plugin.rules["max-class-lines"], klass(10)).length).toBe(0);
+    expect(runRule(plugin.rules["max-class-lines"], klass(1000)).length).toBe(1);
   });
 });

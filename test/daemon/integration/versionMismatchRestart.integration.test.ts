@@ -6,7 +6,12 @@ import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../../src/daemon/
 import { DaemonClient } from "../../../src/daemon/client";
 import { DaemonManager, type DaemonManagerLike } from "../../../src/daemon/manager";
 import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../../src/daemon/constants";
-import type { DaemonOptions, DaemonStatus, PidFileData } from "../../../src/daemon/types";
+import type {
+  DaemonOptions,
+  DaemonSocketPaths,
+  DaemonStatus,
+  PidFileData,
+} from "../../../src/daemon/types";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -53,14 +58,11 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "automobile-version-test-"));
     pidFilePath = join(tempDir, "test.pid");
-    realManager = new DaemonManager(
-      undefined,
-      undefined,
-      undefined,
-      join(tempDir, "test.lock"),
+    realManager = new DaemonManager({
+      lockFilePath: join(tempDir, "test.lock"),
       pidFilePath,
-      join(tempDir, "test.sock"),
-    );
+      socketPath: join(tempDir, "test.sock"),
+    });
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     fakeTimer = new FakeTimer();
     fakeTimer.advanceTime(100_000);
@@ -343,7 +345,9 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       "telemetry-push": join(tempDir, "telemetry-push.sock"),
       "device-gesture-recording": join(tempDir, "device-gesture-recording.sock"),
       "video-recording": join(tempDir, "video-recording.sock"),
-    };
+      "video-stream": join(tempDir, "video-stream.sock"),
+      "webrtc-stream": join(tempDir, "webrtc-stream.sock"),
+    } satisfies DaemonSocketPaths;
     const data: PidFileData = {
       pid: process.pid,
       socketPath: sockets.control,

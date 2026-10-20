@@ -1,5 +1,5 @@
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { describe, expect, it } from "bun:test";
 import { SURVIVING_PROCESS_RECHECK_INTERVAL_MS } from "../../src/devices/coldBootProcessTermination";
 import { DeviceBootService } from "../../src/devices/deviceBootService";
@@ -8,7 +8,7 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -33,7 +33,7 @@ type FakeEmulator = ChildProcess & { exitCode: number | null; signalCode: NodeJS
 
 /** A process that only exits when the test says so; records every signal it is sent. */
 function fakeEmulator(): { process: FakeEmulator; signals: string[]; exit: () => void } {
-  const process = new EventEmitter() as FakeEmulator;
+  const process = new FakeChildProcess(new FakeTimer());
   const signals: string[] = [];
   process.exitCode = null;
   process.signalCode = null;

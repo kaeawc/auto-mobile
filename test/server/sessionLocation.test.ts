@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { describe, expect, spyOn, test } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -35,11 +36,9 @@ const flush = async () => {
 };
 const harness = () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const registry = new LocationRouteRegistry(timer);
   registerLocationRouteSessionCleanup(manager, { registry });
   return { timer, manager, registry };
@@ -235,7 +234,9 @@ describe("session location admission", () => {
       await manager.releaseSession("session");
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
       expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
-      expect(simctl.getMethodCalls("executeCommandArgs")[0].args[2]).toBe("set");
+      expect(
+        z.array(z.string()).parse(simctl.getMethodCalls("executeCommandArgs")[0].args)[2],
+      ).toBe("set");
     } finally {
       markSet.mockRestore();
       manager.stopCleanupTimer();
@@ -389,19 +390,20 @@ describe("session route cleanup", () => {
       await mutation;
       await flush();
       expect(markSet).not.toHaveBeenCalled();
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear"]);
       const pending = manager.getPendingDeviceCleanup(device.deviceId);
       expect(pending).not.toBeNull();
       timer.advanceTime(250);
       await pending;
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear", "clear"]);
     } finally {
       markSet.mockRestore();
       finished.resolve();
@@ -431,7 +433,11 @@ describe("session route cleanup", () => {
     registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
     try {
       await pool.initializeWithDevices([device]);
-      await pool.bindOrReuseDeviceSession("session", device.deviceId, "ios");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session",
+        deviceId: device.deviceId,
+        platform: "ios",
+      });
       const state = new DeviceState(device, {
         timer,
         routeRegistry: registry,
@@ -454,19 +460,23 @@ describe("session route cleanup", () => {
       expect(pending).not.toBeNull();
       await pool.releaseDevice(device.deviceId, "session");
       expect(pool.getDevice(device.deviceId)?.status).toBe("busy");
-      await expect(pool.bindOrReuseDeviceSession("new", device.deviceId, "ios")).rejects.toThrow(
-        "cleanup",
-      );
+      await expect(
+        pool.bindOrReuseDeviceSession({
+          sessionId: "new",
+          deviceId: device.deviceId,
+          platform: "ios",
+        }),
+      ).rejects.toThrow("cleanup");
       timer.advanceTime(250);
       await pending;
       await flush();
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
       expect(pool.getDevice(device.deviceId)?.status).toBe("idle");
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear", "clear"]);
     } finally {
       clears.retireDevice(device.deviceId);
       await manager.getPendingDeviceCleanup(device.deviceId);
@@ -628,7 +638,11 @@ describe("session route cleanup", () => {
       let writes = 0;
       try {
         await pool.initializeWithDevices([device]);
-        await pool.bindOrReuseDeviceSession("session", deviceId, "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "session",
+          deviceId,
+          platform: "android",
+        });
         registry.start(deviceId, points, 1000, 500, true, async (_point, options) => {
           signal = options.signal;
           attempts++;
@@ -653,7 +667,7 @@ describe("session route cleanup", () => {
         expect(pool.getDevice(deviceId)?.status).toBe("busy");
         expect(pool.getStats().idle).toBe(0);
         await expect(
-          pool.bindOrReuseDeviceSession("new-owner", deviceId, "android"),
+          pool.bindOrReuseDeviceSession({ sessionId: "new-owner", deviceId, platform: "android" }),
         ).rejects.toThrow("cleanup");
         let settled = false;
         void cleanup?.then(() => {

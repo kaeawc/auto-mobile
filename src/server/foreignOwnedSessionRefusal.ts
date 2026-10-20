@@ -1,8 +1,8 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import type { SessionAccess } from "../daemon/sessionManager";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
-import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
+import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
 
 const FOREIGN_SESSION_REMEDY =
   "Acquire a device on this connection (getAndroid, getApple or startDevice), or wait for the owner to release the session.";
@@ -45,12 +45,10 @@ export function isSessionOwnedByAnotherConnection(
   sessionUuid: string | undefined,
   mcpSessionId: string | undefined,
 ): boolean {
-  const daemonState = DaemonState.getInstance();
   return (
     !!sessionUuid &&
     !!mcpSessionId &&
-    daemonState.isInitialized() &&
-    daemonState.getDevicePool().isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId)
+    !!defaultDaemonContext.devicePool()?.isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId)
   );
 }
 
@@ -87,9 +85,7 @@ export function refuseControlOnForeignOwnedSession(
   if (!sessionUuid || !isSessionOwnedByAnotherConnection(sessionUuid, mcpSessionId)) {
     return;
   }
-  const deviceId = DaemonState.getInstance()
-    .getSessionManager()
-    .getSession(sessionUuid)?.assignedDevice;
+  const deviceId = defaultDaemonContext.sessionManager()?.findSession(sessionUuid)?.assignedDevice;
   const forced = typeof args === "object" && args !== null && Reflect.get(args, "force") === true;
   const remedy = forced
     ? `${FOREIGN_SESSION_REMEDY} ${FORCED_CALL_REMEDY}`

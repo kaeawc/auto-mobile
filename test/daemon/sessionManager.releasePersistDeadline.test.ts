@@ -17,13 +17,13 @@ import type { DeviceSessionStatus } from "../../src/db/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
-import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makeSessionManager, stopBuiltSessionManagers } from "../helpers/sessionManagerSuite";
 
 const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const flush = async () => {
@@ -79,11 +79,8 @@ class ParkableReleasePersistence extends FakeDeviceSessionPersistence {
   }
 }
 
-const managers: SessionManager[] = [];
 afterEach(() => {
-  for (const manager of managers.splice(0)) {
-    manager.stopCleanupTimer();
-  }
+  stopBuiltSessionManagers();
   DaemonState.getInstance().reset();
   ToolRegistry.clearTools();
   PlatformDeviceManagerFactory.reset();
@@ -93,8 +90,7 @@ async function harness() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
   const persistence = new ParkableReleasePersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
-  managers.push(manager);
+  const manager = makeSessionManager({ timer: timer, persistence: persistence, fakeBarrier: true });
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [device]);
   PlatformDeviceManagerFactory.setInstance(utils);
@@ -106,7 +102,11 @@ async function harness() {
     }),
   );
   await pool.initializeWithDevices([device]);
-  await pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   return { timer, manager, pool, persistence };
 }
 
@@ -296,8 +296,11 @@ describe("a terminal release write that times out and then fails is retried (#10
 
   /** A new daemon on the same database refuses the released UUID. */
   async function expectRefusedAfterRestart(h: Harness): Promise<void> {
-    const restarted = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
-    managers.push(restarted);
+    const restarted = makeSessionManager({
+      timer: h.timer,
+      persistence: h.persistence,
+      fakeBarrier: true,
+    });
     await expect(restarted.admitIssuedSessionForAutomation("old")).rejects.toBeInstanceOf(
       TerminalSessionError,
     );
@@ -370,8 +373,11 @@ describe("a crash while a terminal release write is parked does not revive the U
 
   /** A new daemon process on the same database and data directory. */
   function restart(h: Harness, files: FakeTerminalReleaseJournalFileSystem): SessionManager {
-    const restarted = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
-    managers.push(restarted);
+    const restarted = makeSessionManager({
+      timer: h.timer,
+      persistence: h.persistence,
+      fakeBarrier: true,
+    });
     restarted.attachTerminalReleaseJournal(new FileTerminalReleaseJournal(JOURNAL, files));
     return restarted;
   }
@@ -441,8 +447,11 @@ describe("a crash while a terminal release write is parked does not revive the U
       expect(h.files.files.has(JOURNAL)).toBe(false);
 
       // A third daemon refuses it from the row alone.
-      const third = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
-      managers.push(third);
+      const third = makeSessionManager({
+        timer: h.timer,
+        persistence: h.persistence,
+        fakeBarrier: true,
+      });
       await expect(third.admitIssuedSessionForAutomation("old")).rejects.toBeInstanceOf(
         TerminalSessionError,
       );
@@ -561,7 +570,7 @@ describe("a superseded device-loss release leaves the live session's row active 
       const release = h.manager.releaseSessionUnlessSuperseded(
         "old",
         `device-disconnected:${device.deviceId}`,
-        () => !superseded,
+        { commitFence: () => !superseded },
       );
       await flush();
       const snapshot = h.manager["sessionSlots"].getTerminalSnapshot("old")!;
@@ -658,8 +667,11 @@ describe("a superseded device-loss release leaves the live session's row active 
     if ((await h.persistence.getSession!("old"))?.status === "active") {
       await h.persistence.markReleased("old", "expired", h.timer.now(), "daemon-restart");
     }
-    const restarted = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
-    managers.push(restarted);
+    const restarted = makeSessionManager({
+      timer: h.timer,
+      persistence: h.persistence,
+      fakeBarrier: true,
+    });
     const summary = await restarted.rehydratePersistedSessions({
       assignDeviceToSession: async (sessionId) => {
         await restarted.createSession(sessionId, device.deviceId, "android");
@@ -679,7 +691,7 @@ describe("a superseded device-loss release leaves the live session's row active 
     const release = h.manager.releaseSessionUnlessSuperseded(
       "old",
       `device-disconnected:${device.deviceId}`,
-      () => !superseded,
+      { commitFence: () => !superseded },
     );
     await flush();
     // The serial is re-observed with a newer identity while the terminal write is in flight.
@@ -706,7 +718,7 @@ describe("a superseded device-loss release leaves the live session's row active 
       const release = h.manager.releaseSessionUnlessSuperseded(
         "old",
         `device-disconnected:${device.deviceId}`,
-        () => !superseded,
+        { commitFence: () => !superseded },
       );
       await flush();
       superseded = true;

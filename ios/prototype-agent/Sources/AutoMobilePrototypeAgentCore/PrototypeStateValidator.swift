@@ -13,6 +13,13 @@ import Foundation
 /// raw bytes). The static slider, chip, fab, progress and radio rules are kept: they live in the
 /// same Android functions and cost nothing.
 enum PrototypeStateValidator {
+    private static func actionRejection(_ actions: [PrototypeAction], state: [String: JSONValue]) -> String? {
+        for action in actions {
+            if let message = stateActionError(action, state) { return message }
+        }
+        return nil
+    }
+
     /// The first rule `root` breaks when it holds `state`, or nil when the state is valid.
     /// `nonStateBytes` is the size of the shown spec outside its `state` (`PrototypeSession` measures it
     /// at show); the spec byte cap is checked first, as Android's `validate` does.
@@ -21,6 +28,8 @@ enum PrototypeStateValidator {
         var nodes: [PrototypeNode] = []
         var actions: [PrototypeAction] = []
         collect(root, nodes: &nodes, actions: &actions)
+        // A request's onSuccess / onError lists run state actions too.
+        actions = actions.flatMap(\.flattened)
         for node in nodes {
             if let message = bindingError(node, state) { return message }
         }
@@ -30,10 +39,10 @@ enum PrototypeStateValidator {
         for node in nodes {
             if let message = openWhenError(node, state) { return message }
         }
-        for action in actions {
-            if let message = stateActionError(action, state) { return message }
+        for node in nodes {
+            if let message = refreshError(node, state) { return message }
         }
-        return nil
+        return actionRejection(actions, state: state)
     }
 
     // MARK: Spec size
@@ -58,6 +67,9 @@ enum PrototypeStateValidator {
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
+        actions += (node.swipeActions?.entries ?? []).flatMap(\.action.onTap)
+        actions += node.trailingIcon?.onTap ?? []
+        actions += node.refresh?.onRefresh ?? []
         actions += (node.trailingActions ?? []).flatMap { $0.onTap ?? [] }
         actions += (node.spans ?? []).flatMap { $0.onTap ?? [] }
         actions += node.navigationIcon?.onTap ?? []
@@ -186,7 +198,7 @@ enum PrototypeStateValidator {
               let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
               (1900 ... 2100).contains(year), (1 ... 12).contains(month)
         else { return false }
-        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+        let leap = (year.isMultiple(of: 4) && !year.isMultiple(of: 100)) || year.isMultiple(of: 400)
         let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         return (1 ... days[month - 1]).contains(day)
     }
@@ -204,6 +216,12 @@ enum PrototypeStateValidator {
         let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
         return stored.boolValue == nil ? "\(name) requires a boolean state key" : nil
+    }
+
+    /// Pull-to-refresh binds a boolean key, like the other controls.
+    private static func refreshError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
+        guard node.type == "scroll", let key = node.refresh?.stateKey, let stored = state[key] else { return nil }
+        return stored.boolValue == nil ? "Refresh requires a boolean state key" : nil
     }
 
     // MARK: State actions

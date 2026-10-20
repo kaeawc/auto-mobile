@@ -10,7 +10,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.RequiresApi
+import androidx.core.content.edit
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
@@ -21,6 +23,7 @@ import dev.jasonpearson.automobile.sdk.events.AckPackageInfoReader
 import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
 import dev.jasonpearson.automobile.sdk.events.SdkEventAckCapability
 import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
+import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicBoolean
@@ -100,6 +103,7 @@ object AutoMobileAnr {
     }
 
   /** Check if ANR detection is available on this device. */
+  @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.R)
   fun isAvailable(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
   /** Clears the retained application context during SDK shutdown or a failed initialization. */
@@ -157,7 +161,7 @@ object AutoMobileAnr {
         }
         capped = trace.length == maxChars && reader.read() != -1
       }
-    } catch (e: Exception) {
+    } catch (e: IOException) {
       AutoMobileSDK.logger.w(TAG, e) {
         "Failed to read or close ANR trace after ${trace.length} chars"
       }
@@ -285,6 +289,9 @@ object AutoMobileAnr {
     @Synchronized
     private fun reportNext() {
       if (isFinished) return
+      fun wasReportedAtCursor(identity: String): Boolean =
+        cursor.idsAtTimestamp == null || identity in cursor.idsAtTimestamp.orEmpty()
+
       while (pending.isNotEmpty()) {
         val item = pending.first()
         pending = pending.drop(1)
@@ -292,8 +299,7 @@ object AutoMobileAnr {
         val timestamp = item.timestamp
         if (
           timestamp < cursor.timestamp ||
-            (timestamp == cursor.timestamp &&
-              (cursor.idsAtTimestamp == null || identity in cursor.idsAtTimestamp.orEmpty()))
+            (timestamp == cursor.timestamp && wasReportedAtCursor(identity))
         ) {
           AutoMobileSDK.logger.d(TAG) {
             "Skipping already reported ANR: time=$timestamp, identity=$identity"
@@ -468,11 +474,10 @@ object AutoMobileAnr {
     }
 
     private fun setLastReportedCursor(context: Context, cursor: AnrCursor) {
-      getPrefs(context)
-        .edit()
-        .putLong(KEY_LAST_REPORTED_TIMESTAMP, cursor.timestamp)
-        .putStringSet(KEY_LAST_REPORTED_IDS, cursor.idsAtTimestamp)
-        .apply()
+      getPrefs(context).edit {
+        putLong(KEY_LAST_REPORTED_TIMESTAMP, cursor.timestamp)
+        putStringSet(KEY_LAST_REPORTED_IDS, cursor.idsAtTimestamp)
+      }
     }
   }
 }

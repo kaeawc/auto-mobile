@@ -47,20 +47,18 @@ function harness() {
       toggle: async () => ({ supported: true, applied: false, currentState: false }),
     }),
   };
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => ({ status: "restored" as const }) }),
-    () => ({ restore: async () => {} }),
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
       screenReader: (target) => ({
         restore: (state, signal) => restoreScreenReaderState(target, state, signal, toggles),
       }),
     },
-  );
+  });
 
   const driver = new FakeFocusNavigationDriver();
   driver.exposeHierarchy = true;

@@ -14,7 +14,7 @@ class FakeLabelSetup {
   peak = 0;
   settled = 0;
 
-  constructor(readonly sessionUuids: readonly string[]) {
+  constructor(readonly sessionUuids: string[]) {
     for (const sessionUuid of sessionUuids) {
       this.gates.set(sessionUuid, Promise.withResolvers<void>());
       this.started.set(sessionUuid, Promise.withResolvers<void>());
@@ -110,7 +110,8 @@ describe("bounded label-session readiness setup", () => {
     ["A", "B", "C"],
   ])(
     "completion permutation %s/%s/%s preserves input start order and void result",
-    async (...order) => {
+    async (first, second, third) => {
+      const order = [first, second, third];
       const fake = new FakeLabelSetup(["A", "B", "C"]);
       const work = fake.run();
       expect(fake.starts).toEqual(fake.sessionUuids);
@@ -229,9 +230,9 @@ describe("bounded label-session readiness setup", () => {
     expect(fake.starts).toEqual(["A", "B"]);
   });
 
-  test.each([["A"], ["A", "B"]])(
+  test.each([[["A"]], [["A", "B"]]])(
     "pre-aborted callers start no setup for %j",
-    async (...sessionUuids) => {
+    async (sessionUuids) => {
       const fake = new FakeLabelSetup(sessionUuids);
       const controller = new AbortController();
       const reason = new Error("already cancelled");

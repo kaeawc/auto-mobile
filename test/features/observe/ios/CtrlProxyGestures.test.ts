@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { describe, expect, it } from "bun:test";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import type { DelegateContext } from "../../../../src/features/observe/ios/types";
@@ -30,12 +31,9 @@ function createFakeContext(): {
   const requestManager = new CapturingRequestManager(timer);
   const context: DelegateContext = {
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      new FakeOpenSocket((data) => {
+        sent.push(data);
+      }),
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -67,7 +65,14 @@ describe("iOS CtrlProxyGestures", () => {
     const gestures = new CtrlProxyGestures(context);
 
     const { sentMsg, result } = await callAndResolve(sent, context.requestManager, () =>
-      gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450),
+      gestures.requestMultiFingerSwipe({
+        x1: 10,
+        y1: 20,
+        x2: 30,
+        y2: 40,
+        fingerCount: 3,
+        duration: 450,
+      }),
     );
 
     expect(sentMsg.type).toBe("request_multi_finger_swipe");
@@ -81,9 +86,56 @@ describe("iOS CtrlProxyGestures", () => {
     const gestures = new CtrlProxyGestures(context);
 
     const { sentMsg } = await callAndResolve(sent, requestManager, () =>
-      gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450, 5000, undefined, 30.5),
+      gestures.requestMultiFingerSwipe({
+        x1: 10,
+        y1: 20,
+        x2: 30,
+        y2: 40,
+        fingerCount: 3,
+        duration: 450,
+        timeoutMs: 5000,
+        fingerSpacing: 30.5,
+      }),
     );
 
     expect(sentMsg.offset).toBe(30.5);
+  });
+
+  describe("requestPathGesture", () => {
+    const points = [
+      { x: 1.2, y: 2, offsetMs: 0 },
+      { x: 5, y: 6, offsetMs: 249.6 },
+    ];
+
+    it("sends the timed points with whole-millisecond offsets and the frame context", async () => {
+      const { context, sent, requestManager } = createFakeContext();
+      const gestures = new CtrlProxyGestures(context, undefined, async () => ["path_gesture_v1"]);
+
+      const { sentMsg, result } = await callAndResolve(sent, requestManager, () =>
+        gestures.requestPathGesture(points, 5000, "frame-9"),
+      );
+
+      expect(sentMsg.type).toBe("request_path_gesture");
+      expect(sentMsg.frameContext).toBe("frame-9");
+      expect(sentMsg.points).toEqual([
+        { x: 1.2, y: 2, offsetMs: 0 },
+        { x: 5, y: 6, offsetMs: 250 },
+      ]);
+      expect(result).toMatchObject({ success: true, dispatched: true });
+    });
+
+    it.each([[["double_tap_v1"]], [[]]])(
+      "refuses before any input when the runner advertises %p",
+      async (features) => {
+        const { context, sent } = createFakeContext();
+        const gestures = new CtrlProxyGestures(context, undefined, async () => features);
+
+        const result = await gestures.requestPathGesture(points);
+
+        expect(sent).toEqual([]);
+        expect(result).toMatchObject({ success: false, dispatched: false });
+        expect(result.error).toContain("too old for dragPath");
+      },
+    );
   });
 });

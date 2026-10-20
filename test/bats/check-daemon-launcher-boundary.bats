@@ -5,14 +5,14 @@
 # serial-tagged files in a dedicated serial pass (scripts/ci/run-bats.sh);
 # the tag is enforced by test/scripts/batsSerialTags.test.ts.
 
-SCRIPT="scripts/check-daemon-launcher-boundary.sh"
+SCRIPT="scripts/check-daemon-launcher-boundary.ts"
 FIXTURE="src/daemon/DaemonLauncherBoundaryFixture.ts"
 
 # The unchanged production tree is checked once; fixture tests keep their own
 # parser run against the single changed file instead of rescanning production.
 setup_file() {
   local scan_status=0
-  bash "$SCRIPT" > "$BATS_FILE_TMPDIR/scan.output" 2>&1 || scan_status=$?
+  bun "$SCRIPT" > "$BATS_FILE_TMPDIR/scan.output" 2>&1 || scan_status=$?
   printf '%s\n' "$scan_status" > "$BATS_FILE_TMPDIR/scan.status"
 }
 
@@ -40,7 +40,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -53,7 +53,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -66,7 +66,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -80,7 +80,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -93,7 +93,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -106,7 +106,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -119,7 +119,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -135,7 +135,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -153,7 +153,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -179,7 +179,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 8 ]]
@@ -193,7 +193,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -211,7 +211,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -225,7 +225,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"DaemonLauncherBoundaryFixture.ts"* ]]
@@ -241,7 +241,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
@@ -257,7 +257,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 2 ]]
@@ -278,7 +278,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -322,7 +322,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -340,7 +340,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -360,7 +360,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -380,7 +380,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -397,7 +397,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -452,7 +452,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 7 ]]
@@ -479,7 +479,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -498,7 +498,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production daemon invocations"* ]]
@@ -521,7 +521,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 6 ]]
@@ -541,7 +541,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 1 ]]
@@ -591,7 +591,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 10 ]]
@@ -636,7 +636,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 3 ]]
@@ -677,7 +677,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$(grep -c "DaemonLauncherBoundaryFixture.ts" <<< "$output")" -eq 4 ]]
@@ -703,7 +703,7 @@ teardown() {
     > "$FIXTURE"
 
   assert_production_scan
-  run bash "$SCRIPT" "$FIXTURE"
+  run bun "$SCRIPT" "$FIXTURE"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *'launch("auto-mobile", ["--daemon-mode"])'* ]]

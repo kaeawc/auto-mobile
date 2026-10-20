@@ -22,7 +22,13 @@ const isWindows = platform() === "win32";
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -55,7 +61,6 @@ function makeServer(
 ): UnixSocketServer {
   return new UnixSocketServer(
     socketPath,
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
     null,

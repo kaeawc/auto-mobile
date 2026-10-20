@@ -1,5 +1,7 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { PROTOTYPE_SPEC_CAPABILITY_GATES } from "../../src/features/prototype/prototypeCapabilityGates";
 import type { BootedDevice } from "../../src/models";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
@@ -10,6 +12,8 @@ import {
   FakePrototypeAgentClient,
   FAKE_PROTOTYPE_AGENT_CAPABILITIES,
 } from "../fakes/FakePrototypeAgentClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -21,7 +25,9 @@ const base = {
   state: { liked: false, name: "Ada", query: "", active: false },
   root: { type: "column", children: [label] },
 };
-const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
+// `with` lists capabilities a fixture needs besides the one under test: a device-run request also
+// needs the network capability, so the device gate is exercised with that one already advertised.
+const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
   prototype_theme_modes_v1: fixture({
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -32,6 +38,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     id: "label",
     stateKey: "name",
     label: "Liked",
+  }),
+  prototype_text_field_actions_v1: fixture({
+    type: "textField",
+    id: "label",
+    stateKey: "name",
+    trailingIcon: { icon: "close", label: "Clear" },
+  }),
+  prototype_text_field_leading_icon_v1: fixture({
+    type: "textField",
+    id: "label",
+    stateKey: "name",
+    leadingIcon: "search",
   }),
   prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
   prototype_pager_options_v1: {
@@ -47,6 +65,24 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     ...label,
     onLongPress: [{ type: "emit", name: "long" }],
     onDoubleTap: [{ type: "emit", name: "double" }],
+  }),
+  prototype_carousel_v1: fixture({
+    type: "carousel",
+    id: "label",
+    itemWidth: 120,
+    children: [{ type: "spacer" }],
+  }),
+  prototype_refresh_v1: fixture({
+    type: "scroll",
+    id: "label",
+    refresh: { stateKey: "liked", onRefresh: [{ type: "emit", name: "refresh" }] },
+    child: label,
+  }),
+  prototype_swipe_actions_v1: fixture({
+    type: "row",
+    id: "label",
+    swipeActions: { end: [{ label: "Delete", onTap: [{ type: "emit", name: "delete" }] }] },
+    children: [{ type: "spacer" }],
   }),
   prototype_search_bar_v1: fixture({
     type: "searchBar",
@@ -78,6 +114,26 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     label: "Save",
     enabledWhen: { key: "liked", equals: true },
   }),
+  prototype_data_actions_v1: fixture({
+    ...label,
+    onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
+  }),
+  // A root-level block: a patch cannot introduce it, so only the show half applies (empty ops).
+  prototype_storage_v1: {
+    minimalSpec: { ...base, storage: { version: 1, keys: ["state:liked"] } },
+    ops: [],
+  },
+  prototype_network_v1: fixture({
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
+  }),
+  prototype_network_device_v1: {
+    ...fixture({
+      ...label,
+      onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
+    }),
+    with: ["prototype_network_v1"],
+  },
 };
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {
@@ -123,20 +179,22 @@ function setup() {
     timer,
     clock: timer,
     cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+    // A via "device" request to localhost makes show run `adb reverse`; keep it off the real adb.
+    adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
   });
 }
-async function call(device: BootedDevice, input: unknown) {
+async function call(device: BootedDevice, input: Record<string, unknown>) {
   const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-  return prototypeOutputSchema.parse(result.structuredContent);
+  return prototypeOutputSchema.parse(readToolResponse(result).structuredContent);
 }
 const show = (device: BootedDevice, spec: unknown) => call(device, { action: "show", spec });
 const patch = (device: BootedDevice, ops: unknown, extra = {}) =>
   call(device, { action: "patch", id: base.id, ops, ...extra });
 const requests = (device: BootedDevice) =>
   device.platform === "android" ? proxy.patchRequests : agent.patchRequests;
-function advertise(capability: string) {
-  proxy.setSupportedCommands(["prototype_patch_v1", capability]);
-  agent.handshake.capabilities.push(capability);
+function advertise(...capabilities: string[]) {
+  proxy.setSupportedCommands(["prototype_patch_v1", ...capabilities]);
+  agent.handshake.capabilities.push(...capabilities);
 }
 beforeAll(async () => {
   const undo = preserveToolRegistry();
@@ -168,13 +226,17 @@ test("every registered gate has exactly one parity fixture", () => {
 });
 test.each(cases)(
   "$device.platform refuses $capability identically on show and patch",
-  async ({ capability, minimalSpec, ops, device }) => {
+  async ({ capability, minimalSpec, ops, device, with: others }) => {
+    advertise(...(others ?? []));
     const refusedShow = await show(device, minimalSpec);
     expect(refusedShow.success).toBe(false);
     expect(refusedShow.error).toContain(capability);
     expect(proxy.getPrototypeHistory()).toEqual([]);
     expect(agent.requests).toEqual([]);
     expect((await show(device, base)).success).toBe(true);
+    if (ops.length === 0) {
+      return;
+    }
     const before = store.shownSpecs.read(device.deviceId, base.id);
     const sent = agent.requests.length;
     const refusedPatch = await patch(device, ops);
@@ -196,8 +258,8 @@ test.each(cases)(
 );
 test.each(cases)(
   "$device.platform accepts $capability and state-only patches with it advertised",
-  async ({ capability, minimalSpec, ops, device }) => {
-    advertise(capability);
+  async ({ capability, minimalSpec, ops, device, with: others }) => {
+    advertise(capability, ...(others ?? []));
     expect((await show(device, minimalSpec)).success).toBe(true);
     expect(
       (
@@ -207,7 +269,9 @@ test.each(cases)(
       ).success,
     ).toBe(true);
     expect((await show(device, base)).success).toBe(true);
-    expect((await patch(device, ops)).success).toBe(true);
+    if (ops.length > 0) {
+      expect((await patch(device, ops)).success).toBe(true);
+    }
   },
 );
 test.each(["android", "ios"] as const)(
@@ -239,11 +303,18 @@ test.each(["android", "ios"] as const)(
     }
   },
 );
+let capabilitySource: string;
+beforeAll(() => {
+  const server = new URL("../../src/server/", import.meta.url);
+  const files = [
+    "prototypeTools.ts",
+    ...new Bun.Glob("prototypeTools/**/*.ts").scanSync({ cwd: fileURLToPath(server) }),
+  ];
+  expect(files.length).toBeGreaterThan(1);
+  capabilitySource = files.map((file) => readFileSync(new URL(file, server), "utf8")).join("\n");
+});
 test("prototypeTools routes spec feature detection through the registry", () => {
-  const source = readFileSync(
-    new URL("../../src/server/prototypeTools.ts", import.meta.url),
-    "utf8",
-  );
+  const source = capabilitySource;
   expect(source.includes("prototypeThemeModeFields")).toBe(false);
   expect(source.includes("prototypeDataModelFields")).toBe(false);
 });

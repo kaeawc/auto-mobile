@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   SessionReleaseBroadcaster,
   SESSION_RELEASED_NOTIFICATION_METHOD,
-} from "../../src/server/sessionReleaseBroadcast";
+} from "../../src/daemon/sessionReleaseBroadcast";
 
 describe("SESSION_RELEASED_NOTIFICATION_METHOD", () => {
   test("is the stable session-released wire method", () => {

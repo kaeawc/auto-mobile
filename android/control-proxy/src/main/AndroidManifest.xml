@@ -27,6 +27,15 @@
       android:protectionLevel="signature" />
   <uses-permission android:name="dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2" />
 
+  <!-- Prototype request actions with via "device" make their own HTTP calls (#12528). -->
+  <uses-permission android:name="android.permission.INTERNET" />
+
+  <!-- Android 17 (API 37) drops outbound connections to local-network addresses (RFC 1918, -->
+  <!-- loopback aliases such as the emulator host 10.0.2.2) from apps targeting 37 without this -->
+  <!-- runtime permission, which surfaces as a timeout, not an error (#13018). Grant it with -->
+  <!-- `adb shell pm grant dev.jasonpearson.automobile.ctrlproxy android.permission.ACCESS_LOCAL_NETWORK`. -->
+  <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
   <!-- Permissions required for accessibility service -->
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -40,6 +49,7 @@
         android:label="@string/app_name"
       android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+      android:networkSecurityConfig="@xml/network_security_config"
       android:theme="@style/Theme.Automobileandroid">
 
       <meta-data

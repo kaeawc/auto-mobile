@@ -1,0 +1,2166 @@
+[
+  {
+    "route": "input/tap",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "x": 10,
+      "y": 20
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "valid ios",
+    "ok": true,
+    "value": {
+      "platform": "ios",
+      "x": 10,
+      "y": 20
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "extra keys",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "x": 10,
+      "y": 20
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "negative zero decimals",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "x": -0.5,
+      "y": 0
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/tap requires params object"
+  },
+  {
+    "route": "input/tap",
+    "label": "params null",
+    "ok": false,
+    "message": "input/tap requires params object"
+  },
+  {
+    "route": "input/tap",
+    "label": "params array",
+    "ok": false,
+    "message": "input/tap requires params object"
+  },
+  {
+    "route": "input/tap",
+    "label": "params string",
+    "ok": false,
+    "message": "input/tap requires params object"
+  },
+  {
+    "route": "input/tap",
+    "label": "params number",
+    "ok": false,
+    "message": "input/tap requires params object"
+  },
+  {
+    "route": "input/tap",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/tap requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/tap",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/tap requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/tap",
+    "label": "platform ",
+    "ok": false,
+    "message": "input/tap requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/tap",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/tap requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/tap",
+    "label": "platform iOS",
+    "ok": false,
+    "message": "input/tap requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/tap",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/tap deviceId must be a string when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/tap deviceId must be a string when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/tap deviceId must be a string when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "deviceId valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "emulator-5554",
+      "x": 10,
+      "y": 20
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "frameContext empty",
+    "ok": false,
+    "message": "input/tap frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "frameContext number",
+    "ok": false,
+    "message": "input/tap frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "frameContext null",
+    "ok": false,
+    "message": "input/tap frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "frameContext valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "x": 10,
+      "y": 20,
+      "frameContext": "ctx-1"
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "x missing",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "x string",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "x NaN",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "x Infinity",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "x -Infinity",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "x null",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "y missing",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "y string",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "y NaN",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "y Infinity",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "y -Infinity",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "y null",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "duration 100",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "x": 10,
+      "y": 20,
+      "duration": 100
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "duration 0",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "x": 10,
+      "y": 20,
+      "duration": 0
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "duration -5",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "x": 10,
+      "y": 20,
+      "duration": -5
+    }
+  },
+  {
+    "route": "input/tap",
+    "label": "duration 1.5",
+    "ok": false,
+    "message": "input/tap duration must be an integer number of milliseconds when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "duration 100",
+    "ok": false,
+    "message": "input/tap duration must be an integer number of milliseconds when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "duration null",
+    "ok": false,
+    "message": "input/tap duration must be an integer number of milliseconds when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "duration NaN",
+    "ok": false,
+    "message": "input/tap duration must be an integer number of milliseconds when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "duration Infinity",
+    "ok": false,
+    "message": "input/tap duration must be an integer number of milliseconds when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "first failure wins",
+    "ok": false,
+    "message": "input/tap requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/tap",
+    "label": "coords before duration",
+    "ok": false,
+    "message": "input/tap requires numeric x and y params"
+  },
+  {
+    "route": "input/tap",
+    "label": "duration before deviceId",
+    "ok": false,
+    "message": "input/tap duration must be an integer number of milliseconds when provided"
+  },
+  {
+    "route": "input/tap",
+    "label": "deviceId before frameContext",
+    "ok": false,
+    "message": "input/tap deviceId must be a string when provided"
+  },
+  {
+    "route": "input/swipe",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "startX": 1,
+      "startY": 2,
+      "endX": 3,
+      "endY": 4,
+      "durationMs": 300
+    }
+  },
+  {
+    "route": "input/swipe",
+    "label": "valid full",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "d",
+      "startX": 1,
+      "startY": 2,
+      "endX": 3,
+      "endY": 4,
+      "durationMs": 500,
+      "frameContext": "f"
+    }
+  },
+  {
+    "route": "input/swipe",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/swipe requires params object"
+  },
+  {
+    "route": "input/swipe",
+    "label": "params null",
+    "ok": false,
+    "message": "input/swipe requires params object"
+  },
+  {
+    "route": "input/swipe",
+    "label": "params array",
+    "ok": false,
+    "message": "input/swipe requires params object"
+  },
+  {
+    "route": "input/swipe",
+    "label": "params string",
+    "ok": false,
+    "message": "input/swipe requires params object"
+  },
+  {
+    "route": "input/swipe",
+    "label": "params number",
+    "ok": false,
+    "message": "input/swipe requires params object"
+  },
+  {
+    "route": "input/swipe",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/swipe requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/swipe",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/swipe requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/swipe",
+    "label": "platform ",
+    "ok": false,
+    "message": "input/swipe requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/swipe",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/swipe requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/swipe",
+    "label": "platform iOS",
+    "ok": false,
+    "message": "input/swipe requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/swipe",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/swipe deviceId must be a string when provided"
+  },
+  {
+    "route": "input/swipe",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/swipe deviceId must be a string when provided"
+  },
+  {
+    "route": "input/swipe",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/swipe deviceId must be a string when provided"
+  },
+  {
+    "route": "input/swipe",
+    "label": "deviceId valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "emulator-5554",
+      "startX": 1,
+      "startY": 2,
+      "endX": 3,
+      "endY": 4,
+      "durationMs": 300
+    }
+  },
+  {
+    "route": "input/swipe",
+    "label": "frameContext empty",
+    "ok": false,
+    "message": "input/swipe frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/swipe",
+    "label": "frameContext number",
+    "ok": false,
+    "message": "input/swipe frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/swipe",
+    "label": "frameContext null",
+    "ok": false,
+    "message": "input/swipe frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/swipe",
+    "label": "frameContext valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "startX": 1,
+      "startY": 2,
+      "endX": 3,
+      "endY": 4,
+      "durationMs": 300,
+      "frameContext": "ctx-1"
+    }
+  },
+  {
+    "route": "input/swipe",
+    "label": "startX missing",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startX string",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startX NaN",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startX Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startX -Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startX null",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startY missing",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startY string",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startY NaN",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startY Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startY -Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "startY null",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endX missing",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endX string",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endX NaN",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endX Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endX -Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endX null",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endY missing",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endY string",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endY NaN",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endY Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endY -Infinity",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "endY null",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs 1",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "startX": 1,
+      "startY": 2,
+      "endX": 3,
+      "endY": 4,
+      "durationMs": 1
+    }
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs 60000",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "startX": 1,
+      "startY": 2,
+      "endX": 3,
+      "endY": 4,
+      "durationMs": 60000
+    }
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs 0",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs 60001",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs -1",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs 1.5",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs 300",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs null",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/swipe",
+    "label": "durationMs NaN",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/swipe",
+    "label": "coords before duration",
+    "ok": false,
+    "message": "input/swipe requires numeric startX, startY, endX, and endY params"
+  },
+  {
+    "route": "input/swipe",
+    "label": "duration before deviceId",
+    "ok": false,
+    "message": "input/swipe durationMs must be integer milliseconds between 1 and 60000"
+  },
+  {
+    "route": "input/typeText",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "text": "hello",
+      "submit": false,
+      "append": false
+    }
+  },
+  {
+    "route": "input/typeText",
+    "label": "valid full",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "d",
+      "text": "hello",
+      "submit": true,
+      "append": true,
+      "frameContext": "f"
+    }
+  },
+  {
+    "route": "input/typeText",
+    "label": "submit false",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "text": "hello",
+      "submit": false,
+      "append": false
+    }
+  },
+  {
+    "route": "input/typeText",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/typeText requires params object"
+  },
+  {
+    "route": "input/typeText",
+    "label": "params null",
+    "ok": false,
+    "message": "input/typeText requires params object"
+  },
+  {
+    "route": "input/typeText",
+    "label": "params array",
+    "ok": false,
+    "message": "input/typeText requires params object"
+  },
+  {
+    "route": "input/typeText",
+    "label": "params string",
+    "ok": false,
+    "message": "input/typeText requires params object"
+  },
+  {
+    "route": "input/typeText",
+    "label": "params number",
+    "ok": false,
+    "message": "input/typeText requires params object"
+  },
+  {
+    "route": "input/typeText",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/typeText requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/typeText",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/typeText requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/typeText",
+    "label": "platform ",
+    "ok": false,
+    "message": "input/typeText requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/typeText",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/typeText requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/typeText",
+    "label": "platform iOS",
+    "ok": false,
+    "message": "input/typeText requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/typeText",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/typeText deviceId must be a string when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/typeText deviceId must be a string when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/typeText deviceId must be a string when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "deviceId valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "emulator-5554",
+      "text": "hello",
+      "submit": false,
+      "append": false
+    }
+  },
+  {
+    "route": "input/typeText",
+    "label": "frameContext empty",
+    "ok": false,
+    "message": "input/typeText frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "frameContext number",
+    "ok": false,
+    "message": "input/typeText frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "frameContext null",
+    "ok": false,
+    "message": "input/typeText frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "frameContext valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "text": "hello",
+      "submit": false,
+      "append": false,
+      "frameContext": "ctx-1"
+    }
+  },
+  {
+    "route": "input/typeText",
+    "label": "text undefined",
+    "ok": false,
+    "message": "input/typeText requires non-empty string text param"
+  },
+  {
+    "route": "input/typeText",
+    "label": "text \"\"",
+    "ok": false,
+    "message": "input/typeText requires non-empty string text param"
+  },
+  {
+    "route": "input/typeText",
+    "label": "text 5",
+    "ok": false,
+    "message": "input/typeText requires non-empty string text param"
+  },
+  {
+    "route": "input/typeText",
+    "label": "text null",
+    "ok": false,
+    "message": "input/typeText requires non-empty string text param"
+  },
+  {
+    "route": "input/typeText",
+    "label": "text \" \"",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "text": " ",
+      "submit": false,
+      "append": false
+    }
+  },
+  {
+    "route": "input/typeText",
+    "label": "submit \"true\"",
+    "ok": false,
+    "message": "input/typeText submit must be a boolean when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "submit 1",
+    "ok": false,
+    "message": "input/typeText submit must be a boolean when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "submit null",
+    "ok": false,
+    "message": "input/typeText submit must be a boolean when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "mode \"replace\"",
+    "ok": false,
+    "message": "input/typeText mode must be \"append\" when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "mode \"\"",
+    "ok": false,
+    "message": "input/typeText mode must be \"append\" when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "mode 1",
+    "ok": false,
+    "message": "input/typeText mode must be \"append\" when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "mode null",
+    "ok": false,
+    "message": "input/typeText mode must be \"append\" when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "mode \"APPEND\"",
+    "ok": false,
+    "message": "input/typeText mode must be \"append\" when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "unsupported one",
+    "ok": false,
+    "message": "input/typeText unsupported params: bogus"
+  },
+  {
+    "route": "input/typeText",
+    "label": "unsupported many",
+    "ok": false,
+    "message": "input/typeText unsupported params: zeta, alpha"
+  },
+  {
+    "route": "input/typeText",
+    "label": "unsupported before platform",
+    "ok": false,
+    "message": "input/typeText unsupported params: bogus"
+  },
+  {
+    "route": "input/typeText",
+    "label": "text before deviceId",
+    "ok": false,
+    "message": "input/typeText requires non-empty string text param"
+  },
+  {
+    "route": "input/typeText",
+    "label": "frameContext before mode",
+    "ok": false,
+    "message": "input/typeText frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/typeText",
+    "label": "submit before deviceId",
+    "ok": false,
+    "message": "input/typeText submit must be a boolean when provided"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "home",
+      "responseButton": "home"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button home",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "home",
+      "responseButton": "home"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button back",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "back",
+      "responseButton": "back"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button menu",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "menu",
+      "responseButton": "menu"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button power",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "power",
+      "responseButton": "power"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button volume_up",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "volume_up",
+      "responseButton": "volume_up"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button volume_down",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "volume_down",
+      "responseButton": "volume_down"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button recent",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "recent",
+      "responseButton": "recent"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button app_switch",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "recent",
+      "responseButton": "app_switch"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/pressButton requires params object"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "params null",
+    "ok": false,
+    "message": "input/pressButton requires params object"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "params array",
+    "ok": false,
+    "message": "input/pressButton requires params object"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "params string",
+    "ok": false,
+    "message": "input/pressButton requires params object"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "params number",
+    "ok": false,
+    "message": "input/pressButton requires params object"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/pressButton requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/pressButton requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "platform ",
+    "ok": false,
+    "message": "input/pressButton requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/pressButton requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "platform iOS",
+    "ok": false,
+    "message": "input/pressButton requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/pressButton deviceId must be a string when provided"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/pressButton deviceId must be a string when provided"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/pressButton deviceId must be a string when provided"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "deviceId valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "emulator-5554",
+      "button": "home",
+      "responseButton": "home"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "frameContext empty",
+    "ok": false,
+    "message": "input/pressButton frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "frameContext number",
+    "ok": false,
+    "message": "input/pressButton frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "frameContext null",
+    "ok": false,
+    "message": "input/pressButton frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "frameContext valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "home",
+      "responseButton": "home",
+      "frameContext": "ctx-1"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button undefined",
+    "ok": false,
+    "message": "input/pressButton requires button"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button 5",
+    "ok": false,
+    "message": "input/pressButton requires button"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button null",
+    "ok": false,
+    "message": "input/pressButton requires button"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button \"\"",
+    "ok": false,
+    "message": "input/pressButton button must be one of: home, back, menu, power, volume_up, volume_down, recent, app_switch"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button \"HOME\"",
+    "ok": false,
+    "message": "input/pressButton button must be one of: home, back, menu, power, volume_up, volume_down, recent, app_switch"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button \"enter\"",
+    "ok": false,
+    "message": "input/pressButton button must be one of: home, back, menu, power, volume_up, volume_down, recent, app_switch"
+  },
+  {
+    "route": "input/pressButton",
+    "label": "extra keys allowed",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "button": "home",
+      "responseButton": "home"
+    }
+  },
+  {
+    "route": "input/pressButton",
+    "label": "button before deviceId",
+    "ok": false,
+    "message": "input/pressButton button must be one of: home, back, menu, power, volume_up, volume_down, recent, app_switch"
+  },
+  {
+    "route": "input/key",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "key": "enter"
+    }
+  },
+  {
+    "route": "input/key",
+    "label": "valid full",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "d",
+      "key": "enter",
+      "frameContext": "f"
+    }
+  },
+  {
+    "route": "input/key",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/key requires params object"
+  },
+  {
+    "route": "input/key",
+    "label": "params null",
+    "ok": false,
+    "message": "input/key requires params object"
+  },
+  {
+    "route": "input/key",
+    "label": "params array",
+    "ok": false,
+    "message": "input/key requires params object"
+  },
+  {
+    "route": "input/key",
+    "label": "params string",
+    "ok": false,
+    "message": "input/key requires params object"
+  },
+  {
+    "route": "input/key",
+    "label": "params number",
+    "ok": false,
+    "message": "input/key requires params object"
+  },
+  {
+    "route": "input/key",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/key requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/key",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/key requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/key",
+    "label": "platform ",
+    "ok": false,
+    "message": "input/key requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/key",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/key requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/key",
+    "label": "platform iOS",
+    "ok": false,
+    "message": "input/key requires platform 'android' or 'ios'"
+  },
+  {
+    "route": "input/key",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/key deviceId must be a string when provided"
+  },
+  {
+    "route": "input/key",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/key deviceId must be a string when provided"
+  },
+  {
+    "route": "input/key",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/key deviceId must be a string when provided"
+  },
+  {
+    "route": "input/key",
+    "label": "deviceId valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "emulator-5554",
+      "key": "enter"
+    }
+  },
+  {
+    "route": "input/key",
+    "label": "frameContext empty",
+    "ok": false,
+    "message": "input/key frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/key",
+    "label": "frameContext number",
+    "ok": false,
+    "message": "input/key frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/key",
+    "label": "frameContext null",
+    "ok": false,
+    "message": "input/key frameContext must be a non-empty string when provided"
+  },
+  {
+    "route": "input/key",
+    "label": "frameContext valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "key": "enter",
+      "frameContext": "ctx-1"
+    }
+  },
+  {
+    "route": "input/key",
+    "label": "key undefined",
+    "ok": false,
+    "message": "input/key requires key"
+  },
+  {
+    "route": "input/key",
+    "label": "key 5",
+    "ok": false,
+    "message": "input/key requires key"
+  },
+  {
+    "route": "input/key",
+    "label": "key null",
+    "ok": false,
+    "message": "input/key requires key"
+  },
+  {
+    "route": "input/key",
+    "label": "key \"\"",
+    "ok": false,
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+  },
+  {
+    "route": "input/key",
+    "label": "key \"nope\"",
+    "ok": false,
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+  },
+  {
+    "route": "input/key",
+    "label": "key \"ENTER\"",
+    "ok": false,
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+  },
+  {
+    "route": "input/key",
+    "label": "unsupported one",
+    "ok": false,
+    "message": "input/key unsupported params: bogus"
+  },
+  {
+    "route": "input/key",
+    "label": "unsupported many",
+    "ok": false,
+    "message": "input/key unsupported params: zeta, alpha"
+  },
+  {
+    "route": "input/key",
+    "label": "unsupported before platform",
+    "ok": false,
+    "message": "input/key unsupported params: bogus"
+  },
+  {
+    "route": "input/key",
+    "label": "key before deviceId",
+    "ok": false,
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": false
+    }
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "valid full",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "d",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": true
+    }
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "cancel false",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": false
+    }
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/gestureStart requires params object"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "params null",
+    "ok": false,
+    "message": "input/gestureStart requires params object"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "params array",
+    "ok": false,
+    "message": "input/gestureStart requires params object"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "params string",
+    "ok": false,
+    "message": "input/gestureStart requires params object"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "params number",
+    "ok": false,
+    "message": "input/gestureStart requires params object"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/gestureStart is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "platform ios",
+    "ok": false,
+    "message": "input/gestureStart is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/gestureStart is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/gestureStart is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "gestureId undefined",
+    "ok": false,
+    "message": "input/gestureStart requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "gestureId \"\"",
+    "ok": false,
+    "message": "input/gestureStart requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "gestureId 5",
+    "ok": false,
+    "message": "input/gestureStart requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "gestureId null",
+    "ok": false,
+    "message": "input/gestureStart requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "x missing",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "x string",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "x NaN",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "x Infinity",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "x -Infinity",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "x null",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "y missing",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "y string",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "y NaN",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "y Infinity",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "y -Infinity",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "y null",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/gestureStart deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/gestureStart deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/gestureStart deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "cancel \"true\"",
+    "ok": false,
+    "message": "input/gestureStart cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "cancel 1",
+    "ok": false,
+    "message": "input/gestureStart cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "cancel null",
+    "ok": false,
+    "message": "input/gestureStart cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "gestureId before coords",
+    "ok": false,
+    "message": "input/gestureStart requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "x before y",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "y before deviceId",
+    "ok": false,
+    "message": "input/gestureStart requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureStart",
+    "label": "deviceId before cancel",
+    "ok": false,
+    "message": "input/gestureStart deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": false
+    }
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "valid full",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "d",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": true
+    }
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "cancel false",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": false
+    }
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/gestureMove requires params object"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "params null",
+    "ok": false,
+    "message": "input/gestureMove requires params object"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "params array",
+    "ok": false,
+    "message": "input/gestureMove requires params object"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "params string",
+    "ok": false,
+    "message": "input/gestureMove requires params object"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "params number",
+    "ok": false,
+    "message": "input/gestureMove requires params object"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/gestureMove is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "platform ios",
+    "ok": false,
+    "message": "input/gestureMove is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/gestureMove is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/gestureMove is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "gestureId undefined",
+    "ok": false,
+    "message": "input/gestureMove requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "gestureId \"\"",
+    "ok": false,
+    "message": "input/gestureMove requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "gestureId 5",
+    "ok": false,
+    "message": "input/gestureMove requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "gestureId null",
+    "ok": false,
+    "message": "input/gestureMove requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "x missing",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "x string",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "x NaN",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "x Infinity",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "x -Infinity",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "x null",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "y missing",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "y string",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "y NaN",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "y Infinity",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "y -Infinity",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "y null",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/gestureMove deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/gestureMove deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/gestureMove deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "cancel \"true\"",
+    "ok": false,
+    "message": "input/gestureMove cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "cancel 1",
+    "ok": false,
+    "message": "input/gestureMove cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "cancel null",
+    "ok": false,
+    "message": "input/gestureMove cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "gestureId before coords",
+    "ok": false,
+    "message": "input/gestureMove requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "x before y",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "y before deviceId",
+    "ok": false,
+    "message": "input/gestureMove requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureMove",
+    "label": "deviceId before cancel",
+    "ok": false,
+    "message": "input/gestureMove deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "valid",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": false
+    }
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "valid full",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "deviceId": "d",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": true
+    }
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "cancel false",
+    "ok": true,
+    "value": {
+      "platform": "android",
+      "gestureId": "g1",
+      "x": 5,
+      "y": 6,
+      "cancel": false
+    }
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "params undefined",
+    "ok": false,
+    "message": "input/gestureEnd requires params object"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "params null",
+    "ok": false,
+    "message": "input/gestureEnd requires params object"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "params array",
+    "ok": false,
+    "message": "input/gestureEnd requires params object"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "params string",
+    "ok": false,
+    "message": "input/gestureEnd requires params object"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "params number",
+    "ok": false,
+    "message": "input/gestureEnd requires params object"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "platform undefined",
+    "ok": false,
+    "message": "input/gestureEnd is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "platform ios",
+    "ok": false,
+    "message": "input/gestureEnd is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "platform web",
+    "ok": false,
+    "message": "input/gestureEnd is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "platform 1",
+    "ok": false,
+    "message": "input/gestureEnd is only supported on platform 'android'"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "gestureId undefined",
+    "ok": false,
+    "message": "input/gestureEnd requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "gestureId \"\"",
+    "ok": false,
+    "message": "input/gestureEnd requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "gestureId 5",
+    "ok": false,
+    "message": "input/gestureEnd requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "gestureId null",
+    "ok": false,
+    "message": "input/gestureEnd requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "x missing",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "x string",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "x NaN",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "x Infinity",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "x -Infinity",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "x null",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "y missing",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "y string",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "y NaN",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "y Infinity",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "y -Infinity",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "y null",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "deviceId number",
+    "ok": false,
+    "message": "input/gestureEnd deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "deviceId null",
+    "ok": false,
+    "message": "input/gestureEnd deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "deviceId object",
+    "ok": false,
+    "message": "input/gestureEnd deviceId must be a string when provided"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "cancel \"true\"",
+    "ok": false,
+    "message": "input/gestureEnd cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "cancel 1",
+    "ok": false,
+    "message": "input/gestureEnd cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "cancel null",
+    "ok": false,
+    "message": "input/gestureEnd cancel must be a boolean when provided"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "gestureId before coords",
+    "ok": false,
+    "message": "input/gestureEnd requires a non-empty gestureId"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "x before y",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "y before deviceId",
+    "ok": false,
+    "message": "input/gestureEnd requires numeric x and y params"
+  },
+  {
+    "route": "input/gestureEnd",
+    "label": "deviceId before cancel",
+    "ok": false,
+    "message": "input/gestureEnd deviceId must be a string when provided"
+  }
+]

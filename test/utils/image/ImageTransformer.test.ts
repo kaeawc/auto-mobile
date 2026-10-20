@@ -151,7 +151,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
     });
 
     test("fromBuffer rejects a non-buffer input", () => {
-      expect(() => Image.fromBuffer("nope" as unknown as Buffer)).toThrow("Input must be a Buffer");
+      expect(() => Image.fromBuffer("nope")).toThrow("Input must be a Buffer");
     });
   });
 

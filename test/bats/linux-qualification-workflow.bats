@@ -122,9 +122,12 @@ setup() {
   export CALLS="$BATS_TEST_TMPDIR/calls"
   for cmd in sdkmanager avdmanager sudo lscpu free lspci; do
     printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "${0##*/}" "$*" >> "$CALLS"\n' > "$fake/$cmd"
+    chmod +x "$fake/$cmd"
   done
   printf '#!/usr/bin/env bash\necho "Android emulator version test"\n' > "$BATS_TEST_TMPDIR/sdk/emulator/emulator"
-  chmod +x "$fake"/* "$BATS_TEST_TMPDIR/sdk/emulator/emulator"
+  # Never chmod "$fake"/*: most entries are symlinks to root-owned system tools,
+  # and chmod follows them ("Operation not permitted" on Linux runners).
+  chmod +x "$BATS_TEST_TMPDIR/sdk/emulator/emulator"
   touch "$BATS_TEST_TMPDIR/kvm"
   cell="$BATS_TEST_TMPDIR/cell"
   # host proves the preflight runs before the no-/dev/dri unexercised exit.

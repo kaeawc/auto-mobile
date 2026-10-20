@@ -3,6 +3,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { Element, ViewHierarchyResult, ViewHierarchyNode } from "../../../src/models";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import {
   extractNavigationElements,
@@ -42,12 +43,12 @@ describe("ExploreElementExtraction", () => {
     nodes: ViewHierarchyNode[] = [],
     packageName: string = "com.test.app",
   ): ViewHierarchyResult {
-    return {
+    return createHierarchyForTest({
       hierarchy: {
         node: nodes,
       },
       packageName,
-    };
+    });
   }
 
   function createMockNode(overrides: Partial<ViewHierarchyNode["$"]> = {}): ViewHierarchyNode {
@@ -230,20 +231,14 @@ describe("ExploreElementExtraction", () => {
 
     test("keeps a unique occurrence unindexed", () => {
       const element = createMockElement();
-      const selector = {
-        selectByResourceId: () => ({
+      const selector: Pick<ElementSelector, "select"> = {
+        select: () => ({
           element,
           indexInMatches: 0,
           totalMatches: 1,
           strategy: "first" as const,
         }),
-        selectByText: () => ({
-          element,
-          indexInMatches: 0,
-          totalMatches: 1,
-          strategy: "first" as const,
-        }),
-      } as ElementSelector;
+      };
 
       expect(tapSelectorFor(element, createMockViewHierarchy(), selector)).toEqual({
         elementId: "com.test:id/button",
@@ -256,21 +251,20 @@ describe("ExploreElementExtraction", () => {
         createMockElement({ bounds: { left: 0, top: 20, right: 20, bottom: 40 } }),
         createMockElement({ bounds: { left: 0, top: 40, right: 20, bottom: 60 } }),
       ];
-      const selector = {
-        selectByResourceId: (_hierarchy: unknown, _id: string, options?: { index?: number }) => ({
-          element:
-            options?.index === undefined ? occurrences[0] : (occurrences[options.index] ?? null),
-          indexInMatches: options?.index ?? 0,
-          totalMatches: options?.index === undefined ? 2 : 3,
-          strategy: "first" as const,
-        }),
-        selectByText: (_hierarchy: unknown, _text: string) => ({
-          element: null,
-          indexInMatches: -1,
-          totalMatches: 2,
-          strategy: "first" as const,
-        }),
-      } as ElementSelector;
+      const selector: Pick<ElementSelector, "select"> = {
+        select: (_hierarchy, query, options) =>
+          query.elementId === undefined
+            ? { element: null, indexInMatches: -1, totalMatches: 2, strategy: "first" as const }
+            : {
+                element:
+                  options?.index === undefined
+                    ? occurrences[0]
+                    : (occurrences[options.index] ?? null),
+                indexInMatches: options?.index ?? 0,
+                totalMatches: options?.index === undefined ? 2 : 3,
+                strategy: "first" as const,
+              },
+      };
 
       expect(tapSelectorFor(occurrences[2], createMockViewHierarchy(), selector)).toEqual({
         elementId: "com.test:id/button",
@@ -283,21 +277,20 @@ describe("ExploreElementExtraction", () => {
         createMockElement({ bounds: { left: 0, top: 0, right: 20, bottom: 20 } }),
         createMockElement({ bounds: { left: 0, top: 20, right: 20, bottom: 40 } }),
       ];
-      const selector = {
-        selectByResourceId: (_hierarchy: unknown, _id: string, options?: { index?: number }) => ({
-          element:
-            options?.index === undefined ? occurrences[0] : (occurrences[options.index] ?? null),
-          indexInMatches: options?.index ?? 0,
-          totalMatches: 2,
-          strategy: "first" as const,
-        }),
-        selectByText: (_hierarchy: unknown, _text: string) => ({
-          element: null,
-          indexInMatches: -1,
-          totalMatches: 2,
-          strategy: "first" as const,
-        }),
-      } as ElementSelector;
+      const selector: Pick<ElementSelector, "select"> = {
+        select: (_hierarchy, query, options) =>
+          query.elementId === undefined
+            ? { element: null, indexInMatches: -1, totalMatches: 2, strategy: "first" as const }
+            : {
+                element:
+                  options?.index === undefined
+                    ? occurrences[0]
+                    : (occurrences[options.index] ?? null),
+                indexInMatches: options?.index ?? 0,
+                totalMatches: 2,
+                strategy: "first" as const,
+              },
+      };
 
       expect(tapSelectorFor(occurrences[1], createMockViewHierarchy(), selector)).toEqual({
         elementId: "com.test:id/button",

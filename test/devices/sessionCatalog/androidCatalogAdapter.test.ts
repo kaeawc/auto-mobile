@@ -5,6 +5,7 @@ import {
   type AndroidCatalogPolicy,
   type AndroidNativeCatalogReader,
 } from "../../../src/devices/sessionCatalog";
+import { readFileSync } from "node:fs";
 import type {
   DeviceProfile,
   SystemImage,
@@ -161,5 +162,20 @@ describe("Android native session catalog adapter", () => {
         "Unable to read the installed Android emulator catalog: Android emulator profile catalog returned no profiles.",
     });
     expect(warnings).toEqual([catalog.provenance.message!]);
+  });
+
+  test("resolves the captured API 37 image (android-37.0) to Android 17 (#12788)", () => {
+    const fixtures = "test/fixtures/android-system-image-37";
+    const source = readFileSync(`${fixtures}/source.properties`, "utf8");
+    const buildProp = readFileSync(`${fixtures}/build.prop.excerpt`, "utf8");
+    expect(source).toContain("AndroidVersion.ApiLevel=37.0");
+    expect(buildProp).toContain("ro.build.version.release=17");
+
+    const [release] = adaptAndroidSessionDeviceCatalog(
+      PROFILES,
+      [systemImage("system-images;android-37.0;google_apis;arm64-v8a")],
+      POLICY,
+    ).releases;
+    expect(release).toMatchObject({ apiLevel: 37, osVersion: "17", metadataState: "current" });
   });
 });

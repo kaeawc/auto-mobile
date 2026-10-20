@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../src/server";
 import { registerDoctorTools } from "../../src/server/doctorTools";
@@ -8,6 +9,9 @@ import {
 } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Every device-aware tool is a read or control, and says which (#10965).
@@ -91,6 +95,7 @@ const CLASSIFICATION: Classification = {
     "criticalSection",
     "deviceSnapshot",
     "dragAndDrop",
+    "dragPath",
     "executePlan",
     "explore",
     "highlight",
@@ -103,6 +108,7 @@ const CLASSIFICATION: Classification = {
     "openLink",
     "phoneCall",
     "pinchOn",
+    "multiTouch",
     "postNotification",
     "pressButton",
     "putAppFile",
@@ -126,6 +132,7 @@ const CLASSIFICATION: Classification = {
     "setUIState",
     "shake",
     "stageSessionDownloads",
+    "swipeAt",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.
     "systemTray",
@@ -295,9 +302,15 @@ describe("device-aware tool read/control classification (#10965)", () => {
 
     test("an unclassified hidden device tool in a scratch registry fails (#11353)", () => {
       const scratch = new ToolRegistryClass();
-      scratch.registerDeviceAware("hiddenNewTool", "x", {}, async () => ({ content: [] }), {
-        hidden: true,
-      });
+      scratch.registerDeviceAware(
+        "hiddenNewTool",
+        "x",
+        z.object({}),
+        async () => ({ content: [] }),
+        {
+          hidden: true,
+        },
+      );
       const tools = registeredTools(scratch).filter((tool) => tool.requiresDevice);
       expect(tools.map((tool) => tool.name)).toEqual(["hiddenNewTool"]);
       expect(classificationViolations(tools, { read: [], perArgs: {}, control: [] })).toEqual([

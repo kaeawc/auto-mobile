@@ -5,6 +5,13 @@ import type {
   RawImage,
 } from "../../src/utils/image/backend/ImageBackend";
 
+/** Real decoders reject an empty buffer; the fake does too so error paths match. */
+function assertNonEmpty(source: Buffer): void {
+  if (source.length === 0) {
+    throw new Error("Input buffer is empty");
+  }
+}
+
 /**
  * Fake `ImageBackend` for fast, deterministic tests.
  *
@@ -48,6 +55,13 @@ export class FakeImageBackend implements ImageBackend {
   }
 
   setRawPixelsResult(raw: RawImage): void {
+    // RawImage is RGBA by contract; a mismatched buffer would let tests pass on pixels no
+    // real backend can return.
+    if (raw.data.length !== raw.width * raw.height * 4) {
+      throw new Error(
+        `RawImage data length ${raw.data.length} != width*height*4 (${raw.width * raw.height * 4})`,
+      );
+    }
     this.rawPixelsResult = {
       width: raw.width,
       height: raw.height,
@@ -74,6 +88,7 @@ export class FakeImageBackend implements ImageBackend {
 
   async execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer> {
     this.executeCalls.push({ source, pipeline });
+    assertNonEmpty(source);
     if (this.shouldThrowOnExecute) {
       throw new Error("Simulated error in execute");
     }
@@ -84,14 +99,17 @@ export class FakeImageBackend implements ImageBackend {
 
   async metadata(source: Buffer): Promise<ImageMetadata> {
     this.metadataCalls.push(source);
+    assertNonEmpty(source);
     if (this.shouldThrowOnMetadata) {
       throw new Error("Simulated error in metadata");
     }
-    return this.metadataResult;
+    // Fresh object per call, as real backends build one from each decode.
+    return { ...this.metadataResult };
   }
 
   async rawPixels(source: Buffer): Promise<RawImage> {
     this.rawPixelsCalls.push(source);
+    assertNonEmpty(source);
     if (this.shouldThrowOnRawPixels) {
       throw new Error("Simulated error in rawPixels");
     }

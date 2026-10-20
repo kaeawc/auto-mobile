@@ -93,6 +93,8 @@ class NavigationViewModel(
             // Keep loading state
           }
         }
+      } catch (cancellation: kotlinx.coroutines.CancellationException) {
+        throw cancellation
       } catch (e: Exception) {
         LOG.error("Exception loading navigation data", e)
         _state.value = NavigationUiState.Error(message = e.message ?: "Unknown error")

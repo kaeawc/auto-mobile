@@ -210,7 +210,7 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
     });
 
     test("is a no-op: a defaulted insert already stores a real timestamp", async () => {
-      await repairUp(db as unknown as Kysely<unknown>);
+      await repairUp(db);
       await db
         .insertInto("navigation_apps")
         .values({ app_id: "fresh", updated_at: "2026-07-03T00:00:00.000Z" })
@@ -225,10 +225,11 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
 
     test("runs as part of the real migration chain (migration is registered)", async () => {
       const executed = await db
-        .selectFrom("kysely_migration" as never)
-        .select("name" as never)
+        .withTables<{ kysely_migration: { name: string } }>()
+        .selectFrom("kysely_migration")
+        .select("name")
         .execute();
-      const names = executed.map((r: { name: string }) => r.name);
+      const names = executed.map((r) => r.name);
       expect(names).toContain("2026_07_03_000_repair_datetime_now_defaults");
     });
 

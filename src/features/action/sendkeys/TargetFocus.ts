@@ -61,9 +61,11 @@ export class TargetFocus {
       display,
       { execute: (options) => this.deps.observer.execute({ ...options, skipScreenshot: true }) },
       this.deps.adb(),
-      this.deps.lastRenderedObservation(),
-      signal,
-      this.deps.displayTransitionReader,
+      {
+        lastRenderedObservation: this.deps.lastRenderedObservation(),
+        signal,
+        transitions: this.deps.displayTransitionReader,
+      },
     );
     if (
       this.deps.device.platform === "android" &&
@@ -114,13 +116,9 @@ export class TargetFocus {
   async topFocusedPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
     try {
       const adb = this.deps.adb();
-      const result = await adb.executeCommand(
-        "shell dumpsys window | grep mTopFocusedDisplayId",
-        undefined,
-        undefined,
-        undefined,
+      const result = await adb.executeCommand("shell dumpsys window | grep mTopFocusedDisplayId", {
         signal,
-      );
+      });
       const displayId = parseTopFocusedDisplayId(result.stdout);
       return await new ObservedAndroidDisplayCache(this.deps.timer).panelForLogicalId(
         this.deps.device,

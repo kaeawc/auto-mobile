@@ -5,7 +5,7 @@ import {
   resetDaemonProxyFactoryForTesting,
   type CliOutput,
 } from "../../src/cli";
-import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
+import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/daemon/deviceSessionResult";
 import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/constants";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
@@ -67,7 +67,7 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     }
   });
 
-  test.each(DEVICE_SESSION_ACQUISITION_TOOLS)(
+  test.each([...DEVICE_SESSION_ACQUISITION_TOOLS])(
     "does not inject sessionUuid into %s params",
     async (toolName) => {
       installFakeProxy();

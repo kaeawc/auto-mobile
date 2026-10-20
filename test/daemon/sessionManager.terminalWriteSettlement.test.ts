@@ -28,10 +28,10 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     store = new BusyRewritePersistence();
-    manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-1");
-    await manager.createSession(SESSION, DEVICE, "android", 60_000);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     journal = createDaemonTerminalReleaseJournal({
       dataDir: "/data",
       daemonSessionId: "daemon-1",
@@ -149,7 +149,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
       release_reason: null,
     });
     expect(store.failReleaseWrites).toBe(1);
-    expect(manager["refusedReleaseWrites"].has(snapshot)).toBe(true);
+    expect(manager["rowWriter"].superseded.wasRefused(snapshot)).toBe(true);
     expect(journal.loadUnconfirmed()).toEqual([]);
     expect(manager.getSession(SESSION)).toBeNull();
   });
@@ -162,7 +162,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     const release = manager.releaseSessionUnlessSuperseded(
       SESSION,
       `device-disconnected:${DEVICE}`,
-      () => !superseded,
+      { commitFence: () => !superseded },
     );
     await settleMicrotasks();
     const snapshot = manager["sessionSlots"].getTerminalSnapshot(SESSION)!;
@@ -171,7 +171,9 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     await expect(release).resolves.toEqual({ superseded: true });
     store.park = undefined;
     await manager.releaseSession(SESSION, "plan-auto-release");
-    const replacement = await manager.createSession(SESSION, DEVICE, "android", 60_000);
+    const replacement = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: 60_000,
+    });
     expect(replacement).not.toBe(original);
 
     await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
@@ -184,7 +186,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     await settleMicrotasks();
     // A pending write belonging to the replacement must not stall the old release's refusal.
     expect(refusalReads()).toBe(1);
-    expect(manager["refusedReleaseWrites"].has(snapshot)).toBe(true);
+    expect(manager["rowWriter"].superseded.wasRefused(snapshot)).toBe(true);
     expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       stable_identity_generation: generation,

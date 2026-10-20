@@ -1,9 +1,9 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
 import { registerFailuresResources } from "../../src/server/failuresResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { FakeFailureAnalyticsRepository } from "../fakes/FakeFailureAnalyticsRepository";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -14,40 +14,16 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // QUERY value must reach the timeline's own validation and come back as the
 // timeline's JSON error envelope — neither a throw nor the registry's McpError.
 
-type TimelineQuery = Parameters<FailureAnalyticsRepository["getTimelineData"]>[0];
-
 const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
 
-class FakeFailuresRepository {
-  timelineQueries: TimelineQuery[] = [];
-  failure: Error | undefined;
-
-  async getFailureGroups(): ReturnType<FailureAnalyticsRepository["getFailureGroups"]> {
-    return [];
-  }
-
-  async getTimelineData(
-    query: TimelineQuery,
-  ): ReturnType<FailureAnalyticsRepository["getTimelineData"]> {
-    this.timelineQueries.push(query);
-    if (this.failure) {
-      throw this.failure;
-    }
-    return {
-      dataPoints: [],
-      previousPeriodTotals: { crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 },
-    };
-  }
-}
-
 describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119)", () => {
-  let repository: FakeFailuresRepository;
+  let repository: FakeFailureAnalyticsRepository;
   let readHandler: (request: { params: { uri: string } }, extra: object) => Promise<unknown>;
 
   beforeEach(() => {
     const timer = new FakeTimer();
     timer.setCurrentTime(NOW);
-    repository = new FakeFailuresRepository();
+    repository = new FakeFailureAnalyticsRepository();
     ResourceRegistry.clearResources();
     registerFailuresResources(repository, timer);
     // The #10117 backstop target: a handler that decodes its capture unguarded.
@@ -59,8 +35,8 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
       async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
     );
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const handler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    ResourceRegistry.registerWithServer(server, () => ({}));
+    const handler = server.server.handlersBySchema.get("resources/read");
     if (!handler) {
       throw new Error("read handler not registered");
     }
@@ -73,7 +49,7 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
   });
 
   async function readTimeline(uri: string): Promise<{ error?: string; dateRange?: string }> {
-    const result = (await readHandler({ params: { uri } }, {})) as {
+    const result = (await readHandler({ params: { uri } }, fakeServerContext())) as {
       contents: Array<{ text?: string }>;
     };
     return JSON.parse(result.contents[0]?.text ?? "{}") as { error?: string; dateRange?: string };
@@ -115,7 +91,7 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
   test("a malformed query escape does not surface as an McpError", async () => {
     const outcome = await readHandler(
       { params: { uri: "automobile:failures/timeline?dateRange=bad%zz" } },
-      {},
+      fakeServerContext(),
     ).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
@@ -134,7 +110,10 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
   });
 
   test("the registry backstop still turns a URIError into invalid-params next to the timeline", async () => {
-    const error = await readHandler({ params: { uri: "automobile:test/unguarded/a%" } }, {}).then(
+    const error = await readHandler(
+      { params: { uri: "automobile:test/unguarded/a%" } },
+      fakeServerContext(),
+    ).then(
       () => undefined,
       (caught: unknown) => caught,
     );

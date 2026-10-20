@@ -1,10 +1,13 @@
+import { BOOTED_DEVICE_RESOURCE_URIS } from "../constants/deviceResourceUris";
+export { BOOTED_DEVICE_RESOURCE_URIS };
 import { holderOf } from "../daemon/deviceBinding";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import { registerDeviceResourceInvalidation } from "../daemon/deviceResourceInvalidation";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
 import {
   describeInventoryDevice,
   type AdbOfflineHold,
   type SimulatorTransitionHold,
-} from "./inventoryDeviceDescription";
+} from "../daemon/inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -12,6 +15,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import type {
+  DeviceLockStateInfo,
+  DeviceLockStatesResourceContent,
+} from "./deviceLockStatesResourceContent";
+export type { DeviceLockStatesResourceContent } from "./deviceLockStatesResourceContent";
 import {
   type BootedDeviceDiscovery,
   type DeviceDiscoveryError,
@@ -24,7 +32,7 @@ import {
 } from "../utils/configuredDeviceInventory";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { Session } from "../daemon/sessionManager";
 import type {
@@ -42,7 +50,7 @@ import {
   poolHoldFor,
   type BootedDeviceDescription,
   type DeviceDescription,
-} from "./deviceDescription";
+} from "../daemon/deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -83,9 +91,9 @@ import {
 import { withRemainingBudget } from "../utils/withRemainingBudget";
 import {
   AndroidOrientationReader,
-  IosOrientationReader,
   type OrientationReader,
 } from "../features/action/OrientationReader";
+import { IosOrientationReader } from "../features/action/IosOrientationReader";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { TTLCache } from "../utils/cache/Cache";
@@ -96,10 +104,6 @@ import {
 } from "../devices/deviceBootService";
 
 // Resource URIs
-export const BOOTED_DEVICE_RESOURCE_URIS = {
-  ALL_BOOTED: "automobile:devices/booted",
-  PLATFORM_TEMPLATE: "automobile:devices/booted/{platform}",
-} as const;
 
 // A lightweight per-device lock-state resource. The full booted-devices resource also carries
 // `locked`, but computing it there recomputes service status (isInstalled/isEnabled/sha256) for
@@ -130,22 +134,6 @@ export function resetBootedDevicesResourceCache(): void {
   bootedDevicesResourceCache = null;
   bootedDevicesResourceSingleFlight = new SingleFlight();
   bootedDevicesResourcePublishedGeneration = ++bootedDevicesResourceGeneration;
-}
-
-// Per-device lock state for Android and iOS simulators. Omitted for physical iOS devices or
-// when the advisory probe could not read the state.
-interface DeviceLockStateInfo {
-  deviceId: string;
-  locked?: boolean;
-}
-
-export interface DeviceLockStatesResourceContent {
-  lastUpdated: string; // ISO 8601
-  lockStates: DeviceLockStateInfo[];
-  /** True only when both platform discovery sweeps completed. */
-  observationComplete: boolean;
-  /** Platform-specific discovery failures; an empty object means both sweeps completed. */
-  discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
 
 export interface CtrlProxyVersionInfo {
@@ -1162,8 +1150,8 @@ interface DaemonDeviceContext {
 }
 
 function readDaemonDeviceContext(): DaemonDeviceContext {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const daemon = defaultDaemonContext;
+  if (!daemon.isInitialized()) {
     return {
       devicePool: null,
       sessionsById: null,
@@ -1176,7 +1164,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   let sessionsById: Map<string, Session> | null = null;
   let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
-    devicePool = daemonState.getDevicePool();
+    devicePool = daemon.requireFullDevicePool();
     poolStatus = {
       enabled: true,
       idle: 0,
@@ -1190,14 +1178,14 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   }
 
   try {
-    const sessions = daemonState.getSessionManager().getAllSessions();
+    const sessions = daemon.requireSessionManager().getAllSessions();
     sessionsById = new Map(sessions.map((session) => [session.sessionId, session]));
   } catch (error) {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
 
   try {
-    const registry = daemonState.getDeviceSessionRegistry();
+    const registry = daemon.requireDeviceSessionRegistry();
     resolveDeviceSessionUuid = (deviceId) =>
       registry.getByDeviceId(deviceId)?.deviceSessionUuid ?? null;
   } catch (error) {
@@ -2112,3 +2100,8 @@ export async function notifyBootedDeviceResourcesUpdated(): Promise<void> {
     DEVICE_LOCK_STATES_RESOURCE_URI,
   ]);
 }
+
+registerDeviceResourceInvalidation({
+  resetBootedDevicesResourceCache,
+  notifyBootedDeviceResourcesUpdated,
+});

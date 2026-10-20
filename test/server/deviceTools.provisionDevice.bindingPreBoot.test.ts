@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
@@ -8,7 +8,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -56,7 +56,7 @@ describe("provisionDevice naming a binding's stopped device", () => {
   let readinessDeviceIds: string[];
   let existing: DeviceInfo;
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
@@ -99,7 +99,19 @@ describe("provisionDevice naming a binding's stopped device", () => {
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     resetDeviceToolsDependencies();
@@ -135,7 +147,7 @@ describe("provisionDevice naming a binding's stopped device", () => {
     deviceType: IOS_SPEC.deviceType,
   });
 
-  test("Android: refused before the binding's AVD is booted or prepared", async () => {
+  arranged("Android: refused before the binding's AVD is booted or prepared", async () => {
     await assignBindingDevice(registry, "android", AVD);
     existing = {
       name: AVD,
@@ -154,7 +166,7 @@ describe("provisionDevice naming a binding's stopped device", () => {
     expect({ boots: boots(), readiness: readinessDeviceIds }).toEqual({ boots: [], readiness: [] });
   });
 
-  test("iOS: refused before the binding's simulator is booted or prepared", async () => {
+  arranged("iOS: refused before the binding's simulator is booted or prepared", async () => {
     await assignBindingDevice(registry, "ios", SLOT_UDID);
     existing = iosSlotSimulator();
     devices.setBootedDevices("ios", []);
@@ -166,7 +178,7 @@ describe("provisionDevice naming a binding's stopped device", () => {
     expect({ boots: boots(), readiness: readinessDeviceIds }).toEqual({ boots: [], readiness: [] });
   });
 
-  test("iOS: the binding's own reconciler still boots and prepares its simulator", async () => {
+  arranged("iOS: the binding's own reconciler still boots and prepares its simulator", async () => {
     const binding = await assignBindingDevice(registry, "ios", SLOT_UDID);
     existing = iosSlotSimulator();
     devices.setBootedDevices("ios", []);
@@ -183,23 +195,29 @@ describe("provisionDevice naming a binding's stopped device", () => {
     });
   });
 
-  test("iOS: another binding's reconciler is refused before the simulator is booted", async () => {
-    await assignBindingDevice(registry, "ios", SLOT_UDID);
-    const other = await assignBindingDevice(
-      registry,
-      "ios",
-      "BBBBBBBB-2222-4222-8222-BBBBBBBBBBBB",
-      "runner-b",
-    );
-    existing = iosSlotSimulator();
-    devices.setBootedDevices("ios", []);
-    devices.setDeviceImages("ios", [existing]);
+  arranged(
+    "iOS: another binding's reconciler is refused before the simulator is booted",
+    async () => {
+      await assignBindingDevice(registry, "ios", SLOT_UDID);
+      const other = await assignBindingDevice(
+        registry,
+        "ios",
+        "BBBBBBBB-2222-4222-8222-BBBBBBBBBBBB",
+        "runner-b",
+      );
+      existing = iosSlotSimulator();
+      devices.setBootedDevices("ios", []);
+      devices.setDeviceImages("ios", [existing]);
 
-    const response = await runAsBindingReconciler(other, () =>
-      provision({ platform: "ios", name: "iPhone 17", spec: IOS_SPEC }),
-    );
+      const response = await runAsBindingReconciler(other, () =>
+        provision({ platform: "ios", name: "iPhone 17", spec: IOS_SPEC }),
+      );
 
-    expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_BINDING_CODE);
-    expect({ boots: boots(), readiness: readinessDeviceIds }).toEqual({ boots: [], readiness: [] });
-  });
+      expect(JSON.stringify(response)).toContain(DEVICE_ASSIGNED_TO_BINDING_CODE);
+      expect({ boots: boots(), readiness: readinessDeviceIds }).toEqual({
+        boots: [],
+        readiness: [],
+      });
+    },
+  );
 });

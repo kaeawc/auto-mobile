@@ -1,4 +1,5 @@
-import type { ViewHierarchyResult } from "../../models";
+import type { Element, TapAtResult, ViewHierarchyResult } from "../../models";
+import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { ActionableError } from "../../models/ActionableError";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
@@ -10,22 +11,32 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 // Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
 const defaultContainerSelector = new ResolverElementSelector();
 
-/** Rethrow an interrupted Android long press as an error naming how long the press may stay held. */
-export function throwIfLongPressInterrupted(
+/** Text naming how long an interrupted Android long press may stay held; undefined when it was not interrupted. */
+export function longPressInterruptedMessage(
   error: unknown,
   durationMs: number,
   signal?: AbortSignal,
-): void {
+): string | undefined {
   if (
     signal?.aborted ||
     error instanceof AdbCommandTimeoutError ||
     (error instanceof Error && error.name === "AbortError")
   ) {
     // Killing host adb cannot cancel input's system_server injection.
-    throw new ActionableError(
-      `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
-      { cause: error },
-    );
+    return `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`;
+  }
+  return undefined;
+}
+
+/** Rethrow an interrupted Android long press as an error naming how long the press may stay held. */
+export function throwIfLongPressInterrupted(
+  error: unknown,
+  durationMs: number,
+  signal?: AbortSignal,
+): void {
+  const message = longPressInterruptedMessage(error, durationMs, signal);
+  if (message) {
+    throw new ActionableError(message, { cause: error });
   }
 }
 
@@ -60,4 +71,62 @@ export function isContainerAvailable(
     elementSelector.hasContainer?.(viewHierarchy, container) ??
     defaultContainerSelector.hasContainer(viewHierarchy, container)
   );
+}
+
+/** Error text when `container` does not name exactly one of elementId or text; null when valid. */
+export function containerSelectorError(
+  container: ElementContainerSelector | undefined,
+  tool: string,
+): string | null {
+  if (!container) {
+    return null;
+  }
+  const selectorCount = [container.elementId, container.text].filter(Boolean).length;
+  return selectorCount === 1
+    ? null
+    : `${tool} container must specify exactly one of elementId or text`;
+}
+
+/** Reject a longPress duration beyond the hard ceiling before any device command runs. */
+export function assertLongPressWithinHardMax(durationMs: number | undefined): void {
+  if (durationMs !== undefined && durationMs > LONG_PRESS_HARD_MAX_MS) {
+    throw new ActionableError(
+      `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${durationMs} ms`,
+    );
+  }
+}
+
+/** The failed-result base shared by both tap tools: an empty element at the origin. */
+export function failedTapResult(action: string, error: string) {
+  return {
+    success: false as const,
+    action,
+    error,
+    element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } } as Element,
+  };
+}
+
+/** Adds each activation warning to the set, so a repeated message is reported once. */
+export function collectWarnings(warnings: Set<string>): (messages?: string[]) => void {
+  return (messages = []) => {
+    for (const warning of messages) {
+      warnings.add(warning);
+    }
+  };
+}
+
+export function partialDoubleTapNote(action: TapAtResult["action"], tapsDelivered: number): string {
+  return action === "doubleTap" && tapsDelivered === 1
+    ? " Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically."
+    : "";
+}
+
+export function tapDeliveryReporter(onTapDelivered: () => void): () => void {
+  let delivered = false;
+  return () => {
+    if (!delivered) {
+      delivered = true;
+      onTapDelivered();
+    }
+  };
 }

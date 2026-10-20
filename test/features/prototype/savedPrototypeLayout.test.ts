@@ -47,7 +47,7 @@ async function refusal(input: SavedPrototypeLayoutRequest, reason: SavedPrototyp
 describe("saved prototype layout", () => {
   test("shared fixture, exact manifest serialization, verbatim spec, dedup and atomic order", async () => {
     const { fs, writer } = setup();
-    expect(await writer.write(request(), "/prototype")).toEqual({
+    expect<unknown>(await writer.write(request(), "/prototype")).toEqual({
       kind: "written",
       destination: "/prototype",
       replaced: false,
@@ -58,10 +58,10 @@ describe("saved prototype layout", () => {
         .map((p) => `/prototype/${p}`)
         .sort(),
     );
-    expect(Buffer.from(fs.files.get("/prototype/manifest.json") ?? []).toString()).toBe(
-      JSON.stringify(fixture.expected.manifest, null, 2) + "\n",
-    );
-    expect(Buffer.from(fs.files.get("/prototype/spec.json") ?? []).toString()).toBe(
+    expect(
+      Buffer.from(fs.files.get("/prototype/manifest.json") ?? new Uint8Array()).toString(),
+    ).toBe(JSON.stringify(fixture.expected.manifest, null, 2) + "\n");
+    expect(Buffer.from(fs.files.get("/prototype/spec.json") ?? new Uint8Array()).toString()).toBe(
       fixture.specJson,
     );
     const writes = fs.operations.filter((p) => p.startsWith("write "));
@@ -73,7 +73,7 @@ describe("saved prototype layout", () => {
     for (const [file, hash] of Object.entries(fixture.expected.files)) {
       expect(
         createHash("sha256")
-          .update(fs.files.get(`/prototype/${file}`) ?? [])
+          .update(fs.files.get(`/prototype/${file}`) ?? new Uint8Array())
           .digest("hex"),
       ).toBe(hash);
       expect(hash).toMatch(/^[a-f0-9]{64}$/);
@@ -119,16 +119,16 @@ describe("saved prototype layout", () => {
         replaced: true,
       });
       expect(fs.files.has("/prototype/old")).toBe(false);
-      expect(Buffer.from(fs.files.get("/prototype/spec.json") ?? []).toString()).toBe(
+      expect(Buffer.from(fs.files.get("/prototype/spec.json") ?? new Uint8Array()).toString()).toBe(
         fixture.specJson,
       );
-      expect(Buffer.from(fs.files.get("/prototype/manifest.json") ?? []).toString()).toBe(
-        JSON.stringify(fixture.expected.manifest, null, 2) + "\n",
-      );
+      expect(
+        Buffer.from(fs.files.get("/prototype/manifest.json") ?? new Uint8Array()).toString(),
+      ).toBe(JSON.stringify(fixture.expected.manifest, null, 2) + "\n");
       for (const [file, hash] of Object.entries(fixture.expected.files)) {
         expect(
           createHash("sha256")
-            .update(fs.files.get(`/prototype/${file}`) ?? [])
+            .update(fs.files.get(`/prototype/${file}`) ?? new Uint8Array())
             .digest("hex"),
         ).toBe(hash);
       }
@@ -276,7 +276,9 @@ describe("saved prototype layout", () => {
       kind: "written",
       manifest: { assets: [], fonts: [] },
     });
-    expect(Buffer.from(fs.files.get("/prototype/spec.json") ?? []).toString()).toBe(specJson);
+    expect(Buffer.from(fs.files.get("/prototype/spec.json") ?? new Uint8Array()).toString()).toBe(
+      specJson,
+    );
   });
   test("spec byte boundary is inclusive", async () => {
     const { writer } = setup();

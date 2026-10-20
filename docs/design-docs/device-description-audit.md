@@ -1,6 +1,6 @@
 # Device-description audit
 
-All device-facing projections are built by `src/server/deviceDescription.ts`.
+All device-facing projections are built by `src/daemon/deviceDescription.ts`.
 Phase 3 is complete: public surfaces emit only the canonical
 `DeviceDescription` keys, and every canonical key is present. An unavailable
 fact is `null`, not omitted.

@@ -13,7 +13,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "../db/testDbHelper";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -64,7 +64,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
 
   /** The daemon that starts after the previous one died. */
   function restartedDaemon(): SessionManager {
-    const manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
+    const manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-b");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b"]));
@@ -417,15 +417,10 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       const pool: SessionDeviceAssigner = {
         async assignDeviceToSession(id, platform, target) {
           targets.push(target);
-          await manager.createSession(
-            id,
-            DEVICE,
-            platform ?? "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-            target?.liveness,
-          );
+          await manager.createSession(id, DEVICE, platform ?? "android", {
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+          });
           return DEVICE;
         },
       };
@@ -606,15 +601,10 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
         const pool: SessionDeviceAssigner = {
           async assignDeviceToSession(id, platform, target) {
             targets.push(target);
-            await manager.createSession(
-              id,
-              DEVICE,
-              platform ?? "android",
-              undefined,
-              undefined,
-              target?.stableDeviceId,
-              target?.liveness,
-            );
+            await manager.createSession(id, DEVICE, platform ?? "android", {
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+            });
             return DEVICE;
           },
         };
@@ -664,16 +654,11 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       const result = await manager.rehydratePersistedSessions({
         async assignDeviceToSession(id, platform, target) {
           targets.push(target);
-          await manager.createSession(
-            id,
-            DEVICE,
-            platform ?? "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          await manager.createSession(id, DEVICE, platform ?? "android", {
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return DEVICE;
         },
       });
@@ -713,15 +698,10 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     const pool: SessionDeviceAssigner = {
       async assignDeviceToSession(id, platform, target) {
         targets.push(target);
-        await manager.createSession(
-          id,
-          DEVICE,
-          platform ?? "android",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-          target?.liveness,
-        );
+        await manager.createSession(id, DEVICE, platform ?? "android", {
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+        });
         return DEVICE;
       },
     };

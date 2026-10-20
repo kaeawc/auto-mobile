@@ -1,11 +1,13 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import type { BootedDevice, ElementBounds, ObserveResult } from "../../../src/models";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -14,6 +16,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Measured bounds from #9186: element [0,-361,855,1456], screen 402x874.
 // Unclipped centerX 428 / distanceStart 513 did nothing; expected centre (201,437).
@@ -67,28 +70,30 @@ for (const platform of ["android", "ios"] as const) {
       insets = { top: 0, right: 0, bottom: 0, left: 0 },
       size = { width: 402, height: 874 },
     ) => {
-      const screen: ObserveResult = {
+      const screen: ObserveResult = buildObserveResult({
         updatedAt: timer.now(),
         screenSize: size,
         systemInsets: insets,
         viewHierarchy: {
           hierarchy: {
-            node: [
-              {
-                $: {
-                  "resource-id": "container-id",
-                  text: "Example Domain",
-                  bounds,
-                  class: "android.widget.FrameLayout",
-                  scrollable: true,
-                },
-              },
-            ],
+            node: createFlatNodeForTest({
+              node: [
+                createFlatNodeForTest({
+                  $: {
+                    "resource-id": "container-id",
+                    text: "Example Domain",
+                    bounds,
+                    class: "android.widget.FrameLayout",
+                    scrollable: true,
+                  },
+                }),
+              ],
+            }),
           },
           packageName: "com.test.app",
           updatedAt: timer.now(),
         },
-      };
+      });
       observe.setObserveResult(screen);
     };
 
@@ -112,15 +117,11 @@ for (const platform of ["android", "ios"] as const) {
         activityName: "MainActivity",
         layoutSeqSum: 123,
       });
-      const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        android as unknown as AndroidCtrlProxyClient,
+      const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
+      const iosSpy = spyOnIosClientInstance(ios);
+      const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+        FakeCtrlProxyManager.withAvailability(true),
       );
-      const iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        ios as unknown as IOSCtrlProxyClient,
-      );
-      const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-        isAvailable: async () => true,
-      } as unknown as AndroidCtrlProxyManager);
       restores.push(
         () => androidSpy.mockRestore(),
         () => iosSpy.mockRestore(),
@@ -163,7 +164,7 @@ for (const platform of ["android", "ios"] as const) {
       const screen = observe.getConfiguredObserveResult()!;
       const hierarchy = screen.viewHierarchy!;
       // The reviewer's single-object root is a window/container, not a display.
-      hierarchy.hierarchy.node = {
+      hierarchy.hierarchy.node = createFlatNodeForTest({
         $: {
           "resource-id": "container-id",
           text: "Example Domain",
@@ -171,7 +172,7 @@ for (const platform of ["android", "ios"] as const) {
           class: "android.widget.FrameLayout",
           scrollable: true,
         },
-      };
+      });
       if (trustedSource === "capture") {
         hierarchy.screenWidth = 402;
         hierarchy.screenHeight = 874;
@@ -261,7 +262,10 @@ for (const platform of ["android", "ios"] as const) {
             capture: new FakeHierarchyCapture(() => ({
               ...hierarchy,
               hierarchy: {
-                node: { bounds: { left: 0, top: 0, right: width, bottom: 402 }, node: child },
+                node: createFlatNodeForTest({
+                  bounds: { left: 0, top: 0, right: width, bottom: 402 },
+                  node: child ? [child] : [],
+                }),
               },
             })),
           });

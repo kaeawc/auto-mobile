@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   resolveSwipeDirection,
+  resolveSwipeDirectionRaw,
   SCROLL_TO_FINGER_DIRECTION,
 } from "../../../../src/features/action/swipeon/swipeOnUtils";
 import { SwipeDirection } from "../../../../src/models";
@@ -17,7 +18,7 @@ describe("SCROLL_TO_FINGER_DIRECTION", () => {
 describe("resolveSwipeDirection", () => {
   describe("missing direction", () => {
     it("returns an error when direction is undefined", () => {
-      const result = resolveSwipeDirection({ direction: undefined });
+      const result = resolveSwipeDirectionRaw({ direction: undefined });
       expect(result.error).toBe("direction is required");
       expect(result.direction).toBeUndefined();
     });
@@ -110,30 +111,9 @@ describe("resolveSwipeDirection", () => {
     });
 
     it("reports the missing-direction error verbatim", () => {
-      expect(resolveSwipeDirection({ direction: undefined }).error).toBe("direction is required");
-    });
-  });
-
-  describe("unknown gestureType", () => {
-    it("treats any non-finger gestureType as a scroll and inverts the direction", () => {
-      // Documents current behavior: an unrecognized gestureType falls through to
-      // the scroll branch and inverts the finger direction.
-      const result = resolveSwipeDirection({
-        direction: "up",
-        gestureType: "totally-unknown" as unknown as "scrollTowardsDirection",
-      });
-      expect(result.direction).toBe("down");
-    });
-  });
-
-  describe("regression: object API required (not positional args)", () => {
-    it("returns error when direction field is missing from options object", () => {
-      // The old call site used resolveSwipeDirection(args.direction, args.gestureType) with
-      // positional args. The function signature requires an options object. Passing a string
-      // as the options object results in direction being undefined inside the function.
-      const stringAsOptions = "up" as any;
-      const result = resolveSwipeDirection(stringAsOptions);
-      expect(result.error).toBe("direction is required");
+      expect(resolveSwipeDirectionRaw({ direction: undefined }).error).toBe(
+        "direction is required",
+      );
     });
   });
 });

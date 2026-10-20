@@ -40,29 +40,23 @@ internal fun DeviceState.label(): String =
 
 /** Match a device against every active dimension except [ignore] (for faceted counting). */
 private fun matches(d: PickerDevice, f: PickerFilters, ignore: FilterDimension?): Boolean {
-  if (ignore != FilterDimension.State && f.states.isNotEmpty() && d.state !in f.states) return false
-  if (ignore != FilterDimension.Platform && f.platforms.isNotEmpty() && d.platform !in f.platforms)
-    return false
-  if (
-    ignore != FilterDimension.OsVersion &&
-      f.osKeys.isNotEmpty() &&
-      (d.osKey == null || d.osKey !in f.osKeys)
-  )
-    return false
-  if (
-    ignore != FilterDimension.Architecture &&
-      f.architectures.isNotEmpty() &&
-      (d.architecture == null || d.architecture !in f.architectures)
-  )
-    return false
-  if (
-    ignore != FilterDimension.FormFactor &&
-      f.formFactors.isNotEmpty() &&
-      (d.formFactor == null || d.formFactor !in f.formFactors)
-  )
-    return false
-  return true
+  return FilterDimension.entries.all { dimension ->
+    ignore == dimension || matchesDimension(d, f, dimension)
+  }
 }
+
+private fun matchesDimension(
+  d: PickerDevice,
+  f: PickerFilters,
+  dimension: FilterDimension,
+): Boolean =
+  when (dimension) {
+    FilterDimension.State -> f.states.isEmpty() || d.state in f.states
+    FilterDimension.Platform -> f.platforms.isEmpty() || d.platform in f.platforms
+    FilterDimension.OsVersion -> f.osKeys.isEmpty() || d.osKey in f.osKeys
+    FilterDimension.Architecture -> f.architectures.isEmpty() || d.architecture in f.architectures
+    FilterDimension.FormFactor -> f.formFactors.isEmpty() || d.formFactor in f.formFactors
+  }
 
 /** Devices matching the intersection of all active filters (the grid contents). */
 fun filteredDevices(devices: List<PickerDevice>, f: PickerFilters): List<PickerDevice> =
@@ -104,19 +98,7 @@ fun options(
             platform in f.platforms,
           )
         }
-      FilterDimension.OsVersion -> {
-        if (f.platforms.isEmpty()) return emptyList()
-        val grouped = LinkedHashMap<String, MutableList<PickerDevice>>()
-        for (device in visible) {
-          val key = device.osKey ?: continue
-          grouped.getOrPut(key) { mutableListOf() }.add(device)
-        }
-        grouped.entries
-          .sortedByDescending { it.key.toIntOrNull() ?: 0 }
-          .map { (key, group) ->
-            FilterOption(key, group.first().osLabel ?: key, group.size, key in f.osKeys)
-          }
-      }
+      FilterDimension.OsVersion -> osVersionOptions(visible, f)
       FilterDimension.Architecture ->
         visible
           .mapNotNull { it.architecture }
@@ -145,4 +127,18 @@ fun options(
           }
     }
   return raw.filter { it.count > 0 || it.selected }.filter { matchesQuery(it.label, f.query) }
+}
+
+private fun osVersionOptions(visible: List<PickerDevice>, f: PickerFilters): List<FilterOption> {
+  if (f.platforms.isEmpty()) return emptyList()
+  val grouped = LinkedHashMap<String, MutableList<PickerDevice>>()
+  for (device in visible) {
+    val key = device.osKey ?: continue
+    grouped.getOrPut(key) { mutableListOf() }.add(device)
+  }
+  return grouped.entries
+    .sortedByDescending { it.key.toIntOrNull() ?: 0 }
+    .map { (key, group) ->
+      FilterOption(key, group.first().osLabel ?: key, group.size, key in f.osKeys)
+    }
 }

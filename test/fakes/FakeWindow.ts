@@ -1,8 +1,9 @@
-import { ActiveWindow } from "../../src/models";
+import { ActiveWindowInfo } from "../../src/models";
 import type { Window } from "../../src/features/observe/interfaces/Window";
 import type { GetActiveOptions } from "../../src/features/observe/Window";
 import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
+import { NodeCryptoService } from "../../src/utils/crypto";
 
 /**
  * Fake implementation of Window for testing
@@ -10,13 +11,13 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
  */
 export class FakeWindow implements Window {
   private executedOperations: string[] = [];
-  private configuredCachedActiveWindow: ActiveWindow | null = null;
-  private configuredActiveWindow: ActiveWindow | null = null;
+  private configuredCachedActiveWindow: ActiveWindowInfo | null = null;
+  private configuredActiveWindow: ActiveWindowInfo | null = null;
   private cachedActiveWindowCallCount: number = 0;
   private getActiveCallCount: number = 0;
   private getActiveForceRefreshes: boolean[] = [];
   private getActiveOptions: GetActiveOptions[] = [];
-  private configuredActiveHash: string = "fake-active-hash";
+  private configuredActiveHash: string | null = null;
   private throwOnAbortedSignal: boolean = false;
 
   /**
@@ -31,14 +32,14 @@ export class FakeWindow implements Window {
   /**
    * Configure the cached active window to be returned by getCachedActiveWindow
    */
-  configureCachedActiveWindow(window: ActiveWindow | null): void {
+  configureCachedActiveWindow(window: ActiveWindowInfo | null): void {
     this.configuredCachedActiveWindow = window;
   }
 
   /**
    * Configure the active window to be returned by getActive
    */
-  configureActiveWindow(window: ActiveWindow): void {
+  configureActiveWindow(window: ActiveWindowInfo): void {
     this.configuredActiveWindow = window;
   }
 
@@ -111,7 +112,7 @@ export class FakeWindow implements Window {
 
   // Implementation of Window interface
 
-  async getCachedActiveWindow(): Promise<ActiveWindow | null> {
+  async getCachedActiveWindow(): Promise<ActiveWindowInfo | null> {
     this.executedOperations.push("getCachedActiveWindow");
     this.cachedActiveWindowCallCount++;
     return this.configuredCachedActiveWindow;
@@ -121,7 +122,7 @@ export class FakeWindow implements Window {
     forceRefresh: boolean = false,
     _perf?: PerformanceTracker,
     options: GetActiveOptions = {},
-  ): Promise<ActiveWindow> {
+  ): Promise<ActiveWindowInfo> {
     this.executedOperations.push("getActive");
     this.getActiveCallCount++;
     this.getActiveForceRefreshes.push(forceRefresh);
@@ -137,15 +138,28 @@ export class FakeWindow implements Window {
     if (!this.configuredActiveWindow) {
       throw new Error("No active window configured");
     }
+    // Like the real Window, a fresh read replaces the cache unless the caller opts out.
+    if (options.cacheResult !== false) {
+      this.configuredCachedActiveWindow = this.configuredActiveWindow;
+    }
     return this.configuredActiveWindow;
   }
 
   async getActiveHash(): Promise<string> {
     this.executedOperations.push("getActiveHash");
-    return this.configuredActiveHash;
+    // An explicitly configured hash wins; otherwise derive it from the shown window like the
+    // real Window (a hash of a forced-refresh read, which also refreshes the cache).
+    if (this.configuredActiveHash !== null) {
+      return this.configuredActiveHash;
+    }
+    if (!this.configuredActiveWindow) {
+      return "fake-active-hash";
+    }
+    this.configuredCachedActiveWindow = this.configuredActiveWindow;
+    return NodeCryptoService.generateCacheKey(JSON.stringify(this.configuredActiveWindow));
   }
 
-  async setCachedActiveWindow(activeWindow: ActiveWindow): Promise<void> {
+  async setCachedActiveWindow(activeWindow: ActiveWindowInfo): Promise<void> {
     this.executedOperations.push("setCachedActiveWindow");
     this.configuredCachedActiveWindow = activeWindow;
   }

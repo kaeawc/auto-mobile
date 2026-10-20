@@ -1,3 +1,5 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
@@ -25,16 +27,16 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   const service = new FakeCtrlProxy(timer);
   service.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
-  spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-    isAvailable: async () => true,
-  } as unknown as AndroidCtrlProxyManager);
+  spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+    FakeCtrlProxyManager.withAvailability(true),
+  );
   const command = new DragAndDrop(
     { name: "Fake Android", deviceId: "fake-android", platform: "android" },
     new FakeAdbExecutor(),
     timer,
     { hierarchyCapture: new FakeHierarchyCapture(() => viewHierarchy) },
   );
-  command.observedInteraction = (action) => action(observationOf(viewHierarchy));
+  command.observedInteraction = runBlockWith(observationOf(viewHierarchy));
   return { command, service };
 }
 

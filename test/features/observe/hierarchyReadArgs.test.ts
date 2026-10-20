@@ -42,9 +42,10 @@ describe("resolveViewHierarchyReadArgs", () => {
 });
 
 describe("resolveAccessibilityHierarchyArgs", () => {
-  test("distinguishes a performance tracker from the options form", () => {
+  test("resolves the request into read values and read options", () => {
     const perf = new NoOpPerformanceTracker();
-    expect(resolveAccessibilityHierarchyArgs(perf, false, 0, true).perf).toBe(perf);
+    expect(resolveAccessibilityHierarchyArgs({ perf }).perf).toBe(perf);
+    expect(resolveAccessibilityHierarchyArgs().readOptions).toBeUndefined();
     expect(resolveAccessibilityHierarchyArgs({ disableAllFiltering: true, timeoutMs: 7 })).toEqual({
       perf: undefined,
       skipWaitForFresh: undefined,

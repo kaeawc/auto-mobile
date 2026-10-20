@@ -1,0 +1,43 @@
+{
+  "id": "carousel",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "carousel",
+    "variant": "multiBrowse",
+    "itemWidth": 186,
+    "itemSpacing": 8,
+    "children": [
+      {
+        "type": "card",
+        "children": [
+          {
+            "type": "text",
+            "text": "One"
+          }
+        ]
+      },
+      {
+        "type": "card",
+        "children": [
+          {
+            "type": "text",
+            "text": "Two"
+          }
+        ]
+      },
+      {
+        "type": "card",
+        "children": [
+          {
+            "type": "text",
+            "text": "Three"
+          }
+        ]
+      }
+    ]
+  }
+}

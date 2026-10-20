@@ -149,6 +149,41 @@ private struct PrototypeSubstitutionGuard {
         if case let .object(part)? = fields["openWhen"] {
             try field(part, "key", path: "\(path).openWhen", scope: scope)
         }
+        if case let .object(refresh)? = fields["refresh"] {
+            try field(refresh, "stateKey", path: "\(path).refresh", scope: scope)
+            try actions(refresh, path: "\(path).refresh", scope: scope, list: "onRefresh")
+        }
+    }
+
+    private mutating func optionFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+        if case let .array(options)? = fields["options"] {
+            for (index, option) in options.enumerated() {
+                if case let .object(part) = option {
+                    try field(part, "label", path: "\(path).options[\(index)]", text: true, scope: scope)
+                }
+            }
+        }
+    }
+
+    private mutating func swipeFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+        if case let .object(swipe)? = fields["swipeActions"] {
+            for side in ["start", "end"] {
+                guard case let .array(entries)? = swipe[side] else { continue }
+                for (index, entry) in entries.enumerated() {
+                    try part(entry, path: "\(path).swipeActions.\(side)[\(index)]", scope: scope)
+                }
+            }
+        }
+    }
+
+    private mutating func appBarFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+        try field(fields, "title", path: path, text: true, scope: scope)
+        try part(fields["navigationIcon"], path: "\(path).navigationIcon", scope: scope)
+        if case let .array(parts)? = fields["actions"] {
+            for (index, value) in parts.enumerated() {
+                try part(value, path: "\(path).actions[\(index)]", scope: scope)
+            }
+        }
     }
 
     private mutating func componentFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
@@ -156,21 +191,14 @@ private struct PrototypeSubstitutionGuard {
         case "text": try field(fields, "text", path: path, text: true, scope: scope)
         case "button", "fab": try field(fields, "label", path: path, text: true, scope: scope)
         case "segmentedButton":
-            if case let .array(options)? = fields["options"] {
-                for (index, option) in options.enumerated() {
-                    if case let .object(part) = option {
-                        try field(part, "label", path: "\(path).options[\(index)]", text: true, scope: scope)
-                    }
-                }
-            }
+            try optionFields(fields, path: path, scope: scope)
+        case "textField":
+            try part(fields["trailingIcon"], path: "\(path).trailingIcon", scope: scope)
+            try actions(fields, path: path, scope: scope, list: "onSubmit")
+        case "row", "listItem":
+            try swipeFields(fields, path: path, scope: scope)
         case "topAppBar":
-            try field(fields, "title", path: path, text: true, scope: scope)
-            try part(fields["navigationIcon"], path: "\(path).navigationIcon", scope: scope)
-            if case let .array(parts)? = fields["actions"] {
-                for (index, value) in parts.enumerated() {
-                    try part(value, path: "\(path).actions[\(index)]", scope: scope)
-                }
-            }
+            try appBarFields(fields, path: path, scope: scope)
         case "dialog":
             try field(fields, "title", path: path, text: true, scope: scope)
             try field(fields, "text", path: path, text: true, scope: scope)
@@ -189,20 +217,42 @@ private struct PrototypeSubstitutionGuard {
         try actions(fields, path: path, scope: scope)
     }
 
-    private mutating func actions(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
-        guard case let .array(entries)? = fields["onTap"] else { return }
-        for (index, entry) in entries.enumerated() {
-            guard case let .object(action) = entry else { continue }
-            let actionPath = "\(path).onTap[\(index)]"
-            switch action["type"]?.stringValue {
-            case "setState":
-                try field(action, "key", path: actionPath, scope: scope)
-                try field(action, "value", path: actionPath, scope: scope)
-            case "emit": try field(action, "name", path: actionPath, scope: scope)
-            case "toggle", "increment", "decrement":
-                try field(action, "key", path: actionPath, scope: scope)
-            default: break
+    /// Every action list a node runs: a tap, a long press or a double tap binds the same way. A
+    /// caller may name one list instead (`refresh.onRefresh`).
+    private mutating func actions(
+        _ fields: [String: JSONValue], path: String, scope: Scope?, list: String? = nil
+    )
+        throws
+    {
+        for name in list.map({ [$0] }) ?? ["onTap", "onLongPress", "onDoubleTap"] {
+            guard case let .array(entries)? = fields[name] else { continue }
+            for (index, entry) in entries.enumerated() {
+                guard case let .object(action) = entry else { continue }
+                try actionFields(action, path: "\(path).\(name)[\(index)]", scope: scope)
             }
+        }
+    }
+
+    private mutating func actionFields(_ action: [String: JSONValue], path: String, scope: Scope?) throws {
+        switch action["type"]?.stringValue {
+        case "setState":
+            try field(action, "key", path: path, scope: scope)
+            try field(action, "value", path: path, scope: scope)
+        case "emit": try field(action, "name", path: path, scope: scope)
+        case "setData", "appendData", "removeData": try field(action, "path", path: path, scope: scope)
+        case "request":
+            try field(action, "url", path: path, text: true, scope: scope)
+            try field(action, "statusKey", path: path, scope: scope)
+            for list in ["onSuccess", "onError"] {
+                guard case let .array(entries)? = action[list] else { continue }
+                for (index, entry) in entries.enumerated() {
+                    guard case let .object(nested) = entry else { continue }
+                    try actionFields(nested, path: "\(path).\(list)[\(index)]", scope: scope)
+                }
+            }
+        case "toggle", "increment", "decrement":
+            try field(action, "key", path: path, scope: scope)
+        default: break
         }
     }
 

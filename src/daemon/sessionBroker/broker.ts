@@ -1,3 +1,4 @@
+import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
@@ -8,10 +9,13 @@ import {
 } from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
-import type {
-  SessionBrokerFailure,
-  SessionBrokerReleaseResult,
-  SessionBrokerResult,
+import {
+  SESSION_OWNER_EXITED_CODE,
+  SESSION_OWNER_EXITED_MESSAGE,
+  type SessionBrokerFailure,
+  type SessionBrokerReleaseReason,
+  type SessionBrokerReleaseResult,
+  type SessionBrokerResult,
 } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -24,6 +28,9 @@ import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./req
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import {
   destructionTicket,
+  EXPORT_RETENTION_MS,
+  SessionExportIdentityMismatchError,
+  type BrokerExportIdentity,
   type BrokerAdmission,
   type BrokerAdmissionInput,
   type BrokerRequestRecord,
@@ -44,7 +51,11 @@ export interface SessionBrokerOptions {
   reuseCleanDevices?: boolean;
   /** How long a terminal receipt keeps answering replay; defaults to {@link RECEIPT_RETENTION_MS}. */
   receiptRetentionMs?: number;
+  /** Maximum pin age for an unacknowledged export. */
+  exportRetentionMs?: number;
 }
+
+export { EXPORT_RETENTION_MS } from "./store";
 
 /**
  * Terminal receipts answer exact replay for 30 days after they become terminal. The protocol
@@ -84,21 +95,6 @@ function failedResult(config: SessionConfig, failure: SessionBrokerFailure): Ses
   };
 }
 
-/**
- * Reading or assembling the receipt failed after activation committed. The active grant stays
- * intact and is not routed through acquisition rollback; the caller receives an RPC error and a
- * replay of the same request identity reads the committed receipt.
- */
-class CommittedReceiptReadError extends ActionableError {
-  constructor(requestId: string, cause: unknown) {
-    super(
-      `Session request ${requestId} committed its session, but its receipt could not be read ` +
-        `(${errorMessage(cause)}); replay the same request ID to recover it`,
-      { cause },
-    );
-  }
-}
-
 function sameProcess(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
   return (
     left.daemonId === right.daemonId &&
@@ -130,13 +126,14 @@ export class SessionBroker {
     config: SessionConfig,
     livenessOwnerToken: string,
     signal?: AbortSignal,
+    exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
     if (this.stopping) {
       return Promise.reject(new ActionableError("Session broker is stopping"));
     }
     const controller = new AbortController();
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-    const pending = this.prepareOnce(config, livenessOwnerToken, ownedSignal);
+    const pending = this.prepareOnce(config, livenessOwnerToken, ownedSignal, exportIdentity);
     this.preparationOwners.set(pending, { controller, requestId: config.requestId });
     void pending.then(
       () => this.preparationOwners.delete(pending),
@@ -149,6 +146,7 @@ export class SessionBroker {
     config: SessionConfig,
     livenessOwnerToken: string,
     signal: AbortSignal,
+    exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
     let admitted = false;
     const fingerprint = sessionRequestFingerprint(config, livenessOwnerToken);
@@ -156,9 +154,15 @@ export class SessionBroker {
     try {
       const previous = await this.options.store.getRequest(config.requestId);
       if (previous) {
-        return this.replay(previous, config, fingerprint, livenessOwnerToken, signal);
+        return this.replay(previous, {
+          config,
+          fingerprint,
+          livenessOwnerToken,
+          signal,
+          exportIdentity,
+        });
       }
-      const input = await this.admissionInput(config, fingerprint, signal);
+      const input = await this.admissionInput(config, fingerprint, signal, exportIdentity);
       const admission = await this.options.store.admit(input);
       if (admission.kind === "existing" || admission.kind === "refused") {
         return this.resultUnlessAborted(admission.request, signal);
@@ -166,6 +170,9 @@ export class SessionBroker {
       admitted = true;
       return await this.prepareAdmission(admission, input, config, livenessOwnerToken, signal);
     } catch (error) {
+      if (error instanceof SessionExportIdentityMismatchError) {
+        throw error;
+      }
       if (error instanceof CommittedReceiptReadError) {
         logger.warn(error.message, error.cause);
         throw error;
@@ -180,6 +187,7 @@ export class SessionBroker {
         fingerprint,
         admitted,
         error,
+        exportIdentity,
       );
     } finally {
       this.finishPreparation(config.requestId);
@@ -192,6 +200,7 @@ export class SessionBroker {
     fingerprint: string,
     admitted: boolean,
     error: unknown,
+    exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
     const failure = failureFor(error);
     if (admitted) {
@@ -216,7 +225,14 @@ export class SessionBroker {
         ? result
         : {
             ...result,
-            failure: { ...failure, retryable: failure.retryable && !result.cleanupPending },
+            failure: {
+              ...failure,
+              retryable: failure.retryable && !result.cleanupPending,
+              // The stored receipt owns the retry hint, so the first reply matches every replay.
+              ...(result.failure?.retryRequires
+                ? { retryRequires: result.failure.retryRequires }
+                : {}),
+            },
           };
     }
     // Catalog/default resolution can fail before admission. Retain that terminal identity too:
@@ -228,10 +244,23 @@ export class SessionBroker {
       independentlyCommitted?.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
       this.consumerOwns(independentlyCommitted, livenessOwnerToken)
     ) {
+      if (exportIdentity) {
+        await this.options.store.linkRequestExport(
+          config.requestId,
+          independentlyCommitted.fingerprint,
+          exportIdentity,
+        );
+      }
       return this.result(independentlyCommitted);
     }
     const receipt = await this.options.store.recordPreAdmissionFailure(
-      { requestId: config.requestId, fingerprint, parameters: config, owner: this.options.owner },
+      {
+        requestId: config.requestId,
+        fingerprint,
+        parameters: config,
+        owner: this.options.owner,
+        export: exportIdentity,
+      },
       failure,
     );
     return this.result(receipt);
@@ -247,13 +276,17 @@ export class SessionBroker {
   }
 
   /** Receipt replay does not depend on today's runtime catalog or default configuration. */
-  private replay(
+  private async replay(
     previous: BrokerRequestRecord,
-    config: SessionConfig,
-    fingerprint: string,
-    livenessOwnerToken: string,
-    signal: AbortSignal,
-  ): Promise<SessionBrokerResult> | SessionBrokerResult {
+    context: {
+      config: SessionConfig;
+      fingerprint: string;
+      livenessOwnerToken: string;
+      signal: AbortSignal;
+      exportIdentity?: BrokerExportIdentity;
+    },
+  ): Promise<SessionBrokerResult> {
+    const { config, fingerprint, livenessOwnerToken, signal, exportIdentity } = context;
     const ownedAbandonment =
       previous.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
       this.consumerOwns(previous, livenessOwnerToken);
@@ -267,6 +300,13 @@ export class SessionBroker {
         ),
       );
     }
+    if (exportIdentity) {
+      await this.options.store.linkRequestExport(
+        previous.requestId,
+        previous.fingerprint,
+        exportIdentity,
+      );
+    }
     return this.resultUnlessAborted(previous, signal);
   }
 
@@ -274,6 +314,7 @@ export class SessionBroker {
     config: SessionConfig,
     fingerprint: string,
     signal: AbortSignal,
+    exportIdentity?: BrokerExportIdentity,
   ): Promise<BrokerAdmissionInput> {
     signal.throwIfAborted();
     const catalog = await this.options.catalog(config.device.platform, signal);
@@ -284,6 +325,7 @@ export class SessionBroker {
       fingerprint,
       parameters: config,
       owner: this.options.owner,
+      export: exportIdentity,
       limits: this.options.limits,
       matches: (profile) => matchSessionDevice(requirement, poolProfile(profile)).kind === "match",
       resolveCreation: () => unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog)),
@@ -331,15 +373,28 @@ export class SessionBroker {
     // own liveness policy releases it if the caller never returns. Abandonment is separate and
     // durable, so an aborted caller re-reads the receipt rather than reporting a stale one.
     try {
-      return await this.result(
+      const result = await this.result(
         signal.aborted
           ? ((await this.options.store.getRequest(config.requestId)) ?? request)
           : request,
       );
+      return result.outcome === "ready" ? await this.rereadIfSuperseded(result, config) : result;
     } catch (error) {
       // Only the reply is uncertain (#12771): the committed grant is not a preparation failure.
       throw new CommittedReceiptReadError(config.requestId, error);
     }
+  }
+
+  /**
+   * An abandonment can commit while the ready receipt is being assembled (#12762). Reread the
+   * durable receipt so a ready reply never outlives the grant it describes.
+   */
+  private async rereadIfSuperseded(
+    result: SessionBrokerResult,
+    config: SessionConfig,
+  ): Promise<SessionBrokerResult> {
+    const latest = await this.options.store.getRequest(config.requestId);
+    return latest && latest.state !== "active" ? this.result(latest) : result;
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {
@@ -397,6 +452,46 @@ export class SessionBroker {
     return request?.state === "active" && sameProcess(request.owner, this.options.owner);
   }
 
+  async getExport(prepareId: string, requestDigest: string, ownerToken: string) {
+    const found = await this.authorizedExport(prepareId, requestDigest, ownerToken);
+    if (!found) {
+      return undefined;
+    }
+    return {
+      contractVersion: 1 as const,
+      prepareId,
+      requestDigest,
+      acknowledged: found.record.acknowledgedAtMs !== null,
+      result: await this.result(found.request),
+    };
+  }
+
+  async acknowledgeExport(
+    prepareId: string,
+    requestDigest: string,
+    ownerToken: string,
+  ): Promise<{ prepareId: string; outcome: "acknowledged" | "unknown_export" }> {
+    const found = await this.authorizedExport(prepareId, requestDigest, ownerToken);
+    const record = found && (await this.options.store.acknowledgeExport(prepareId));
+    return { prepareId, outcome: record ? "acknowledged" : "unknown_export" };
+  }
+
+  private async authorizedExport(prepareId: string, requestDigest: string, ownerToken: string) {
+    const record = await this.options.store.getExport(prepareId);
+    if (!record) {
+      return undefined;
+    }
+    const request = await this.options.store.getRequest(record.requestId);
+    if (
+      record.requestDigest !== requestDigest ||
+      !request ||
+      !this.consumerOwns(request, ownerToken)
+    ) {
+      throw new SessionExportIdentityMismatchError();
+    }
+    return { record, request };
+  }
+
   private assertConsumerOwner(request: BrokerRequestRecord, ownerToken: string): void {
     if (!this.consumerOwns(request, ownerToken)) {
       throw new ActionableError("Session request belongs to another liveness owner");
@@ -410,12 +505,30 @@ export class SessionBroker {
     );
   }
 
-  release(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
+  /**
+   * Ends a session. An ordinary release answers once cleanup settles and records `released`. An
+   * owner-exit release (#12791) is not the client's release: it terminally records
+   * `session_owner_exited` and answers as soon as that receipt is committed, while the session
+   * drain and device destruction continue as tracked release work ({@link joinReleases}).
+   */
+  release(
+    sessionUuid: string,
+    reason?: SessionBrokerReleaseReason,
+  ): Promise<SessionBrokerReleaseResult> {
     const previous = this.releases.get(sessionUuid);
     if (previous) {
       return previous;
     }
-    const pending = this.releaseOnce(sessionUuid);
+    if (reason === SESSION_OWNER_EXITED_CODE) {
+      return this.releaseAfterOwnerExit(sessionUuid);
+    }
+    return this.trackRelease(sessionUuid, this.releaseOnce(sessionUuid));
+  }
+
+  private trackRelease(
+    sessionUuid: string,
+    pending: Promise<SessionBrokerReleaseResult>,
+  ): Promise<SessionBrokerReleaseResult> {
     this.releases.set(sessionUuid, pending);
     // Both handlers terminate; callers still observe the original result/rejection.
     void pending.then(
@@ -423,6 +536,67 @@ export class SessionBroker {
       () => this.releases.delete(sessionUuid),
     );
     return pending;
+  }
+
+  private releaseAfterOwnerExit(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
+    const committed = this.commitOwnerExit(sessionUuid);
+    // Registered synchronously, so a concurrent release joins this cleanup instead of racing it.
+    // trackRelease settles its own rejection; the caller observes the committed answer below.
+    void this.trackRelease(
+      sessionUuid,
+      committed.then((exit) =>
+        exit
+          ? this.finishOwnerExit(sessionUuid, exit)
+          : { sessionUuid, outcome: "unknown_session" },
+      ),
+    );
+    return committed.then(async (exit) =>
+      exit
+        ? this.releaseStatus(exit.request, sessionUuid)
+        : { sessionUuid, outcome: "unknown_session" },
+    );
+  }
+
+  /** Terminal first: the receipt says the owner died even if the native drain never settles. */
+  private async commitOwnerExit(
+    sessionUuid: string,
+  ): Promise<{ request: BrokerRequestRecord; ticket?: DestructionTicket } | undefined> {
+    const request = await this.options.store.getSession(sessionUuid);
+    if (!request) {
+      return undefined;
+    }
+    const ticket = await this.options.store.fail(
+      request.requestId,
+      this.options.owner,
+      SESSION_OWNER_EXITED_MESSAGE,
+      SESSION_OWNER_EXITED_CODE,
+    );
+    logger.info(
+      `Session ${sessionUuid} lost its execution owner; request ${request.requestId} is ` +
+        `terminal (${SESSION_OWNER_EXITED_CODE})`,
+    );
+    return {
+      request: (await this.options.store.getRequest(request.requestId)) ?? request,
+      ...(ticket ? { ticket } : {}),
+    };
+  }
+
+  private async finishOwnerExit(
+    sessionUuid: string,
+    exit: { request: BrokerRequestRecord; ticket?: DestructionTicket },
+  ): Promise<SessionBrokerReleaseResult> {
+    try {
+      await this.options.devices.release(sessionUuid);
+    } catch (error) {
+      // The destroying resource and native journal keep ownership; recovery retries cleanup.
+      logger.warn(
+        `Session ${sessionUuid} drain after owner exit remains pending: ${errorMessage(error)}`,
+      );
+    }
+    if (exit.ticket) {
+      await this.tryCleanup(exit.ticket);
+    }
+    return this.releaseStatus(exit.request, sessionUuid);
   }
 
   /** Daemon shutdown joins callers; unfinished native work retains journal ownership. */
@@ -553,6 +727,7 @@ export class SessionBroker {
     return this.options.store.pruneTerminalRequests(
       this.options.receiptRetentionMs ?? RECEIPT_RETENTION_MS,
       RECEIPT_PRUNE_BATCH,
+      this.options.exportRetentionMs ?? EXPORT_RETENTION_MS,
     );
   }
 

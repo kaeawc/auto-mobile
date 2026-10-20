@@ -1,7 +1,8 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
+import { afterAll, afterEach, describe, expect, spyOn } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -9,8 +10,9 @@ import {
   storeSetupTiming,
   createToolExecutionContext,
 } from "../../src/server/ToolExecutionContext";
-import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
+import type { DeviceReadinessProxyDriver } from "../../src/server/deviceReadinessProxyProvider";
 import {
   installNoOpReadinessDriver,
   setDeviceReadinessProxyDriverProviderForTesting,
@@ -32,6 +34,7 @@ import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { DeviceSession } from "../../src/db/types";
 import type { ProxySetupResult } from "../../src/utils/interfaces/ProxyManager";
 import { logger } from "../../src/utils/logger";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
 
 /** Drain pending microtasks without yielding to timers or I/O. */
 const drainMicrotasks = async (): Promise<void> => {
@@ -63,8 +66,43 @@ describe("ToolExecutionContext", () => {
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeTimer: FakeTimer;
   let fakeDeviceManager: FakeDeviceManager;
-  const originalGetInstance = AndroidCtrlProxyManager.getInstance;
-  const originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
+  // Per-test readiness stubs, published through the readiness-driver provider seam
+  // (`setDeviceReadinessProxyDriverProviderForTesting`) instead of reassigning the
+  // `AndroidCtrlProxyManager` / `AndroidCtrlProxyClient` `getInstance` statics.
+  type ManagerStub = Pick<DeviceReadinessProxyDriver, "resetSetupState" | "setup"> &
+    Partial<Pick<DeviceReadinessProxyDriver, "isInstalled" | "isVersionCompatible">>;
+  type ClientStub = Pick<
+    DeviceReadinessProxyDriver,
+    "waitForConnection" | "resetConnectionBudget"
+  > & {
+    close?: () => Promise<void>;
+  };
+  let managerStub: ManagerStub | undefined;
+  let clientStub: ClientStub | undefined;
+  let onDriverRequested: ((device: BootedDevice) => void) | undefined;
+  const publishDriver = () => {
+    setDeviceReadinessProxyDriverProviderForTesting((device) => {
+      onDriverRequested?.(device);
+      return {
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        ...managerStub,
+        ...clientStub,
+        resetSetupState: managerStub?.resetSetupState ?? (() => {}),
+        setup: managerStub?.setup ?? (async () => ({ success: true, message: "ok" })),
+      };
+    });
+  };
+  const stubManager = (stub: ManagerStub) => {
+    managerStub = stub;
+    publishDriver();
+  };
+  const stubClient = (stub: ClientStub) => {
+    clientStub = stub;
+    publishDriver();
+  };
   const sessionOptions = { keepScreenAwake: false };
   // The auto-advancing FakeTimer runs the readiness waits of a setup far past the default 2-minute
   // idle window; tests that race setups give their session a window those waits fit inside.
@@ -94,11 +132,11 @@ describe("ToolExecutionContext", () => {
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
 
     // These tests exercise the real `ensureAccessibilityServiceReady` path and
-    // stub setup via the `AndroidCtrlProxyManager`/`AndroidCtrlProxyClient`
-    // `getInstance` statics per test. Restore the real readiness driver (which
-    // routes through those statics) so the overrides take effect; the shared
-    // preload's no-op driver (#6227) is re-installed in `afterEach` so the rest
-    // of the process stays neutralized.
+    // stub setup per test through `stubManager`/`stubClient`, which publish a
+    // readiness driver via the provider seam. Restore the real provider here so
+    // an unstubbed test still runs the real path; the shared preload's no-op
+    // driver (#6227) is re-installed in `afterEach` so the rest of the process
+    // stays neutralized.
     setDeviceReadinessProxyDriverProviderForTesting(null);
 
     // Reset AndroidCtrlProxyClient instances for clean test state
@@ -107,8 +145,9 @@ describe("ToolExecutionContext", () => {
 
   function cleanup() {
     sessionManager?.stopCleanupTimer();
-    AndroidCtrlProxyManager.getInstance = originalGetInstance;
-    AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
+    managerStub = undefined;
+    clientStub = undefined;
+    onDriverRequested = undefined;
     AndroidCtrlProxyClient.resetInstances();
     installNoOpReadinessDriver();
   }
@@ -119,7 +158,63 @@ describe("ToolExecutionContext", () => {
   };
   const test = warmedTests(reset);
 
-  test("setup timing belongs to each session on a shared device", async () => {
+  arranged(
+    "the real readiness provider forwards the session device to the proxy manager and client",
+    async () => {
+      // `setup()` restored the real provider, so this goes through its own `getInstance(device)`
+      // forwarding. Prototype-only instances keep the real manager/client (which shell out to adb)
+      // from being constructed; only the methods the readiness path calls are given behaviour.
+      const calls: string[] = [];
+      const manager = Object.assign(Object.create(AndroidCtrlProxyManager.prototype), {
+        resetSetupState: () => calls.push("resetSetupState"),
+        rebindIfUnhealthy: async () => {
+          calls.push("rebindIfUnhealthy");
+          return false;
+        },
+        setup: async () => {
+          calls.push("setup");
+          return { success: true, message: "ok" };
+        },
+      });
+      const client = Object.assign(Object.create(AndroidCtrlProxyClient.prototype), {
+        waitForConnection: async () => {
+          calls.push("waitForConnection");
+          return true;
+        },
+        resetConnectionBudget: () => calls.push("resetConnectionBudget"),
+        verifyServiceReady: async () => {
+          calls.push("verifyServiceReady");
+          return true;
+        },
+      });
+      const managerLookup = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(manager);
+      const clientLookup = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+      try {
+        await createToolExecutionContext(
+          "real-provider",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+        );
+        expect(calls).toEqual(
+          expect.arrayContaining(["resetSetupState", "setup", "waitForConnection"]),
+        );
+        expect(managerLookup.mock.calls.length).toBeGreaterThan(0);
+        expect(managerLookup.mock.calls.map(([device]) => device.deviceId)).toEqual(
+          managerLookup.mock.calls.map(() => "device-1"),
+        );
+        expect(clientLookup.mock.calls.length).toBeGreaterThan(0);
+        expect(clientLookup.mock.calls.map(([device]) => device.deviceId)).toEqual(
+          clientLookup.mock.calls.map(() => "device-1"),
+        );
+      } finally {
+        managerLookup.mockRestore();
+        clientLookup.mockRestore();
+      }
+    },
+  );
+
+  arranged("setup timing belongs to each session on a shared device", async () => {
     await sessionManager.createSession("timing-a", "device-1", "android");
     await sessionManager.createSession("timing-b", "device-1", "android");
     const timingA = [{ name: "setup-a", durationMs: 5 }];
@@ -136,7 +231,7 @@ describe("ToolExecutionContext", () => {
     expect(consumeSetupTiming("device-1")).toBeNull();
   });
 
-  test("setup timing falls back for direct mode and unassigned sessions", async () => {
+  arranged("setup timing falls back for direct mode and unassigned sessions", async () => {
     const directTiming = [{ name: "direct", durationMs: 2 }];
     storeSetupTiming("timing-direct-device", directTiming, "direct-session", undefined);
     expect(consumeSetupTiming("timing-direct-device", "direct-session", undefined)).toBe(
@@ -153,7 +248,7 @@ describe("ToolExecutionContext", () => {
     expect(consumeSetupTiming("device-1", "timing-unassigned", sessionManager)).toBeNull();
   });
 
-  test("fallback setup timing is isolated and evicted oldest first at its cap", async () => {
+  arranged("fallback setup timing is isolated and evicted oldest first at its cap", async () => {
     await sessionManager.createSession("timing-resolved", "device-1", "android");
     await sessionManager.createSession("timing-unassigned-owner", "another-device", "android");
     const fallbackTiming = [{ name: "fallback", durationMs: 1 }];
@@ -172,7 +267,7 @@ describe("ToolExecutionContext", () => {
     expect(consumeSetupTiming("timing-cap-256")).not.toBeNull();
   });
 
-  test("released sessions discard pending setup timing, including late writes", async () => {
+  arranged("released sessions discard pending setup timing, including late writes", async () => {
     await sessionManager.createSession("timing-release", "device-1", "android");
     const timing = [{ name: "setup", durationMs: 5 }];
     storeSetupTiming("device-1", timing, "timing-release", sessionManager);
@@ -185,7 +280,7 @@ describe("ToolExecutionContext", () => {
     expect(consumeSetupTiming("device-1")).toBeNull();
   });
 
-  test("expired sessions discard pending setup timing", async () => {
+  arranged("expired sessions discard pending setup timing", async () => {
     const session = await sessionManager.createSession("timing-expiry", "device-1", "android");
     storeSetupTiming(
       "device-1",
@@ -203,30 +298,52 @@ describe("ToolExecutionContext", () => {
     expect(consumeSetupTiming("device-1")).toBeNull();
   });
 
-  beforeEach(reset);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await reset();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each(table)(
+        name,
+        async (row: T) => {
+          await reset();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
   afterEach(cleanup);
   afterAll(cleanup);
 
-  test("should run accessibility setup when creating a new session", async () => {
+  arranged("should run accessibility setup when creating a new session", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
 
     const clientCallArgs: unknown[] = [];
-    AndroidCtrlProxyClient.getInstance = ((device: unknown) => {
+    onDriverRequested = (device) => {
       clientCallArgs.push(device);
-      return {
-        waitForConnection: async () => true,
-        resetConnectionBudget: () => {},
-        close: async () => {},
-      };
-    }) as any;
+    };
+    stubClient({
+      waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
+      close: async () => {},
+    });
 
     const context = await createToolExecutionContext(
       "session-1",
@@ -249,35 +366,37 @@ describe("ToolExecutionContext", () => {
   // waitForConnection(), so failures recorded earlier in the session (#7537's
   // background reconnect, or an earlier failed readiness attempt) don't
   // silently gate the dial that would otherwise succeed.
-  test("resets the connection budget after a successful setup, before waitForConnection", async () => {
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "resets the connection budget after a successful setup, before waitForConnection",
+    async () => {
+      stubManager({
         resetSetupState: () => {},
         setup: async () => ({ success: true, message: "ok" }),
-      }) as any;
+      });
 
-    const calls: string[] = [];
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      resetConnectionBudget: () => {
-        calls.push("resetConnectionBudget");
-      },
-      waitForConnection: async () => {
-        calls.push("waitForConnection");
-        return true;
-      },
-      close: async () => {},
-    })) as any;
+      const calls: string[] = [];
+      stubClient({
+        resetConnectionBudget: () => {
+          calls.push("resetConnectionBudget");
+        },
+        waitForConnection: async () => {
+          calls.push("waitForConnection");
+          return true;
+        },
+        close: async () => {},
+      });
 
-    const context = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
-      sessionOptions,
-    );
+      const context = await createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
 
-    expect(context.deviceId).toBe("device-1");
-    expect(calls).toEqual(["resetConnectionBudget", "waitForConnection"]);
-  });
+      expect(context.deviceId).toBe("device-1");
+      expect(calls).toEqual(["resetConnectionBudget", "waitForConnection"]);
+    },
+  );
 
   // Issue #7541: a failed `waitForConnection()` used to throw straight out of
   // the retry loop, so the second of the two declared attempts was
@@ -288,7 +407,7 @@ describe("ToolExecutionContext", () => {
   // `tryRebindUnhealthyAccessibilityService` + a fresh `setup()`, so the
   // second attempt is a real health-check-and-rebind rather than a bare
   // repeat of the first.
-  test.each(["new", "persisted"])(
+  arrangedEach(["new", "persisted"])(
     "recovers a failed proxy connection within one call for a %s session (#7541)",
     async (entrypoint) => {
       let connected = false;
@@ -332,64 +451,75 @@ describe("ToolExecutionContext", () => {
   // Issue #7541: the retry budget is bounded — a connection that never comes
   // up must still fail fast rather than retry forever, and must not record
   // `automationReady` for a device that was never actually reachable.
-  test("throws after two consecutive failed connection attempts and does not record automationReady (#7541)", async () => {
-    let setupCalls = 0;
-    setDeviceReadinessProxyDriverProviderForTesting(() => ({
-      resetSetupState: () => {},
-      setup: async () => {
-        setupCalls++;
-        return { success: true, message: "ok" };
-      },
-      waitForConnection: async () => false,
-      isInstalled: async () => true,
-      isVersionCompatible: async () => true,
-    }));
-    await expect(
-      createToolExecutionContext(
-        "connection-never-recovers",
+  arranged(
+    "throws after two consecutive failed connection attempts and does not record automationReady (#7541)",
+    async () => {
+      let setupCalls = 0;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls++;
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => false,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      await expect(
+        createToolExecutionContext(
+          "connection-never-recovers",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+        ),
+      ).rejects.toThrow("CtrlProxy connection");
+      expect(sessionManager.getDeviceReadiness("connection-never-recovers")).not.toBe(
+        "automationReady",
+      );
+      expect(setupCalls).toBe(2);
+    },
+  );
+
+  arranged(
+    "health-probes an upgraded session and restarts an unresponsive proxy once",
+    async () => {
+      const calls: string[] = [];
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        rebindIfUnhealthy: async () => {
+          calls.push("rebind");
+          return false;
+        },
+        setup: async () => ({ success: true, message: "ok" }),
+        waitForConnection: async () => {
+          calls.push("connect");
+          return true;
+        },
+        verifyServiceReady: async () => {
+          calls.push("probe");
+          return calls.filter((call) => call === "probe").length === 2;
+        },
+        forceRestartProcess: async () => {
+          calls.push("restart");
+          return true;
+        },
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      await sessionManager.createSession("upgrade-health", "device-1", "android");
+      sessionManager.setDeviceReadiness("upgrade-health", "booted");
+      await createToolExecutionContext(
+        "upgrade-health",
         sessionManager,
         devicePool,
         sessionOptions,
-      ),
-    ).rejects.toThrow("CtrlProxy connection");
-    expect(sessionManager.getDeviceReadiness("connection-never-recovers")).not.toBe(
-      "automationReady",
-    );
-    expect(setupCalls).toBe(2);
-  });
+      );
+      expect(sessionManager.getDeviceReadiness("upgrade-health")).toBe("automationReady");
+      expect(calls).toEqual(["rebind", "connect", "probe", "restart", "probe"]);
+    },
+  );
 
-  test("health-probes an upgraded session and restarts an unresponsive proxy once", async () => {
-    const calls: string[] = [];
-    setDeviceReadinessProxyDriverProviderForTesting(() => ({
-      resetSetupState: () => {},
-      rebindIfUnhealthy: async () => {
-        calls.push("rebind");
-        return false;
-      },
-      setup: async () => ({ success: true, message: "ok" }),
-      waitForConnection: async () => {
-        calls.push("connect");
-        return true;
-      },
-      verifyServiceReady: async () => {
-        calls.push("probe");
-        return calls.filter((call) => call === "probe").length === 2;
-      },
-      forceRestartProcess: async () => {
-        calls.push("restart");
-        return true;
-      },
-      isInstalled: async () => true,
-      isVersionCompatible: async () => true,
-    }));
-    await sessionManager.createSession("upgrade-health", "device-1", "android");
-    sessionManager.setDeviceReadiness("upgrade-health", "booted");
-    await createToolExecutionContext("upgrade-health", sessionManager, devicePool, sessionOptions);
-    expect(sessionManager.getDeviceReadiness("upgrade-health")).toBe("automationReady");
-    expect(calls).toEqual(["rebind", "connect", "probe", "restart", "probe"]);
-  });
-
-  test("an upgraded session accepts a driver without optional health primitives", async () => {
+  arranged("an upgraded session accepts a driver without optional health primitives", async () => {
     const calls: string[] = [];
     setDeviceReadinessProxyDriverProviderForTesting(() => ({
       resetSetupState: () => {},
@@ -421,7 +551,7 @@ describe("ToolExecutionContext", () => {
   // substring-matching `message`/`error` a second time downstream. Device-
   // connection and timeout categories are transient and worth the loop's
   // bounded retry.
-  test.each(["deviceConnection", "timeout"] as const)(
+  arrangedEach(["deviceConnection", "timeout"] as const)(
     "retries a %s-classified setup failure and resolves after two setup() calls (#7541)",
     async (category) => {
       let setupCalls = 0;
@@ -460,7 +590,7 @@ describe("ToolExecutionContext", () => {
   // terminal — retrying with the same inputs would fail identically — so
   // they must throw after exactly one `setup()` call instead of waiting out
   // the retry delay.
-  test.each(["permission", "install"] as const)(
+  arrangedEach(["permission", "install"] as const)(
     "throws a %s-classified setup failure after exactly one setup() call (#7541)",
     async (category) => {
       let setupCalls = 0;
@@ -491,70 +621,124 @@ describe("ToolExecutionContext", () => {
     },
   );
 
-  // Issue #7541: an abort during the retry delay must reject promptly with
-  // the caller's own reason instead of waiting out the 3s sleep. That caller
-  // was the flight's only waiter, so the flight ends abandoned instead of
-  // retrying, and the follow-up call starts a fresh flight with its own setup.
-  test("rejects promptly with the caller's reason when aborted during the retry sleep (#7541)", async () => {
+  test("readiness preserves the typed transport cause", async () => {
+    const typed = new AdbDeviceTransportUnavailableError("device-1", new Error("device offline"));
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => ({
+        success: false,
+        message: "setup failed",
+        error: typed.message,
+        cause: new Error("context", { cause: typed }),
+        category: "deviceConnection" as const,
+      }),
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await expect(
+      createToolExecutionContext("setup-transport", sessionManager, devicePool, sessionOptions),
+    ).rejects.toBe(typed);
+  });
+
+  // Issue #13392: a confirmed device loss keeps its typed cause and is terminal
+  // even though its message classifies as deviceConnection.
+  test("does not retry a deviceConnection failure carrying a DeviceLostError cause (#13392)", async () => {
     let setupCalls = 0;
-    let resolveFirstSetup!: () => void;
-    const firstSetupDone = new Promise<void>((resolve) => {
-      resolveFirstSetup = resolve;
-    });
+    const lost = new DeviceLostError("device-1", "error: device 'device-1' not found");
     setDeviceReadinessProxyDriverProviderForTesting(() => ({
       resetSetupState: () => {},
       setup: async () => {
         setupCalls++;
-        if (setupCalls === 1) {
-          queueMicrotask(() => resolveFirstSetup());
-          return {
-            success: false,
-            message: "Failed to setup Accessibility Service due to device connection issue",
-            error: "error: device offline",
-            category: "deviceConnection" as const,
-          };
-        }
-        return { success: true, message: "ok" };
+        return {
+          success: false,
+          message: "Failed to setup Accessibility Service due to device connection issue",
+          error: lost.message,
+          cause: lost,
+          category: "deviceConnection" as const,
+        };
       },
       waitForConnection: async () => true,
       isInstalled: async () => true,
       isVersionCompatible: async () => true,
     }));
-    await sessionManager.createSession("session-abort-retry-sleep", "device-1", "android");
-    // The auto-advancing timer would otherwise jump to the idle sweep while the turns drain, and
-    // an idle release is terminal (#11258): the follow-up call below must find the same session.
-    sessionManager.stopCleanupTimer();
-    const controller = new AbortController();
-    const context = createToolExecutionContext(
-      "session-abort-retry-sleep",
+    const failure = await createToolExecutionContext(
+      "setup-device-lost-terminal",
       sessionManager,
       devicePool,
       sessionOptions,
-      undefined,
-      undefined,
-      false,
-      controller.signal,
-    );
-    // The fake timer's auto-advance fires the retry sleep only once the microtask
-    // queue goes quiet, so waiting for the microtask-scheduled `firstSetupDone`
-    // here is guaranteed to land before the retry sleep's fake deadline fires.
-    await firstSetupDone;
-    controller.abort(new Error("caller cancelled during retry sleep"));
-    await expect(context).rejects.toThrow("caller cancelled during retry sleep");
-    // Give auto-advance the turns it would need to fire the 3s retry sleep:
-    // a flight that kept retrying would call setup() a second time here.
-    await drainTurns();
+    ).catch((error: unknown) => error);
+    expect((failure as Error).message).toContain("Failed to setup accessibility service");
+    expect((failure as Error).cause).toBe(lost);
     expect(setupCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBeUndefined();
-    await createToolExecutionContext(
-      "session-abort-retry-sleep",
-      sessionManager,
-      devicePool,
-      sessionOptions,
-    );
-    expect(setupCalls).toBe(2);
-    expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBe("automationReady");
   });
+
+  // Issue #7541: an abort during the retry delay must reject promptly with
+  // the caller's own reason instead of waiting out the 3s sleep. That caller
+  // was the flight's only waiter, so the flight ends abandoned instead of
+  // retrying, and the follow-up call starts a fresh flight with its own setup.
+  arranged(
+    "rejects promptly with the caller's reason when aborted during the retry sleep (#7541)",
+    async () => {
+      let setupCalls = 0;
+      let resolveFirstSetup!: () => void;
+      const firstSetupDone = new Promise<void>((resolve) => {
+        resolveFirstSetup = resolve;
+      });
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls++;
+          if (setupCalls === 1) {
+            queueMicrotask(() => resolveFirstSetup());
+            return {
+              success: false,
+              message: "Failed to setup Accessibility Service due to device connection issue",
+              error: "error: device offline",
+              category: "deviceConnection" as const,
+            };
+          }
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => true,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      await sessionManager.createSession("session-abort-retry-sleep", "device-1", "android");
+      // The auto-advancing timer would otherwise jump to the idle sweep while the turns drain, and
+      // an idle release is terminal (#11258): the follow-up call below must find the same session.
+      sessionManager.stopCleanupTimer();
+      const controller = new AbortController();
+      const context = createToolExecutionContext(
+        "session-abort-retry-sleep",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        { requireIssuedSession: false, signal: controller.signal },
+      );
+      // The fake timer's auto-advance fires the retry sleep only once the microtask
+      // queue goes quiet, so waiting for the microtask-scheduled `firstSetupDone`
+      // here is guaranteed to land before the retry sleep's fake deadline fires.
+      await firstSetupDone;
+      controller.abort(new Error("caller cancelled during retry sleep"));
+      await expect(context).rejects.toThrow("caller cancelled during retry sleep");
+      // Give auto-advance the turns it would need to fire the 3s retry sleep:
+      // a flight that kept retrying would call setup() a second time here.
+      await drainTurns();
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBeUndefined();
+      await createToolExecutionContext(
+        "session-abort-retry-sleep",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      expect(setupCalls).toBe(2);
+      expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBe(
+        "automationReady",
+      );
+    },
+  );
 
   describe("readiness flight with no waiters left (#7541 follow-up)", () => {
     const RETRY_DELAY_MS = 3000;
@@ -588,16 +772,10 @@ describe("ToolExecutionContext", () => {
     };
 
     const startContext = (sessionId: string, signal?: AbortSignal) =>
-      createToolExecutionContext(
-        sessionId,
-        manualSessionManager,
-        manualPool,
-        sessionOptions,
-        undefined,
-        undefined,
-        false,
+      createToolExecutionContext(sessionId, manualSessionManager, manualPool, sessionOptions, {
+        requireIssuedSession: false,
         signal,
-      );
+      });
 
     const abandonedLogs = (debugSpy: { mock: { calls: unknown[][] } }) =>
       debugSpy.mock.calls.filter((call) =>
@@ -624,37 +802,40 @@ describe("ToolExecutionContext", () => {
       manualSessionManager?.stopCleanupTimer();
     });
 
-    test("the last waiter leaving during the retry sleep ends the flight without a second setup()", async () => {
-      await setupManual();
-      const debugSpy = spyOn(logger, "debug");
-      try {
-        const gate = gatedSetup();
-        await manualSessionManager.createSession("no-waiters-sleep", "device-1", "android");
-        const controller = new AbortController();
-        const context = startContext("no-waiters-sleep", controller.signal);
-        await gate.started[0].promise;
-        gate.results[0].resolve(transientFailure);
-        await drainTurns(() => manualTimer.getPendingTimeouts().includes(RETRY_DELAY_MS));
+    arranged(
+      "the last waiter leaving during the retry sleep ends the flight without a second setup()",
+      async () => {
+        await setupManual();
+        const debugSpy = spyOn(logger, "debug");
+        try {
+          const gate = gatedSetup();
+          await manualSessionManager.createSession("no-waiters-sleep", "device-1", "android");
+          const controller = new AbortController();
+          const context = startContext("no-waiters-sleep", controller.signal);
+          await gate.started[0].promise;
+          gate.results[0].resolve(transientFailure);
+          await drainTurns(() => manualTimer.getPendingTimeouts().includes(RETRY_DELAY_MS));
 
-        controller.abort(new Error("last waiter left"));
-        await expect(context).rejects.toThrow("last waiter left");
-        await drainTurns(() => abandonedLogs(debugSpy).length > 0);
+          controller.abort(new Error("last waiter left"));
+          await expect(context).rejects.toThrow("last waiter left");
+          await drainTurns(() => abandonedLogs(debugSpy).length > 0);
 
-        // The retry sleep ended early and released its timer.
-        expect(manualTimer.getPendingTimeouts()).not.toContain(RETRY_DELAY_MS);
-        await manualTimer.advanceTimeAsync(RETRY_DELAY_MS, drainMicrotasks);
-        expect(gate.calls()).toBe(1);
-        expect(abandonedLogs(debugSpy)).toHaveLength(1);
-        expect(String(abandonedLogs(debugSpy)[0][0])).toContain(
-          "deviceId=device-1, attemptsCompleted=1",
-        );
-        expect(manualSessionManager.getDeviceReadiness("no-waiters-sleep")).toBeUndefined();
-      } finally {
-        debugSpy.mockRestore();
-      }
-    });
+          // The retry sleep ended early and released its timer.
+          expect(manualTimer.getPendingTimeouts()).not.toContain(RETRY_DELAY_MS);
+          await manualTimer.advanceTimeAsync(RETRY_DELAY_MS, drainMicrotasks);
+          expect(gate.calls()).toBe(1);
+          expect(abandonedLogs(debugSpy)).toHaveLength(1);
+          expect(String(abandonedLogs(debugSpy)[0][0])).toContain(
+            "deviceId=device-1, attemptsCompleted=1",
+          );
+          expect(manualSessionManager.getDeviceReadiness("no-waiters-sleep")).toBeUndefined();
+        } finally {
+          debugSpy.mockRestore();
+        }
+      },
+    );
 
-    test("one of two waiters leaving keeps the flight retrying for the other", async () => {
+    arranged("one of two waiters leaving keeps the flight retrying for the other", async () => {
       await setupManual();
       const gate = gatedSetup();
       await manualSessionManager.createSession("one-waiter-left", "device-1", "android");
@@ -682,34 +863,37 @@ describe("ToolExecutionContext", () => {
       expect(manualSessionManager.getDeviceReadiness("one-waiter-left")).toBe("automationReady");
     });
 
-    test("an abort during setup() lets that setup finish, then starts no further attempt", async () => {
-      await setupManual();
-      const debugSpy = spyOn(logger, "debug");
-      try {
-        const gate = gatedSetup();
-        await manualSessionManager.createSession("no-waiters-mid-setup", "device-1", "android");
-        const controller = new AbortController();
-        const context = startContext("no-waiters-mid-setup", controller.signal);
-        await gate.started[0].promise;
+    arranged(
+      "an abort during setup() lets that setup finish, then starts no further attempt",
+      async () => {
+        await setupManual();
+        const debugSpy = spyOn(logger, "debug");
+        try {
+          const gate = gatedSetup();
+          await manualSessionManager.createSession("no-waiters-mid-setup", "device-1", "android");
+          const controller = new AbortController();
+          const context = startContext("no-waiters-mid-setup", controller.signal);
+          await gate.started[0].promise;
 
-        controller.abort(new Error("left mid-setup"));
-        await expect(context).rejects.toThrow("left mid-setup");
-        expect(abandonedLogs(debugSpy)).toHaveLength(0);
+          controller.abort(new Error("left mid-setup"));
+          await expect(context).rejects.toThrow("left mid-setup");
+          expect(abandonedLogs(debugSpy)).toHaveLength(0);
 
-        // The in-progress setup() still runs to completion.
-        gate.results[0].resolve(transientFailure);
-        await drainTurns(() => abandonedLogs(debugSpy).length > 0);
-        expect(manualTimer.getPendingTimeouts()).not.toContain(RETRY_DELAY_MS);
-        await manualTimer.advanceTimeAsync(RETRY_DELAY_MS, drainMicrotasks);
-        expect(gate.calls()).toBe(1);
-        expect(abandonedLogs(debugSpy)).toHaveLength(1);
-        expect(manualSessionManager.getDeviceReadiness("no-waiters-mid-setup")).toBeUndefined();
-      } finally {
-        debugSpy.mockRestore();
-      }
-    });
+          // The in-progress setup() still runs to completion.
+          gate.results[0].resolve(transientFailure);
+          await drainTurns(() => abandonedLogs(debugSpy).length > 0);
+          expect(manualTimer.getPendingTimeouts()).not.toContain(RETRY_DELAY_MS);
+          await manualTimer.advanceTimeAsync(RETRY_DELAY_MS, drainMicrotasks);
+          expect(gate.calls()).toBe(1);
+          expect(abandonedLogs(debugSpy)).toHaveLength(1);
+          expect(manualSessionManager.getDeviceReadiness("no-waiters-mid-setup")).toBeUndefined();
+        } finally {
+          debugSpy.mockRestore();
+        }
+      },
+    );
 
-    test("a caller arriving after an abandoned flight starts a fresh flight", async () => {
+    arranged("a caller arriving after an abandoned flight starts a fresh flight", async () => {
       await setupManual();
       const debugSpy = spyOn(logger, "debug");
       try {
@@ -742,7 +926,7 @@ describe("ToolExecutionContext", () => {
     });
   });
 
-  test("preserves the caller's abort reason while shared setup completes", async () => {
+  arranged("preserves the caller's abort reason while shared setup completes", async () => {
     const setupStarted = Promise.withResolvers<void>();
     const finishSetup = Promise.withResolvers<void>();
     let setupCalls = 0;
@@ -766,10 +950,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       sessionOptions,
-      undefined,
-      undefined,
-      false,
-      controller.signal,
+      { requireIssuedSession: false, signal: controller.signal },
     );
     await setupStarted.promise;
     controller.abort(reason);
@@ -778,7 +959,7 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
-  test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
+  arranged("does not run accessibility setup when a pooled emulator serial is stale", async () => {
     const staleDeviceManager = new FakeDeviceManager();
     const stalePool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
@@ -792,14 +973,13 @@ describe("ToolExecutionContext", () => {
     staleDeviceManager.bootedDevices = [];
 
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
 
     await expect(
       createToolExecutionContext("session-stale", sessionManager, stalePool, sessionOptions),
@@ -808,55 +988,59 @@ describe("ToolExecutionContext", () => {
     expect(stalePool.getDevice("emulator-5554")).toBeNull();
   });
 
-  test("writes the keep-awake state to the typed keepScreenAwake slot on setup (#2973)", async () => {
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "writes the keep-awake state to the typed keepScreenAwake slot on setup (#2973)",
+    async () => {
+      stubManager({
         resetSetupState: () => {},
         setup: async () => ({ success: true, message: "ok" }),
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // keepScreenAwake:false → apply() short-circuits to an applied:false state,
-    // which ensureKeepScreenAwake must persist to the typed slot (not customData).
-    await createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions);
+      // keepScreenAwake:false → apply() short-circuits to an applied:false state,
+      // which ensureKeepScreenAwake must persist to the typed slot (not customData).
+      await createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions);
 
-    const state = sessionManager.getKeepScreenAwake("session-1");
-    expect(state).toBeDefined();
-    expect(state!.applied).toBe(false);
-    expect(
-      (sessionManager.getSessionCache("session-1") as Record<string, unknown>).customData,
-    ).toBeUndefined();
-  });
+      const state = sessionManager.getKeepScreenAwake("session-1");
+      expect(state).toBeDefined();
+      expect(state!.applied).toBe(false);
+      expect(
+        (sessionManager.getSessionCache("session-1") as Record<string, unknown>).customData,
+      ).toBeUndefined();
+    },
+  );
 
   // #6227: the persisted daemon-session path (ToolRegistry passing sessionUuid
   // into createToolExecutionContext) must honor a tool's declared
   // deviceReadiness the same way the legacy/no-session path already does via
   // DeviceSessionManager.ensureDeviceReady's `readiness` option.
-  test("skips accessibility setup for a new session when deviceReadiness is booted (#6227)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "skips accessibility setup for a new session when deviceReadiness is booted (#6227)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
+      });
 
-    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
-      ...sessionOptions,
-      deviceReadiness: "booted",
-    });
+      const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
+        ...sessionOptions,
+        deviceReadiness: "booted",
+      });
 
-    expect(context.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(0);
-  });
+      expect(context.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(0);
+    },
+  );
 
-  test("checks unhealthy binding before setup on an existing session", async () => {
+  arranged("checks unhealthy binding before setup on an existing session", async () => {
     const calls: string[] = [];
     setDeviceReadinessProxyDriverProviderForTesting(() => ({
       resetSetupState: () => calls.push("reset"),
@@ -884,7 +1068,7 @@ describe("ToolExecutionContext", () => {
     expect(sessionManager.getDeviceReadiness("unbound-service")).toBe("automationReady");
   });
 
-  test("continues setup when the optional binding check fails", async () => {
+  arranged("continues setup when the optional binding check fails", async () => {
     const calls: string[] = [];
     setDeviceReadinessProxyDriverProviderForTesting(() => ({
       resetSetupState: () => {},
@@ -912,69 +1096,73 @@ describe("ToolExecutionContext", () => {
     expect(sessionManager.getDeviceReadiness("binding-probe")).toBe("automationReady");
   });
 
-  test("still runs accessibility setup for a new session when deviceReadiness is automationReady (#6227)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "still runs accessibility setup for a new session when deviceReadiness is automationReady (#6227)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
-      ...sessionOptions,
-      deviceReadiness: "automationReady",
-    });
+      const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
+        ...sessionOptions,
+        deviceReadiness: "automationReady",
+      });
 
-    expect(context.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-  });
+      expect(context.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+    },
+  );
 
-  test("a tool not requiring readiness (deviceReadiness omitted) is unaffected on the persisted path (#6227)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "a tool not requiring readiness (deviceReadiness omitted) is unaffected on the persisted path (#6227)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // No deviceReadiness set — behaves exactly as before this fix (default
-    // automationReady semantics), for both a new session...
-    const freshContext = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
-      sessionOptions,
-    );
-    expect(freshContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
+      // No deviceReadiness set — behaves exactly as before this fix (default
+      // automationReady semantics), for both a new session...
+      const freshContext = await createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      expect(freshContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
 
-    // ...and an already-established session (existingSession short-circuit,
-    // unrelated to deviceReadiness).
-    const existingContext = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
-      sessionOptions,
-    );
-    expect(existingContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-  });
+      // ...and an already-established session (existingSession short-circuit,
+      // unrelated to deviceReadiness).
+      const existingContext = await createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      expect(existingContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+    },
+  );
 
   // #6227 P1 (round 5): a NORMAL freshly-acquired session (getAndroid /
   // startDevice) already ran `prepareStartDeviceRunnerReadiness` — CtrlProxy /
@@ -983,62 +1171,63 @@ describe("ToolExecutionContext", () => {
   // `setDeviceReadiness` at bind time (mirroring what `bindBootedDeviceSession`
   // in deviceTools.ts does), so the first subsequent `automationReady` tool
   // call must NOT see `undefined` and redundantly re-run setup.
-  test("does not redundantly re-run setup for a session whose readiness was recorded at acquisition (#6227 round 5 P1)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "does not redundantly re-run setup for a session whose readiness was recorded at acquisition (#6227 round 5 P1)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // Simulate the acquisition/binding path: the session is created and its
-    // achieved readiness is recorded (as `bindBootedDeviceSession` now does)
-    // BEFORE any tool call reaches `createToolExecutionContext`.
-    await sessionManager.createSession("session-acquired", "device-1", "android");
-    sessionManager.setDeviceReadiness("session-acquired", "automationReady");
+      // Simulate the acquisition/binding path: the session is created and its
+      // achieved readiness is recorded (as `bindBootedDeviceSession` now does)
+      // BEFORE any tool call reaches `createToolExecutionContext`.
+      await sessionManager.createSession("session-acquired", "device-1", "android");
+      sessionManager.setDeviceReadiness("session-acquired", "automationReady");
 
-    const context = await createToolExecutionContext(
-      "session-acquired",
-      sessionManager,
-      devicePool,
-      {
+      const context = await createToolExecutionContext(
+        "session-acquired",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
+      );
+
+      expect(context.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(0);
+      await createToolExecutionContext("session-acquired", sessionManager, devicePool, {
         ...sessionOptions,
         deviceReadiness: "automationReady",
-      },
-    );
+      });
+      expect(setupCalls).toBe(0);
+    },
+  );
 
-    expect(context.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(0);
-    await createToolExecutionContext("session-acquired", sessionManager, devicePool, {
-      ...sessionOptions,
-      deviceReadiness: "automationReady",
-    });
-    expect(setupCalls).toBe(0);
-  });
-
-  test("reruns setup after automation readiness is invalidated for a session", async () => {
+  arranged("reruns setup after automation readiness is invalidated for a session", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await sessionManager.createSession("lost-service", "device-1", "android");
     sessionManager.setDeviceReadiness("lost-service", "automationReady");
@@ -1054,103 +1243,106 @@ describe("ToolExecutionContext", () => {
   // re-established (e.g. mid-recovery, unrecorded) must still be treated as
   // not-ready and run setup — the acquisition-time recording above must not
   // widen the concurrency-hole fix in `isReadinessSatisfied`.
-  test("still runs setup for a genuinely-unrecorded recovered session (#6227 round 5 P1)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "still runs setup for a genuinely-unrecorded recovered session (#6227 round 5 P1)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // No `setDeviceReadiness` call here — this session's readiness was never
-    // recorded, mirroring a recovered session whose acquisition never
-    // completed `prepareStartDeviceRunnerReadiness` cleanly.
-    await sessionManager.createSession("session-unrecorded-recovery", "device-1", "android");
+      // No `setDeviceReadiness` call here — this session's readiness was never
+      // recorded, mirroring a recovered session whose acquisition never
+      // completed `prepareStartDeviceRunnerReadiness` cleanly.
+      await sessionManager.createSession("session-unrecorded-recovery", "device-1", "android");
 
-    const context = await createToolExecutionContext(
-      "session-unrecorded-recovery",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
+      const context = await createToolExecutionContext(
+        "session-unrecorded-recovery",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
 
-    expect(context.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-  });
+      expect(context.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+    },
+  );
 
   // #6227 P1 follow-up: a session first reached via a `booted` tool must be
   // *upgraded* — not left disconnected — when a later call on the same
   // sessionUuid needs `automationReady`. The `existingSession` fast path must
   // not silently satisfy a stricter readiness requirement than the session
   // actually achieved.
-  test("upgrades a booted-only session to automationReady when a later call needs it (#6227)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "upgrades a booted-only session to automationReady when a later call needs it (#6227)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    const bootedContext = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
-      {
-        ...sessionOptions,
-        deviceReadiness: "booted",
-      },
-    );
-    expect(bootedContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(0);
-    expect(sessionManager.getDeviceReadiness("session-1")).toBe("booted");
-
-    // Same sessionUuid, now via an automationReady tool — must run setup
-    // (upgrade), not take the existingSession skip path.
-    const upgradedContext = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
-      {
-        ...sessionOptions,
-        deviceReadiness: "automationReady",
-      },
-    );
-    expect(upgradedContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
-  });
-
-  test("reruns automation readiness after a VM restore resets the session marker", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
+      const bootedContext = await createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "booted",
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+      );
+      expect(bootedContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(0);
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("booted");
+
+      // Same sessionUuid, now via an automationReady tool — must run setup
+      // (upgrade), not take the existingSession skip path.
+      const upgradedContext = await createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
+      );
+      expect(upgradedContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+    },
+  );
+
+  arranged("reruns automation readiness after a VM restore resets the session marker", async () => {
+    let setupCalls = 0;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
     sessionManager.resetDeviceReadinessForDevice("device-1");
@@ -1159,44 +1351,51 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(2);
   });
 
-  test("does not redundantly re-run setup for a booted tool after an automationReady session (#6227)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "does not redundantly re-run setup for a booted tool after an automationReady session (#6227)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    const readyContext = await createToolExecutionContext("session-1", sessionManager, devicePool, {
-      ...sessionOptions,
-      deviceReadiness: "automationReady",
-    });
-    expect(readyContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
+      const readyContext = await createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
+      );
+      expect(readyContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
 
-    // Same sessionUuid, now via a booted-only tool — must NOT downgrade or
-    // redundantly redo setup.
-    const bootedContext = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
-      {
-        ...sessionOptions,
-        deviceReadiness: "booted",
-      },
-    );
-    expect(bootedContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
-  });
+      // Same sessionUuid, now via a booted-only tool — must NOT downgrade or
+      // redundantly redo setup.
+      const bootedContext = await createToolExecutionContext(
+        "session-1",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "booted",
+        },
+      );
+      expect(bootedContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
+    },
+  );
 
   // #6227 P1 follow-up: a concurrency window where a `booted` request
   // publishes the recovered session into `SessionManager`'s in-memory map
@@ -1204,47 +1403,49 @@ describe("ToolExecutionContext", () => {
   // *before* recording its readiness. A concurrent `automationReady` request
   // that resolves the same sessionUuid in that window must NOT treat the
   // still-undefined recorded readiness as satisfied and skip setup.
-  test("runs setup for a concurrent automationReady call that observes a published-but-unrecorded session (#6227)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "runs setup for a concurrent automationReady call that observes a published-but-unrecorded session (#6227)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // Simulate the race directly: a session already published into the
-    // SessionManager's in-memory map (as `createSession` does), but with its
-    // deviceReadiness NOT YET recorded — exactly the state a concurrent
-    // `booted` request's session is in after publish but before
-    // `runDeviceReadinessSetup` records the level.
-    await sessionManager.createSession("session-race-window", "device-1", "android");
-    expect(sessionManager.getDeviceReadiness("session-race-window")).toBeUndefined();
+      // Simulate the race directly: a session already published into the
+      // SessionManager's in-memory map (as `createSession` does), but with its
+      // deviceReadiness NOT YET recorded — exactly the state a concurrent
+      // `booted` request's session is in after publish but before
+      // `runDeviceReadinessSetup` records the level.
+      await sessionManager.createSession("session-race-window", "device-1", "android");
+      expect(sessionManager.getDeviceReadiness("session-race-window")).toBeUndefined();
 
-    // A concurrent automationReady request resolves this same session as
-    // "existing" and must run setup rather than trusting the unrecorded
-    // readiness.
-    const context = await createToolExecutionContext(
-      "session-race-window",
-      sessionManager,
-      devicePool,
-      {
-        ...sessionOptions,
-        deviceReadiness: "automationReady",
-      },
-    );
+      // A concurrent automationReady request resolves this same session as
+      // "existing" and must run setup rather than trusting the unrecorded
+      // readiness.
+      const context = await createToolExecutionContext(
+        "session-race-window",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
+      );
 
-    expect(context.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-race-window")).toBe("automationReady");
-  });
+      expect(context.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-race-window")).toBe("automationReady");
+    },
+  );
 
   // #6227 P1 review follow-up: two `automationReady` calls that reach a
   // freshly-published session (readiness still undefined) *concurrently* must
@@ -1253,20 +1454,21 @@ describe("ToolExecutionContext", () => {
   // CtrlProxy manager while the first's `setup()` is still in flight. Setup
   // must run exactly once (single-flight), and both callers must observe the
   // upgraded readiness once it resolves.
-  test("serializes concurrent automationReady upgrades on the same session so setup runs exactly once (#6227)", async () => {
-    let setupCalls = 0;
-    let resetCalls = 0;
-    let releaseSetup!: () => void;
-    const setupGate = new Promise<void>((resolve) => {
-      releaseSetup = resolve;
-    });
-    let setupEnteredResolve!: () => void;
-    const setupEntered = new Promise<void>((resolve) => {
-      setupEnteredResolve = resolve;
-    });
+  arranged(
+    "serializes concurrent automationReady upgrades on the same session so setup runs exactly once (#6227)",
+    async () => {
+      let setupCalls = 0;
+      let resetCalls = 0;
+      let releaseSetup!: () => void;
+      const setupGate = new Promise<void>((resolve) => {
+        releaseSetup = resolve;
+      });
+      let setupEnteredResolve!: () => void;
+      const setupEntered = new Promise<void>((resolve) => {
+        setupEnteredResolve = resolve;
+      });
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+      stubManager({
         resetSetupState: () => {
           resetCalls += 1;
         },
@@ -1276,72 +1478,72 @@ describe("ToolExecutionContext", () => {
           await setupGate;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // Publish the session with readiness NOT YET recorded — the same window
-    // a recovered/newly-published session sits in before this module's own
-    // setup pass records a level.
-    await sessionManager.createSession("session-race-concurrent", "device-1", "android");
-    expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBeUndefined();
+      // Publish the session with readiness NOT YET recorded — the same window
+      // a recovered/newly-published session sits in before this module's own
+      // setup pass records a level.
+      await sessionManager.createSession("session-race-concurrent", "device-1", "android");
+      expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBeUndefined();
 
-    const call1 = createToolExecutionContext(
-      "session-race-concurrent",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
+      const call1 = createToolExecutionContext(
+        "session-race-concurrent",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
 
-    // Let call1 run until it has actually entered `setup()` (i.e. it has
-    // already registered itself as the in-flight upgrade for this session)
-    // before starting the second, concurrent caller.
-    await setupEntered;
+      // Let call1 run until it has actually entered `setup()` (i.e. it has
+      // already registered itself as the in-flight upgrade for this session)
+      // before starting the second, concurrent caller.
+      await setupEntered;
 
-    const call2 = createToolExecutionContext(
-      "session-race-concurrent",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
+      const call2 = createToolExecutionContext(
+        "session-race-concurrent",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
 
-    // Give call2 a chance to observe the in-flight upgrade and start
-    // awaiting it, then let the single in-flight setup complete.
-    await Promise.resolve();
-    await Promise.resolve();
-    releaseSetup();
+      // Give call2 a chance to observe the in-flight upgrade and start
+      // awaiting it, then let the single in-flight setup complete.
+      await Promise.resolve();
+      await Promise.resolve();
+      releaseSetup();
 
-    const [context1, context2] = await Promise.all([call1, call2]);
+      const [context1, context2] = await Promise.all([call1, call2]);
 
-    expect(context1.deviceId).toBe("device-1");
-    expect(context2.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-    expect(resetCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBe("automationReady");
-  });
+      expect(context1.deviceId).toBe("device-1");
+      expect(context2.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+      expect(resetCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBe("automationReady");
+    },
+  );
 
-  test("serializes concurrent setup after automation readiness is invalidated", async () => {
+  arranged("serializes concurrent setup after automation readiness is invalidated", async () => {
     let setupCalls = 0;
     const setupEntered = Promise.withResolvers<void>();
     const setupGate = Promise.withResolvers<void>();
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          setupEntered.resolve();
-          await setupGate.promise;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        setupEntered.resolve();
+        await setupGate.promise;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await sessionManager.createSession("lost-service-concurrent", "device-1", "android");
     sessionManager.setDeviceReadiness("lost-service-concurrent", "automationReady");
@@ -1386,20 +1588,21 @@ describe("ToolExecutionContext", () => {
   // Routing the fresh-session branch through `ensureReadinessUpgraded` too
   // (same map, keyed by `session.sessionId`) closes this: setup must run
   // exactly once even when both concurrent callers take the fresh path.
-  test("routes concurrent fresh-session setups for the same new sessionUuid through the single-flight so setup runs exactly once (#6227)", async () => {
-    let setupCalls = 0;
-    let resetCalls = 0;
-    let releaseSetup!: () => void;
-    const setupGate = new Promise<void>((resolve) => {
-      releaseSetup = resolve;
-    });
-    let setupEnteredResolve!: () => void;
-    const setupEntered = new Promise<void>((resolve) => {
-      setupEnteredResolve = resolve;
-    });
+  arranged(
+    "routes concurrent fresh-session setups for the same new sessionUuid through the single-flight so setup runs exactly once (#6227)",
+    async () => {
+      let setupCalls = 0;
+      let resetCalls = 0;
+      let releaseSetup!: () => void;
+      const setupGate = new Promise<void>((resolve) => {
+        releaseSetup = resolve;
+      });
+      let setupEnteredResolve!: () => void;
+      const setupEntered = new Promise<void>((resolve) => {
+        setupEnteredResolve = resolve;
+      });
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+      stubManager({
         resetSetupState: () => {
           resetCalls += 1;
         },
@@ -1409,47 +1612,48 @@ describe("ToolExecutionContext", () => {
           await setupGate;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // Neither call awaits before the other starts: both synchronously
-    // observe `getSessionForNewExecution` returning `null` for this
-    // never-before-seen sessionUuid, then join the same
-    // pending assignment entry once the second call reaches it —
-    // exactly the race described above.
-    const call1 = createToolExecutionContext(
-      "session-race-fresh-both",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
-    const call2 = createToolExecutionContext(
-      "session-race-fresh-both",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
+      // Neither call awaits before the other starts: both synchronously
+      // observe `getSessionForNewExecution` returning `null` for this
+      // never-before-seen sessionUuid, then join the same
+      // pending assignment entry once the second call reaches it —
+      // exactly the race described above.
+      const call1 = createToolExecutionContext(
+        "session-race-fresh-both",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
+      const call2 = createToolExecutionContext(
+        "session-race-fresh-both",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
 
-    // Let the single in-flight setup actually enter `setup()` before
-    // releasing it, then give any second (would-be) caller a chance to
-    // observe the in-flight upgrade before it completes.
-    await setupEntered;
-    await Promise.resolve();
-    await Promise.resolve();
-    releaseSetup();
+      // Let the single in-flight setup actually enter `setup()` before
+      // releasing it, then give any second (would-be) caller a chance to
+      // observe the in-flight upgrade before it completes.
+      await setupEntered;
+      await Promise.resolve();
+      await Promise.resolve();
+      releaseSetup();
 
-    const [context1, context2] = await Promise.all([call1, call2]);
+      const [context1, context2] = await Promise.all([call1, call2]);
 
-    expect(context1.deviceId).toBe("device-1");
-    expect(context2.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-    expect(resetCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-race-fresh-both")).toBe("automationReady");
-  });
+      expect(context1.deviceId).toBe("device-1");
+      expect(context2.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+      expect(resetCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-race-fresh-both")).toBe("automationReady");
+    },
+  );
 
   // #6227 P1 follow-up (round 4): a `booted`-only caller (e.g. `listApps`)
   // must not join — or fail because of — an in-flight `automationReady`
@@ -1458,19 +1662,20 @@ describe("ToolExecutionContext", () => {
   // (`devicePool.assertSessionReadyForAutomation` ran earlier), so a booted
   // caller has nothing to gain from waiting on stricter automation setup and
   // must not inherit its rejection.
-  test("a concurrent booted call bypasses (and does not fail from) an in-flight automationReady setup that later rejects (#6227)", async () => {
-    let automationSetupCalls = 0;
-    let setupEnteredResolve!: () => void;
-    const setupEntered = new Promise<void>((resolve) => {
-      setupEnteredResolve = resolve;
-    });
-    let triggerReject!: () => void;
-    const rejectSignal = new Promise<void>((resolve) => {
-      triggerReject = resolve;
-    });
+  arranged(
+    "a concurrent booted call bypasses (and does not fail from) an in-flight automationReady setup that later rejects (#6227)",
+    async () => {
+      let automationSetupCalls = 0;
+      let setupEnteredResolve!: () => void;
+      const setupEntered = new Promise<void>((resolve) => {
+        setupEnteredResolve = resolve;
+      });
+      let triggerReject!: () => void;
+      const rejectSignal = new Promise<void>((resolve) => {
+        triggerReject = resolve;
+      });
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           automationSetupCalls += 1;
@@ -1478,64 +1683,66 @@ describe("ToolExecutionContext", () => {
           await rejectSignal;
           throw new Error("simulated automation setup failure");
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    await sessionManager.createSession("session-booted-bypass", "device-1", "android");
+      await sessionManager.createSession("session-booted-bypass", "device-1", "android");
 
-    const automationCall = createToolExecutionContext(
-      "session-booted-bypass",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
+      const automationCall = createToolExecutionContext(
+        "session-booted-bypass",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
 
-    // Let the automationReady call actually enter (and register as the
-    // in-flight upgrade for) setup before the concurrent booted call starts.
-    await setupEntered;
+      // Let the automationReady call actually enter (and register as the
+      // in-flight upgrade for) setup before the concurrent booted call starts.
+      await setupEntered;
 
-    const bootedContext = await createToolExecutionContext(
-      "session-booted-bypass",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "booted" },
-    );
+      const bootedContext = await createToolExecutionContext(
+        "session-booted-bypass",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "booted" },
+      );
 
-    // The booted call must succeed without waiting for the still-pending
-    // automationReady setup, and must record the booted baseline itself.
-    expect(bootedContext.deviceId).toBe("device-1");
-    expect(sessionManager.getDeviceReadiness("session-booted-bypass")).toBe("booted");
+      // The booted call must succeed without waiting for the still-pending
+      // automationReady setup, and must record the booted baseline itself.
+      expect(bootedContext.deviceId).toBe("device-1");
+      expect(sessionManager.getDeviceReadiness("session-booted-bypass")).toBe("booted");
 
-    // Now let the automationReady setup actually reject — the booted call
-    // above already resolved and must be unaffected by this.
-    triggerReject();
-    await expect(automationCall).rejects.toThrow();
-    expect(automationSetupCalls).toBe(1);
-  });
+      // Now let the automationReady setup actually reject — the booted call
+      // above already resolved and must be unaffected by this.
+      triggerReject();
+      await expect(automationCall).rejects.toThrow();
+      expect(automationSetupCalls).toBe(1);
+    },
+  );
 
   // #6227 P2 follow-up: the single-flight map must be scoped to the session
   // INCARNATION, not the bare session UUID. A recreated session with the
   // same UUID (e.g. restart recovery re-binding it after a nonterminal
   // release's setup-drain timeout) must never join a stale flight left
   // behind by its predecessor.
-  test("scopes the readiness single-flight to the session incarnation, not the bare UUID (#6227 P2 follow-up)", async () => {
-    let setupCalls = 0;
-    let oldEnteredResolve!: () => void;
-    const oldEntered = new Promise<void>((resolve) => {
-      oldEnteredResolve = resolve;
-    });
-    let releaseOldGate!: () => void;
-    const oldGate = new Promise<void>((resolve) => {
-      releaseOldGate = resolve;
-    });
-    let mode: "old" | "new" = "old";
+  arranged(
+    "scopes the readiness single-flight to the session incarnation, not the bare UUID (#6227 P2 follow-up)",
+    async () => {
+      let setupCalls = 0;
+      let oldEnteredResolve!: () => void;
+      const oldEntered = new Promise<void>((resolve) => {
+        oldEnteredResolve = resolve;
+      });
+      let releaseOldGate!: () => void;
+      const oldGate = new Promise<void>((resolve) => {
+        releaseOldGate = resolve;
+      });
+      let mode: "old" | "new" = "old";
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
@@ -1545,87 +1752,89 @@ describe("ToolExecutionContext", () => {
           }
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    const original = await sessionManager.createSession(
-      "session-incarnation-scope",
-      "device-1",
-      "android",
-    );
+      const original = await sessionManager.createSession(
+        "session-incarnation-scope",
+        "device-1",
+        "android",
+      );
 
-    // The old incarnation's readiness setup starts and hangs mid-flight — it
-    // is never released within this test, standing in for setup that is
-    // still pending when the release below reaches its drain timeout.
-    const oldCall = createToolExecutionContext(
-      "session-incarnation-scope",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      original,
-    );
-    await oldEntered;
+      // The old incarnation's readiness setup starts and hangs mid-flight — it
+      // is never released within this test, standing in for setup that is
+      // still pending when the release below reaches its drain timeout.
+      const oldCall = createToolExecutionContext(
+        "session-incarnation-scope",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { admittedSession: original },
+      );
+      await oldEntered;
 
-    // A nonterminal release reaches the ~1s setup-drain timeout while the
-    // old incarnation's setup is still pending, and proceeds anyway
-    // (fakeTimer auto-advance fires the drain timeout without a real wait).
-    await sessionManager.releaseSession("session-incarnation-scope", PLAN_AUTO_RELEASE_REASON);
+      // A nonterminal release reaches the ~1s setup-drain timeout while the
+      // old incarnation's setup is still pending, and proceeds anyway
+      // (fakeTimer auto-advance fires the drain timeout without a real wait).
+      await sessionManager.releaseSession("session-incarnation-scope", PLAN_AUTO_RELEASE_REASON);
 
-    // The UUID is recreated as a brand-new incarnation (e.g. restart
-    // recovery re-binding it, possibly to a different device).
-    const replacement = await sessionManager.createSession(
-      "session-incarnation-scope",
-      "device-1",
-      "android",
-    );
-    expect(replacement).not.toBe(original);
-    mode = "new";
+      // The UUID is recreated as a brand-new incarnation (e.g. restart
+      // recovery re-binding it, possibly to a different device).
+      const replacement = await sessionManager.createSession(
+        "session-incarnation-scope",
+        "device-1",
+        "android",
+      );
+      expect(replacement).not.toBe(original);
+      mode = "new";
 
-    // The replacement must start its OWN flight rather than joining (and
-    // resolving from) the predecessor's still-pending one. It queues behind the
-    // old incarnation on the shared per-device readiness lock (#6227 FIX 2), so
-    // release the old (now-released) incarnation's hung setup to free that lock;
-    // the replacement then runs its own setup (setupCalls -> 2) rather than the
-    // predecessor's.
-    const newContextPromise = createToolExecutionContext(
-      "session-incarnation-scope",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      replacement,
-    );
+      // The replacement must start its OWN flight rather than joining (and
+      // resolving from) the predecessor's still-pending one. It queues behind the
+      // old incarnation on the shared per-device readiness lock (#6227 FIX 2), so
+      // release the old (now-released) incarnation's hung setup to free that lock;
+      // the replacement then runs its own setup (setupCalls -> 2) rather than the
+      // predecessor's.
+      const newContextPromise = createToolExecutionContext(
+        "session-incarnation-scope",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { admittedSession: replacement },
+      );
 
-    releaseOldGate();
-    await oldCall.catch(() => {
-      // The old incarnation's own call is expected to fail once its setup
-      // finally resolves against an already-released session; only the
-      // replacement's outcome is under test here.
-    });
+      releaseOldGate();
+      await oldCall.catch(() => {
+        // The old incarnation's own call is expected to fail once its setup
+        // finally resolves against an already-released session; only the
+        // replacement's outcome is under test here.
+      });
 
-    const newContext = await newContextPromise;
+      const newContext = await newContextPromise;
 
-    expect(newContext.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(2);
-    expect(sessionManager.getDeviceReadiness("session-incarnation-scope")).toBe("automationReady");
-  });
+      expect(newContext.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(2);
+      expect(sessionManager.getDeviceReadiness("session-incarnation-scope")).toBe(
+        "automationReady",
+      );
+    },
+  );
 
   // #6227 P1 review follow-up: the readiness UPGRADE path must honor
   // `--skip-ctrl-proxy-download` exactly as the fresh acquisition path does.
   // A booted-only session upgraded to automationReady while downloads are
   // disabled and CtrlProxy is NOT installed must refuse (actionable error)
   // rather than trigger `setup()`'s download/install of the missing artifact.
-  test("does not download CtrlProxy when upgrading a booted-only session while --skip-ctrl-proxy-download is set (#6227)", async () => {
-    let setupCalls = 0;
-    let installed = false;
-    let versionCompatible = true;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "does not download CtrlProxy when upgrading a booted-only session while --skip-ctrl-proxy-download is set (#6227)",
+    async () => {
+      let setupCalls = 0;
+      let installed = false;
+      let versionCompatible = true;
+      stubManager({
         resetSetupState: () => {},
         isInstalled: async () => installed,
         isVersionCompatible: async () => versionCompatible,
@@ -1633,69 +1842,70 @@ describe("ToolExecutionContext", () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    serverConfig.setSkipCtrlProxyDownload(true);
-    try {
-      // A booted-only first touch skips accessibility setup entirely.
-      const bootedContext = await createToolExecutionContext(
-        "session-skip-dl",
-        sessionManager,
-        devicePool,
-        { ...sessionOptions, deviceReadiness: "booted" },
-      );
-      expect(bootedContext.deviceId).toBe("device-1");
-      expect(setupCalls).toBe(0);
-      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
+      serverConfig.setSkipCtrlProxyDownload(true);
+      try {
+        // A booted-only first touch skips accessibility setup entirely.
+        const bootedContext = await createToolExecutionContext(
+          "session-skip-dl",
+          sessionManager,
+          devicePool,
+          { ...sessionOptions, deviceReadiness: "booted" },
+        );
+        expect(bootedContext.deviceId).toBe("device-1");
+        expect(setupCalls).toBe(0);
+        expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
 
-      // Upgrade to automationReady while CtrlProxy is NOT installed: the fresh
-      // path fails here rather than downloading, so the upgrade must too —
-      // `setup()` (the download/install path) must never run.
-      await expect(
-        createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
-        }),
-      ).rejects.toThrow(/not installed and runner downloads are disabled/);
-      expect(setupCalls).toBe(0);
-      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
+        // Upgrade to automationReady while CtrlProxy is NOT installed: the fresh
+        // path fails here rather than downloading, so the upgrade must too —
+        // `setup()` (the download/install path) must never run.
+        await expect(
+          createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          }),
+        ).rejects.toThrow(/not installed and runner downloads are disabled/);
+        expect(setupCalls).toBe(0);
+        expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
 
-      // Installed but INCOMPATIBLE version: downloads are disabled, so the
-      // incompatible proxy cannot be upgraded. The upgrade must refuse with the
-      // version-mismatch actionable error rather than run `setup()` against the
-      // incompatible installed proxy.
-      installed = true;
-      versionCompatible = false;
-      await expect(
-        createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
-        }),
-      ).rejects.toThrow(/CtrlProxy version mismatch/);
-      expect(setupCalls).toBe(0);
-      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
+        // Installed but INCOMPATIBLE version: downloads are disabled, so the
+        // incompatible proxy cannot be upgraded. The upgrade must refuse with the
+        // version-mismatch actionable error rather than run `setup()` against the
+        // incompatible installed proxy.
+        installed = true;
+        versionCompatible = false;
+        await expect(
+          createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          }),
+        ).rejects.toThrow(/CtrlProxy version mismatch/);
+        expect(setupCalls).toBe(0);
+        expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("booted");
 
-      // With the artifact already present AND compatible, the upgrade proceeds
-      // without a download (setup runs against an installed package).
-      versionCompatible = true;
-      const upgraded = await createToolExecutionContext(
-        "session-skip-dl",
-        sessionManager,
-        devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
-      );
-      expect(upgraded.deviceId).toBe("device-1");
-      expect(setupCalls).toBe(1);
-      expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("automationReady");
-    } finally {
-      serverConfig.setSkipCtrlProxyDownload(false);
-    }
-  });
+        // With the artifact already present AND compatible, the upgrade proceeds
+        // without a download (setup runs against an installed package).
+        versionCompatible = true;
+        const upgraded = await createToolExecutionContext(
+          "session-skip-dl",
+          sessionManager,
+          devicePool,
+          { ...sessionOptions, deviceReadiness: "automationReady" },
+        );
+        expect(upgraded.deviceId).toBe("device-1");
+        expect(setupCalls).toBe(1);
+        expect(sessionManager.getDeviceReadiness("session-skip-dl")).toBe("automationReady");
+      } finally {
+        serverConfig.setSkipCtrlProxyDownload(false);
+      }
+    },
+  );
 
   // #6227 P1 review follow-up: a session-scoped readiness upgrade must
   // participate in the SAME per-device readiness lock the acquisition paths
@@ -1704,52 +1914,58 @@ describe("ToolExecutionContext", () => {
   // never both reset+setup the shared per-device CtrlProxy manager. Here a
   // concurrent device preparation holds that lock; the upgrade must not run
   // accessibility setup until the preparation releases it.
-  test("serializes a session upgrade behind a concurrent device preparation holding the per-device readiness lock (#6227)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "serializes a session upgrade behind a concurrent device preparation holding the per-device readiness lock (#6227)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    await sessionManager.createSession(
-      "session-device-lock",
-      "device-1",
-      "android",
-      AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
-    );
+      await sessionManager.createSession("session-device-lock", "device-1", "android", {
+        timeoutMs: AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
+      });
 
-    // Stand in for a concurrent device preparation (startDevice/getAndroid/
-    // provision via RunnerReadinessService) holding the SAME per-device lock.
-    const release = await acquireDeviceReadinessLock(deviceReadinessLockKey("android", "device-1"));
+      // Stand in for a concurrent device preparation (startDevice/getAndroid/
+      // provision via RunnerReadinessService) holding the SAME per-device lock.
+      const release = await acquireDeviceReadinessLock(
+        deviceReadinessLockKey("android", "device-1"),
+      );
 
-    const upgrade = createToolExecutionContext("session-device-lock", sessionManager, devicePool, {
-      ...sessionOptions,
-      deviceReadiness: "automationReady",
-    });
+      const upgrade = createToolExecutionContext(
+        "session-device-lock",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
+      );
 
-    // While the device preparation holds the lock, the upgrade cannot run
-    // accessibility setup — no concurrent reset+setup on the shared manager.
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(setupCalls).toBe(0);
+      // While the device preparation holds the lock, the upgrade cannot run
+      // accessibility setup — no concurrent reset+setup on the shared manager.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(setupCalls).toBe(0);
 
-    // Once the device preparation releases, the queued upgrade proceeds and
-    // runs setup exactly once.
-    release();
-    const context = await upgrade;
-    expect(context.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-device-lock")).toBe("automationReady");
-  });
+      // Once the device preparation releases, the queued upgrade proceeds and
+      // runs setup exactly once.
+      release();
+      const context = await upgrade;
+      expect(context.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-device-lock")).toBe("automationReady");
+    },
+  );
 
   // #6280 P2 review follow-up: a device acquisition (startDevice/getAndroid)
   // releases the per-device readiness lock as soon as CtrlProxy setup
@@ -1758,183 +1974,185 @@ describe("ToolExecutionContext", () => {
   // reused, post-restart recovered) session must not race a second setup in
   // that gap; it must join the acquisition's marker and observe the recorded
   // readiness once the acquisition finishes.
-  test("joins an in-flight device acquisition instead of redoing CtrlProxy setup for a reused session (#6280)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "joins an in-flight device acquisition instead of redoing CtrlProxy setup for a reused session (#6280)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    // A post-restart recovered session: already tracked, readiness never
-    // recorded — mirrors a session reused by a concurrent acquisition.
-    await sessionManager.createSession(
-      "session-acquisition-race",
-      "device-1",
-      "android",
-      AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
-    );
+      // A post-restart recovered session: already tracked, readiness never
+      // recorded — mirrors a session reused by a concurrent acquisition.
+      await sessionManager.createSession("session-acquisition-race", "device-1", "android", {
+        timeoutMs: AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
+      });
 
-    // Stand in for a device acquisition that has already released the
-    // per-device readiness lock (CtrlProxy setup finished) but has not yet
-    // bound/recorded readiness for the reused session.
-    let resolveAcquisition!: () => void;
-    const acquisitionDone = new Promise<void>((resolve) => {
-      resolveAcquisition = resolve;
-    });
-    const acquisitionPromise = trackDeviceAcquisitionReadiness(
-      deviceReadinessLockKey("android", "device-1"),
-      async () => {
-        await acquisitionDone;
-        sessionManager.setDeviceReadiness("session-acquisition-race", "automationReady");
-      },
-    );
+      // Stand in for a device acquisition that has already released the
+      // per-device readiness lock (CtrlProxy setup finished) but has not yet
+      // bound/recorded readiness for the reused session.
+      let resolveAcquisition!: () => void;
+      const acquisitionDone = new Promise<void>((resolve) => {
+        resolveAcquisition = resolve;
+      });
+      const acquisitionPromise = trackDeviceAcquisitionReadiness(
+        deviceReadinessLockKey("android", "device-1"),
+        async () => {
+          await acquisitionDone;
+          sessionManager.setDeviceReadiness("session-acquisition-race", "automationReady");
+        },
+      );
 
-    const upgrade = createToolExecutionContext(
-      "session-acquisition-race",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-    );
+      const upgrade = createToolExecutionContext(
+        "session-acquisition-race",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+      );
 
-    // While the acquisition marker is set, the upgrade must wait on it
-    // instead of racing its own CtrlProxy setup on the device just prepared.
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(setupCalls).toBe(0);
+      // While the acquisition marker is set, the upgrade must wait on it
+      // instead of racing its own CtrlProxy setup on the device just prepared.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(setupCalls).toBe(0);
 
-    resolveAcquisition();
-    await acquisitionPromise;
-    const context = await upgrade;
+      resolveAcquisition();
+      await acquisitionPromise;
+      const context = await upgrade;
 
-    expect(context.deviceId).toBe("device-1");
-    expect(setupCalls).toBe(0);
-    expect(sessionManager.getDeviceReadiness("session-acquisition-race")).toBe("automationReady");
-  });
+      expect(context.deviceId).toBe("device-1");
+      expect(setupCalls).toBe(0);
+      expect(sessionManager.getDeviceReadiness("session-acquisition-race")).toBe("automationReady");
+    },
+  );
 
-  test("cancels while queued for a device readiness transaction without starting setup (#6280)", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "cancels while queued for a device readiness transaction without starting setup (#6280)",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
-    await sessionManager.createSession("session-cancelled-readiness", "device-1", "android");
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
+      await sessionManager.createSession("session-cancelled-readiness", "device-1", "android");
 
-    const release = await acquireDeviceReadinessLock(deviceReadinessLockKey("android", "device-1"));
-    const controller = new AbortController();
-    const context = createToolExecutionContext(
-      "session-cancelled-readiness",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      controller.signal,
-    );
+      const release = await acquireDeviceReadinessLock(
+        deviceReadinessLockKey("android", "device-1"),
+      );
+      const controller = new AbortController();
+      const context = createToolExecutionContext(
+        "session-cancelled-readiness",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { requireIssuedSession: false, signal: controller.signal },
+      );
 
-    controller.abort(new Error("request cancelled"));
-    await expect(context).rejects.toThrow("request cancelled");
-    release();
-    expect(setupCalls).toBe(0);
-  });
+      controller.abort(new Error("request cancelled"));
+      await expect(context).rejects.toThrow("request cancelled");
+      release();
+      expect(setupCalls).toBe(0);
+    },
+  );
 
-  test("runs session readiness setup with a flight signal that is independent of one requester (#6280)", async () => {
-    let setupSignal: AbortSignal | undefined;
-    setDeviceReadinessProxyDriverProviderForTesting(() => ({
-      resetSetupState: () => {},
-      setup: async () => {
-        setupSignal = getAbortSignal();
-        return { success: true, message: "ok" };
-      },
-      waitForConnection: async () => true,
-      isInstalled: async () => true,
-      isVersionCompatible: async () => true,
-    }));
-    await sessionManager.createSession("session-signal-readiness", "device-1", "android");
-    const controller = new AbortController();
+  arranged(
+    "runs session readiness setup with a flight signal that is independent of one requester (#6280)",
+    async () => {
+      let setupSignal: AbortSignal | undefined;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupSignal = getAbortSignal();
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => true,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      await sessionManager.createSession("session-signal-readiness", "device-1", "android");
+      const controller = new AbortController();
 
-    await createToolExecutionContext(
-      "session-signal-readiness",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      controller.signal,
-    );
+      await createToolExecutionContext(
+        "session-signal-readiness",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { requireIssuedSession: false, signal: controller.signal },
+      );
 
-    expect(setupSignal).toBeDefined();
-    expect(setupSignal).not.toBe(controller.signal);
-    expect(setupSignal!.aborted).toBe(false);
-  });
+      expect(setupSignal).toBeDefined();
+      expect(setupSignal).not.toBe(controller.signal);
+      expect(setupSignal!.aborted).toBe(false);
+    },
+  );
 
-  test("does not let a cancelled readiness-flight initiator cancel a live joiner (#6280)", async () => {
-    let resolveSetup!: () => void;
-    const setupStarted = new Promise<void>((resolve) => {
-      resolveSetup = resolve;
-    });
-    let setupCalls = 0;
-    setDeviceReadinessProxyDriverProviderForTesting(() => ({
-      resetSetupState: () => {},
-      setup: async () => {
-        setupCalls += 1;
-        await setupStarted;
-        return { success: true, message: "ok" };
-      },
-      waitForConnection: async () => true,
-      isInstalled: async () => true,
-      isVersionCompatible: async () => true,
-    }));
-    await sessionManager.createSession(
-      "session-shared-flight",
-      "device-1",
-      "android",
-      AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
-    );
-    const firstController = new AbortController();
-    const first = createToolExecutionContext(
-      "session-shared-flight",
-      sessionManager,
-      devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      firstController.signal,
-    );
-    await new Promise((resolve) => setImmediate(resolve));
-    const second = createToolExecutionContext("session-shared-flight", sessionManager, devicePool, {
-      ...sessionOptions,
-      deviceReadiness: "automationReady",
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    firstController.abort(new Error("first request cancelled"));
-    await expect(first).rejects.toThrow("first request cancelled");
-    resolveSetup();
-    await expect(second).resolves.toMatchObject({ deviceId: "device-1" });
-    expect(setupCalls).toBe(1);
-  });
+  arranged(
+    "does not let a cancelled readiness-flight initiator cancel a live joiner (#6280)",
+    async () => {
+      let resolveSetup!: () => void;
+      const setupStarted = new Promise<void>((resolve) => {
+        resolveSetup = resolve;
+      });
+      let setupCalls = 0;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          await setupStarted;
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => true,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      await sessionManager.createSession("session-shared-flight", "device-1", "android", {
+        timeoutMs: AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
+      });
+      const firstController = new AbortController();
+      const first = createToolExecutionContext(
+        "session-shared-flight",
+        sessionManager,
+        devicePool,
+        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { requireIssuedSession: false, signal: firstController.signal },
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      const second = createToolExecutionContext(
+        "session-shared-flight",
+        sessionManager,
+        devicePool,
+        {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      firstController.abort(new Error("first request cancelled"));
+      await expect(first).rejects.toThrow("first request cancelled");
+      resolveSetup();
+      await expect(second).resolves.toMatchObject({ deviceId: "device-1" });
+      expect(setupCalls).toBe(1);
+    },
+  );
 
-  test("joins readiness work after its first caller cancels (#6280, #6400)", async () => {
+  arranged("joins readiness work after its first caller cancels (#6280, #6400)", async () => {
     let resolveSetup!: () => void;
     const setupStarted = new Promise<void>((resolve) => {
       resolveSetup = resolve;
@@ -1961,10 +2179,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      cancelled.signal,
+      { requireIssuedSession: false, signal: cancelled.signal },
     );
     await setupEntered.promise;
     cancelled.abort(new Error("first request cancelled"));
@@ -1984,70 +2199,70 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
-  test("cancelled callers detach while their shared CtrlProxy setup completes (#6400)", async () => {
-    const setupEntered = Promise.withResolvers<void>();
-    const finishSetup = Promise.withResolvers<void>();
-    let resetCalls = 0;
-    let setupCalls = 0;
-    let completedSetups = 0;
-    let setupSignal: AbortSignal | undefined;
-    setDeviceReadinessProxyDriverProviderForTesting(() => ({
-      resetSetupState: () => {
-        resetCalls += 1;
-      },
-      setup: async () => {
-        setupCalls += 1;
-        setupSignal = getAbortSignal();
-        setupEntered.resolve();
-        await finishSetup.promise;
-        setupSignal?.throwIfAborted();
-        completedSetups += 1;
-        return { success: true, message: "ok" };
-      },
-      waitForConnection: async () => true,
-      isInstalled: async () => true,
-      isVersionCompatible: async () => true,
-    }));
-    await sessionManager.createSession("session-shared-cancellation", "device-1", "android");
+  arranged(
+    "cancelled callers detach while their shared CtrlProxy setup completes (#6400)",
+    async () => {
+      const setupEntered = Promise.withResolvers<void>();
+      const finishSetup = Promise.withResolvers<void>();
+      let resetCalls = 0;
+      let setupCalls = 0;
+      let completedSetups = 0;
+      let setupSignal: AbortSignal | undefined;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {
+          resetCalls += 1;
+        },
+        setup: async () => {
+          setupCalls += 1;
+          setupSignal = getAbortSignal();
+          setupEntered.resolve();
+          await finishSetup.promise;
+          setupSignal?.throwIfAborted();
+          completedSetups += 1;
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => true,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      await sessionManager.createSession("session-shared-cancellation", "device-1", "android");
 
-    const firstController = new AbortController();
-    const first = createToolExecutionContext(
-      "session-shared-cancellation",
-      sessionManager,
-      devicePool,
-      sessionOptions,
-      undefined,
-      undefined,
-      false,
-      firstController.signal,
-    );
-    await setupEntered.promise;
-    expect(resetCalls).toBe(1);
-    expect(setupCalls).toBe(1);
+      const firstController = new AbortController();
+      const first = createToolExecutionContext(
+        "session-shared-cancellation",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        { requireIssuedSession: false, signal: firstController.signal },
+      );
+      await setupEntered.promise;
+      expect(resetCalls).toBe(1);
+      expect(setupCalls).toBe(1);
 
-    firstController.abort(new Error("first caller cancelled"));
-    await expect(first).rejects.toThrow("first caller cancelled");
-    expect(setupSignal?.aborted).toBe(false);
-    expect(completedSetups).toBe(0);
+      firstController.abort(new Error("first caller cancelled"));
+      await expect(first).rejects.toThrow("first caller cancelled");
+      expect(setupSignal?.aborted).toBe(false);
+      expect(completedSetups).toBe(0);
 
-    const later = createToolExecutionContext(
-      "session-shared-cancellation",
-      sessionManager,
-      devicePool,
-      sessionOptions,
-    );
-    finishSetup.resolve();
-    await expect(later).resolves.toMatchObject({ deviceId: "device-1" });
-    expect(setupSignal?.aborted).toBe(false);
-    expect(completedSetups).toBe(1);
-    expect(resetCalls).toBe(1);
-    expect(setupCalls).toBe(1);
-    expect(sessionManager.getDeviceReadiness("session-shared-cancellation")).toBe(
-      "automationReady",
-    );
-  });
+      const later = createToolExecutionContext(
+        "session-shared-cancellation",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      finishSetup.resolve();
+      await expect(later).resolves.toMatchObject({ deviceId: "device-1" });
+      expect(setupSignal?.aborted).toBe(false);
+      expect(completedSetups).toBe(1);
+      expect(resetCalls).toBe(1);
+      expect(setupCalls).toBe(1);
+      expect(sessionManager.getDeviceReadiness("session-shared-cancellation")).toBe(
+        "automationReady",
+      );
+    },
+  );
 
-  test("an already-aborted caller does not start shared readiness setup (#6400)", async () => {
+  arranged("an already-aborted caller does not start shared readiness setup (#6400)", async () => {
     let resetCalls = 0;
     let setupCalls = 0;
     setDeviceReadinessProxyDriverProviderForTesting(() => ({
@@ -2072,17 +2287,14 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         sessionOptions,
-        undefined,
-        undefined,
-        false,
-        controller.signal,
+        { requireIssuedSession: false, signal: controller.signal },
       ),
     ).rejects.toThrow("cancelled before readiness");
     expect(resetCalls).toBe(0);
     expect(setupCalls).toBe(0);
   });
 
-  test("bounds repeated device acquisition readiness setup iterations", async () => {
+  arranged("bounds repeated device acquisition readiness setup iterations", async () => {
     let setupCalls = 0;
     let setupPasses = 0;
     const readinessKey = deviceReadinessLockKey("android", "device-1");
@@ -2119,7 +2331,7 @@ describe("ToolExecutionContext", () => {
     expect(setupPasses).toBe(5);
   });
 
-  test("bounds device acquisition setup by elapsed fake time", async () => {
+  arranged("bounds device acquisition setup by elapsed fake time", async () => {
     let setupCalls = 0;
     let setupPasses = 0;
     const readinessKey = deviceReadinessLockKey("android", "device-1");
@@ -2159,16 +2371,15 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
-  test("should not run accessibility setup for existing sessions", async () => {
+  arranged("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
 
     await sessionManager.createSession("session-1", "device-1", "android");
     // #6227 P1 follow-up: `undefined` recorded readiness is no longer treated
@@ -2189,158 +2400,165 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(0);
   });
 
-  test("does not recreate an admitted session released before setup", async () => {
+  arranged("does not recreate an admitted session released before setup", async () => {
     const admittedSession = await sessionManager.createSession("session-1", "device-1", "android");
     await sessionManager.releaseSession("session-1", "explicit-release");
 
     await expect(
-      createToolExecutionContext(
-        "session-1",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
+      createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions, {
         admittedSession,
-      ),
+      }),
     ).rejects.toThrow("Session session-1 was released during setup");
     expect(sessionManager.getSession("session-1")).toBeNull();
   });
 
-  test("quarantines preserved reset-cohort session routing until recovery settles", async () => {
-    const first: BootedDevice = {
-      name: "Pixel_8_API_35",
-      platform: "android",
-      deviceId: "emulator-5554",
-    };
-    const second: BootedDevice = {
-      name: "Pixel_9_API_36",
-      platform: "android",
-      deviceId: "emulator-5556",
-    };
-    const image = (device: BootedDevice): DeviceInfo => ({
-      name: device.name,
-      platform: "android",
-      isRunning: true,
-      source: "local",
-    });
-    fakeDeviceManager.bootedDevices = [first, second];
-    await devicePool.addDevice(first, image(first));
-    await devicePool.addDevice(second, image(second));
-    await devicePool.bindOrReuseDeviceSession(
-      "reset-session-1",
-      first.deviceId,
-      "android",
-      image(first),
-    );
-    await devicePool.bindOrReuseDeviceSession(
-      "reset-session-2",
-      second.deviceId,
-      "android",
-      image(second),
-    );
-    const detached = await devicePool.detachAdbServerResetCohort([
-      devicePool.getDevice(first.deviceId)!,
-      devicePool.getDevice(second.deviceId)!,
-    ]);
+  arranged(
+    "quarantines preserved reset-cohort session routing until recovery settles",
+    async () => {
+      const first: BootedDevice = {
+        name: "Pixel_8_API_35",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const second: BootedDevice = {
+        name: "Pixel_9_API_36",
+        platform: "android",
+        deviceId: "emulator-5556",
+      };
+      const image = (device: BootedDevice): DeviceInfo => ({
+        name: device.name,
+        platform: "android",
+        isRunning: true,
+        source: "local",
+      });
+      fakeDeviceManager.bootedDevices = [first, second];
+      await devicePool.addDevice(first, image(first));
+      await devicePool.addDevice(second, image(second));
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "reset-session-1",
+        deviceId: first.deviceId,
+        platform: "android",
+        sourceImage: image(first),
+      });
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "reset-session-2",
+        deviceId: second.deviceId,
+        platform: "android",
+        sourceImage: image(second),
+      });
+      const detached = await devicePool.detachAdbServerResetCohort([
+        devicePool.getDevice(first.deviceId)!,
+        devicePool.getDevice(second.deviceId)!,
+      ]);
 
-    try {
-      await expect(
-        createToolExecutionContext("reset-session-2", sessionManager, devicePool, sessionOptions),
-      ).rejects.toThrow(/device-disconnected:emulator-5556;incident=/);
-    } finally {
-      await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
-    }
+      try {
+        await expect(
+          createToolExecutionContext("reset-session-2", sessionManager, devicePool, sessionOptions),
+        ).rejects.toThrow(/device-disconnected:emulator-5556;incident=/);
+      } finally {
+        await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
+      }
 
-    expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).toThrow(
-      /device-disconnected:emulator-5556;incident=/,
-    );
-    await sessionManager.releaseSession("reset-session-2", "explicit-release");
-    expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).not.toThrow();
-  });
-
-  test("retains an implicit autolock mapping while its reset cohort is quarantined", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
-    const device: BootedDevice = {
-      name: "Pixel_8_API_35",
-      platform: "android",
-      deviceId: "emulator-5554",
-    };
-    const image: DeviceInfo = {
-      name: device.name,
-      platform: "android",
-      isRunning: true,
-      source: "local",
-    };
-    fakeDeviceManager.bootedDevices = [device];
-    await devicePool.addDevice(device, image);
-    const sessionId = await devicePool.autolockDevice(
-      device.deviceId,
-      "android",
-      "mcp-session",
-      image,
-    );
-    const detached = await devicePool.detachAdbServerResetCohort([
-      devicePool.getDevice(device.deviceId)!,
-    ]);
-
-    try {
-      expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android")).toBe(
-        sessionId,
+      expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).toThrow(
+        /device-disconnected:emulator-5556;incident=/,
       );
-      await expect(
-        createToolExecutionContext(sessionId, sessionManager, devicePool, sessionOptions),
-      ).rejects.toThrow(/device-disconnected:emulator-5554;incident=/);
-      expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android")).toBe(
-        sessionId,
-      );
-    } finally {
-      await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
-      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-    }
-  });
+      await sessionManager.releaseSession("reset-session-2", "explicit-release");
+      expect(() => devicePool.assertSessionReadyForAutomation("reset-session-2")).not.toThrow();
+    },
+  );
 
-  test("runs first-session setup when a released UUID is recreated during context creation", async () => {
-    let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
+  arranged(
+    "retains an implicit autolock mapping while its reset cohort is quarantined",
+    async () => {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      const device: BootedDevice = {
+        name: "Pixel_8_API_35",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const image: DeviceInfo = {
+        name: device.name,
+        platform: "android",
+        isRunning: true,
+        source: "local",
+      };
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.addDevice(device, image);
+      const sessionId = await devicePool.autolockDevice(
+        device.deviceId,
+        "android",
+        "mcp-session",
+        image,
+      );
+      const detached = await devicePool.detachAdbServerResetCohort([
+        devicePool.getDevice(device.deviceId)!,
+      ]);
+
+      try {
+        expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android")).toBe(
+          sessionId,
+        );
+        await expect(
+          createToolExecutionContext(sessionId, sessionManager, devicePool, sessionOptions),
+        ).rejects.toThrow(/device-disconnected:emulator-5554;incident=/);
+        expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android")).toBe(
+          sessionId,
+        );
+      } finally {
+        await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      }
+    },
+  );
+
+  arranged(
+    "runs first-session setup when a released UUID is recreated during context creation",
+    async () => {
+      let setupCalls = 0;
+      stubManager({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      waitForConnection: async () => true,
-      resetConnectionBudget: () => {},
-      close: async () => {},
-    })) as any;
+      });
+      stubClient({
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        close: async () => {},
+      });
 
-    const original = await sessionManager.createSession("session-recreated", "device-1", "android");
-    let finishSetup!: () => void;
-    const setup = sessionManager.trackSessionSetup(
-      original,
-      () =>
-        new Promise<void>((resolve) => {
-          finishSetup = resolve;
-        }),
-    );
-    const release = sessionManager.releaseSession("session-recreated", PLAN_AUTO_RELEASE_REASON);
-    await Promise.resolve();
-    const context = createToolExecutionContext(
-      "session-recreated",
-      sessionManager,
-      devicePool,
-      sessionOptions,
-    );
-    finishSetup();
-    await setup;
-    await release;
+      const original = await sessionManager.createSession(
+        "session-recreated",
+        "device-1",
+        "android",
+      );
+      let finishSetup!: () => void;
+      const setup = sessionManager.trackSessionSetup(
+        original,
+        () =>
+          new Promise<void>((resolve) => {
+            finishSetup = resolve;
+          }),
+      );
+      const release = sessionManager.releaseSession("session-recreated", PLAN_AUTO_RELEASE_REASON);
+      await Promise.resolve();
+      const context = createToolExecutionContext(
+        "session-recreated",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      finishSetup();
+      await setup;
+      await release;
 
-    await expect(context).resolves.toMatchObject({ deviceId: "device-1" });
-    expect(setupCalls).toBe(1);
-  });
+      await expect(context).resolves.toMatchObject({ deviceId: "device-1" });
+      expect(setupCalls).toBe(1);
+    },
+  );
 
-  test("rejects an admitted session once its release begins", async () => {
+  arranged("rejects an admitted session once its release begins", async () => {
     const session = await sessionManager.createSession("session-releasing", "device-1", "android");
     let finishSetup!: () => void;
     const setup = sessionManager.trackSessionSetup(
@@ -2354,14 +2572,9 @@ describe("ToolExecutionContext", () => {
     await Promise.resolve();
 
     await expect(
-      createToolExecutionContext(
-        "session-releasing",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
-        session,
-      ),
+      createToolExecutionContext("session-releasing", sessionManager, devicePool, sessionOptions, {
+        admittedSession: session,
+      }),
     ).rejects.toThrow("released during setup");
 
     finishSetup();
@@ -2369,7 +2582,7 @@ describe("ToolExecutionContext", () => {
     await release;
   });
 
-  test("rechecks admission after setup releases its session", async () => {
+  arranged("rechecks admission after setup releases its session", async () => {
     const session = await sessionManager.createSession("session-releasing", "device-1", "android");
     // #6227 P1 follow-up: `undefined` readiness is no longer treated as
     // satisfied on the existingSession path, so record it explicitly here —
@@ -2390,8 +2603,7 @@ describe("ToolExecutionContext", () => {
           sessionManager,
           devicePool,
           sessionOptions,
-          undefined,
-          session,
+          { admittedSession: session },
         ),
       ).rejects.toThrow("released during setup");
     } finally {
@@ -2399,7 +2611,7 @@ describe("ToolExecutionContext", () => {
     }
   });
 
-  test("does not apply keep-awake after a session is released during setup", async () => {
+  arranged("does not apply keep-awake after a session is released during setup", async () => {
     let allowActivityWrite!: () => void;
     const activityWrite = new Promise<void>((resolve) => {
       allowActivityWrite = resolve;
@@ -2450,7 +2662,7 @@ describe("ToolExecutionContext", () => {
     }
   });
 
-  test("bounds accessibility setup and rejects it after the session releases", async () => {
+  arranged("bounds accessibility setup and rejects it after the session releases", async () => {
     const boundedTimer = new FakeTimer();
     const boundedSessionManager = new SessionManager(
       boundedTimer,
@@ -2482,20 +2694,19 @@ describe("ToolExecutionContext", () => {
     const setupStartedPromise = new Promise<void>((resolve) => {
       setupStarted = resolve;
     });
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupStarted();
-          await setupFinished;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupStarted();
+        await setupFinished;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     try {
       const context = createToolExecutionContext(
@@ -2566,64 +2777,73 @@ describe("ToolExecutionContext", () => {
       session_timeout_ms: 10,
       heartbeat_timeout_ms: 5,
       has_received_heartbeat: 1,
+      activity_seq: 0,
+      stable_identity_generation: 0,
+      heartbeat_timeout_source: null,
+      liveness_contract_generation: 0,
+      liveness_owner_token: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
+
       created_at: "2026-09-03T00:00:00.000Z",
       updated_at: "2026-09-03T00:00:00.000Z",
     });
 
-    test("rejects a fabricated UUID and never assigns a pooled device while a session is active", async () => {
-      let setupCalls = 0;
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
+    arranged(
+      "rejects a fabricated UUID and never assigns a pooled device while a session is active",
+      async () => {
+        let setupCalls = 0;
+        stubManager({
           resetSetupState: () => {},
           setup: async () => {
             setupCalls += 1;
             return { success: true, message: "ok" };
           },
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
+        });
+        stubClient({
+          waitForConnection: async () => true,
+          resetConnectionBudget: () => {},
+          close: async () => {},
+        });
+
+        // The connection already holds a live, issued session on device-1.
+        await devicePool.assignDeviceToSession("issued-session", "android");
+        expect(sessionManager.getSession("issued-session")?.assignedDevice).toBe("device-1");
+
+        const assignSpy = spyOn(devicePool, "assignDeviceToSession");
+
+        await expect(
+          createToolExecutionContext(
+            "kumquat-D",
+            sessionManager,
+            devicePool,
+            sessionOptions,
+            { requireIssuedSession: true }, // requireIssuedSession — the device-tool boundary
+          ),
+        ).rejects.toThrow(/not an active daemon session/);
+
+        // No pooled device was minted for the fabricated id, and the caller's own
+        // live session is untouched.
+        expect(assignSpy).not.toHaveBeenCalled();
+        expect(sessionManager.getSession("kumquat-D")).toBeNull();
+        expect(sessionManager.getSession("issued-session")?.assignedDevice).toBe("device-1");
+        expect(setupCalls).toBe(0);
+        assignSpy.mockRestore();
+      },
+    );
+
+    arranged("still recovers a persisted, non-terminal session (live-during-restart)", async () => {
+      stubManager({
+        resetSetupState: () => {},
+        setup: async () => ({ success: true, message: "ok" }),
+      });
+      stubClient({
         waitForConnection: async () => true,
         resetConnectionBudget: () => {},
         close: async () => {},
-      })) as any;
-
-      // The connection already holds a live, issued session on device-1.
-      await devicePool.assignDeviceToSession("issued-session", "android");
-      expect(sessionManager.getSession("issued-session")?.assignedDevice).toBe("device-1");
-
-      const assignSpy = spyOn(devicePool, "assignDeviceToSession");
-
-      await expect(
-        createToolExecutionContext(
-          "kumquat-D",
-          sessionManager,
-          devicePool,
-          sessionOptions,
-          undefined,
-          undefined,
-          true, // requireIssuedSession — the device-tool boundary
-        ),
-      ).rejects.toThrow(/not an active daemon session/);
-
-      // No pooled device was minted for the fabricated id, and the caller's own
-      // live session is untouched.
-      expect(assignSpy).not.toHaveBeenCalled();
-      expect(sessionManager.getSession("kumquat-D")).toBeNull();
-      expect(sessionManager.getSession("issued-session")?.assignedDevice).toBe("device-1");
-      expect(setupCalls).toBe(0);
-      assignSpy.mockRestore();
-    });
-
-    test("still recovers a persisted, non-terminal session (live-during-restart)", async () => {
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
-          resetSetupState: () => {},
-          setup: async () => ({ success: true, message: "ok" }),
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
-        waitForConnection: async () => true,
-        resetConnectionBudget: () => {},
-        close: async () => {},
-      })) as any;
+      });
 
       const persisted = nonTerminalPersisted("restarted-session", "device-1");
       const recoveryManager = new SessionManager(
@@ -2655,9 +2875,7 @@ describe("ToolExecutionContext", () => {
           recoveryManager,
           recoveryPool,
           sessionOptions,
-          undefined,
-          undefined,
-          true, // requireIssuedSession must NOT block restart recovery
+          { requireIssuedSession: true }, // requireIssuedSession must NOT block restart recovery
         );
         expect(context.deviceId).toBe("device-1");
         expect(recoveryManager.getSession("restarted-session")?.assignedDevice).toBe("device-1");
@@ -2666,58 +2884,60 @@ describe("ToolExecutionContext", () => {
       }
     });
 
-    test("the caller's own issued session still resolves without a new assignment", async () => {
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
+    arranged(
+      "the caller's own issued session still resolves without a new assignment",
+      async () => {
+        stubManager({
           resetSetupState: () => {},
           setup: async () => ({ success: true, message: "ok" }),
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
-        waitForConnection: async () => true,
-        resetConnectionBudget: () => {},
-        close: async () => {},
-      })) as any;
+        });
+        stubClient({
+          waitForConnection: async () => true,
+          resetConnectionBudget: () => {},
+          close: async () => {},
+        });
 
-      await sessionManager.createSession("mine", "device-1", "android");
-      const assignSpy = spyOn(devicePool, "assignDeviceToSession");
+        await sessionManager.createSession("mine", "device-1", "android");
+        const assignSpy = spyOn(devicePool, "assignDeviceToSession");
 
-      const context = await createToolExecutionContext(
-        "mine",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
-        undefined,
-        true,
-      );
+        const context = await createToolExecutionContext(
+          "mine",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+          { requireIssuedSession: true },
+        );
 
-      expect(context.deviceId).toBe("device-1");
-      expect(assignSpy).not.toHaveBeenCalled();
-      assignSpy.mockRestore();
-    });
+        expect(context.deviceId).toBe("device-1");
+        expect(assignSpy).not.toHaveBeenCalled();
+        assignSpy.mockRestore();
+      },
+    );
 
-    test("device-label / internal fresh mint is unaffected (requireIssuedSession defaults false)", async () => {
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
+    arranged(
+      "device-label / internal fresh mint is unaffected (requireIssuedSession defaults false)",
+      async () => {
+        stubManager({
           resetSetupState: () => {},
           setup: async () => ({ success: true, message: "ok" }),
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
-        waitForConnection: async () => true,
-        resetConnectionBudget: () => {},
-        close: async () => {},
-      })) as any;
+        });
+        stubClient({
+          waitForConnection: async () => true,
+          resetConnectionBudget: () => {},
+          close: async () => {},
+        });
 
-      // Mirrors deviceLabelMapping.registerDeviceLabelMap, which mints a fresh
-      // derived session without passing requireIssuedSession.
-      const context = await createToolExecutionContext(
-        "base:B",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-      );
-      expect(context.deviceId).toBe("device-1");
-      expect(sessionManager.getSession("base:B")?.assignedDevice).toBe("device-1");
-    });
+        // Mirrors deviceLabelMapping.registerDeviceLabelMap, which mints a fresh
+        // derived session without passing requireIssuedSession.
+        const context = await createToolExecutionContext(
+          "base:B",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+        );
+        expect(context.deviceId).toBe("device-1");
+        expect(sessionManager.getSession("base:B")?.assignedDevice).toBe("device-1");
+      },
+    );
   });
 });

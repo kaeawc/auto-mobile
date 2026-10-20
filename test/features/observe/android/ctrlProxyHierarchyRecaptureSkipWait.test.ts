@@ -156,21 +156,16 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
   test("requireFreshExtraction polls extract independently even when the prior sync is inside the cache serve window", async () => {
     const device = await deviceLikeAndroidHierarchy();
     try {
-      const first = await device.hierarchy.getAccessibilityHierarchy(
-        undefined,
-        undefined,
-        true,
-        DEVICE_CAPTURE_TIME + 1,
-      );
-      const second = await device.hierarchy.getAccessibilityHierarchy(
-        undefined,
-        undefined,
-        true,
-        first?.updatedAt,
-        false,
-        undefined,
-        { requireFreshExtraction: true },
-      );
+      const first = await device.hierarchy.getAccessibilityHierarchy(undefined, {
+        skipWaitForFresh: true,
+        minTimestamp: DEVICE_CAPTURE_TIME + 1,
+      });
+      const second = await device.hierarchy.getAccessibilityHierarchy(undefined, {
+        skipWaitForFresh: true,
+        minTimestamp: first?.updatedAt,
+        disableAllFiltering: false,
+        requireFreshExtraction: true,
+      });
       expect(device.extractions()).toBe(2);
       expect(first?.fresh).toBe(true);
       expect(second?.fresh).toBe(true);
@@ -183,18 +178,14 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
   test("standalone inclusive reads still return the cached frame unverified without extracting", async () => {
     const device = await deviceLikeAndroidHierarchy();
     try {
-      const first = await device.hierarchy.getAccessibilityHierarchy(
-        undefined,
-        undefined,
-        true,
-        DEVICE_CAPTURE_TIME + 1,
-      );
-      const second = await device.hierarchy.getAccessibilityHierarchy(
-        undefined,
-        undefined,
-        false,
-        first?.updatedAt,
-      );
+      const first = await device.hierarchy.getAccessibilityHierarchy(undefined, {
+        skipWaitForFresh: true,
+        minTimestamp: DEVICE_CAPTURE_TIME + 1,
+      });
+      const second = await device.hierarchy.getAccessibilityHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: first?.updatedAt,
+      });
       expect(device.extractions()).toBe(1);
       expect(second?.updatedAt).toBe(first?.updatedAt);
       expect(second?.fresh).toBe(false);
@@ -208,14 +199,11 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
     h = createHarness();
     const started = h.timer.now();
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      true,
-      T + 1,
-      false,
-      undefined,
-    );
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: T + 1,
+      disableAllFiltering: false,
+    });
 
     expect(h.waitCalls).toEqual([]);
     expect(h.timer.now() - started).toBe(0);
@@ -232,14 +220,11 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
     // device stamp is the initial capture's, below the caller's floor.
     h.syncTree = tree(T, "late pre-navigation push");
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      true,
-      T + 1,
-      false,
-      undefined,
-    );
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: T + 1,
+      disableAllFiltering: false,
+    });
 
     expect(h.waitCalls).toEqual([]);
     expect(h.syncCalls()).toBe(1);
@@ -251,14 +236,11 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
     h = createHarness();
     const started = h.timer.now();
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      T + 1,
-      false,
-      undefined,
-    );
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: T + 1,
+      disableAllFiltering: false,
+    });
 
     expect(h.waitCalls).toEqual([DEFAULT_FRESH_WAIT_MS]);
     expect(h.timer.now() - started).toBe(DEFAULT_FRESH_WAIT_MS);

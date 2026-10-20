@@ -56,7 +56,9 @@ function deriveGeneration({
 
 function capturedLister(
   readFile: () => Promise<string>,
-  options: Pick<ConstructorParameters<typeof DevicectlDeviceLister>[0], "timer" | "logger"> = {},
+  options: Partial<
+    Pick<NonNullable<ConstructorParameters<typeof DevicectlDeviceLister>[0]>, "timer" | "logger">
+  > = {},
 ) {
   return new DevicectlDeviceLister({
     platform: () => "darwin",
@@ -316,13 +318,13 @@ describe("devicectl list devices host captures", () => {
         expect(parsed.simulators).toEqual(
           capture.result.devices
             .map((record) => ({
-              deviceId: record.properties.hardware.udid,
+              deviceId: String(record.properties.hardware.udid),
               name: record.properties.state.name,
-              platform: "ios",
+              platform: "ios" as const,
               iosVersion: record.properties.software.osVersionNumber.stringValue,
               osVersion: record.properties.software.osVersionNumber.stringValue,
               // All captured product types are iPhone models, including Duo.
-              formFactor: "phone",
+              formFactor: "phone" as const,
             }))
             .toSorted((a, b) => String(a.deviceId).localeCompare(String(b.deviceId))),
         );

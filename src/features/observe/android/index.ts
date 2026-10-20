@@ -8,6 +8,7 @@
 // Main client
 export { AndroidCtrlProxyClient } from "./AndroidCtrlProxyClient";
 export type { AndroidCtrlProxy } from "./AndroidCtrlProxyClient";
+export type { ViewHierarchyAndroidCtrlProxy } from "./ViewHierarchyAndroidCtrlProxy";
 
 // Types
 export type {
@@ -25,4 +26,5 @@ export type {
   A11yActionResult,
   SettingsNamespace,
   AndroidPerfTiming,
+  AccessibilityNodeSelector,
 } from "./types";

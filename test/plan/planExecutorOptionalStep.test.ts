@@ -1,5 +1,6 @@
+import { DefaultPlanStepExecutor } from "../../src/utils/plan/PlanStepExecutor";
 import { describe, expect, test, mock, spyOn, beforeEach, afterEach } from "bun:test";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -16,13 +17,13 @@ import { convertDebugStepsToRecords } from "../../src/server/planExecutionOrches
  * issue #2811) without breaking the runs where that dialog is absent.
  */
 describe("PlanExecutor — optional steps", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let originalDebugMode: boolean;
 
   beforeEach(() => {
     originalDebugMode = isDebugModeEnabled();
     setDebugModeEnabled(false);
-    planExecutor = new DefaultPlanExecutor(new FakeTimer());
+    planExecutor = createDefaultPlanExecutor(new FakeTimer());
     const deviceSchema = z.object({
       platform: z.string().optional(),
       deviceId: z.string().optional(),
@@ -118,7 +119,7 @@ describe("PlanExecutor — optional steps", () => {
             content: [{ type: "text", text }],
           }),
         );
-        const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+        const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
           {
             name: "malformed envelope",
             steps: [
@@ -154,7 +155,7 @@ describe("PlanExecutor — optional steps", () => {
             error: outcome === "completed" ? undefined : "timed failure",
           });
         });
-        const result = await new DefaultPlanExecutor(timer).executePlan(
+        const result = await createDefaultPlanExecutor(timer).executePlan(
           {
             name: "step-duration",
             steps: [{ tool: "optionalStepTimed", params: {}, optional: outcome === "skipped" }],
@@ -188,14 +189,25 @@ describe("PlanExecutor — optional steps", () => {
         return createStructuredToolResponse({ success: false, error: "timed failure" });
       },
     );
-    const result = await new DefaultPlanExecutor(timer).executePlan({
-      name: "parallel-step-durations",
-      devices: ["device-a", "device-b"],
-      steps: [
-        { tool: "optionalStepTimed", params: { device: "device-a", elapsed: 250 }, optional: true },
-        { tool: "optionalStepTimed", params: { device: "device-b", elapsed: 400 }, optional: true },
-      ],
-    });
+    const result = await createDefaultPlanExecutor(timer).executePlan(
+      {
+        name: "parallel-step-durations",
+        devices: ["device-a", "device-b"],
+        steps: [
+          {
+            tool: "optionalStepTimed",
+            params: { device: "device-a", elapsed: 250 },
+            optional: true,
+          },
+          {
+            tool: "optionalStepTimed",
+            params: { device: "device-b", elapsed: 400 },
+            optional: true,
+          },
+        ],
+      },
+      0,
+    );
 
     expect(result.success).toBe(true);
     expect(result.perDeviceResults?.get("device-a")?.skippedSteps?.[0]?.durationMs).toBe(250);
@@ -346,7 +358,7 @@ describe("PlanExecutor — optional steps", () => {
 
   test("records elapsed duration for skipped optional steps in multi-device results", async () => {
     const fakeTimer = new FakeTimer();
-    const timedExecutor = new DefaultPlanExecutor(fakeTimer);
+    const timedExecutor = createDefaultPlanExecutor(fakeTimer);
     ToolRegistry.register(
       "optionalStepTimedFail",
       "fails after time passes",
@@ -481,7 +493,7 @@ describe("PlanExecutor — optional steps", () => {
   test.each([false, true])(
     "execution error preserves earlier skip (parallel=%s)",
     async (parallel) => {
-      const executeStep = spyOn(planExecutor, "executeStep")
+      const executeStep = spyOn(DefaultPlanStepExecutor.prototype, "executeStep")
         .mockResolvedValueOnce({ status: "skipped", error: "element not found", details: {} })
         .mockRejectedValueOnce(new Error("execution interrupted"));
       try {

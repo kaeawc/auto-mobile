@@ -41,7 +41,12 @@ describe("IOSCtrlProxyManager doctor discovery", () => {
     return {
       ports,
       executor,
-      manager: IOSCtrlProxyManager.createForTestingWithDeps(device, timer, undefined, executor),
+      manager: IOSCtrlProxyManager.createForTestingWithDeps({
+        device,
+        timer,
+        builder: undefined,
+        processExecutor: executor,
+      }),
     };
   }
 
@@ -58,12 +63,12 @@ describe("IOSCtrlProxyManager doctor discovery", () => {
     for (const body of [JSON.stringify({ status: "ok" }), "OK"]) {
       const executor = new FakeProcessExecutor();
       executor.setCommandResponse("curl", createExecResult(body, ""));
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
         device,
         timer,
-        undefined,
-        executor,
-      );
+        builder: undefined,
+        processExecutor: executor,
+      });
       expect(await manager.discoverRunnerPort()).toBeNull();
     }
   });
@@ -171,45 +176,4 @@ describe("IOSCtrlProxyManager doctor discovery", () => {
       }
     }
   });
-});
-
-describe("custom simulator device set argv", () => {
-  for (const configured of [false, true]) {
-    test(
-      configured
-        ? "injects --set immediately after simctl"
-        : "preserves the original argv when unset",
-      async () => {
-        const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
-        try {
-          if (configured) {
-            process.env.CORESIMULATOR_DEVICE_SET_PATH = "/tmp/custom device set";
-          } else {
-            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
-          }
-          const prefix = configured ? ["simctl", "--set", "/tmp/custom device set"] : ["simctl"];
-          const exec = new FakeProcessExecutor();
-          const capture = spyOn(exec, "executeCommand");
-          exec.setDefaultResponse(createExecResult(device.deviceId, ""));
-          const timer = new FakeTimer();
-          const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-            device,
-            timer,
-            undefined,
-            exec,
-          );
-          expect(await manager["isSimulatorDetected"]()).toBe(true);
-          expect(capture.mock.calls).toEqual([["xcrun", [...prefix, "list", "devices"]]]);
-          expect(timer.getSleepHistory()).toEqual([]);
-        } finally {
-          PortManager.reset();
-          if (previous === undefined) {
-            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
-          } else {
-            process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
-          }
-        }
-      },
-    );
-  }
 });

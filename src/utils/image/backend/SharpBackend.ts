@@ -1,4 +1,4 @@
-import { loadSharp, type SharpFactory } from "../loadSharp";
+import { loadSharp } from "../loadSharp";
 import type {
   ImageBackend,
   ImageMetadata,
@@ -7,7 +7,50 @@ import type {
   RawImage,
 } from "./ImageBackend";
 
-export type SharpLoader = () => Promise<SharpFactory>;
+export interface SharpResizeOptions {
+  width: number;
+  height?: number;
+  fit?: "cover" | "fill";
+  kernel?: "nearest";
+}
+
+export interface SharpExtractRegion {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface SharpWebpOptions {
+  quality?: number;
+  lossless?: true;
+  nearLossless?: true;
+}
+
+export interface SharpRawResult {
+  data: Uint8Array;
+  info: { width: number; height: number };
+}
+
+/** The slice of a sharp pipeline that SharpBackend drives. */
+export interface SharpPipeline {
+  resize(options: SharpResizeOptions): SharpPipeline;
+  rotate(degrees: number): SharpPipeline;
+  extract(region: SharpExtractRegion): SharpPipeline;
+  png(): SharpPipeline;
+  jpeg(options: { quality?: number }): SharpPipeline;
+  webp(options: SharpWebpOptions): SharpPipeline;
+  ensureAlpha(): SharpPipeline;
+  raw(): SharpPipeline;
+  metadata(): Promise<{ width?: number; height?: number; format?: string }>;
+  toBuffer(): Promise<Buffer>;
+  toBuffer(options: { resolveWithObject: true }): Promise<SharpRawResult>;
+}
+
+/** The slice of the sharp module entry point that SharpBackend uses. */
+export type SharpPort = (input: Buffer) => SharpPipeline;
+
+export type SharpLoader = () => Promise<SharpPort>;
 
 export interface SharpBackendOptions {
   loadSharp?: SharpLoader;
@@ -30,10 +73,10 @@ export class SharpBackend implements ImageBackend {
   }
 
   private async withSharp<T>(
-    operation: (sharp: SharpFactory) => Promise<T>,
+    operation: (sharp: SharpPort) => Promise<T>,
     fallback: () => Promise<T>,
   ): Promise<T> {
-    let sharp: SharpFactory;
+    let sharp: SharpPort;
     try {
       sharp = await this.loadSharp();
     } catch {
@@ -45,10 +88,7 @@ export class SharpBackend implements ImageBackend {
     return operation(sharp);
   }
 
-  private applyOperation(
-    image: ReturnType<SharpFactory>,
-    op: ImageOperation,
-  ): ReturnType<SharpFactory> {
+  private applyOperation(image: SharpPipeline, op: ImageOperation): SharpPipeline {
     switch (op.type) {
       case "resize": {
         const kernel = op.mode === "nearest" ? "nearest" : undefined;
@@ -69,10 +109,7 @@ export class SharpBackend implements ImageBackend {
     }
   }
 
-  private applyEncoding(
-    image: ReturnType<SharpFactory>,
-    pipeline: ImagePipeline,
-  ): ReturnType<SharpFactory> {
+  private applyEncoding(image: SharpPipeline, pipeline: ImagePipeline): SharpPipeline {
     switch (pipeline.encoding?.mime) {
       case "image/png":
         return image.png();
@@ -92,10 +129,10 @@ export class SharpBackend implements ImageBackend {
   }
 
   private async applyPipeline(
-    sharp: SharpFactory,
+    sharp: SharpPort,
     source: Buffer,
     pipeline: ImagePipeline,
-  ): Promise<ReturnType<SharpFactory>> {
+  ): Promise<SharpPipeline> {
     let image = sharp(source);
     let hasResizeInCurrentPipeline = false;
     let hasCropInCurrentPipeline = false;

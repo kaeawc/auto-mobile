@@ -1,18 +1,16 @@
+import { makePool } from "../helpers/makePool";
 import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
 import type { Session } from "../../src/daemon/sessionManager";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 
 const original: BootedDevice = {
@@ -59,38 +57,38 @@ describe("device binding writers current behavior (#11802)", () => {
   let utils: FakeDeviceUtils;
   let pool: DevicePool;
   let liveness: MissingDeviceLiveness;
+  let rebootOverride: boolean | undefined;
   let changes: StateChange[];
   let autolockEnv: string | undefined;
 
   async function initialize() {
     timer = new FakeTimer();
     timer.setCurrentTime(1000);
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [original, bystander]);
     changes = [];
-    pool = new DevicePool(
-      createDevicePoolDependencies(manager, "binding-characterization", {
-        timer,
-        deviceManager: utils,
-        idGenerator: new FakeIdGenerator(["autolock-owner"]),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: false, maxAttempts: 0 },
-        deviceSessionContinuityEnabled: false,
-        missingDeviceLivenessFactory: (port) => {
-          liveness = new MissingDeviceLiveness(port);
-          return liveness;
-        },
-        onDeviceStateChanged: (deviceId, platform) => {
-          changes.push({ deviceId, platform, binding: binding(pool.getDevice(deviceId)!) });
-        },
-      }),
-    );
+    rebootOverride = undefined;
+    pool = makePool(manager, "binding-characterization", {
+      timer,
+      deviceManager: utils,
+      idGenerator: new FakeIdGenerator(["autolock-owner"]),
+      recoveryPolicy: { onLoss: false, maxAttempts: 0 },
+      deviceSessionContinuityEnabled: false,
+      missingDeviceLivenessFactory: (port) => {
+        liveness = new MissingDeviceLiveness({
+          ...port,
+          shouldRebootDisconnectedAndroidDevice: (device) =>
+            rebootOverride ?? port.shouldRebootDisconnectedAndroidDevice(device),
+        });
+        return liveness;
+      },
+      onDeviceStateChanged: (deviceId, platform) => {
+        changes.push({ deviceId, platform, binding: binding(pool.getDevice(deviceId)!) });
+      },
+    });
     await pool.initializeWithDevices([original, bystander]);
   }
 
@@ -109,11 +107,36 @@ describe("device binding writers current behavior (#11802)", () => {
       close();
     }
   });
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     autolockEnv = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     await initialize();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each([...table])(
+        name,
+        async (row: T) => {
+          await arrangeHarness();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
   afterEach(() => {
     close();
     if (autolockEnv === undefined) {
@@ -137,25 +160,30 @@ describe("device binding writers current behavior (#11802)", () => {
   }
 
   async function bindOwner() {
-    await pool.bindOrReuseDeviceSession("owner", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     assertAgreement();
     return pool.getDevice(original.deviceId)!;
   }
 
   const initial: Binding = {
     sessionId: null,
-    status: "idle",
-    bindingStatus: "idle",
-    health: "ok",
+    status: "idle" as const,
+    bindingStatus: "idle" as const,
+    health: "ok" as const,
     errorCount: 0,
     assignmentCount: 0,
     lastUsedAt: 1000,
   };
   const owned: Binding = {
     sessionId: "owner",
-    status: "busy",
-    bindingStatus: "busy",
-    health: "ok",
+    status: "busy" as const,
+    bindingStatus: "busy" as const,
+    health: "ok" as const,
     errorCount: 0,
     assignmentCount: 1,
     lastUsedAt: 1001,
@@ -186,13 +214,19 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
         });
         expect(changes.map((change) => change.binding)).toEqual([
           owned,
-          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+          {
+            ...owned,
+            sessionId: null,
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
+          },
         ]);
       },
     },
@@ -227,9 +261,9 @@ describe("device binding writers current behavior (#11802)", () => {
           expect(binding(captured)).toEqual({
             ...owned,
             sessionId: null,
-            status: "idle",
-            bindingStatus: "idle",
-            health: "ok",
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
           });
           const rebound = { ...owned, lastUsedAt: 1002 };
           expect(binding(pool.getDevice(replacement.deviceId)!)).toEqual(rebound);
@@ -237,7 +271,13 @@ describe("device binding writers current behavior (#11802)", () => {
           expect(changes.map((change) => change.binding)).toEqual([
             owned,
             { ...owned, errorCount: 1 },
-            { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+            {
+              ...owned,
+              sessionId: null,
+              status: "idle" as const,
+              bindingStatus: "idle" as const,
+              health: "ok" as const,
+            },
             rebound,
           ]);
         } finally {
@@ -250,21 +290,18 @@ describe("device binding writers current behavior (#11802)", () => {
       name: "recovery rebind to another pooled device",
       run: async () => {
         await bindOwner();
-        await pool.bindOrReuseDeviceSession(
-          "owner",
-          bystander.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: bystander.deviceId,
+          platform: "android",
+          allowSessionRebind: true,
+        });
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
         });
         expect(binding(pool.getDevice(bystander.deviceId)!)).toEqual({
           ...owned,
@@ -288,7 +325,13 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(pool.getDevice(original.deviceId)?.autolockSessionId).toBeUndefined();
         expect(changes.map((change) => change.binding)).toEqual([
           locked,
-          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+          {
+            ...owned,
+            sessionId: null,
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
+          },
         ]);
       },
     },
@@ -304,9 +347,9 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(binding(captured)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
           errorCount: 1,
         });
         expect(pool.getDevice(original.deviceId)).toBeNull();
@@ -338,14 +381,14 @@ describe("device binding writers current behavior (#11802)", () => {
     },
   ];
   for (const row of rows) {
-    test(`agreement after ${row.name}`, async () => {
+    arranged(`agreement after ${row.name}`, async () => {
       assertAgreement();
       await row.run();
       assertAgreement();
     });
   }
 
-  test.each(["add", "refresh"] as const)(
+  arrangedEach(["add", "refresh"] as const)(
     "%s entry literal starts with no owner or history",
     async (route) => {
       // devicePool.ts addDevice and devicePoolRefresh.ts new-entry literals.
@@ -363,19 +406,22 @@ describe("device binding writers current behavior (#11802)", () => {
     },
   );
 
-  test("tentative allocation restores every field and does not notify a rolled-back claim", async () => {
-    // Existing bindingDirection test pins the returned device. Add only the
-    // snapshot fields and silent rollback contract (devicePool.ts Object.assign).
-    await bindOwner();
-    pool.recordDeviceError(bystander.deviceId);
-    changes.length = 0;
-    expect(await pool.assignDeviceToSession("owner", "android")).toBe(original.deviceId);
-    expect(binding(pool.getDevice(bystander.deviceId)!)).toEqual({ ...initial, errorCount: 1 });
-    expect(changes).toEqual([]);
-    assertAgreement();
-  });
+  arranged(
+    "tentative allocation restores every field and does not notify a rolled-back claim",
+    async () => {
+      // Existing bindingDirection test pins the returned device. Add only the
+      // snapshot fields and silent rollback contract (devicePool.ts Object.assign).
+      await bindOwner();
+      pool.recordDeviceError(bystander.deviceId);
+      changes.length = 0;
+      expect(await pool.assignDeviceToSession("owner", "android")).toBe(original.deviceId);
+      expect(binding(pool.getDevice(bystander.deviceId)!)).toEqual({ ...initial, errorCount: 1 });
+      expect(changes).toEqual([]);
+      assertAgreement();
+    },
+  );
 
-  test.each(["idle", "busy"] as const)(
+  arrangedEach(["idle", "busy"] as const)(
     "rollback preserves raw %s binding under a health error",
     (status) => {
       const device = pool.getDevice(original.deviceId)!;
@@ -384,17 +430,17 @@ describe("device binding writers current behavior (#11802)", () => {
       }
       markDeviceError(device);
       const before = binding(device);
-      const snapshot = pool["snapshotSessionAssignment"](device);
+      const snapshot = pool.testHooks.snapshotSessionAssignment(device);
       expect(snapshot).toMatchObject({ status, health: "error", sessionId: device.sessionId });
       bindDevice(device, "tentative");
       device.errorCount = 17;
-      pool["restoreSessionAssignment"](device, snapshot);
+      pool.testHooks.restoreSessionAssignment(device, snapshot);
       expect(binding(device)).toEqual(before);
       expect(statusOf(device)).toBe("error");
     },
   );
 
-  test("stale expectedSessionId release preserves all fields and stays silent", async () => {
+  arranged("stale expectedSessionId release preserves all fields and stays silent", async () => {
     // devicePool.test.ts already pins refusal; this pins the untouched tuple/event.
     await bindOwner();
     pool.recordDeviceError(original.deviceId);
@@ -405,178 +451,205 @@ describe("device binding writers current behavior (#11802)", () => {
     assertAgreement();
   });
 
-  test("explicit bind retains error history during detach, then resets it on the new claim", async () => {
-    // explicitDeviceBind.ts expired/missing-owner null/idle writer. A normal
-    // release leaves the pool capture for the caller's separate releaseDevice.
-    await bindOwner();
-    pool.recordDeviceError(original.deviceId);
-    await manager.releaseSession("owner");
-    changes.length = 0;
-    await pool.bindOrReuseDeviceSession("next-owner", original.deviceId, "android");
-    const departed = {
-      ...owned,
-      sessionId: null,
-      status: "idle",
-      bindingStatus: "idle",
-      health: "ok",
-      errorCount: 1,
-    };
-    const rebound = {
-      ...owned,
-      sessionId: "next-owner",
-      assignmentCount: 2,
-      lastUsedAt: 1002,
-    };
-    expect(changes.map((change) => change.binding)).toEqual([departed, rebound]);
-    expect(binding(pool.getDevice(original.deviceId)!)).toEqual(rebound);
-    assertAgreement();
-  });
+  arranged(
+    "explicit bind retains error history during detach, then resets it on the new claim",
+    async () => {
+      // explicitDeviceBind.ts expired/missing-owner null/idle writer. A normal
+      // release leaves the pool capture for the caller's separate releaseDevice.
+      await bindOwner();
+      pool.recordDeviceError(original.deviceId);
+      await manager.releaseSession("owner");
+      changes.length = 0;
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "next-owner",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
+      const departed = {
+        ...owned,
+        sessionId: null,
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
+        errorCount: 1,
+      };
+      const rebound = {
+        ...owned,
+        sessionId: "next-owner",
+        assignmentCount: 2,
+        lastUsedAt: 1002,
+      };
+      expect(changes.map((change) => change.binding)).toEqual([departed, rebound]);
+      expect(binding(pool.getDevice(original.deviceId)!)).toEqual(rebound);
+      assertAgreement();
+    },
+  );
 
   for (const bound of [false, true]) {
-    test(`successful reboot clears health error only when unbound (bound ${bound})`, async () => {
-      // recordDeviceError is a health verdict, orthogonal to ownership. addDevice
-      // is the successful boot boundary; it must not clear a bound device's error.
-      if (bound) {
-        await bindOwner();
-      }
-      changes.length = 0;
-      for (let error = 0; error < 5; error++) {
-        pool.recordDeviceError(original.deviceId);
-      }
-      const failed = {
-        ...(bound ? owned : initial),
-        status: "error",
-        health: "error",
-        errorCount: 5,
-      };
-      expect(binding(pool.getDevice(original.deviceId)!)).toEqual(failed);
-      expect(changes.map((change) => change.binding)).toEqual([failed]);
-      assertAgreement();
-      timer.advanceTime(10);
-      await pool.addDevice(original, image);
-      const recovered = { ...initial, lastUsedAt: 1010 };
-      expect(binding(pool.getDevice(original.deviceId)!)).toEqual(bound ? failed : recovered);
-      expect(changes.map((change) => change.binding)).toEqual(
-        bound ? [failed] : [failed, recovered],
-      );
-      assertAgreement();
-    });
+    arranged(
+      `successful reboot clears health error only when unbound (bound ${bound})`,
+      async () => {
+        // recordDeviceError is a health verdict, orthogonal to ownership. addDevice
+        // is the successful boot boundary; it must not clear a bound device's error.
+        if (bound) {
+          await bindOwner();
+        }
+        changes.length = 0;
+        for (let error = 0; error < 5; error++) {
+          pool.recordDeviceError(original.deviceId);
+        }
+        const failed = {
+          ...(bound ? owned : initial),
+          status: "error" as const,
+          health: "error" as const,
+          errorCount: 5,
+        };
+        expect(binding(pool.getDevice(original.deviceId)!)).toEqual(failed);
+        expect(changes.map((change) => change.binding)).toEqual([failed]);
+        assertAgreement();
+        timer.advanceTime(10);
+        await pool.addDevice(original, image);
+        const recovered = { ...initial, lastUsedAt: 1010 };
+        expect(binding(pool.getDevice(original.deviceId)!)).toEqual(bound ? failed : recovered);
+        expect(changes.map((change) => change.binding)).toEqual(
+          bound ? [failed] : [failed, recovered],
+        );
+        assertAgreement();
+      },
+    );
   }
 
-  test("preserved-session handoff detaches the pool without resetting history or reverse routing", async () => {
-    // Only the reboot coordinator's private callback exposes this intermediate
-    // writer. Invoke the instance method, retaining instance patch seams.
-    const captured = await bindOwner();
-    pool.recordDeviceError(original.deviceId);
-    changes.length = 0;
-    const session = manager.getSession("owner")!;
-    expect(pool["detachSessionForAndroidRecovery"](captured, "owner", session)).toBe(true);
-    const detached = {
-      ...owned,
-      sessionId: null,
-      status: "idle",
-      bindingStatus: "idle",
-      health: "ok",
-      errorCount: 1,
-    };
-    expect(binding(captured)).toEqual(detached);
-    expect(manager.getSessionForDevice(original.deviceId)).toBe("owner");
-    expect(changes.map((change) => change.binding)).toEqual([detached]);
-  });
+  arranged(
+    "preserved-session handoff detaches the pool without resetting history or reverse routing",
+    async () => {
+      // Only the reboot coordinator's private callback exposes this intermediate
+      // writer. Invoke the instance method, retaining instance patch seams.
+      const captured = await bindOwner();
+      pool.recordDeviceError(original.deviceId);
+      changes.length = 0;
+      const session = manager.getSession("owner")!;
+      expect(pool.testHooks.detachSessionForAndroidRecovery(captured, "owner", session)).toBe(true);
+      const detached = {
+        ...owned,
+        sessionId: null,
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
+        errorCount: 1,
+      };
+      expect(binding(captured)).toEqual(detached);
+      expect(manager.getSessionForDevice(original.deviceId)).toBe("owner");
+      expect(changes.map((change) => change.binding)).toEqual([detached]);
+    },
+  );
 
-  test("preserved-session handoff refuses a superseded session object", async () => {
+  arranged("preserved-session handoff refuses a superseded session object", async () => {
     const captured = await bindOwner();
     const session = manager.getSession("owner")!;
     const stale: Session = { ...session };
     changes.length = 0;
-    expect(pool["detachSessionForAndroidRecovery"](captured, "owner", stale)).toBe(false);
+    expect(pool.testHooks.detachSessionForAndroidRecovery(captured, "owner", stale)).toBe(false);
     expect(binding(captured)).toEqual(owned);
     expect(changes).toEqual([]);
     assertAgreement();
   });
 
-  test("captured release refuses a stale assignment generation even with the right owner", async () => {
-    // The public releaseDevice always captures the current generation; only
-    // the instance callback can supply a stale expectedAssignmentCount.
-    const captured = await bindOwner();
-    pool.recordDeviceError(original.deviceId);
-    changes.length = 0;
-    await pool["releaseCapturedDevice"](captured, "owner", 0);
-    expect(binding(captured)).toEqual({ ...owned, errorCount: 1 });
-    expect(changes).toEqual([]);
-    assertAgreement();
-  });
+  arranged(
+    "captured release refuses a stale assignment generation even with the right owner",
+    async () => {
+      // The public releaseDevice always captures the current generation; only
+      // the instance callback can supply a stale expectedAssignmentCount.
+      const captured = await bindOwner();
+      pool.recordDeviceError(original.deviceId);
+      changes.length = 0;
+      await pool.testHooks.releaseCapturedDevice(captured, "owner", 0);
+      expect(binding(captured)).toEqual({ ...owned, errorCount: 1 });
+      expect(changes).toEqual([]);
+      assertAgreement();
+    },
+  );
 
-  test("bound missing-device eviction clears only sessionId before the idle verdict and removal", async () => {
-    // devicePool.ts releaseSessionForEvictedDevice :4205 is intentionally a
-    // sessionId-only write; missingDeviceLiveness.ts :574 supplies idle later.
-    const captured = await bindOwner();
-    pool.recordDeviceError(original.deviceId);
-    changes.length = 0;
-    utils.setBootedDevices("android", [bystander]);
-    await liveness.evictMissingPooledDevice(captured, "absent");
-    const detached = { ...owned, sessionId: null, errorCount: 1 };
-    const removed = { ...detached, status: "idle", bindingStatus: "idle", health: "ok" };
-    expect(changes.map((change) => change.binding)).toEqual([detached, removed]);
-    expect(binding(captured)).toEqual(removed);
-    expect(manager.getSessionForDevice(original.deviceId)).toBeNull();
-    expect(pool.getDevice(original.deviceId)).toBeNull();
-    assertAgreement();
-  });
+  arranged(
+    "bound missing-device eviction clears only sessionId before the idle verdict and removal",
+    async () => {
+      // devicePool.ts releaseSessionForEvictedDevice :4205 is intentionally a
+      // sessionId-only write; missingDeviceLiveness.ts :574 supplies idle later.
+      const captured = await bindOwner();
+      pool.recordDeviceError(original.deviceId);
+      changes.length = 0;
+      utils.setBootedDevices("android", [bystander]);
+      await liveness.evictMissingPooledDevice(captured, "absent");
+      const detached = { ...owned, sessionId: null, errorCount: 1 };
+      const removed = {
+        ...detached,
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
+      };
+      expect(changes.map((change) => change.binding)).toEqual([detached, removed]);
+      expect(binding(captured)).toEqual(removed);
+      expect(manager.getSessionForDevice(original.deviceId)).toBeNull();
+      expect(pool.getDevice(original.deviceId)).toBeNull();
+      assertAgreement();
+    },
+  );
 
   for (const detached of [false, true]) {
-    test(`missing-device health claim notifies while unbound (detached recovery ${detached})`, async () => {
-      // missingDeviceLiveness.ts :299 (idle eviction) / :420 (detached recovery).
-      // Existing liveness tests omit the full tuple and subscriber notification.
-      // Park incident I/O so both claims are observed BEFORE eviction settles.
-      const captured = pool.getDevice(original.deviceId)!;
-      pool.recordDeviceError(original.deviceId);
-      const incidentStarted = Promise.withResolvers<void>();
-      const incident = Promise.withResolvers<undefined>();
-      const record = spyOn(pool, "recordEmulatorLossIncident").mockImplementation(async () => {
-        incidentStarted.resolve();
-        return await incident.promise;
-      });
-      const reboot = spyOn(pool, "shouldRebootDisconnectedAndroidDevice").mockReturnValue(detached);
-      const disconnect = spyOn(pool, "removeDisconnectedDevice").mockResolvedValue();
-      utils.setBootedDevices("android", [bystander]);
-      const checking = liveness.ensurePooledDevicePresent(captured, detached, false, !detached);
-      try {
-        await incidentStarted.promise;
+    arranged(
+      `missing-device health claim notifies while unbound (detached recovery ${detached})`,
+      async () => {
+        // missingDeviceLiveness.ts :299 (idle eviction) / :420 (detached recovery).
+        // Existing liveness tests omit the full tuple and subscriber notification.
+        // Park incident I/O so both claims are observed BEFORE eviction settles.
+        const captured = pool.getDevice(original.deviceId)!;
+        pool.recordDeviceError(original.deviceId);
+        const incidentStarted = Promise.withResolvers<void>();
+        const incident = Promise.withResolvers<undefined>();
+        const record = spyOn(pool, "recordEmulatorLossIncident").mockImplementation(async () => {
+          incidentStarted.resolve();
+          return await incident.promise;
+        });
+        rebootOverride = detached;
+        const disconnect = spyOn(pool, "removeDisconnectedDevice").mockResolvedValue();
+        utils.setBootedDevices("android", [bystander]);
+        const checking = liveness.ensurePooledDevicePresent(captured, detached, false, !detached);
+        try {
+          await incidentStarted.promise;
+          expect(binding(captured)).toEqual({
+            ...initial,
+            status: "error" as const,
+            health: "error" as const,
+            errorCount: 1,
+          });
+          expect(changes.map((change) => change.binding)).toEqual([
+            { ...initial, status: "error", health: "error", errorCount: 1 },
+          ]);
+          assertAgreement();
+        } finally {
+          incident.resolve(undefined);
+          try {
+            await checking;
+            await drainUntil(
+              () =>
+                detached
+                  ? disconnect.mock.calls.length === 1
+                  : pool.getDevice(original.deviceId) === null,
+              { description: "missing-device eviction dispatch" },
+            );
+          } finally {
+            record.mockRestore();
+            rebootOverride = undefined;
+            disconnect.mockRestore();
+          }
+        }
         expect(binding(captured)).toEqual({
           ...initial,
-          status: "error",
-          health: "error",
+          status: detached ? "idle" : "error",
+          health: detached ? "ok" : "error",
           errorCount: 1,
         });
-        expect(changes.map((change) => change.binding)).toEqual([
-          { ...initial, status: "error", health: "error", errorCount: 1 },
-        ]);
-        assertAgreement();
-      } finally {
-        incident.resolve(undefined);
-        try {
-          await checking;
-          await drainUntil(
-            () =>
-              detached
-                ? disconnect.mock.calls.length === 1
-                : pool.getDevice(original.deviceId) === null,
-            { description: "missing-device eviction dispatch" },
-          );
-        } finally {
-          record.mockRestore();
-          reboot.mockRestore();
-          disconnect.mockRestore();
-        }
-      }
-      expect(binding(captured)).toEqual({
-        ...initial,
-        status: detached ? "idle" : "error",
-        health: detached ? "ok" : "error",
-        errorCount: 1,
-      });
-      expect(changes).toHaveLength(detached ? 2 : 1);
-    });
+        expect(changes).toHaveLength(detached ? 2 : 1);
+      },
+    );
   }
 });

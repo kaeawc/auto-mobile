@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readAndroidDeviceApiLevel } from "../../../src/utils/android-cmdline-tools/readAndroidDeviceApiLevel";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { ApiLevelProbeExecutor } from "../../../src/utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
@@ -55,7 +55,7 @@ describe("readAndroidDeviceApiLevel", () => {
         executed.push(command);
         return execResult("33");
       },
-    } as unknown as AdbExecutor;
+    } satisfies ApiLevelProbeExecutor;
 
     const level = await readAndroidDeviceApiLevel(bareExecutor);
 

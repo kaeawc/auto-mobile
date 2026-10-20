@@ -221,6 +221,9 @@ describe("SetPosture", () => {
     adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
     const { feature, tracker } = makeFeature(device, adb);
     const result = await feature.execute("closed");
+    if ("status" in result) {
+      throw new Error(`Expected posture success: ${result.message}`);
+    }
     expect(tracker.identityRevision(device.deviceId)).toBe(1);
     expect("display" in result && result.display.generation).toBe(
       tracker.identityRevision(device.deviceId),
@@ -265,6 +268,9 @@ describe("SetPosture", () => {
         transitionSink: tracker,
       });
       const result = await feature.execute("closed");
+      if ("status" in result) {
+        throw new Error(`Expected posture success: ${result.message}`);
+      }
       expect(result).toMatchObject({
         posture: "closed",
         display: { key: display.key, posture: "closed", generation: before + 1 },
@@ -346,6 +352,9 @@ describe("SetPosture", () => {
         display: { ...display, posture },
       });
       const result = await feature.execute(posture);
+      if ("status" in result) {
+        throw new Error(`Expected posture success: ${result.message}`);
+      }
       expect(adb.getExecutedCommands()).toEqual([
         "shell cmd device_state print-states",
         ...commands,
@@ -378,6 +387,9 @@ describe("SetPosture", () => {
         display: { ...display, posture },
       });
       const result = await feature.execute(posture);
+      if ("status" in result) {
+        throw new Error(`Expected posture success: ${result.message}`);
+      }
       expect(adb.getExecutedCommands()).toEqual([
         "shell cmd device_state print-states",
         "shell cmd device_state state reset",
@@ -554,6 +566,9 @@ describe("SetPosture", () => {
       adb.setCommandResponse("emu resize-display 2", createExecResult("OK", ""));
       const { feature } = sizedFeature(adb, [{ width: 200, height: 300 }]);
       const result = await feature.execute("opened", "tablet");
+      if ("status" in result) {
+        throw new Error(`Expected posture success: ${result.message}`);
+      }
       expect(result.warnings).toBeUndefined();
     });
 
@@ -564,6 +579,9 @@ describe("SetPosture", () => {
       const adb = foldableAdb();
       const { feature } = sizedFeature(adb, [{ width: 200, height: 300 }], "cover", [cover, inner]);
       const result = await feature.execute("opened");
+      if ("status" in result) {
+        throw new Error(`Expected posture success: ${result.message}`);
+      }
       expect(result.warnings).toEqual([
         expect.stringContaining("active display is still the cover panel rather than the inner"),
       ]);
@@ -572,12 +590,20 @@ describe("SetPosture", () => {
     test("stays silent when the active panel matches or the role is unknown", async () => {
       const adb = foldableAdb();
       const matching = sizedFeature(adb, [{ width: 200, height: 300 }], "inner", [cover, inner]);
-      expect((await matching.feature.execute("opened")).warnings).toBeUndefined();
+      const matchingResult = await matching.feature.execute("opened");
+      if ("status" in matchingResult) {
+        throw new Error("Expected posture success");
+      }
+      expect(matchingResult.warnings).toBeUndefined();
       const unknown = sizedFeature(foldableAdb(), [{ width: 200, height: 300 }], "unknown", [
         cover,
         inner,
       ]);
-      expect((await unknown.feature.execute("opened")).warnings).toBeUndefined();
+      const unknownResult = await unknown.feature.execute("opened");
+      if ("status" in unknownResult) {
+        throw new Error("Expected posture success");
+      }
+      expect(unknownResult.warnings).toBeUndefined();
     });
   });
 
@@ -718,6 +744,9 @@ describe("SetPosture", () => {
     adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
     const { feature } = makeFeature(makeDevice("R5CT123"), adb);
     const result = await feature.execute("closed");
+    if ("status" in result) {
+      throw new Error(`Expected posture success: ${result.message}`);
+    }
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
       "shell cmd device_state state reset",
@@ -852,7 +881,7 @@ describe("SetPosture", () => {
       const simctl = new FakeSimctl();
       const feature = new SetPosture(makeDevice("physical-android", ["opened"]), { simctl });
       await expect(feature.execute("closed")).rejects.toThrow("not supported by this device");
-      expect(await feature.executeHingeAngle(90)).toMatchObject({ status: "unsupported" });
+      expect(await feature.executeHingeAngle(90)).toMatchObject({ status: "unsupported" as const });
       expect(simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
     });
 
@@ -909,7 +938,7 @@ describe("SetPosture", () => {
         const clear = spyOn(ObservedAndroidDisplayCache, "clear");
         try {
           const unsupported = {
-            status: "unsupported",
+            status: "unsupported" as const,
             message: "This iOS simulator is not a foldable device.",
           };
           for (const posture of ["closed", "half_opened", "opened"] as const) {
@@ -993,7 +1022,7 @@ describe("SetPosture", () => {
         await h.feature.executeHingeAngle(90),
       ]) {
         expect(result).toEqual({
-          status: "unsupported",
+          status: "unsupported" as const,
           message: "Physical iOS hinge posture can only be read, not set.",
         });
       }
@@ -1020,40 +1049,43 @@ describe("SetPosture", () => {
     },
     { ...sessionDuo, displays: { panels: [], postures: [] } },
     { ...sessionDuo, displays: undefined },
-  ])("both forms refuse an iOS simulator without foldable evidence: %j", async (device) => {
-    const h = makeIosFeature(device);
-    h.client.supportedCommands = ["set_hinge_angle"];
-    const hinge = spyOn(h.client, "requestSetHingeAngle");
-    const clear = spyOn(ObservedAndroidDisplayCache, "clear");
-    const unsupported = {
-      status: "unsupported",
-      message: "This iOS simulator is not a foldable device.",
-    };
-    try {
-      for (const posture of [
-        "closed",
-        "half_opened",
-        "opened",
-        "rear_display",
-        "flipped",
-        "tent",
-      ] as const) {
-        expect(await h.feature.execute(posture)).toEqual(unsupported);
+  ] satisfies BootedDevice[])(
+    "both forms refuse an iOS simulator without foldable evidence: %j",
+    async (device) => {
+      const h = makeIosFeature(device);
+      h.client.supportedCommands = ["set_hinge_angle"];
+      const hinge = spyOn(h.client, "requestSetHingeAngle");
+      const clear = spyOn(ObservedAndroidDisplayCache, "clear");
+      const unsupported = {
+        status: "unsupported" as const,
+        message: "This iOS simulator is not a foldable device.",
+      };
+      try {
+        for (const posture of [
+          "closed",
+          "half_opened",
+          "opened",
+          "rear_display",
+          "flipped",
+          "tent",
+        ] as const) {
+          expect(await h.feature.execute(posture)).toEqual(unsupported);
+        }
+        expect(await h.feature.executeHingeAngle(90)).toEqual(unsupported);
+        expect(hinge).not.toHaveBeenCalled();
+        expect(clear).not.toHaveBeenCalled();
+        expect(h.sequence).toEqual([]);
+        expect(h.tracker.identityRevision(device.deviceId)).toBe(0);
+        expect(h.getObserveCount()).toBe(0);
+        if (device.deviceType !== undefined) {
+          expect(h.simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
+        }
+      } finally {
+        hinge.mockRestore();
+        clear.mockRestore();
       }
-      expect(await h.feature.executeHingeAngle(90)).toEqual(unsupported);
-      expect(hinge).not.toHaveBeenCalled();
-      expect(clear).not.toHaveBeenCalled();
-      expect(h.sequence).toEqual([]);
-      expect(h.tracker.identityRevision(device.deviceId)).toBe(0);
-      expect(h.getObserveCount()).toBe(0);
-      if (device.deviceType !== undefined) {
-        expect(h.simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
-      }
-    } finally {
-      hinge.mockRestore();
-      clear.mockRestore();
-    }
-  });
+    },
+  );
 
   describe("best effort hinge angles", () => {
     function makeAndroidAngleHarness() {
@@ -1363,7 +1395,7 @@ describe("SetPosture", () => {
         const h = makeFeature(makeDevice(), adb);
         const result = await h.feature.executeHingeAngle(90);
         expect(result).toMatchObject({
-          status: "unsupported",
+          status: "unsupported" as const,
           message: expect.stringContaining(raw),
         });
         expect(adb.getExecutedCommands()).toEqual(["emu sensor set hinge-angle0 90"]);
@@ -1537,7 +1569,7 @@ describe("SetPosture", () => {
         timer: new FakeTimer(),
       });
       expect(await feature.executeHingeAngle(90)).toMatchObject({
-        status: "unsupported",
+        status: "unsupported" as const,
         message: expect.stringContaining("KO: bad speed"),
       });
       expect(console.calls).toEqual([{ degrees: 90, signal: undefined }]);
@@ -1548,7 +1580,7 @@ describe("SetPosture", () => {
       const adb = new FakeAdbExecutor();
       const h = makeFeature(makeDevice("R5CT123"), adb);
       expect(await h.feature.executeHingeAngle(90)).toMatchObject({
-        status: "unsupported",
+        status: "unsupported" as const,
         message: expect.stringContaining("emulator console"),
       });
       expect(adb.getExecutedCommands()).toEqual([]);
@@ -1606,9 +1638,9 @@ describe("SetPosture", () => {
       "unadvertised iOS runner %j requests a re-cut without sending or notifying",
       async ({ supported }) => {
         const h = makeIosFeature();
-        h.client.supportedCommands = supported;
+        h.client.supportedCommands = supported ? [...supported] : null;
         expect(await h.feature.executeHingeAngle(90)).toMatchObject({
-          status: "unsupported",
+          status: "unsupported" as const,
           message: expect.stringContaining("re-cut"),
         });
         expect(h.client.getHingeAngleHistory()).toEqual([]);
@@ -1621,7 +1653,7 @@ describe("SetPosture", () => {
       Object.defineProperty(h.client, "getSupportedCommands", { value: undefined });
       const result = await h.feature.executeHingeAngle(90);
       expect(result).toMatchObject({
-        status: "unsupported",
+        status: "unsupported" as const,
         message: expect.stringContaining("8547"),
       });
       expect(h.client.getHingeAngleHistory()).toEqual([]);
@@ -1645,7 +1677,7 @@ describe("SetPosture", () => {
       const h = makeIosFeature({ ...sessionDuo, displays: { panels: [], postures: ["opened"] } });
       h.client.supportedCommands = ["set_hinge_angle"];
       expect(await h.feature.executeHingeAngle(90)).toEqual({
-        status: "unsupported",
+        status: "unsupported" as const,
         message: "This iOS simulator is not a foldable device.",
       });
       expect(h.client.getHingeAngleHistory()).toEqual([]);
@@ -1657,7 +1689,9 @@ describe("SetPosture", () => {
     ])("unsupported iOS target %j sends nothing", async (device) => {
       const h = makeIosFeature(device);
       h.client.supportedCommands = ["set_hinge_angle"];
-      expect(await h.feature.executeHingeAngle(90)).toMatchObject({ status: "unsupported" });
+      expect(await h.feature.executeHingeAngle(90)).toMatchObject({
+        status: "unsupported" as const,
+      });
       expect(h.client.getHingeAngleHistory()).toEqual([]);
       expect(h.sequence).toEqual([]);
     });
@@ -1693,6 +1727,9 @@ describe("SetPosture", () => {
       });
       try {
         const result = await feature.execute("half_opened");
+        if ("status" in result) {
+          throw new Error(`Expected posture success: ${result.message}`);
+        }
         expect(result).toMatchObject({
           posture: "half_opened",
           display: { posture: "half_opened" },
@@ -1836,42 +1873,49 @@ describe("SetPosture", () => {
     sessionDuo,
     { ...duo, displays: undefined },
     { ...duo, displays: { panels: [duo.displays!.panels[1]!], postures: ["opened" as const] } },
-  ])("both forms accept Duo type or hydrated Duo panels: %j", async (device) => {
-    for (const [posture, angle] of [
-      ["closed", 0],
-      ["half_opened", 130],
-      ["opened", 180],
-    ] as const) {
-      const expectedDisplay = {
-        ...display,
-        key: posture === "closed" ? "primary" : "primary-1",
-        role: posture === "closed" ? "cover" : "inner",
-        posture,
-      };
-      const { feature, client, simctl, getObserveCount } = makeIosFeature(device, [
-        {
-          ...observation,
-          display: expectedDisplay,
-          screenSize:
-            posture === "closed" ? { width: 466, height: 678 } : { width: 951, height: 669 },
-        },
-      ]);
-      expect(await feature.execute(posture)).toEqual({
-        posture,
-        display: { ...expectedDisplay, generation: 2 },
-        locked: true,
-      });
-      expect(client.getHingeAngleHistory()).toEqual([angle]);
-      expect(getObserveCount()).toBe(1);
-      client.supportedCommands = ["set_hinge_angle"];
-      expect(await feature.executeHingeAngle(angle)).toMatchObject({ hingeAngle: angle });
-      expect(client.getHingeAngleHistory()).toEqual([angle, angle]);
-      expect(simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
-    }
-  });
+  ] satisfies BootedDevice[])(
+    "both forms accept Duo type or hydrated Duo panels: %j",
+    async (device) => {
+      for (const [posture, angle] of [
+        ["closed", 0],
+        ["half_opened", 130],
+        ["opened", 180],
+      ] as const) {
+        const expectedDisplay = {
+          ...display,
+          key: posture === "closed" ? "primary" : "primary-1",
+          role: posture === "closed" ? "cover" : "inner",
+          posture,
+        } satisfies ObserveResult["display"];
+        const { feature, client, simctl, getObserveCount } = makeIosFeature(device, [
+          {
+            ...observation,
+            display: expectedDisplay,
+            screenSize:
+              posture === "closed" ? { width: 466, height: 678 } : { width: 951, height: 669 },
+          },
+        ]);
+        expect(await feature.execute(posture)).toEqual({
+          posture,
+          display: { ...expectedDisplay, generation: 2 },
+          locked: true,
+        });
+        expect(client.getHingeAngleHistory()).toEqual([angle]);
+        expect(getObserveCount()).toBe(1);
+        client.supportedCommands = ["set_hinge_angle"];
+        expect(await feature.executeHingeAngle(angle)).toMatchObject({ hingeAngle: angle });
+        expect(client.getHingeAngleHistory()).toEqual([angle, angle]);
+        expect(simctl.getMethodCalls("getDeviceInfo")).toEqual([]);
+      }
+    },
+  );
 
   test("polls until the iPhone Duo active display matches the requested posture", async () => {
-    const laterDisplay = { ...display, key: "primary", role: "cover" };
+    const laterDisplay = {
+      ...display,
+      key: "primary",
+      role: "cover",
+    } satisfies ObserveResult["display"];
     const oldObservation = { ...observation, screenSize: { width: 669, height: 951 } };
     const { feature, getObserveCount } = makeIosFeature(duo, [
       oldObservation,
@@ -1963,7 +2007,7 @@ describe("SetPosture", () => {
   });
 
   test("notifies before observing and after the new panel settles", async () => {
-    const expectedDisplay = { ...display, role: "cover" };
+    const expectedDisplay = { ...display, role: "cover" } satisfies ObserveResult["display"];
     const { feature, sequence } = makeIosFeature(duo, [
       { ...observation, display: expectedDisplay, screenSize: { width: 466, height: 678 } },
     ]);
@@ -1980,7 +2024,7 @@ describe("SetPosture", () => {
   });
 
   test("returns an indeterminate observation with a warning instead of polling or throwing", async () => {
-    const unknownObservation = {
+    const unknownObservation: ObserveResult = {
       ...observation,
       display: { ...display, role: "unknown" },
       screenSize: { width: 777, height: 888 },
@@ -2076,12 +2120,16 @@ describe("SetPosture", () => {
 
   test("physical iOS and non-Duo simulators report unsupported", async () => {
     const physical = makeIosFeature({ ...duo, deviceId: "00008120-001C191E0E99003A" });
-    expect(await physical.feature.execute("opened")).toMatchObject({ status: "unsupported" });
+    expect(await physical.feature.execute("opened")).toMatchObject({
+      status: "unsupported" as const,
+    });
     const ordinary = makeIosFeature({
       ...duo,
       deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
     });
-    expect(await ordinary.feature.execute("opened")).toMatchObject({ status: "unsupported" });
+    expect(await ordinary.feature.execute("opened")).toMatchObject({
+      status: "unsupported" as const,
+    });
     expect(physical.client.getHingeAngleHistory()).toEqual([]);
     expect(ordinary.client.getHingeAngleHistory()).toEqual([]);
   });
@@ -2200,6 +2248,9 @@ for (const platform of ["android", "ios"] as const) {
       const h = harness();
       h.observe.setObserveResult(() => h.stamped(h.sink.revision() - 1));
       const result = await h.feature.execute("closed");
+      if ("status" in result) {
+        throw new Error(`Expected posture success: ${result.message}`);
+      }
       if (!("display" in result)) {
         throw new Error("Expected a supported posture result");
       }
@@ -2710,7 +2761,7 @@ for (const platform of ["ios", "android"] as const) {
               .create({ ...h.device, displays: { panels: [], postures: ["opened"] } })
               .execute("closed");
       if (platform === "ios") {
-        await expect(unsupported).resolves.toMatchObject({ status: "unsupported" });
+        await expect(unsupported).resolves.toMatchObject({ status: "unsupported" as const });
       } else {
         await expect(unsupported).rejects.toThrow("Nothing was changed");
       }

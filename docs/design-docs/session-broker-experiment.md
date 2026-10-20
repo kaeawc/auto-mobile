@@ -6,6 +6,32 @@ it. Callers do not select slots, pool identities, runner scopes, or capacity.
 The requirement vocabulary and default resolution are documented in
 [session-requirements.md](session-requirements.md).
 
+## Pinned session exports
+
+Broker mode advertises `session-broker-export/v1`. A client may pass the strict
+optional `export: { prepareId, requestDigest }` to `daemon/prepareSession`; both
+strings must contain 1–256 characters. Admission and pre-admission failures link
+this identity to the request receipt in the same transaction, before native work.
+Replays may link a previously unexported receipt; conflicting prepare identities
+or digests are rejected with `session_export_identity_mismatch`.
+
+`daemon/getSessionExport { prepareId, requestDigest, livenessOwnerToken }` returns
+`{ contractVersion: 1, prepareId, requestDigest, acknowledged, result }`, or
+`session_export_not_found`. The result derives from the current durable receipt:
+after owner-exit recovery it reports `failed` / `session_owner_exited`, retaining
+the original session UUID and profile. Authentication uses the original consumer
+token even when recovery changes the daemon owner. Reading an export grants no
+session control and never acquires a replacement device.
+
+`daemon/acknowledgeSessionExport` takes the same strict parameters and returns
+`{ prepareId, outcome: "acknowledged" }`, or `"unknown_export"` for an absent
+identity. Digest and owner checks precede acknowledgement; exact replays preserve
+the first acknowledgement time. An unacknowledged export pins its receipt past
+the normal 30-day terminal window, up to a configurable 180-day export age.
+Acknowledged or expired export rows prune with their eligible request receipts;
+pending resource cleanup and retained-receipt tombstone guards still apply.
+Clients omitting `export` retain the existing prepare contract.
+
 ## Current qualification boundary
 
 The first native milestone deliberately uses zero pooling. Every relinquished
@@ -245,7 +271,11 @@ The daemon protocol is:
 - `daemon/prepareSession`: `{config, livenessOwnerToken}`.
 - `daemon/sessionRequestStatus`: `{requestId, livenessOwnerToken}`.
 - `daemon/abandonSessionRequest`: `{requestId, livenessOwnerToken}`.
-- `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken}`.
+- `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken, reason?}`.
+  A client release omits `reason` and ends `released`. A proxy whose execution
+  owner died sends `reason: "session_owner_exited"`: the daemon commits the
+  terminal `failed`/`session_owner_exited` receipt, answers `cleanup_pending`,
+  and finishes the drain and device destruction as tracked release work (#12791).
 - Reconnect registration: `{sessionId, clientName, sessionBroker:
   {requestId, livenessOwnerToken}}`.
 

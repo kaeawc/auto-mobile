@@ -6,7 +6,7 @@ import {
   getNetworkEvents,
   type NetworkEventWithId,
 } from "../db/networkEventRepository";
-import { NetworkState } from "./NetworkState";
+import { NetworkState } from "../utils/NetworkState";
 import { BODY_TRUNCATION_LIMIT } from "../utils/truncateBodyText";
 import { computePercentile } from "../utils/percentile";
 

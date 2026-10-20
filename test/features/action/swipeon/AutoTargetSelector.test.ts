@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon";
 import { ObserveResult } from "../../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
+import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
@@ -21,7 +22,9 @@ describe("SwipeOn autoTarget", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const createObserveResult = (viewHierarchy: any): ObserveResult => ({
-    timestamp: Date.now(),
+    updatedAt: Date.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy,
@@ -43,14 +46,14 @@ describe("SwipeOn autoTarget", () => {
   });
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbExecutor(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };
 

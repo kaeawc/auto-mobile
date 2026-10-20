@@ -21,10 +21,100 @@ import kotlinx.coroutines.runBlocking
  * Virtual time (`mainClock`) over the in-memory transport.
  */
 @OptIn(ExperimentalTestApi::class)
-class DesktopDaemonSessionCompositionTest {
-  private val pixel = DesktopDaemonSessionBinding("emulator-5554", "android")
-  private val pixelFold = DesktopDaemonSessionBinding("emulator-5556", "android")
+internal abstract class DesktopDaemonSessionCompositionFixture(
+  protected val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+) {
+  protected val pixel = DesktopDaemonSessionBinding("emulator-5554", "android")
+  protected val pixelFold = DesktopDaemonSessionBinding("emulator-5556", "android")
 
+  protected var sessionCounter = 0
+
+  /** Extra virtual milliseconds a slow fake call adds to the session's monotonic clock. */
+  @Volatile protected var clockSkewMs = 0L
+
+  protected fun ComposeUiTest.tick() {
+    mainClock.advanceTimeBy(HEARTBEAT_MS)
+    mainClock.advanceTimeByFrame()
+  }
+
+  /**
+   * Lets a pane change, an input or a session rotation recompose and restart the session effect.
+   */
+  protected fun ComposeUiTest.settle() {
+    repeat(3) { mainClock.advanceTimeByFrame() }
+  }
+
+  /** One input's allocation, as the input clients wait on it. Returns whether it was allowed. */
+  protected fun ComposeUiTest.input(host: Host, deviceId: String): Boolean {
+    val allocation: Deferred<Boolean> = host.state().requestInput(deviceId)
+    settle()
+    assertTrue(allocation.isCompleted, "allocating $deviceId did not finish")
+    return runBlocking { allocation.await() }
+  }
+
+  protected fun ComposeUiTest.start(
+    transport: RecordingDaemonTransport,
+    panes: List<DesktopDaemonSessionBinding>,
+    visible: Boolean = true,
+    inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
+    bindRetryBackoff: BindRetryBackoff = BindRetryBackoff { BIND_ERROR_RETRY_MAX_DELAY_MS },
+  ): Host {
+    val host =
+      Host(transport, panes, visible, inputAllocationTimeoutMs, bindRetryBackoff) {
+        mainClock.currentTime + clockSkewMs
+      }
+    setContent { host.compose() }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    return host
+  }
+
+  protected inner class Host(
+    private val transport: RecordingDaemonTransport,
+    panes: List<DesktopDaemonSessionBinding>,
+    visible: Boolean,
+    private val inputAllocationTimeoutMs: Long,
+    private val bindRetryBackoff: BindRetryBackoff,
+    private val clockMs: () -> Long,
+  ) {
+    val panes: MutableState<List<DesktopDaemonSessionBinding>> = mutableStateOf(panes)
+    val visible: MutableState<Boolean> = mutableStateOf(visible)
+    val recordings = ActiveRecordingTracker()
+    private var state: DesktopDaemonSessionState? = null
+
+    fun state(): DesktopDaemonSessionState = requireNotNull(state)
+
+    @Composable
+    fun compose() {
+      state =
+        rememberDesktopDaemonSession(
+          DesktopDaemonSessionOptions(
+            socketPath = "in-memory",
+            panes = panes,
+            hostVisible = visible.value,
+            activeRecordings = recordings,
+            inputAllocationTimeoutMs = inputAllocationTimeoutMs,
+            bindRetryBackoff = bindRetryBackoff,
+            monotonicClockMs = clockMs,
+            sessionFactory = {
+              DesktopDaemonSession(
+                McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),
+              )
+            },
+            ioDispatcher = testDispatcher,
+            cleanupDispatcher = testDispatcher,
+          ),
+        )
+    }
+  }
+
+  protected companion object {
+    const val HEARTBEAT_MS = 2_000L
+  }
+}
+
+@OptIn(ExperimentalTestApi::class)
+internal class DesktopDaemonSessionCompositionTest : DesktopDaemonSessionCompositionFixture() {
   @Test
   fun `watching a pane never binds across many heartbeat ticks`() = runComposeUiTest {
     val transport = RecordingDaemonTransport()
@@ -432,7 +522,10 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals("emulator-5554", host.state().boundDeviceId)
       assertEquals(null, host.state().bindErrorMessage)
     }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class DesktopDaemonSessionOwnershipTest : DesktopDaemonSessionCompositionFixture() {
   @Test
   fun `input on a device another session holds is refused and never re-sent`() = runComposeUiTest {
     val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
@@ -854,87 +947,4 @@ class DesktopDaemonSessionCompositionTest {
       // The UI clock is not advanced, so the allocation cannot run before the deadline.
       assertFalse(host.state().inputAllocation.awaitInputAllowed(pixel.deviceId))
     }
-
-  private var sessionCounter = 0
-
-  /** Extra virtual milliseconds a slow fake call adds to the session's monotonic clock. */
-  @Volatile private var clockSkewMs = 0L
-
-  private fun ComposeUiTest.tick() {
-    mainClock.advanceTimeBy(HEARTBEAT_MS)
-    mainClock.advanceTimeByFrame()
-  }
-
-  /**
-   * Lets a pane change, an input or a session rotation recompose and restart the session effect.
-   */
-  private fun ComposeUiTest.settle() {
-    repeat(3) { mainClock.advanceTimeByFrame() }
-  }
-
-  /** One input's allocation, as the input clients wait on it. Returns whether it was allowed. */
-  private fun ComposeUiTest.input(host: Host, deviceId: String): Boolean {
-    val allocation: Deferred<Boolean> = host.state().requestInput(deviceId)
-    settle()
-    assertTrue(allocation.isCompleted, "allocating $deviceId did not finish")
-    return runBlocking { allocation.await() }
-  }
-
-  private fun ComposeUiTest.start(
-    transport: RecordingDaemonTransport,
-    panes: List<DesktopDaemonSessionBinding>,
-    visible: Boolean = true,
-    inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
-    bindRetryBackoff: BindRetryBackoff = BindRetryBackoff { BIND_ERROR_RETRY_MAX_DELAY_MS },
-  ): Host {
-    val host =
-      Host(transport, panes, visible, inputAllocationTimeoutMs, bindRetryBackoff) {
-        mainClock.currentTime + clockSkewMs
-      }
-    setContent { host.compose() }
-    mainClock.autoAdvance = false
-    mainClock.advanceTimeByFrame()
-    return host
-  }
-
-  private inner class Host(
-    private val transport: RecordingDaemonTransport,
-    panes: List<DesktopDaemonSessionBinding>,
-    visible: Boolean,
-    private val inputAllocationTimeoutMs: Long,
-    private val bindRetryBackoff: BindRetryBackoff,
-    private val clockMs: () -> Long,
-  ) {
-    val panes: MutableState<List<DesktopDaemonSessionBinding>> = mutableStateOf(panes)
-    val visible: MutableState<Boolean> = mutableStateOf(visible)
-    val recordings = ActiveRecordingTracker()
-    private var state: DesktopDaemonSessionState? = null
-
-    fun state(): DesktopDaemonSessionState = requireNotNull(state)
-
-    @Composable
-    fun compose() {
-      state =
-        rememberDesktopDaemonSession(
-          socketPath = "in-memory",
-          panes = panes,
-          hostVisible = visible.value,
-          activeRecordings = recordings,
-          inputAllocationTimeoutMs = inputAllocationTimeoutMs,
-          bindRetryBackoff = bindRetryBackoff,
-          monotonicClockMs = clockMs,
-          sessionFactory = {
-            DesktopDaemonSession(
-              McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),
-            )
-          },
-          ioDispatcher = Dispatchers.Unconfined,
-          cleanupDispatcher = Dispatchers.Unconfined,
-        )
-    }
-  }
-
-  private companion object {
-    const val HEARTBEAT_MS = 2_000L
-  }
 }

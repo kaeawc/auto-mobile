@@ -58,6 +58,14 @@ interface PreferenceEntriesResult {
 
 export interface StorageResourceDependencies {
   adbClientFactory?: AdbClientFactory;
+  /** Resolves the CtrlProxy client that lists preference files; defaults to the platform singleton. */
+  preferenceFilesClient?: (
+    device: BootedDevice,
+  ) => Pick<AndroidCtrlProxyClient, "listPreferenceFiles">;
+  /** Resolves the CtrlProxy client that reads preference entries; defaults to the platform singleton. */
+  preferenceEntriesClient?: (
+    device: BootedDevice,
+  ) => Pick<AndroidCtrlProxyClient, "getPreferenceEntries">;
 }
 
 interface StorageCache {
@@ -97,12 +105,15 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
 async function listPreferenceFilesForDevice(
   device: BootedDevice,
   packageName: string,
+  deps: StorageResourceDependencies = {},
 ): Promise<PreferenceFile[]> {
   if (device.platform === "android") {
-    const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+    const client =
+      deps.preferenceFilesClient?.(device) ??
+      AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
     return client.listPreferenceFiles(packageName);
   } else if (device.platform === "ios") {
-    const client = IOSCtrlProxyClient.getInstance(device);
+    const client = deps.preferenceFilesClient?.(device) ?? IOSCtrlProxyClient.getInstance(device);
     return client.listPreferenceFiles(packageName);
   }
   throw new Error(`Unsupported platform: ${device.platform}`);
@@ -118,7 +129,9 @@ async function getPreferenceEntriesForDevice(
   deps: StorageResourceDependencies = {},
 ): Promise<PreferenceEntriesResult> {
   if (device.platform === "android") {
-    const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+    const client =
+      deps.preferenceEntriesClient?.(device) ??
+      AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
     try {
       return {
         entries: await client.getPreferenceEntries(packageName, fileName),
@@ -152,7 +165,7 @@ async function getPreferenceEntriesForDevice(
       }
     }
   } else if (device.platform === "ios") {
-    const client = IOSCtrlProxyClient.getInstance(device);
+    const client = deps.preferenceEntriesClient?.(device) ?? IOSCtrlProxyClient.getInstance(device);
     return {
       entries: await client.getPreferenceEntries(packageName, fileName),
       source: "ctrlproxy",
@@ -215,7 +228,10 @@ function buildEntriesUri(deviceId: string, packageName: string, fileName: string
 /**
  * Get storage files resource content
  */
-async function getStorageFilesResource(params: Record<string, string>): Promise<ResourceContent> {
+async function getStorageFilesResource(
+  params: Record<string, string>,
+  deps: StorageResourceDependencies = {},
+): Promise<ResourceContent> {
   const { deviceId, packageName } = params;
   const decodedPackage = safeDecodeSegment(packageName);
   if (decodedPackage === null) {
@@ -241,7 +257,7 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
     logger.info(
       `[StorageResources] Found device: ${device.deviceId} (${device.platform}), calling listPreferenceFiles`,
     );
-    const files = await listPreferenceFilesForDevice(device, decodedPackage);
+    const files = await listPreferenceFilesForDevice(device, decodedPackage, deps);
     logger.info(`[StorageResources] listPreferenceFiles returned ${files.length} files`);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(files);
@@ -389,7 +405,7 @@ export function registerStorageResources(deps: StorageResourceDependencies = {})
     "App Storage Files",
     "List all storage files in an app (Android SharedPreferences or iOS UserDefaults suites). Requires app to have AutoMobile SDK with storage inspection enabled.",
     "application/json",
-    getStorageFilesResource,
+    (params: Record<string, string>) => getStorageFilesResource(params, deps),
   );
 
   // Register template for getting storage entries

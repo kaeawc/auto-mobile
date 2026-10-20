@@ -26,19 +26,17 @@ for (const reason of ["keep-screen-awake", "biometric-enrollment", "network-cond
         throw new Error("bounded retry failed");
       }
     };
-    const manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => ({
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({
         restore: async (state) => {
           await restore(state);
           return { status: "restored" as const };
         },
       }),
-      () => ({ restore }),
-      { networkCondition: () => ({ restore }) },
-    );
+      biometricEnrollmentRestorer: () => ({ restore }),
+      restorers: { networkCondition: () => ({ restore }) },
+    });
     manager.stopCleanupTimer();
     const markers = new InMemoryDeviceHealthMarkers(timer);
     manager.setDeviceHealthMarkers(

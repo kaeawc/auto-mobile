@@ -1,6 +1,3 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -16,9 +13,9 @@ import {
   sessionExecutionProbe,
   subscribeToolCallEndActivity,
 } from "../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -27,6 +24,12 @@ import {
   createFakeDaemonState,
   createFakeDeviceManager,
 } from "./helpers/inputSocketHarness";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * The stroke lift of #11439 meets a release that lands BETWEEN gesture frames (#11429's heartbeat
@@ -43,40 +46,6 @@ import {
  * server and execution tracker on a FakeTimer; only the device client is a fake.
  */
 
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
-}
-
 const SESSION = "stroke-holder-session";
 const NEXT_SESSION = "next-owner-session";
 const OWNER_TOKEN = "harness-a";
@@ -88,7 +57,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let server: UnixSocketServerHarness;
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
   let unsubscribeActivity: () => void;
@@ -102,6 +71,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
       getDevicePool: () => ({
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+        releaseDevice: async () => {},
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };
@@ -146,7 +116,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
       },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -173,39 +143,28 @@ describe("an open input stroke vs. a release of its holder session", () => {
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     await claimingHeartbeat();
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    const stroke =
-      (kind: string) => async (_id: string, _x: number, _y: number, last?: unknown) => {
-        strokes.push(kind === "end" && last === true ? "cancel" : kind);
-        return { success: true };
-      };
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestGestureStart: stroke("start"),
-          requestGestureMove: stroke("move"),
-          requestGestureEnd: stroke("end"),
-        }) as unknown as AndroidCtrlProxyClient,
-    );
-    const fakePool = createFakeDaemonState().getDevicePool();
-    const server = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      {
-        isInitialized: () => true,
-        getSessionManager: () => sessionManager,
-        getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
-      new FakeTimer(),
-    );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    const stroke = async (kind: string) => {
+      strokes.push(kind);
+      return { success: true, totalTimeMs: 0 };
+    };
+    spyOnAndroidClientInstance(androidDevice, {
+      getScreenScaleMetadata: () => null,
+      requestGestureStart: () => stroke("start"),
+      requestGestureMove: () => stroke("move"),
+      requestGestureEnd: (_id, _x, _y, cancel) => stroke(cancel === true ? "cancel" : "end"),
+    });
+    const serverState: DaemonStateAccess = {
+      ...createFakeDaemonState(),
+      getSessionManager: () => sessionManager,
+    };
+    server = createHarnessServer("unused", serverState, new FakeTimer());
+    server.allowRequests();
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    server.connect(socket);
 
     // The daemon's heartbeat monitor, wired as in `socketServerInputSuspectSession.test.ts`.
     monitor = new SessionHeartbeatMonitor(
@@ -213,7 +172,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
       sessionExecutionProbe(executionTracker, sessionManager, pool, { excludeReads: true }),
       async (sessionId, reason) => {
         sessionManager.cancelExecutionsCutByRelease(sessionId, reason);
-        await sessionManager.releaseSession(sessionId, reason, true);
+        await sessionManager.releaseSession(sessionId, reason, { allowExpired: true });
       },
       timer,
     );
@@ -227,7 +186,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     // before the device client is restored.
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     unsubscribeActivity();
     executionTracker.setSessionClockOffsetProvider(() => 0);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
@@ -241,9 +200,9 @@ describe("an open input stroke vs. a release of its holder session", () => {
   beforeAll(async () => {
     await setUp();
     try {
-      sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+      sessionManager.onSessionRelease((sessionId) => void server.liftStrokesHeldBy(sessionId));
       await reapHolderWithStrokeOpen();
-      await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+      await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       await sendGesture("Move");
     } finally {
       await tearDown();
@@ -255,7 +214,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
 
   test("releasing the holder lifts its open stroke before the device has a new owner", async () => {
     // The server's session-release subscription, which `start()` wires to the broadcaster.
-    sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+    sessionManager.onSessionRelease((sessionId) => void server.liftStrokesHeldBy(sessionId));
 
     await reapHolderWithStrokeOpen();
     await settle();
@@ -263,7 +222,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     expect(strokes).toEqual(["start", "cancel"]);
 
     // The pane's next frame is refused by the new owner's gate and lifts nothing a second time.
-    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     expect(await sendGesture("Move")).toMatchObject({
       success: false,
       code: "device_owned_by_other_session",
@@ -276,7 +235,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
   // #11490: a plan's auto-release goes through the same release notification, so the stroke of
   // #11470 is lifted exactly once, and a frame still in flight is cut before the device is freed.
   test("a plan auto-release cuts an in-flight gesture frame and lifts the open stroke once", async () => {
-    sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+    sessionManager.onSessionRelease((sessionId) => void server.liftStrokesHeldBy(sessionId));
     expect(await sendGesture("Start")).toMatchObject({ success: true });
     const frame = executionTracker.startExecution("input/gestureMove", undefined, SESSION);
     executionTracker.bindDeviceExecution(frame.id, DEVICE);
@@ -301,7 +260,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     expect(strokes).toEqual(["start", "cancel"]);
     // Not terminal: the UUID is issued again by name and a new stroke starts under it.
     expect(sessionManager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     await claimingHeartbeat();
     expect(await sendGesture("Start")).toMatchObject({ success: true });
     socket.destroy();
@@ -311,7 +270,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
 
   test("a gestureMove refused because the reaped holder's device has a new owner lifts the stroke", async () => {
     await reapHolderWithStrokeOpen();
-    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
 
     const response = await sendGesture("Move");
 
@@ -324,7 +283,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
 
   test("a gestureEnd refused the same way does not leave the pointer down either", async () => {
     await reapHolderWithStrokeOpen();
-    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
 
     const response = await sendGesture("End");
 

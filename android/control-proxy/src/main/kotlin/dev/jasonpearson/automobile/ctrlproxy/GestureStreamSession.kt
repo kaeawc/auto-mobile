@@ -145,52 +145,73 @@ internal class GestureStreamSession<S>(
       is GestureStreamAction.Done -> finish(success = true, error = null)
       is GestureStreamAction.Wait -> waiting = true
       is GestureStreamAction.Dispatch -> {
-        val segment = action.segment.clampedToNonNegative()
-        if (!segment.willContinue) lifting = true
-        if (
-          !segment.isInitial &&
-            segment.willContinue &&
-            action.segment.from != action.segment.to &&
-            segment.from == segment.to
-        ) {
-          pump()
-          return
-        }
-        val precedingLift = liftFrom
-        try {
-          val stroke =
-            if (segment.isInitial) dispatcher.initialStroke(segment)
-            else dispatcher.continueStroke(requireNotNull(previousStroke), segment)
-          previousStroke = stroke
-          if (segment.willContinue) liftFrom = stroke to segment.to
-          // The dispatcher contract guarantees these callbacks fire on the gesture thread, so pump
-          // the
-          // next segment DIRECTLY — no re-post. The re-post added a full handler-queue cycle
-          // between
-          // a
-          // stroke completing and its continuation being dispatched, which on a busy thread was
-          // long
-          // enough for the framework to cancel the continued gesture (issue: streaming gesture
-          // input).
-          dispatcher.dispatchContinuing(
-            stroke = stroke,
-            displayId = displayId,
-            onComplete = { if (previousStroke === stroke) pump() },
-            onFailed = { error -> if (previousStroke === stroke) fail(error) },
-            onRejected = { error ->
-              if (!terminal && !releasing && previousStroke === stroke) {
-                liftFrom = precedingLift
-                fail(error)
-              }
-            },
-          )
-        } catch (e: Exception) {
-          // No Android log call: this framework-free session has no injected logger for JVM tests.
-          if (!terminal && !releasing) {
+        StrokeDispatch().dispatchSegment(action)
+      }
+    }
+  }
+
+  private inner class StrokeDispatch {
+    fun dispatchSegment(action: GestureStreamAction.Dispatch) {
+      val segment = action.segment.clampedToNonNegative()
+      if (!segment.willContinue) lifting = true
+      val isClampedContinuation =
+        !segment.isInitial &&
+          segment.willContinue &&
+          action.segment.from != action.segment.to &&
+          segment.from == segment.to
+      if (isClampedContinuation) {
+        pump()
+        return
+      }
+      val precedingLift = liftFrom
+      try {
+        val stroke =
+          if (segment.isInitial) dispatcher.initialStroke(segment)
+          else dispatcher.continueStroke(requireNotNull(previousStroke), segment)
+        previousStroke = stroke
+        if (segment.willContinue) liftFrom = stroke to segment.to
+        dispatchStroke(stroke, precedingLift)
+      } catch (e: IllegalArgumentException) {
+        // No Android log call: this framework-free session has no injected logger for JVM tests.
+        failStrokeBuild(precedingLift, e)
+      } catch (e: IllegalStateException) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        // No Android log call: this framework-free session has no injected logger for JVM tests.
+        failStrokeBuild(precedingLift, e)
+      } catch (e: SecurityException) {
+        // No Android log call: this framework-free session has no injected logger for JVM tests.
+        failStrokeBuild(precedingLift, e)
+      }
+    }
+
+    private fun dispatchStroke(stroke: S, precedingLift: Pair<S, GesturePoint>?) {
+      // The dispatcher contract guarantees these callbacks fire on the gesture thread, so pump
+      // the
+      // next segment DIRECTLY — no re-post. The re-post added a full handler-queue cycle
+      // between
+      // a
+      // stroke completing and its continuation being dispatched, which on a busy thread was
+      // long
+      // enough for the framework to cancel the continued gesture (issue: streaming gesture
+      // input).
+      dispatcher.dispatchContinuing(
+        stroke = stroke,
+        displayId = displayId,
+        onComplete = { if (previousStroke === stroke) pump() },
+        onFailed = { error -> if (previousStroke === stroke) fail(error) },
+        onRejected = { error ->
+          if (!terminal && !releasing && previousStroke === stroke) {
             liftFrom = precedingLift
-            fail(e.message ?: "Failed to build streamed gesture stroke")
+            fail(error)
           }
-        }
+        },
+      )
+    }
+
+    private fun failStrokeBuild(precedingLift: Pair<S, GesturePoint>?, error: Exception) {
+      if (!terminal && !releasing) {
+        liftFrom = precedingLift
+        fail(error.message ?: "Failed to build streamed gesture stroke")
       }
     }
   }
@@ -231,7 +252,12 @@ internal class GestureStreamSession<S>(
         onFailed = { finish(false, error) },
         onRejected = { finish(false, error) },
       )
-    } catch (_: Exception) {
+    } catch (_: IllegalArgumentException) {
+      finish(false, error)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      finish(false, error)
+    } catch (_: SecurityException) {
       finish(false, error)
     }
   }

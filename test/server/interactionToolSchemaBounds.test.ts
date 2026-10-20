@@ -1,4 +1,5 @@
 import { LONG_PRESS_HARD_MAX_MS } from "../../src/features/action/tapAtGesture";
+import { toolIsError } from "../helpers/toolResponse";
 import {
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
@@ -6,18 +7,15 @@ import {
 import { afterEach, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
+  type InteractionToolDependencies,
   dragAndDropSchema,
   dragAndDropHandler,
-  setDragAndDropFactory,
-  resetDragAndDropFactory,
   swipeOnSchema,
   pinchOnSchema,
   sendKeysSchema,
   tapAnySchema,
   tapOnSchema,
   swipeOnHandler,
-  setSwipeOnFactory,
-  resetSwipeOnFactory,
 } from "../../src/server/interactionTools";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -41,8 +39,11 @@ import {
   PINCH_SCALE_EXCLUSIVE_MIN,
   PINCH_DURATION_MIN_MS,
   PINCH_DURATION_MAX_MS,
+  PINCH_ROTATION_MAX_DEGREES,
+  PINCH_ROTATION_MIN_DEGREES,
 } from "../../src/features/action/PinchOn";
 
+const interactionDeps: InteractionToolDependencies = {};
 test("schema bounds follow the implementation constants", () => {
   const bounds = [
     {
@@ -52,6 +53,13 @@ test("schema bounds follow the implementation constants", () => {
       max: PINCH_DURATION_MAX_MS,
       exclusive: false,
       integer: true,
+    },
+    {
+      field: "rotationDegrees",
+      schema: pinchOnSchema.shape.rotationDegrees,
+      min: PINCH_ROTATION_MIN_DEGREES,
+      max: PINCH_ROTATION_MAX_DEGREES,
+      exclusive: false,
     },
     {
       field: "pressDurationMs",
@@ -182,8 +190,8 @@ const device: BootedDevice = {
 };
 
 afterEach(() => {
-  resetDragAndDropFactory();
-  resetSwipeOnFactory();
+  delete interactionDeps.dragAndDropFactory;
+  delete interactionDeps.swipeOnFactory;
 });
 
 test("pinch schema rejects the nonpositive values already rejected by the action", () => {
@@ -209,27 +217,33 @@ test("implementation-supported drag duration reaches the fake action unchanged",
     dragDurationMs: 1500,
   };
   const parsedDrag = dragAndDropSchema.parse(dragInput);
-  setDragAndDropFactory(() => ({
+  interactionDeps.dragAndDropFactory = () => ({
     execute: async (options) => {
       expect(options.dragDurationMs).toBe(dragInput.dragDurationMs);
       return { success: true, duration: 1500, distance: 10 };
     },
-  }));
-  expect((await dragAndDropHandler(device, parsedDrag)).isError).toBeUndefined();
+  });
+  expect(
+    toolIsError(
+      await dragAndDropHandler(device, parsedDrag, undefined, undefined, interactionDeps),
+    ),
+  ).toBe(false);
 });
 
 test.each([{ apexPause: 3000 }, { returnSpeed: 0.1 }, { returnSpeed: 4 }])(
   "implementation-supported swipe timing reaches the fake action: %j",
   async (timing) => {
     const parsedSwipe = swipeOnSchema.parse({ direction: "up", boomerang: true, ...timing });
-    setSwipeOnFactory(() => ({
+    interactionDeps.swipeOnFactory = () => ({
       execute: async (options) => {
         expect(options.apexPause).toBe(timing.apexPause);
         expect(options.returnSpeed).toBe(timing.returnSpeed);
-        return { success: true };
+        return { success: true, targetType: "screen", x1: 0, y1: 0, x2: 0, y2: 0, duration: 0 };
       },
-    }));
-    expect((await swipeOnHandler(device, parsedSwipe)).isError).toBeUndefined();
+    });
+    expect(
+      toolIsError(await swipeOnHandler(device, parsedSwipe, undefined, undefined, interactionDeps)),
+    ).toBe(false);
   },
 );
 

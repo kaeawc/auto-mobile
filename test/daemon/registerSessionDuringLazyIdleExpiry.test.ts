@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { expireIfDue } from "../helpers/expireIfDue";
 import type { Kysely } from "kysely";
 import {
   DAEMON_REGISTER_SESSION_METHOD,
@@ -6,6 +7,7 @@ import {
 } from "../../src/daemon/constants";
 import {
   handleDaemonRequest,
+  type DaemonMethodResult,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
@@ -43,13 +45,17 @@ const idleRefusal = {
   details: { sessionUuid: SESSION, reason: "cleanup-expired", idle: true },
   releaseReason: "cleanup-expired",
   idle: true,
-};
+} satisfies DaemonMethodResult;
 const bareNotFound = {
   success: false,
   code: DAEMON_SESSION_NOT_FOUND_CODE,
   error: `Session not found: ${SESSION}`,
-};
-const idleNotFound = { ...bareNotFound, releaseReason: "cleanup-expired", idle: true };
+} satisfies DaemonMethodResult;
+const idleNotFound = {
+  ...bareNotFound,
+  releaseReason: "cleanup-expired",
+  idle: true,
+} satisfies DaemonMethodResult;
 
 describe("registerSession during lazy idle expiry (#12042)", () => {
   let db: Kysely<Database>;
@@ -67,11 +73,9 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     restoreStarted = false;
     const restored = Promise.withResolvers<void>();
     finishRestore = restored.resolve;
-    manager = new SessionManager(
-      timer,
-      new DeviceSessionRepository(db, timer),
-      () => new FakeDbWriteBarrier(),
-      () => ({
+    manager = new SessionManager(timer, new DeviceSessionRepository(db, timer), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({
         restore: async () => {
           restoreStarted = true;
           await restored.promise;
@@ -79,7 +83,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
           return { status: "restored" as const };
         },
       }),
-    );
+    });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-a");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-a"]));
@@ -94,7 +98,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
         throw new Error("These requests must not consult the pool");
       },
     };
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     manager.setKeepScreenAwake(SESSION, { applied: true, method: "svc", svcWasEnabled: false });
   });
 
@@ -164,7 +168,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
 
   test("a finished idle release refuses registration", async () => {
     expireWithoutLookup();
-    expect(manager.getSession(SESSION)).toBeNull();
+    expect(expireIfDue(manager, SESSION)).toBeNull();
     finishRestore();
     await manager.waitForSessionRelease(SESSION);
 
@@ -203,7 +207,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     try {
       const registration = register();
       await drainUntil(() => reading, { description: "blocked persisted snapshot read" });
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       manager.setKeepScreenAwake(SESSION, { applied: true, method: "svc", svcWasEnabled: false });
       expireWithoutLookup();
       finishRead.resolve();
@@ -340,7 +344,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
 
   test("an overdue daemon-shutdown handoff stays bare before the fence and answers expired after restore", async () => {
     expireWithoutLookup();
-    const release = manager.releaseSession(SESSION, "daemon-shutdown", true);
+    const release = manager.releaseSession(SESSION, "daemon-shutdown", { allowExpired: true });
     try {
       await drainUntil(() => restoreStarted, { description: "daemon-shutdown keep-awake restore" });
       expectPreFenceRestore();
@@ -351,7 +355,11 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
       expect(await sessionInfo()).toEqual(bareNotFound);
       finishRestore();
       await release;
-      const released = { ...bareNotFound, releaseReason: "expired", idle: true };
+      const released = {
+        ...bareNotFound,
+        releaseReason: "expired",
+        idle: true,
+      } satisfies DaemonMethodResult;
       expect(await heartbeat()).toEqual(released);
       expect(await sessionInfo()).toEqual(released);
     } finally {
@@ -367,7 +375,11 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     try {
       await drainUntil(() => restoreStarted, { description: "CLI idle keep-awake restore" });
       expectPreFenceRestore();
-      const released = { ...bareNotFound, releaseReason: "cli-idle-timeout", idle: true };
+      const released = {
+        ...bareNotFound,
+        releaseReason: "cli-idle-timeout",
+        idle: true,
+      } satisfies DaemonMethodResult;
       expect(await manager.getReleasedSessionReason(SESSION)).toBe("cli-idle-timeout");
       expect(await heartbeat()).toEqual(released);
       finishRestore();
@@ -385,7 +397,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     const release = manager.releaseSessionUnlessSuperseded(
       SESSION,
       "device-disconnected:emulator-5554",
-      () => true,
+      { commitFence: () => true },
     );
     try {
       await drainUntil(() => restoreStarted, { description: "device-loss keep-awake restore" });

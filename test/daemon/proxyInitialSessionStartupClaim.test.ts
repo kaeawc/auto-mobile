@@ -33,12 +33,13 @@ describe("proxy --initial-session-uuid startup claim", () => {
   const setUp = async () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(SESSION, "emulator-5554", "android", { timeoutMs: 60_000 });
     state = {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

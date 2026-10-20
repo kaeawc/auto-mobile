@@ -11,6 +11,7 @@ public enum ResponseType: String, CaseIterable, Sendable {
     case multiFingerSwipeResult = "multi_finger_swipe_result"
     case dragResult = "drag_result"
     case pinchResult = "pinch_result"
+    case pathGestureResult = "path_gesture_result"
     case setTextResult = "set_text_result"
     case appendTextResult = "append_text_result"
     case clearTextResult = "clear_text_result"

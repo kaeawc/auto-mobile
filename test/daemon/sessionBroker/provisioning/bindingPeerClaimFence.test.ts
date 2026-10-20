@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/daemon/sessionBroker/provisioning/executionLiveness";
+import { timedHold } from "../../../helpers/timedReleaseHold";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/models/managedExecutionLiveness";
 import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFixtures";
 import {
   BindingOwnershipLostError,
@@ -234,7 +235,9 @@ describe("rehydrated managed execution peer claim fence", () => {
         "terminal after binding-ownership-lost",
       );
       expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("no longer owns")),
+        warn.mock.calls.filter(([message]: unknown[]) =>
+          String(message).includes("no longer owns"),
+        ),
       ).toHaveLength(1);
       expect(warn.mock.calls).toHaveLength(1);
       expect(info.mock.calls).toHaveLength(0);
@@ -708,9 +711,9 @@ describe("rehydrated managed execution peer claim fence", () => {
       });
       faults.busy.claimExecution = 1;
       await reowner.reown([S], { rehydrated: true });
-      const hold = reowner.releaseDeviceHold(S)!;
+      const hold = timedHold(reowner.releaseDeviceHold(S));
       let settled: string | undefined;
-      void hold.settled!.then((outcome) => {
+      void hold.settled.then((outcome) => {
         settled = outcome;
       });
       await advance(25);

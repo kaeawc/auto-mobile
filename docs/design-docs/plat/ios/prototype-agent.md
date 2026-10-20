@@ -37,7 +37,10 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Bottom sheet lifting above the keyboard                                               | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Style `weight`, `minWidth`/`maxWidth`/`minHeight`/`maxHeight`, `aspectRatio` (#11543) | Supported, not yet device-verified: sized by `PrototypeSizing` in Android's order (bounds, then `width`/`height`, then aspect ratio); a weight takes exactly its share of a `row`/`column`'s main axis and beats that axis's size and bounds, and is ignored outside a row or column; `min` wins when it exceeds `max`; content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew, as `wrapContentWidth()`/`wrapContentHeight()` do, while an explicit `width`/`height`/`fill` keeps the node's alignment; weighted stacks mirror under RTL via SwiftUI's own Layout mirroring; sizes are fractional points, not rounded to pixels |
 | Data model (#11673)                                                                   | Implemented with `prototype_data_model_v1`: authored tree and repeat-cell guards precede resolution; resolved limits precede repeat expansion; status reports read-only `data`; see [Data model](../android/prototype-ux.md#data-model-11673).                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| [Patch (#11675)](../android/prototype-ux.md#patch-11675)                              | Not implemented: the agent does not advertise `prototype_patch_v1` (the pure applier and shared fixtures exist in the agent core).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Data actions (#12519), `prototype_data_actions_v1`                                    | Implemented, not yet device-verified: `setData`, `appendData`, `removeData` through `PrototypeDataWrite`; see [Data actions capability](#data-actions-capability).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Storage (#12522), `prototype_storage_v1`                                              | Implemented, not yet device-verified: per-id values in the app sandbox with the Android precedence rules; see [Storage capability](#storage-capability).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Request action (#12529)                                                               | Implemented, not yet device-verified (`prototype_network_v1` and `prototype_network_device_v1`): `via: "host"` through `prototype_request` / `prototype_response` frames, `via: "device"` through a URLSession client; see [Request action capability](#request-action-capability).                                                                                                                                                                                                                                                                                                                                                                                  |
+| [Patch (#11675)](../android/prototype-ux.md#patch-11675)                              | Implemented: `patch_prototype` applies `/data`, `/state` and `replaceNode` in place, advertised as `prototype_patch_v1` (`PrototypeSession.patch`). Needs device verification.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Non-scalar state values (`null`, array, object)                                       | Refused at `show`, as Android and the host schema do: state is string, number or boolean only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Foreground scoping to the shown-over app                                              | Not needed: the agent lives in the app, so backgrounding the app hides its window                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Accessibility identifier fallback (`node.id`)                                         | Matches Android: only `testTag`, including `<testTag>.<part>` for composite parts. Advertises `prototype_identifier_test_tag_only_v1`; host lifts the platform note.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -501,11 +504,165 @@ substitution to the shared UTF-16 substituted-text limit; literals do not consum
 State interpolation then uses the ordinary expanded tree. `repeat.key` is accepted and kept during
 resolution, but rows retain positional identity until keyed patching (#11675).
 
-Data stays agent-owned and read-only; inspect/status report it next to state, events do not.
+Data stays agent-owned and read-only except through the data actions below; inspect/status report
+it next to state.
 Two data keys that are canonically equivalent Unicode strings collapse into one on iOS because
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
-the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+the host validator's data byte-cost rule at show; the existing 1 MiB whole-spec byte cap still bounds input.
+
+## Data actions capability
+
+The agent advertises `prototype_data_actions_v1` for `setData`, `appendData` and `removeData`
+([contract](../android/prototype-ux.md#data-actions-12519)). `PrototypeRepeat` binds a whole `{index}`
+path segment and `{item}`/`{index}` values per row at expansion, so a row's action reaches the session
+already concrete. `PrototypeSession` resolves the `{value}`, `{state}` or `{data}` value at the action,
+applies `PrototypeDataWrite` (a twin of the host's `applyPrototypeDataWrite`, with its `invalid_path`,
+`invalid_value`, `not_found`, `not_array` and `limit_exceeded` codes and `MAX_PROTOTYPE_DATA_WRITE_BYTES`),
+and rebuilds the drawn tree from the spec's authored root with `PrototypeSpec.replacingData`, so data
+text, repeat rows and data conditions refresh and `PrototypeModel` republishes the spec. A write the
+tree cannot be rebuilt for within the show's limits is refused like any other.
+
+A refused write changes nothing, emits nothing and does not stop the rest of the action list. An
+accepted write bumps the shown id's data revision (monotonic per id, never rewound by a re-show, as
+event sequences are; every show is itself one revision, so the first show reports 1, as on Android,
+#13040) and emits one `change` event whose `name` is the written `/data/...` path (the
+array for an append) and whose payload is `{op, value?, revision}`. The value always travels. The agent
+shares that counter with `prototype_patch_v1` (#11675): device state writes and accepted patches take the next revision too.
+
+## Storage capability
+
+The agent advertises `prototype_storage_v1` and the `clear_prototype_storage` request type (#12526;
+[contract](../android/prototype-ux.md#storage-12522)). Stored values live in the host app's own sandbox,
+in `Application Support/AutoMobilePrototypeAgent/storage/<id>.json` (`FilePrototypeStorageStore`), never in
+the app's own files or its `UserDefaults` domain; the saved-prototype viewer app uses the same code in its
+own sandbox. Writes are atomic (`Data.write(options: .atomic)`) and the id is percent-encoded into the file
+name, so no id can leave the directory or collide after sanitizing. A file that does not decode (or is far
+over the byte limit) is logged, deleted and treated as nothing stored.
+
+`PrototypeStorageCoordinator` is the only code that touches a `PrototypeStorageStore`. `PrototypeModel.show`
+calls `prepare` first: `PrototypeStorageRestore` (a twin of the host's `restorePrototypeStorage`) applies the
+precedence rules, entries that no longer fit are deleted, and the session receives the restored state and
+data through `PrototypeSession.show(_:restoredState:)` before the first draw, with no `change` event and no
+data revision bump. After every transition the model calls `sessionChanged`; a listed key whose live value
+moved is written on a trailing 400 ms debounce (injected `PrototypeClock`), and a dismissal, the next show,
+`get_prototype_status` and the app entering the background or ending flush at once. A write that would take
+the id over `MAX_PROTOTYPE_STORAGE_BYTES` still applies live, keeps the key's previous stored value and is
+listed in `skippedKeys`. `reset: true` does not clear storage.
+
+`get_prototype_status` (and the standalone `inspect_prototypes` entry) carries a flat
+`storage: {version, keys: [{key, bytes}], totalBytes, skippedKeys?}` for a prototype whose spec declares
+`storage`. `clear_prototype_storage {id}` answers `cleared`, the number of stored keys removed, and leaves the
+shown prototype alone. The iOS saved prototype is its own app, so `deleteSaved` uninstalls the app and its
+sandbox, storage included.
+
+## Request action capability
+
+The agent advertises `prototype_network_v1` and `prototype_network_device_v1` for the `request` action
+([contract](../android/prototype-ux.md#request-action-12523)). `PrototypeSession` is a twin of the
+host's `applyPrototypeRequestOutcome`: a tap resolves the action's bindings against the committed
+state and data (`PrototypeRequestResolver`, twin of `resolvePrototypeRequest`; `{key}` and
+`{data:/pointer}` are bound in one pass so a substituted value is never scanned again), moves the
+`statusKey` to `loading` and issues a start command. The answer arrives later through
+`completeRequest`, which writes `into`, then `<into>__meta` (dropping `headers` when the value does not
+fit the data write limit), moves the status key, emits the `prototype_request` event and runs
+`onSuccess` or `onError`, in that order. A request that cannot be built (an unresolvable binding, an
+invalid URL) or is refused (`too_many_in_flight`, at 4) completes at once as an error through the same
+path. A newer request to the same `into` cancels the older: the older writes nothing, leaves the status
+key alone, runs no follow-up and reports a `cancelled` event (its `durationMs` is 0, because the
+session has no clock). Dismissal, a replacing show of another prototype and `reset` cancel every
+request; a same-id replace keeps them.
+
+`PrototypeRequestValidator` repeats the host's static rules on the authored tree at show (URL scheme,
+method, bodies on GET and HEAD, `into` naming an object member, `statusKey` naming a declared string
+state key, header names, entry counts, `timeoutMs` 1 to 30000, follow-up lists of 1 to 32, the reserved
+`prototype_request` emit name and `MAX_PROTOTYPE_ACTION_DEPTH`), and `PrototypeRepeat` binds a request's
+`url`, `statusKey`, `into`, header and query strings, binding objects and nested follow-up lists per
+row. Query entries are set on the URL in sorted key order (UTF-16 code units, the same as JS
+`sort()`) on every runtime; the Swift decoder holds `query` as an unordered dictionary, so the rule
+is canonical rather than authored order, and the resolved URL and event `url` match the host's. The query is edited on its raw `&`-separated pieces, not re-serialized: a set key replaces its first piece in place (later duplicates removed), new keys append, and untouched pieces keep their spelling (`flag`, `%20`); see the request section of the prototype UX doc. A
+string body without an author-set `Content-Type` is sent as `text/plain; charset=utf-8` and any
+other JSON body as `application/json`, as on the host and Android.
+
+`PrototypeRequestDriver` runs what the session starts, behind a clock and two seams so its tests are
+deterministic:
+
+- **`via: "host"` (the default).** The agent sends a `prototype_request` frame
+  (`prototypeRequestMessageSchema`) to exactly one connection, the most recently authenticated one
+  (`PrototypeConnectionRegistry.current`, as Android's `WebSocketServer.sendToHost`), so a
+  reconnecting daemon replaces the one it superseded and a side-effecting call never runs twice
+  (events still broadcast to every authenticated connection). The owning connection of each pending call is remembered (`PrototypeHostRouting`), so when that connection closes its calls end at once as `network` even while an older connection remains. The host's
+  `prototype_response` frame arrives as an ordinary request line that the agent routes to the driver and
+  never replies to. When the device drops a host call (superseded by a newer request to the same `into`,
+  dismissed, reset or timed out) it sends `{"type":"prototype_request_cancel","requestId"}` to the call's
+  owning connection (skipped if that connection is gone); the host aborts the fetch, frees its slot and
+  sends no reply, and a late response is ignored. A host that stays silent for `timeoutMs` plus 2 s ends as `timeout`; no connected host, or
+  the last host leaving, ends it as `network`. The host side is `createPrototypeRequestHost` wired to
+  the agent client (`attachIosPrototypeRequests`), which also cancels the device's requests when the
+  connection closes.
+- **`via: "device"`.** Core owns the `PrototypeHttpClient` protocol and links no HTTP library; the agent
+  injects `PrototypeURLSessionClient`. It uses a dedicated ephemeral `URLSession` (never
+  `URLSession.shared`, so the app's cookies, cache and credentials are untouched) with the contract's
+  30 s ceiling, enforces `timeoutMs` as a total deadline, stops reading a 2xx body and fails with `too_large` once
+  it crosses 262144 bytes (or its `Content-Length` announces more; a non-2xx body is never read, so it is
+  an `http_error` however large), maps URLSession errors to the
+  contract's codes and reports the duration from the task metrics. Its tests run the real client over a
+  `URLProtocol` stub.
+
+**Alamofire.** The proposal for #12529 names Alamofire 5.x for the on-device client, after two checks:
+that an injected dylib linking Alamofire coexists with a host app that links its own copy, and the
+dylib's binary size. Both need macOS, Xcode and a simulator, so they have not been run and the package
+does not depend on Alamofire. The URLSession client above is in place behind the same
+`PrototypeHttpClient` protocol, which is the fallback the proposal describes; an Alamofire client would
+be a second conformance, chosen where the agent builds the driver, with no change to Core.
+
+**App Transport Security.** localhost and IP-literal `http://` hosts are exempt from ATS; any other
+cleartext `http://` host falls under the host app's own ATS settings. There is no allowlist. The
+viewer template app sets `NSAllowsArbitraryLoads` in `Viewer/Info.plist`, so a viewer runs any URL. In
+an injected agent a `via: "device"` request that ATS blocks
+(`NSURLErrorAppTransportSecurityRequiresSecureConnection`) completes as a typed `network` error whose
+message tells the author to use `via: "host"`, which the AutoMobile host runs without that restriction.
+
+## Data, storage and network (#12531)
+
+This is the iOS view of the data, storage and request features; the shared contract and the capability
+map live in the Android design doc, [Data, storage and network](../android/prototype-ux.md#data-storage-and-network-12531).
+
+| Capability                    | Gates                                                                | iOS agent                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `prototype_data_actions_v1`   | `setData`, `appendData`, `removeData`                                | Advertised; see [Data actions capability](#data-actions-capability)                                     |
+| `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clear_prototype_storage` | Advertised; values live under `Application Support/AutoMobilePrototypeAgent/storage` in the app sandbox |
+| `prototype_network_v1`        | `request` with `via: "host"`                                         | Advertised; see [Request action capability](#request-action-capability)                                 |
+| `prototype_network_device_v1` | `request` with `via: "device"`                                       | Advertised; a dedicated ephemeral `URLSession`                                                          |
+
+**`localhost` on a simulator.** An iOS simulator shares the Mac's network stack, so `localhost`,
+`127.0.0.1` and `[::1]` are the Mac for both `via` values and nothing is reversed (Android needs
+`adb reverse` for `via: "device"`).
+
+**Transports.** `via: "host"` is a `prototype_request` frame to exactly one connection, the most
+recently authenticated one, answered by a `prototype_response`; the host runs the fetch and applies no
+allowlist. `via: "device"` runs on `URLSession` inside the target app. There is no URL allowlist on
+either path.
+
+**App Transport Security.** `via: "device"` is subject to the app's ATS: cleartext `http://` to `localhost`
+and IP addresses is exempt, any other cleartext host is blocked and reported as `network` with a message
+that points to `via: "host"` (which the host runs without ATS) or `https://`.
+
+**Storage.** Precedence is the same as Android: a changed `version` discards stored values, stored values
+replace the spec's for listed keys, and values that no longer fit are dropped. A failed disk write keeps
+the keys dirty and retries, and a same-id re-show restores from the unsaved values meanwhile.
+
+**Limits.** The same as Android:
+
+| Limit                                        | Value                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 262144 bytes of data cost                                  |
+| Response body                                | `MAX_PROTOTYPE_RESPONSE_BYTES`, 262144 bytes, 2xx only (a non-2xx body is never read)        |
+| Request `timeoutMs`                          | 1 to 30000, default 10000                                                                    |
+| Requests in flight                           | 4 per device                                                                                 |
+| Header and query entries                     | 16 each, values up to 4096 characters                                                        |
+| Storage                                      | at most 64 keys, 262144 stored bytes per prototype id                                        |
+| Emit payload                                 | 4096 bytes; a larger `change` event drops its `value` and the host stops mirroring that spec |
 
 ## Text field options
 
@@ -549,6 +706,78 @@ have any vertical scroll ancestor (omitted scroll axis is vertical). Current pag
 the first fully visible page; page events, placeholders and navigation bindings keep
 their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 Indicator and carousel remain deferred.
+
+## Carousel and pager indicator (not device-verified)
+
+`prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
+(default `none`): page dots drawn over the pager (a centred row at the bottom, or a column at the
+end edge for a vertical pager) with the current page filled. The dots are decoration and add no
+semantics node.
+
+A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
+`repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is
+`multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` is dp >= 0. It has no page index,
+event or `setPage` target; use a `pager` when the page matters. The host refuses a show on a
+CtrlProxy or iOS agent without the capability before sending it, and the iOS result carries a
+`carousel` platform note.
+
+iOS draws every variant as fixed-width (`itemWidth`) items in a horizontal `ScrollView` with
+`scrollTargetBehavior(.viewAligned)`; there are no multi-browse or hero size changes, and every
+item stays in the accessibility tree. The indicator dots are plain circles (no icons), hidden from
+accessibility.
+
+## Pull-to-refresh (`scroll.refresh`, not device-verified)
+
+A vertical `scroll` may declare `refresh: {stateKey, onRefresh}` (1-32 actions in `onRefresh`, the
+same union as `onTap`). `stateKey` names a boolean state key that shows the refresh indicator
+while it is true; it must be boolean if declared, and a horizontal scroll with `refresh` is
+rejected at `<path>.refresh`. A pull writes true to the key (emitting a `change` event) and then
+runs `onRefresh`; the prototype's own `setState`, or a `patch` of `/state/<key>` with a
+`baseRevision`, writes false to end it. A pull while the key is already true is ignored. Repeat
+and component placeholders bind in the key and the actions like `onTap`. The capability is
+`prototype_refresh_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it.
+
+iOS draws it with `refreshable` on the `ScrollView`: the closure sets the key, runs the actions
+and stays open until the key is false (or the view goes away). A key set true without a pull shows
+a plain `ProgressView` at the top, since SwiftUI cannot start `refreshable` programmatically.
+Android uses Material `PullToRefreshBox`.
+
+## Text field trailing icon and IME action (not device-verified)
+
+`prototype_text_field_actions_v1` gates textField `trailingIcon {icon, label, onTap?}`, `imeAction`
+(`done`, `next`, `search`, `send`, `go`) and `onSubmit` (1-32 actions); multiline text has no IME
+action, so the host refuses them with `multiline: true`. iOS maps `imeAction` to `submitLabel` (done
+when only `onSubmit` is authored) and runs `onSubmit` from `onSubmit`; the trailing icon is an SF
+Symbol button beside the field (a plain glyph without `onTap`), named by `label`, with the
+accessibility identifier `<testTag>.trailingIcon` that `tapOn` can target. Android draws an
+`IconButton` in the field's trailing slot and uses Compose `ImeAction` with `KeyboardActions`.
+
+## Swipe actions (not device-verified)
+
+A `row` or `listItem` may declare `swipeActions: {start?, end?, fullSwipe?}` (needs
+`prototype_swipe_actions_v1`). `start` is revealed by swiping right and `end` by swiping left
+(mirrored in right-to-left layouts is not done: sides are physical). Each side holds 1-3 entries
+`{label, icon?, role?, color?, onTap}`: `label` is the button text and its accessibility name,
+`icon` a built-in icon name (an SF Symbol on iOS), `role` `default` (primary colours) or
+`destructive` (error colours), `color` a hex or theme role that overrides the background, and
+`onTap` 1-32 actions. The first entry of a side sits at the screen edge. A release past 40% of
+the revealed width, or a fling past the open velocity, leaves the row open; a drag beyond the
+revealed width resists (rubber-band). With `fullSwipe: true` a drag past 60% of the row (or a hard
+fling) runs the swiped side's first entry and closes the row. Only one row is open at a time, and a
+tap on an open row closes it instead of running its `onTap`. Revealed buttons get the test tag
+`<rowTestTag>.swipe.<index>`, counting `start` entries first and then `end`; they exist only while
+the row is open. Every entry is also an accessibility action (TalkBack custom action, VoiceOver
+action) on the row, so assistive technology can run it without swiping. Reduced motion or spec
+`motion: "none"` snaps instead of animating. Put swipeActions on repeated rows; a row inside a
+horizontal `pager` or a `carousel` is refused because their drag would compete.
+
+iOS uses a custom `DragGesture` reveal inside the existing `ScrollView` (not a SwiftUI `List`), an
+`accessibilityAction` per entry for VoiceOver, SF Symbols for icons and the same thresholds
+(`PrototypeSwipe.swift`).
+
+`leadingIcon` (`prototype_text_field_leading_icon_v1`) is a built-in icon name drawn before the
+text as an SF Symbol, decoration only, hidden from accessibility.
 
 ## Prototype gesture action lists
 

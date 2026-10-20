@@ -16,6 +16,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case requestMultiFingerSwipe = "request_multi_finger_swipe"
     case requestDrag = "request_drag"
     case requestPinch = "request_pinch"
+    case requestPathGesture = "request_path_gesture"
 
     // Text input
     case requestSetText = "request_set_text"
@@ -94,6 +95,7 @@ extension RequestType {
         case .requestTwoFingerSwipe, .requestMultiFingerSwipe: return .multiFingerSwipeResult
         case .requestDrag: return .dragResult
         case .requestPinch: return .pinchResult
+        case .requestPathGesture: return .pathGestureResult
         case .requestSetText: return .setTextResult
         case .requestAppendText: return .appendTextResult
         case .requestClearText: return .clearTextResult

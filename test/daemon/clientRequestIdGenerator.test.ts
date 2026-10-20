@@ -1,15 +1,13 @@
 import { describe, expect, test, beforeEach } from "bun:test";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { Duplex } from "node:stream";
-import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../../src/daemon/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-interface DaemonClientFrameInternals {
-  handleData(data: Buffer): void;
-}
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 /**
  * Capture every frame written to the socket so the test can inspect the request
@@ -30,9 +28,10 @@ function createConnectedClient(
   idGenerator: CountingIdGenerator,
   writes: string[],
 ): DaemonClient {
-  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, {}, null, idGenerator);
-  (client as any).connected = true;
-  (client as any).socket = createCapturingSocket(writes);
+  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator,
+  });
+  client.testHooks.attachSocket(createCapturingSocket(writes));
   return client;
 }
 
@@ -90,7 +89,7 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
       const client = createConnectedClient(fakeTimer, idGenerator, writes);
 
       const pending = client.callTool("tapOn", {});
-      (client as unknown as DaemonClientFrameInternals).handleData(
+      client.testHooks.simulateIncomingData(
         Buffer.from(
           JSON.stringify({
             id: "req-1",
@@ -119,7 +118,7 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     const client = createConnectedClient(fakeTimer, idGenerator, writes);
 
     const pending = client.callTool("tapOn", {});
-    (client as any).handleData(
+    client.testHooks.simulateIncomingData(
       Buffer.from(
         JSON.stringify({
           id: "req-1",
@@ -140,7 +139,7 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     const client = createConnectedClient(fakeTimer, idGenerator, writes);
 
     const pending = client.callTool("tapOn", {});
-    (client as any).handleData(
+    client.testHooks.simulateIncomingData(
       Buffer.from(
         JSON.stringify({
           id: "req-1",
@@ -175,7 +174,7 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     async (code) => {
       const client = createConnectedClient(fakeTimer, new CountingIdGenerator("req"), []);
       const pending = client.callDaemonMethod("daemon/sessionInfo", { sessionId: "missing" });
-      (client as unknown as DaemonClientFrameInternals).handleData(
+      client.testHooks.simulateIncomingData(
         Buffer.from(
           JSON.stringify({
             id: "req-1",
@@ -203,7 +202,7 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     const client = createConnectedClient(fakeTimer, idGenerator, writes);
 
     const pending = client.callTool("listDevices", { platform: "android" });
-    (client as any).handleData(
+    client.testHooks.simulateIncomingData(
       Buffer.from(
         JSON.stringify({
           id: "req-1",

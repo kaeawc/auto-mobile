@@ -13,6 +13,7 @@ import type { Kysely } from "kysely";
 import {
   NavigationGraphManager,
   NavigationEvent,
+  type IncomingNavigationEvent,
 } from "../../../src/features/navigation/NavigationGraphManager";
 import { runMigrations } from "../../helpers/database";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -62,7 +63,7 @@ describe("NavigationGraphManager", () => {
   function makeFreshManager(): NavigationGraphManager {
     return NavigationGraphManager.createForTesting(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
     );
   }
 
@@ -256,13 +257,13 @@ describe("NavigationGraphManager", () => {
 
     test("should handle event with missing timestamp by using timer fallback", async () => {
       // Simulate WebSocket message where timestamp is on the outer message, not the event
-      const event = {
+      const event: IncomingNavigationEvent = {
         destination: "HomeScreen",
         source: "COMPOSE_NAVIGATION",
         arguments: {},
         metadata: {},
         sequenceNumber: 0,
-      } as unknown as NavigationEvent;
+      };
       // event.timestamp is undefined, simulating the real WebSocket scenario
 
       await manager.recordNavigationEvent(event);
@@ -284,7 +285,7 @@ describe("NavigationGraphManager", () => {
       const timer = new FakeTimer();
       manager = NavigationGraphManager.createForTesting(
         new NavigationRepository(harness.db),
-        new TestCoverageRepository(undefined, harness.db),
+        new TestCoverageRepository(harness.db),
         timer,
       );
       await manager.setCurrentApp("com.test.app");
@@ -914,24 +915,19 @@ function createCountingDBEdge(
   to: string,
   onFromScreenRead: () => void,
 ): DBNavigationEdge {
-  const edge = {
+  const edge: DBNavigationEdge = {
+    get from_screen() {
+      onFromScreenRead();
+      return from;
+    },
     id,
     app_id: "com.test.app",
-    to,
     to_screen: to,
     tool_name: "tapOn",
     tool_args: "{}",
     timestamp: 1000,
     created_at: "2026-01-01T00:00:00.000Z",
-  } as DBNavigationEdge;
-
-  Object.defineProperty(edge, "from_screen", {
-    enumerable: true,
-    get: () => {
-      onFromScreenRead();
-      return from;
-    },
-  });
+  };
 
   return edge;
 }
@@ -1414,7 +1410,7 @@ class ThrowingEdgeTraversalCoverageRepo extends TestCoverageRepository {
     private readonly injectedTimer: Timer,
     db?: Kysely<Database>,
   ) {
-    super(injectedTimer, db);
+    super(db, injectedTimer);
   }
 
   override withExecutor(executor: Kysely<Database>): TestCoverageRepository {
@@ -1496,7 +1492,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
   }
 
   test("happy path persists node + visit + edge + traversal rows", async () => {
-    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const coverage = new TestCoverageRepository(db);
     const manager = makeManager(coverage);
     await manager.setCurrentApp(APP_ID);
     await manager.startTestSession("session-happy");
@@ -1563,7 +1559,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
   });
 
   test("side effects fire only after the transaction commits", async () => {
-    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const coverage = new TestCoverageRepository(db);
     const manager = makeManager(coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -1600,7 +1596,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
   });
 
   test("does not deadlock a concurrent writer on the shared connection", async () => {
-    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const coverage = new TestCoverageRepository(db);
     const manager = makeManager(coverage);
     await manager.setCurrentApp(APP_ID);
     await manager.recordNavigationEvent(createEvent("Screen1", 1000));
@@ -1634,7 +1630,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
 
   describe("graph-update listener isolation (#4171)", () => {
     test("still notifies later listeners after an earlier listener throws", async () => {
-      const manager = makeManager(new TestCoverageRepository(defaultTimer, db));
+      const manager = makeManager(new TestCoverageRepository(db));
       await manager.setCurrentApp(APP_ID);
 
       const calls: string[] = [];
@@ -1656,11 +1652,13 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     });
 
     test("stops notifying every listener once they are cleared with null", async () => {
-      const manager = makeManager(new TestCoverageRepository(defaultTimer, db));
+      const manager = makeManager(new TestCoverageRepository(db));
       await manager.setCurrentApp(APP_ID);
 
       const calls: number[] = [];
-      manager.setGraphUpdateListener(() => calls.push(1));
+      manager.setGraphUpdateListener(() => {
+        calls.push(1);
+      });
       manager.setGraphUpdateListener(null);
 
       await manager.setCurrentApp("com.test.other");
@@ -1713,7 +1711,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 
   test("throws a clear error when the coverage repo is bound to a different connection", async () => {
     const navRepo = new NavigationRepository(navDb);
-    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const coverage = new TestCoverageRepository(coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -1724,7 +1722,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 
   test("names the connection-identity invariant in the error message", async () => {
     const navRepo = new NavigationRepository(navDb);
-    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const coverage = new TestCoverageRepository(coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -1735,7 +1733,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 
   test("guard fires before the transaction opens — the navigation write is not applied", async () => {
     const navRepo = new NavigationRepository(navDb);
-    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const coverage = new TestCoverageRepository(coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -1758,7 +1756,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     // FK violation surfacing as an opaque SqliteError. The guard turns that into a
     // clear, pre-transaction ActionableError instead.
     const navRepo = new NavigationRepository(navDb);
-    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const coverage = new TestCoverageRepository(coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
     // startTestSession writes the session on the coverage connection, whose
@@ -1781,7 +1779,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 
   test("allows the write when both repos share the same connection", async () => {
     const navRepo = new NavigationRepository(navDb);
-    const coverage = new TestCoverageRepository(defaultTimer, navDb);
+    const coverage = new TestCoverageRepository(navDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -1829,7 +1827,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
   test("recordHierarchyNavigation Case 1 throws ActionableError on a foreign-bound coverage repo", async () => {
     const navRepo = await seedCorrelatedHome();
     // Coverage repo bound to a DIFFERENT connection — the foreign bind the guard exists to catch.
-    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const coverage = new TestCoverageRepository(coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -1863,7 +1861,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 
   test("recordHierarchyNavigation Case 1 guard names the connection-identity invariant", async () => {
     const navRepo = await seedCorrelatedHome();
-    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const coverage = new TestCoverageRepository(coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -1887,7 +1885,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     // assertion discriminating (the split path is genuinely reachable here) and mirrors
     // the recordNavigationEvent twin above.
     const navRepo = await seedCorrelatedHome();
-    const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+    const coverage = new TestCoverageRepository(coverageDb);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
     // startTestSession writes the session on the coverage connection, whose
@@ -1927,7 +1925,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 // foreign-bound-connection tests for BOTH methods, not just one.
 describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", () => {
   const managerSource = readFileSync(
-    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphRecorder.ts"),
     "utf8",
   );
 
@@ -1953,7 +1951,7 @@ describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", 
     const coverageDb = await createTestDatabase({ foreignKeys: true });
     try {
       const navRepo = new NavigationRepository(navDb);
-      const coverage = new TestCoverageRepository(defaultTimer, coverageDb);
+      const coverage = new TestCoverageRepository(coverageDb);
       const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
       await manager.setCurrentApp("com.test.msg");
 
@@ -1980,7 +1978,7 @@ describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", 
  * opening `{` to its matching `}`. Returning the *spans* (not a whole-file
  * substring match) is what keeps the side-effect guard from false-positiving on
  * the legitimate post-commit side effects that already sit OUTSIDE these
- * callbacks (issue #3129). A naive whole-file scan for `this.notifyGraphUpdated(`
+ * callbacks (issue #3129). A naive whole-file scan for `this.context.notifyGraphUpdated(`
  * would flag the correct code.
  */
 function extractRunBothReposCallbackBodies(source: string): string[] {
@@ -2009,18 +2007,18 @@ function extractRunBothReposCallbackBodies(source: string): string[] {
 
 describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () => {
   const managerSource = readFileSync(
-    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphRecorder.ts"),
     "utf8",
   );
 
   // Known post-commit side effects that MUST stay OUTSIDE the transaction callback
   // (never on rollback, never holding the exclusive connection across non-DB IO).
-  // See the helper docstring + both call-site comments in NavigationGraphManager.ts.
+  // See the helper docstring + both call-site comments in NavigationGraphRecorder.ts.
   const FORBIDDEN_SIDE_EFFECTS = [
-    "this.notifyGraphUpdated(",
+    "this.context.notifyGraphUpdated(",
     "TelemetryRecorder",
-    "this.activeNavigation =",
-    "this.currentScreen =",
+    "this.state.activeNavigation =",
+    "this.state.currentScreen =",
   ];
 
   test("the source has exactly two helper callbacks to scan", () => {
@@ -2040,23 +2038,23 @@ describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () =>
   });
 
   test("TDD teeth: the guard fires when a side effect is placed inside a callback", () => {
-    // Simulate a future author writing `this.notifyGraphUpdated()` inside a callback body.
+    // Simulate a future author writing `this.context.notifyGraphUpdated()` inside a callback body.
     const bodies = extractRunBothReposCallbackBodies(managerSource);
     expect(bodies.length).toBeGreaterThan(0);
-    const mutated = bodies[0] + "\n        this.notifyGraphUpdated();\n";
+    const mutated = bodies[0] + "\n        this.context.notifyGraphUpdated();\n";
     const tripped = FORBIDDEN_SIDE_EFFECTS.some((s) => mutated.includes(s));
     expect(tripped).toBe(true);
   });
 
   test("the extractor isolates the callback body from surrounding post-commit code", () => {
-    // The real post-commit `this.notifyGraphUpdated()` / `this.currentScreen =` calls sit
+    // The real post-commit `this.context.notifyGraphUpdated()` / `this.state.currentScreen =` calls sit
     // OUTSIDE the callbacks in the file; if the brace-matcher over-ran past the closing `}`
     // it would swallow them and the side-effect test would false-positive. Assert those
     // legitimate calls exist in the file but NOT in any extracted body.
-    expect(managerSource).toContain("this.notifyGraphUpdated();");
+    expect(managerSource).toContain("this.context.notifyGraphUpdated();");
     const bodies = extractRunBothReposCallbackBodies(managerSource);
     for (const body of bodies) {
-      expect(body).not.toContain("this.notifyGraphUpdated();");
+      expect(body).not.toContain("this.context.notifyGraphUpdated();");
     }
   });
 });
@@ -2072,7 +2070,7 @@ class ThrowingNodeVisitCoverageRepo extends TestCoverageRepository {
     private readonly injectedTimer: Timer,
     db?: Kysely<Database>,
   ) {
-    super(injectedTimer, db);
+    super(db, injectedTimer);
   }
 
   override withExecutor(executor: Kysely<Database>): TestCoverageRepository {
@@ -2164,7 +2162,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
 
   function makeManager(): NavigationGraphManager {
     const navRepo = new NavigationRepository(db);
-    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const coverage = new TestCoverageRepository(db);
     return NavigationGraphManager.createForTesting(navRepo, coverage);
   }
 
@@ -2234,7 +2232,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     // The link failure happens AFTER getOrCreateNode + getOrCreateFingerprint both
     // wrote — the exact orphaned node/fingerprint partial write #2968 calls out.
     const navRepo = new ThrowingLinkPromoteRepo(APP_ID, db);
-    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const coverage = new TestCoverageRepository(db);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
@@ -2377,7 +2375,7 @@ describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction 
 
   test("happy path records the visit + coverage and updates currentScreen", async () => {
     const navRepo = new NavigationRepository(db);
-    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const coverage = new TestCoverageRepository(db);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
     await seedCorrelatedNode(manager);
@@ -2445,7 +2443,7 @@ describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction 
     // rolls back. The control flag lets setup writes (which also touchApp) succeed.
     const control = { throwOnTouch: false };
     const navRepo = new ConditionalTouchAppRepo(control, db);
-    const coverage = new TestCoverageRepository(defaultTimer, db);
+    const coverage = new TestCoverageRepository(db);
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
     await seedCorrelatedNode(manager); // no startTestSession → activeTestSession stays null

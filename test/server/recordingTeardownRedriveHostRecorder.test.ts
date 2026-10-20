@@ -6,7 +6,7 @@ import {
   redriveUnconfirmedCaptureTeardowns,
   type RecordingTeardownRedriveDeps,
   type StartupOrphanCaptures,
-} from "../../src/server/recordingTeardownRedrive";
+} from "../../src/daemon/recordingTeardownRedrive";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -30,11 +30,9 @@ afterEach(() => {
 async function harness(held = false, incarnation: number | undefined = 1) {
   const timer = new FakeTimer();
   const repo = new FakeVideoRecordingRepository();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const holder = spyOn(manager, "getSessionForDevice").mockReturnValue(held ? "holder" : null);

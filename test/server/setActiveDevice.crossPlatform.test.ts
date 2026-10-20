@@ -14,7 +14,9 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { setActiveDeviceResultSchema } from "../../src/server/utilityToolOutputSchemas";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
+import { toolJson, toolStructured, toolText } from "../helpers/toolResponse";
 
 /**
  * `setActiveDevice {deviceId}` without `platform` fell back to the connection's default session and
@@ -44,8 +46,10 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
 
   const setup = async (devices: BootedDevice[]) => {
     const timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
-      return new FakeDbWriteBarrier();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => {
+        return new FakeDbWriteBarrier();
+      },
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
@@ -223,12 +227,10 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
       sessionUuid: owned,
       __mcpSessionId: CONNECTION,
     });
-    const content = result.content[0];
-    expect(content?.type).toBe("text");
-    if (content?.type !== "text") {
-      throw new Error("Expected selection text");
-    }
-    expect(JSON.parse(content.text)).toMatchObject({ sessionUuid: owned });
+    expect(toolJson(result)).toMatchObject({ sessionUuid: owned });
+    // The text and structured payloads are the same object (#11830).
+    expect(toolText(result)).toBe(JSON.stringify(toolStructured(result)));
+    expect(setActiveDeviceResultSchema.safeParse(toolStructured(result)).success).toBe(true);
     expect(manager.getSession(owned)!.platform).toBe("android");
   });
 });

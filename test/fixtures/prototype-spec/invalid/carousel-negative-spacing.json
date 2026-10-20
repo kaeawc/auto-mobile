@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "carousel",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "carousel",
+      "itemWidth": 100,
+      "itemSpacing": -1,
+      "children": [
+        {
+          "type": "card",
+          "children": [
+            {
+              "type": "text",
+              "text": "A"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.itemSpacing"
+}

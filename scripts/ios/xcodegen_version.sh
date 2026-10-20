@@ -22,14 +22,14 @@ XCODEGEN_VERSION="2.46.0"
 # The vendor's prebuilt release archive. The version is in the URL, so this is
 # version-exact by construction -- unlike Homebrew, which cannot install an
 # arbitrary older version and drifts whenever its formula moves.
-# shellcheck disable=SC2034  # consumed by scripts that source this file
 XCODEGEN_RELEASE_URL="https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+
+: "$XCODEGEN_RELEASE_URL"
 
 # GitHub release assets are MUTABLE: a re-uploaded xcodegen.zip under the same
 # tag would still report 2.46.0 and sail through the version gate, then generate
 # different bytes -- reproducing #3975 with the guard reporting green. Pinning
 # the digest is what actually makes this version-exact.
-# shellcheck disable=SC2034  # consumed by scripts that source this file
 XCODEGEN_RELEASE_SHA256="${XCODEGEN_RELEASE_SHA256:-4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806}"
 
 # The installer may land in ${HOME}/.local when /usr/local is not writable, and

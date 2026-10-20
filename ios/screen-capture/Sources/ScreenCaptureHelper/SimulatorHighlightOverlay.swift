@@ -61,17 +61,22 @@ enum SimulatorDisplayGeometry {
         return value
     }
 
+    // Generic conditional casting avoids Swift's rejection of direct conditional CF casts.
+    // Callers must first validate the Core Foundation type ID.
+    private static func checkedValue<Value>(_ value: CFTypeRef, as _: Value.Type) -> Value? {
+        value as? Value
+    }
+
     static func frame(_ element: AXUIElement) -> CGRect? {
         guard let position = attribute(element, kAXPositionAttribute),
               let size = attribute(element, kAXSizeAttribute),
               CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
         var point = CGPoint.zero
         var dimensions = CGSize.zero
-        // Core Foundation bridging requires a cast after the type-ID guards above.
-        // swiftlint:disable force_cast
-        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
-              AXValueGetValue(size as! AXValue, .cgSize, &dimensions) else { return nil }
-        // swiftlint:enable force_cast
+        guard let positionValue = checkedValue(position, as: AXValue.self),
+              let sizeValue = checkedValue(size, as: AXValue.self) else { return nil }
+        guard AXValueGetValue(positionValue, .cgPoint, &point),
+              AXValueGetValue(sizeValue, .cgSize, &dimensions) else { return nil }
         return CGRect(origin: point, size: dimensions)
     }
 

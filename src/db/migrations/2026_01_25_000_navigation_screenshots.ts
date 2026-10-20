@@ -1,8 +1,8 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 
-async function columnExists(
-  db: Kysely<unknown>,
+async function columnExists<DB>(
+  db: Kysely<DB>,
   tableName: string,
   columnName: string,
 ): Promise<boolean> {
@@ -12,7 +12,7 @@ async function columnExists(
   return result.rows.length > 0;
 }
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Add screenshot_path column to navigation_nodes table (if not already present)
   const hasColumn = await columnExists(db, "navigation_nodes", "screenshot_path");
   if (!hasColumn) {
@@ -20,7 +20,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   // SQLite doesn't support dropping columns directly, so we need to recreate the table
   // For simplicity, we'll use a workaround since SQLite 3.35.0+ supports DROP COLUMN
   await db.schema.alterTable("navigation_nodes").dropColumn("screenshot_path").execute();

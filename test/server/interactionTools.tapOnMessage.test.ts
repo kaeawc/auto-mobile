@@ -1,4 +1,5 @@
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { specTypeSchemas } from "@modelcontextprotocol/server";
+import { asObservedResult } from "../../src/features/action/observedInteractionStages";
 import { recordObservationRead } from "../../src/features/observe/observationReadScope";
 import { z } from "zod/v4";
 import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
@@ -10,19 +11,14 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { ObserveResult } from "../../src/models";
 import { warmedTests } from "../helpers/interactionCancellation";
-import { afterEach, describe, expect } from "bun:test";
+import { afterEach, describe, expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  type InteractionToolDependencies,
   buildTapOnResultMessage,
   hitTestHandler,
   hitTestSchema,
   registerInteractionTools,
-  resetHitTestObservationFactory,
-  resetTapAtElementFactory,
-  resetTapOnElementFactory,
-  setTapAtElementFactory,
-  setHitTestObservationFactory,
-  setTapOnElementFactory,
   tapAtHandler,
   tapAtSchema,
   tapOnHandler,
@@ -40,11 +36,24 @@ import type {
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { TapOnCall } from "../../src/features/action/ActionCall";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
+const interactionDeps: InteractionToolDependencies = {};
+/** Validates a value as a spec `CallToolResult`, as the v1 SDK's `CallToolResultSchema.parse` did. */
+function parseCallToolResult(value: unknown) {
+  const result = specTypeSchemas.CallToolResult["~standard"].validate(value);
+  if (result.issues) {
+    throw new Error(`Invalid CallToolResult: ${JSON.stringify(result.issues)}`);
+  }
+  return result.value;
+}
 
 const test = warmedTests(() => {
-  resetTapAtElementFactory();
-  resetTapOnElementFactory();
-  resetHitTestObservationFactory();
+  delete interactionDeps.tapAtElementFactory;
+  delete interactionDeps.tapOnElementFactory;
+  delete interactionDeps.hitTestObservationFactory;
   ToolRegistry.clearTools();
 });
 
@@ -209,21 +218,33 @@ describe("buildTapOnResultMessage", () => {
 // selector that matched nothing still produced "Tapped on element (...)" and no
 // `isError` on the envelope — the exact shape #5902 first fixed for text input.
 describe("tapOnHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
-  const args: TapOnArgs = { selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" }, platform: "android" };
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
+  const args: TapOnArgs = {
+    selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" },
+    action: "tap",
+    platform: "android",
+  };
 
   afterEach(() => {
-    resetTapAtElementFactory();
-    resetTapOnElementFactory();
+    delete interactionDeps.tapAtElementFactory;
+    delete interactionDeps.tapOnElementFactory;
     ToolRegistry.clearTools();
   });
 
-  // The direct-call tests below only pin the wiring if the handler they call is
-  // the one registered for "tapOn" — pin that identity so the two cannot drift.
-  test("the module-scope handler is the one registered for tapOn", () => {
+  // The direct-call tests below only pin the wiring if the handler registered for
+  // "tapOn" produces the same response as the one they call, with the same injected
+  // dependencies — pin that equivalence so the two cannot drift.
+  test("the registered tapOn handler behaves like the module-scope handler", async () => {
     ToolRegistry.clearTools();
-    registerInteractionTools();
-    expect(ToolRegistry.getTool("tapOn")?.deviceAwareHandler).toBe(tapOnHandler);
+    registerInteractionTools(interactionDeps);
+    interactionDeps.tapOnElementFactory = () => ({
+      execute: async () => fakeResult({ error: "Element not found" }),
+    });
+    const registered = ToolRegistry.getTool("tapOn")?.deviceAwareHandler;
+    expect(registered).toBeDefined();
+    expect(await registered!(fakeDevice, { ...args })).toEqual(
+      await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps),
+    );
   });
 
   test("IME-occluded Android focus keeps the tapOn MCP failure payload", async () => {
@@ -236,31 +257,39 @@ describe("tapOnHandler (registered handler wiring)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    const tap = new TapOnElement(device, adb, {
-      timer,
-      elementSelector: new FakeElementSelector(element),
-      tapStrategy: new FakeTapStrategy(),
-      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
-    });
     const observation: ObserveResult = {
       observationId: "occluded-focus",
       updatedAt: 1,
       screenSize: { width: 400, height: 240 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     };
-    tap.observedInteraction = async (action) => ({
-      ...(await action(recordObservationRead(observation))),
-      observation,
+    const tap = new TapOnElement(device, adb, {
+      timer,
+      elementSelector: new FakeElementSelector(element),
+      tapStrategy: new FakeTapStrategy(),
+      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+    });
+    spyOn(tap, "observedInteraction").mockImplementation(async (action) => {
+      const result = asObservedResult(await action(recordObservationRead(observation)));
+      result.observation = observation;
+      return result;
     });
     const error =
       'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';
-    setTapOnElementFactory(() => tap);
-    const response = await tapOnHandler(device, {
-      selector: { text: "Continue as Guest" },
-      action: "focus",
-      platform: "android",
-    });
+    interactionDeps.tapOnElementFactory = () => tap;
+    const response = await tapOnHandler(
+      device,
+      {
+        selector: { text: "Continue as Guest" },
+        action: "focus",
+        platform: "android",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(response.isError).toBe(true);
     const payload = {
       message: `Failed to tap: ${error}`,
@@ -286,12 +315,10 @@ describe("tapOnHandler (registered handler wiring)", () => {
 
   test("tapOn result with internal layer metadata passes the MCP SDK schema", async () => {
     const result = { ...fakeResult({ success: true }), [tapResolvedLayer]: "prototype" as const };
-    setTapOnElementFactory(() => ({ execute: async () => result }));
-    const response = await tapOnHandler(fakeDevice, args);
+    interactionDeps.tapOnElementFactory = () => ({ execute: async () => result });
+    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
 
-    expect(CallToolResultSchema.parse(response).structuredContent).toEqual(
-      response.structuredContent,
-    );
+    expect(parseCallToolResult(response).structuredContent).toEqual(response.structuredContent);
     expect(
       Reflect.ownKeys(response.structuredContent).every((key) => typeof key === "string"),
     ).toBe(true);
@@ -302,16 +329,16 @@ describe("tapOnHandler (registered handler wiring)", () => {
     (JSON.parse(response.content[0].text) as { message: string }).message;
 
   test("a selector miss sets isError and reports the failure, not a tap", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         fakeResult({
           error:
             "Failed to perform tap on element: Element not found with provided text 'ZZZ_NO_SUCH_TEXT_ZZZ'",
           searchUntil: { durationMs: 1521, requestCount: 29, changeCount: 0 },
         }),
-    }));
+    });
 
-    const response = await tapOnHandler(fakeDevice, args);
+    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(response.isError).toBe(true);
     const message = parseMessage(response);
     // The failure keeps the search summary: the user sees both that nothing
@@ -327,20 +354,20 @@ describe("tapOnHandler (registered handler wiring)", () => {
 
   test("unconfirmed activation warning appears in tapOn message and structured result", async () => {
     const warning = "TalkBack activation is unconfirmed";
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () => fakeResult({ success: true, warnings: [warning] }),
-    }));
-    const response = await tapOnHandler(fakeDevice, args);
+    });
+    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(parseMessage(response)).toContain(`Warning: ${warning}`);
     expect(getStructuredField(response, "warnings")).toEqual([warning]);
   });
 
   test("a failure without search stats carries no empty summary parenthetical", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () => fakeResult({ error: "Element not found with provided text 'Missing'" }),
-    }));
+    });
 
-    const response = await tapOnHandler(fakeDevice, args);
+    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(response.isError).toBe(true);
     expect(parseMessage(response)).toBe(
       "Failed to tap: Element not found with provided text 'Missing'",
@@ -349,28 +376,29 @@ describe("tapOnHandler (registered handler wiring)", () => {
 
   // `||` not `??`: an empty-string error must still yield a non-empty failure
   // message (#4183 P4), never a blank or success-shaped one.
-  test.each([
+  const emptyErrorCases: ReadonlyArray<readonly [string | undefined, string]> = [
     [undefined, "Failed to tap: unknown error"],
     ["", "Failed to tap: unknown error"],
-  ])("a failure with error %p yields %p", async (error, expected) => {
-    setTapOnElementFactory(() => ({ execute: async () => fakeResult({ error }) }));
+  ];
+  test.each(emptyErrorCases)("a failure with error %p yields %p", async (error, expected) => {
+    interactionDeps.tapOnElementFactory = () => ({ execute: async () => fakeResult({ error }) });
 
-    const response = await tapOnHandler(fakeDevice, args);
+    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(response.isError).toBe(true);
     expect(parseMessage(response)).toBe(expected);
   });
 
   test("a successful tap keeps the success message and no isError", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         fakeResult({
           success: true,
           selectedElement: selected({ text: "Internet" }),
           searchUntil: { durationMs: 300, requestCount: 5, changeCount: 2 },
         }),
-    }));
+    });
 
-    const response = await tapOnHandler(fakeDevice, args);
+    const response = await tapOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(response.isError).toBeUndefined();
     expect(parseMessage(response)).toBe(
       'Tapped on element (matched text="Internet"; 1 match; 2 view hierarchy changes over 5 requests within 300ms)',
@@ -379,16 +407,22 @@ describe("tapOnHandler (registered handler wiring)", () => {
   });
 
   test("an already-checked toggle reports a skipped tap and exposes it in the payload", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         fakeResult({
           success: true,
           skipped: "already-checked",
           selectedElement: selected({ text: "Wi-Fi" }),
         }),
-    }));
+    });
 
-    const response = await tapOnHandler(fakeDevice, { ...args, ensureChecked: true });
+    const response = await tapOnHandler(
+      fakeDevice,
+      { ...args, ensureChecked: true },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     const message = parseMessage(response);
     expect(message).toContain("already");
     expect(message).toContain("no tap");
@@ -400,16 +434,22 @@ describe("tapOnHandler (registered handler wiring)", () => {
   });
 
   test("a verified ensureChecked tap reports the checked-state transition", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         fakeResult({
           success: true,
           element: { checked: "false", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
           selectedElement: selected({ text: "Wi-Fi" }),
         }),
-    }));
+    });
 
-    const response = await tapOnHandler(fakeDevice, { ...args, ensureChecked: true });
+    const response = await tapOnHandler(
+      fakeDevice,
+      { ...args, ensureChecked: true },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     const message = parseMessage(response);
     expect(message).toContain("was unchecked");
     expect(message).toContain("now checked");
@@ -419,14 +459,21 @@ describe("tapOnHandler (registered handler wiring)", () => {
   // #11638: the match is promoted to the clickable row, so selectedElement.text is
   // empty; the label the caller searched for must still appear in the message.
   test("names the selector label when the promoted row carries no text (#11638)", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () => fakeResult({ success: true, selectedElement: selected({ text: "" }) }),
-    }));
-
-    const response = await tapOnHandler(fakeDevice, {
-      selector: { text: "Network & internet" },
-      platform: "android",
     });
+
+    const response = await tapOnHandler(
+      fakeDevice,
+      {
+        selector: { text: "Network & internet" },
+        action: "tap",
+        platform: "android",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
 
     expect(parseMessage(response)).toBe(
       'Tapped on element (matched text="Network & internet"; 1 match)',
@@ -434,7 +481,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
   });
 
   test("names the searched label, not a shared resource id, in the toggle transition (#11638)", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         fakeResult({
           success: true,
@@ -444,13 +491,20 @@ describe("tapOnHandler (registered handler wiring)", () => {
             resourceId: "com.android.settings:id/switchWidget",
           }),
         }),
-    }));
-
-    const response = await tapOnHandler(fakeDevice, {
-      selector: { text: "Wi-Fi" },
-      ensureChecked: false,
-      platform: "android",
     });
+
+    const response = await tapOnHandler(
+      fakeDevice,
+      {
+        selector: { text: "Wi-Fi" },
+        action: "tap",
+        ensureChecked: false,
+        platform: "android",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
 
     expect(parseMessage(response)).toStartWith(
       "Wi-Fi was checked, tapped, now unchecked (verified)",
@@ -459,17 +513,24 @@ describe("tapOnHandler (registered handler wiring)", () => {
 });
 
 describe("tapAtHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
   const args: TapAtArgs = { x: 12, y: 34, platform: "android" };
 
   afterEach(() => {
-    resetTapAtElementFactory();
+    delete interactionDeps.tapAtElementFactory;
     ToolRegistry.clearTools();
   });
 
-  test("the module-scope handler is the one registered for tapAt", () => {
-    registerInteractionTools();
-    expect(ToolRegistry.getTool("tapAt")?.deviceAwareHandler).toBe(tapAtHandler);
+  test("the registered tapAt handler behaves like the module-scope handler", async () => {
+    registerInteractionTools(interactionDeps);
+    interactionDeps.tapAtElementFactory = () => ({
+      execute: async () => ({ success: true, x: 12, y: 34 }) as TapAtResult,
+    });
+    const registered = ToolRegistry.getTool("tapAt")?.deviceAwareHandler;
+    expect(registered).toBeDefined();
+    expect(await registered!(fakeDevice, args)).toEqual(
+      await tapAtHandler(fakeDevice, args, undefined, undefined, interactionDeps),
+    );
   });
 
   test("accepts coordinate gestures, response controls, and shared device targeting", () => {
@@ -513,11 +574,11 @@ describe("tapAtHandler (registered handler wiring)", () => {
   });
 
   test("serializes a successful native-coordinate tap", async () => {
-    setTapAtElementFactory(() => ({
+    interactionDeps.tapAtElementFactory = () => ({
       execute: async () => ({ success: true, x: 12, y: 34 }) as TapAtResult,
-    }));
+    });
 
-    const response = await tapAtHandler(fakeDevice, args);
+    const response = await tapAtHandler(fakeDevice, args, undefined, undefined, interactionDeps);
 
     expect(response.isError).toBeUndefined();
     expect(getStructuredField(response, "message")).toBe("Tapped at (12, 34)");
@@ -529,21 +590,27 @@ describe("tapAtHandler (registered handler wiring)", () => {
 
   test("passes snapshot and gesture options through to tapAt", async () => {
     let received: unknown;
-    setTapAtElementFactory(() => ({
+    interactionDeps.tapAtElementFactory = () => ({
       execute: async (options) => {
         received = options;
         return { success: true, x: 30, y: 40, action: "doubleTap" };
       },
-    }));
-
-    const response = await tapAtHandler(fakeDevice, {
-      ...args,
-      x: 0.3,
-      y: 0.4,
-      snapshotId: "ref-1",
-      coordinateSpace: "normalized",
-      action: "doubleTap",
     });
+
+    const response = await tapAtHandler(
+      fakeDevice,
+      {
+        ...args,
+        x: 0.3,
+        y: 0.4,
+        snapshotId: "ref-1",
+        coordinateSpace: "normalized",
+        action: "doubleTap",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
 
     expect(received).toMatchObject({
       x: 0.3,
@@ -556,12 +623,12 @@ describe("tapAtHandler (registered handler wiring)", () => {
   });
 
   test("marks a coordinate-tap failure as an MCP error", async () => {
-    setTapAtElementFactory(() => ({
+    interactionDeps.tapAtElementFactory = () => ({
       execute: async () =>
         ({ success: false, x: 10, y: 34, error: "outside screen bounds" }) as TapAtResult,
-    }));
+    });
 
-    const response = await tapAtHandler(fakeDevice, args);
+    const response = await tapAtHandler(fakeDevice, args, undefined, undefined, interactionDeps);
 
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "message")).toBe(
@@ -574,14 +641,14 @@ describe("tapAtHandler (registered handler wiring)", () => {
 
 describe("hitTestHandler", () => {
   afterEach(() => {
-    resetHitTestObservationFactory();
+    delete interactionDeps.hitTestObservationFactory;
     ToolRegistry.clearTools();
   });
 
   test("registers an opt-in preview with the same strict coordinate inputs as tapAt", () => {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const tool = ToolRegistry.getTool("hitTest");
-    expect(tool?.deviceAwareHandler).toBe(hitTestHandler);
+    expect(tool?.deviceAwareHandler).toBeDefined();
     expect(tool?.defaultEnabled).toBe(false);
     const validInput = { x: 1, y: 2, snapshotId: "ref-1" };
     expect(hitTestSchema.safeParse(validInput).success).toBe(true);
@@ -609,8 +676,8 @@ describe("hitTestHandler", () => {
   });
 
   test("registered hitTest schema rejects obsolete observation controls", () => {
-    registerInteractionTools();
-    const schema: typeof hitTestSchema = ToolRegistry.getTool("hitTest")!.schema;
+    registerInteractionTools(interactionDeps);
+    const schema = ToolRegistry.getTool("hitTest")!.schema;
     const validInput = {
       x: 0.5,
       y: 1,
@@ -640,13 +707,19 @@ describe("hitTestHandler", () => {
     const device = { deviceId: "fake", platform: "android" } as BootedDevice;
     const calls: unknown[] = [];
     const observation = loadAndroidHomeObserve().observe;
-    setHitTestObservationFactory(() => ({
+    interactionDeps.hitTestObservationFactory = () => ({
       execute: async (options) => {
         calls.push(options);
         return observation;
       },
-    }));
-    const response = await hitTestHandler(device, { x: 1, y: 2, display: "active" });
+    });
+    const response = await hitTestHandler(
+      device,
+      { x: 1, y: 2, display: "active" },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ display: "active", skipScreenshot: true });
     expect(getStructuredField(response, "method")).toBe("hierarchy-bounds");
@@ -657,13 +730,19 @@ describe("hitTestHandler", () => {
   test("resolves normalized hitTest coordinates in the shared native space", async () => {
     const device = { deviceId: "fake", platform: "android" } as BootedDevice;
     const observation = loadAndroidHomeObserve().observe;
-    setHitTestObservationFactory(() => ({ execute: async () => observation }));
+    interactionDeps.hitTestObservationFactory = () => ({ execute: async () => observation });
 
-    const response = await hitTestHandler(device, {
-      x: 0.5,
-      y: 0.5,
-      coordinateSpace: "normalized",
-    });
+    const response = await hitTestHandler(
+      device,
+      {
+        x: 0.5,
+        y: 0.5,
+        coordinateSpace: "normalized",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
 
     expect(getStructuredField(response, "point")).toEqual({
       x: Math.round(observation.screenSize!.width / 2),
@@ -674,13 +753,19 @@ describe("hitTestHandler", () => {
   test("rejects an unknown snapshot reference before producing a preview", async () => {
     const device = { deviceId: "fake-unknown-reference", platform: "android" } as BootedDevice;
     const observation = loadAndroidHomeObserve().observe;
-    setHitTestObservationFactory(() => ({ execute: async () => observation }));
+    interactionDeps.hitTestObservationFactory = () => ({ execute: async () => observation });
 
-    const result = await hitTestHandler(device, {
-      x: -1,
-      y: 2,
-      snapshotId: "ref-unknown",
-    }).then(
+    const result = await hitTestHandler(
+      device,
+      {
+        x: -1,
+        y: 2,
+        snapshotId: "ref-unknown",
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    ).then(
       (response) => response,
       (error: unknown) => error,
     );
@@ -692,21 +777,24 @@ describe("hitTestHandler", () => {
 });
 
 describe("tapOn handler transport deadline", () => {
-  afterEach(resetTapOnElementFactory);
+  afterEach(() => {
+    delete interactionDeps.tapOnElementFactory;
+  });
   test("over-budget longPress propagates the real tapOn ActionableError before device work", async () => {
     const device: BootedDevice = { name: "Test", deviceId: "budget-tap-on", platform: "android" };
     const timer = new FakeTimer();
     timer.advanceTime(1000);
     const adb = new FakeAdbExecutor();
     const action = new TapOnElement(device, adb, { timer });
-    setTapOnElementFactory(() => action);
+    interactionDeps.tapOnElementFactory = () => action;
 
-    const call = tapOnHandler(device, {
+    const internalArgs = {
       selector: { text: "Target" },
-      action: "longPress",
+      action: "longPress" as const,
       duration: 20000,
       __mcpRequestDeadlineMs: timer.now() + 5000,
-    });
+    };
+    const call = tapOnHandler(device, internalArgs, undefined, undefined, interactionDeps);
     await expect(call).rejects.toBeInstanceOf(ActionableError);
     await expect(call).rejects.toThrow(
       "longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started.",
@@ -719,19 +807,29 @@ describe("tapOn handler transport deadline", () => {
     async (deadline) => {
       let received: number | undefined;
       let recoveryPolicy: { throwOnKeyboardOcclusion?: boolean } | undefined;
-      setTapOnElementFactory(() => ({
+      interactionDeps.tapOnElementFactory = () => ({
         execute: async (_options, call) => {
           received = (call as TapOnCall | undefined)?.deadlineMs;
           recoveryPolicy = (call as TapOnCall | undefined)?.recovery;
-          return { success: true, action: "longPress", element: { text: "Target" } };
+          return {
+            success: true,
+            action: "longPress",
+            element: { text: "Target", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+          };
         },
-      }));
+      });
       const args = {
         selector: { text: "Target" },
         action: "longPress" as const,
         __mcpRequestDeadlineMs: deadline,
       };
-      await tapOnHandler({ deviceId: "handler-deadline", name: "Test", platform: "android" }, args);
+      await tapOnHandler(
+        { deviceId: "handler-deadline", name: "Test", platform: "android" },
+        args,
+        undefined,
+        undefined,
+        interactionDeps,
+      );
       expect(received).toBe(deadline);
       expect(recoveryPolicy).toBeUndefined();
     },

@@ -8,7 +8,7 @@ import {
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
 } from "../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/models/deviceAcquisitionRefusals";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { logger } from "../../src/utils/logger";
@@ -17,8 +17,8 @@ import {
   LocationRouteRegistry,
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   deferHeldPlanAppCleanup,
   takeHeldPlanAppCleanup,
@@ -48,22 +48,28 @@ async function harness() {
     restore: async () => {
       await behavior.gate;
       writes.push(kind);
-      return { status: "restored" as const };
     },
   });
-  const manager = new SessionManager(
-    timer,
-    persistence,
-    () => new FakeDbWriteBarrier(),
-    record("keep-awake"),
-    record("biometric"),
-    {
+  const recordKeepAwake = (kind: string) => () => {
+    const restorer = record(kind)();
+    return {
+      restore: async () => {
+        await restorer.restore();
+        return { status: "restored" as const };
+      },
+    };
+  };
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: recordKeepAwake("keep-awake"),
+    biometricEnrollmentRestorer: record("biometric"),
+    restorers: {
       networkCondition: record("network"),
       clock: record("clock"),
       rotation: record("rotation"),
       screenReader: record("screen-reader"),
     },
-  );
+  });
   manager.stopCleanupTimer();
   managers.push(manager);
   const session = await manager.createSession(SESSION, DEVICE, "android");
@@ -100,6 +106,7 @@ describe("session release device ownership hold", () => {
       registry,
       mockLocationClears: {
         markSet: () => {},
+        abandonClear: () => {},
         clearLateSet: () => null,
         retireDevice: (device) => {
           retired.push(device);
@@ -222,7 +229,7 @@ describe("session release device ownership hold", () => {
     manager.onSessionRelease((_id, _device, _reason, _snapshot, releaseOptions) => {
       options.push(releaseOptions.deviceIdentityReplaced === true);
     });
-    const release = manager.releaseSession(SESSION, "explicit-release", false, undefined, {
+    const release = manager.releaseSession(SESSION, "explicit-release", {
       deviceIdentityReplaced: true,
     });
     await drainMicrotasks(40);
@@ -368,7 +375,7 @@ describe("session release device ownership hold", () => {
       await reowner.reown([SESSION], { rehydrated: true });
       held = false;
       manager.setReleaseDeviceHold((id) => reowner.releaseDeviceHold(id));
-      const release = manager.releaseSession(SESSION, "heartbeat-timeout", true);
+      const release = manager.releaseSession(SESSION, "heartbeat-timeout", { allowExpired: true });
       await drainMicrotasks(30);
       expect(reowner.isReleaseHeld(SESSION)).toBe(true);
       expect(writes).toEqual([]);
@@ -409,10 +416,16 @@ test("bind refusal uses the real derived hold and resets its bound at early conf
   manager.setReleaseDeviceHold((id) => reowner.releaseDeviceHold(id));
   const release = manager.releaseSession(SESSION, "daemon-shutdown");
   async function refusedBind() {
-    const refusal = await pool.bindOrReuseDeviceSession("next-session", DEVICE, "android").then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const refusal = await pool
+      .bindOrReuseDeviceSession({
+        sessionId: "next-session",
+        deviceId: DEVICE,
+        platform: "android",
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     if (!(refusal instanceof DeviceCleanupInProgressError)) {
       throw new Error(`Expected cleanup refusal, got ${String(refusal)}`);
     }

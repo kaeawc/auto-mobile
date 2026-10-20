@@ -25,6 +25,7 @@ import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_STORAGE_CAPABILITY,
   SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol";
 import type {
@@ -43,6 +44,7 @@ import {
   type PrototypeAssetUpload,
 } from "../prototypeAssets";
 import type { PrototypeSpec } from "../prototypeSpec";
+import { prototypeClearStorageUnsupportedMessage } from "../prototypeStorage";
 import type {
   PrototypeDeviceStatus,
   PrototypeShowOptions,
@@ -133,6 +135,11 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
       : {}),
     success: result.success,
     requestId: result.requestId,
+    ...(typeof result.cleared === "number" &&
+    Number.isSafeInteger(result.cleared) &&
+    result.cleared >= 0
+      ? { cleared: result.cleared }
+      : {}),
     ...(typeof result.error === "string" ? { error: result.error } : {}),
     ...(typeof totalTimeMs === "number" ? { totalTimeMs } : {}),
     ...(Array.isArray(missingAssets) &&
@@ -277,6 +284,14 @@ export class IosPrototypeTransport implements PrototypeTransport {
   async dismiss(target: PrototypeDismiss): Promise<PrototypeResult> {
     const body: PrototypeAgentMessage = target.all ? { all: true } : { id: target.id };
     return toPrototypeResult(await this.agent.request("dismiss_prototype", body));
+  }
+
+  /** Wipes the values the agent stored for `id` (#12522); refused unless it advertises prototype_storage_v1. */
+  async clearStorage(id: string): Promise<PrototypeResult> {
+    if (!this.supportsCapability(PROTOTYPE_STORAGE_CAPABILITY)) {
+      throw new ActionableError(prototypeClearStorageUnsupportedMessage("ios"));
+    }
+    return toPrototypeResult(await this.agent.request("clear_prototype_storage", { id }));
   }
 
   async putAsset(

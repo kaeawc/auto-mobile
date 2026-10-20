@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { getTextRequestDeadlineMs } from "../../../src/features/action/textTransportTimeout";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -29,7 +30,7 @@ import {
   FakeObserveScreenForSetUIState,
   FakeFieldTypeDetector,
 } from "../../fakes/FakeSetUIStateDependencies";
-import type { ActionCall } from "../../../src/features/action/ActionCall";
+import type { ActionCall, TapOnCall } from "../../../src/features/action/ActionCall";
 
 describe("SetUIState", () => {
   const device: BootedDevice = {
@@ -48,23 +49,26 @@ describe("SetUIState", () => {
 
   const createHierarchyWithElement = (element: Partial<Element>): ViewHierarchyResult => ({
     hierarchy: {
-      node: [
-        {
-          $: {
-            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-            ...element,
+      node: {
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              ...element,
+            },
           },
-        },
-      ],
+        ],
+      },
     },
   });
 
-  const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: hierarchy,
-  });
+  const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy,
+    });
 
   const createSetUIState = (keyboard?: Pick<Keyboard, "execute">, platform = device.platform) => {
     return new SetUIState({ ...device, platform }, null, {
@@ -101,25 +105,100 @@ describe("SetUIState", () => {
     fakeTimer.enableAutoAdvance();
   });
 
+  test("skips effect settling for focus, toggle, dropdown open and selection", async () => {
+    const elements: Partial<Element>[] = [
+      { "resource-id": "name", text: "Name", class: "android.widget.EditText", editable: true },
+      {
+        "resource-id": "enabled",
+        text: "Enabled",
+        class: "android.widget.Switch",
+        checkable: true,
+      },
+      { "resource-id": "country", text: "Country", class: "android.widget.Spinner" },
+    ];
+    fakeObserve.setViewHierarchy({
+      hierarchy: {
+        node: {
+          node: elements.map((element, index) => ({
+            $: {
+              ...element,
+              bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
+            },
+          })),
+        },
+      },
+    });
+    fakeFieldTypeDetector.setFieldType("name", "text");
+    fakeFieldTypeDetector.setFieldType("enabled", "toggle");
+    fakeFieldTypeDetector.setFieldType("country", "dropdown");
+    const calls: TapOnCall[] = [];
+    const execute = fakeTap.execute.bind(fakeTap);
+    const tap = spyOn(fakeTap, "execute").mockImplementation(async (options, call?: TapOnCall) => {
+      calls.push(call ?? {});
+      if (options.elementId === "enabled") {
+        fakeFieldTypeDetector.setChecked("enabled", true);
+      }
+      if (options.text === "Choice") {
+        fakeFieldTypeDetector.setTextValue("country", "Choice");
+      }
+      return execute(options, call);
+    });
+    try {
+      const result = await createSetUIState().execute({
+        fields: [
+          { selector: { elementId: "name" }, value: "Jane" },
+          { selector: { elementId: "enabled" }, selected: true },
+          { selector: { elementId: "country" }, value: "Choice" },
+        ],
+      });
+      expect(result.success).toBe(true);
+      expect(result.fields.every((field) => field.verified)).toBe(true);
+      expect(fakeTap.getCalls().map((call) => call.options)).toEqual([
+        { elementId: "name", action: "focus" },
+        { elementId: "enabled", action: "tap" },
+        { elementId: "country", action: "tap" },
+        { text: "Choice", action: "tap" },
+      ]);
+      expect(calls).toHaveLength(4);
+      expect(calls.every((call) => call.settlePostTapEffect === false)).toBe(true);
+      expect(calls[0]?.recovery).toEqual({ throwOnKeyboardOcclusion: true });
+      // The dropdown's own opening delay remains; no tap effect delay is charged.
+      expect(fakeTimer.now()).toBe(200);
+    } finally {
+      tap.mockRestore();
+    }
+  });
+
   test("warns and preserves a field failure when focus throws", async () => {
     const error = new Error("focus transport failed");
     const tap = spyOn(fakeTap, "execute").mockRejectedValue(error);
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const result = await createSetUIState()["applyFieldValue"](
-        { text: "Name" },
-        { selector: { text: "Name" }, value: "Jane" },
-        "text",
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "name",
+            class: "android.widget.EditText",
+            text: "Name",
+            editable: true,
+          }),
+        ),
       );
-      expect(result).toEqual({ success: false, error: error.message, stopRetrying: false });
-      expect(
-        loggerCallsWithPrefix(warning.mock.calls, "[SetUIState] Failed to apply field value:"),
-      ).toEqual([
-        [
-          "[SetUIState] Failed to apply field value: focus transport failed",
-          expect.objectContaining({ message: error.message, cause: error }),
-        ],
-      ]);
+      fakeFieldTypeDetector.setFieldType("name", "text");
+      const result = await createSetUIState().execute({
+        fields: [{ selector: { elementId: "name" }, value: "Jane" }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.fields[0]?.error).toBe(error.message);
+      const warnings = loggerCallsWithPrefix(
+        warning.mock.calls,
+        "[SetUIState] Failed to apply field value:",
+      );
+      expect(warnings).toHaveLength(result.fields[0]?.attempts ?? -1);
+      for (const [message, cause] of warnings) {
+        expect(message).toBe("[SetUIState] Failed to apply field value: focus transport failed");
+        expect(cause).toEqual(expect.objectContaining({ message: error.message }));
+      }
     } finally {
       tap.mockRestore();
       warning.mockRestore();
@@ -231,24 +310,26 @@ describe("SetUIState", () => {
       const events: string[] = [];
       const hierarchy = (passwordId: string): ViewHierarchyResult => ({
         hierarchy: {
-          node: [
-            {
-              $: {
-                text: "Email",
-                "resource-id": "email",
-                class: "android.widget.EditText",
-                bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+          node: {
+            node: [
+              {
+                $: {
+                  text: "Email",
+                  "resource-id": "email",
+                  class: "android.widget.EditText",
+                  bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+                },
               },
-            },
-            {
-              $: {
-                text: "Password",
-                "resource-id": passwordId,
-                class: "android.widget.EditText",
-                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+              {
+                $: {
+                  text: "Password",
+                  "resource-id": passwordId,
+                  class: "android.widget.EditText",
+                  bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       });
       fakeObserve.setResultFactory(() => {
@@ -369,7 +450,7 @@ describe("SetUIState", () => {
         expect(loggerCallsWithPrefix(warn.mock.calls, "[SetUIState]")).toHaveLength(0);
         expect(fakeTap.execute).toHaveBeenCalledWith(
           { elementId: "password", action: "focus" },
-          { recovery: { throwOnKeyboardOcclusion: true } },
+          { recovery: { throwOnKeyboardOcclusion: true }, settlePostTapEffect: false },
         );
       } finally {
         warn.mockRestore();
@@ -511,7 +592,7 @@ describe("SetUIState", () => {
           .filter((node) => node.className === "android.widget.EditText" && node.rootGroup === 0)
           .slice(0, 2);
         const hierarchy: ViewHierarchyResult = {
-          hierarchy: { node: fields.map((field) => field.source) },
+          hierarchy: { node: { node: fields.map((field) => field.source) } },
         };
         const nodes = new SearchableHierarchy().project(hierarchy);
         fields.forEach((field, index) => {
@@ -620,9 +701,11 @@ describe("SetUIState", () => {
       const reason = new Error(`stop at ${site}`);
       const hierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [textField("first", 0), textField("second", 60)].map((element) => ({
-            $: element,
-          })),
+          node: {
+            node: [textField("first", 0), textField("second", 60)].map((element) => ({
+              $: element,
+            })),
+          },
         },
       };
       fakeFieldTypeDetector.setFieldType("first", "text");
@@ -688,9 +771,11 @@ describe("SetUIState", () => {
       fakeObserve.setResult(
         createObserveResult({
           hierarchy: {
-            node: [textField("first", 0), textField("second", 60)].map((element) => ({
-              $: element,
-            })),
+            node: {
+              node: [textField("first", 0), textField("second", 60)].map((element) => ({
+                $: element,
+              })),
+            },
           },
         }),
       );
@@ -858,15 +943,15 @@ describe("SetUIState", () => {
           "resource-id": "remember_me",
           text: "Remember Me",
           class: "android.widget.CheckBox",
-          checkable: "true" as any,
-          checked: "false" as any,
+          checkable: "true",
+          checked: "false",
         });
         const updatedHierarchy = createHierarchyWithElement({
           "resource-id": "remember_me",
           text: "Remember Me",
           class: "android.widget.CheckBox",
-          checkable: "true" as any,
-          checked: "true" as any,
+          checkable: "true",
+          checked: "true",
         });
 
         let observeCallCount = 0;
@@ -898,8 +983,8 @@ describe("SetUIState", () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "remember_me",
         class: "android.widget.CheckBox",
-        checkable: "true" as any,
-        checked: "true" as any,
+        checkable: "true",
+        checked: "true",
       });
       fakeObserve.setResult(createObserveResult(hierarchy));
       fakeFieldTypeDetector.setFieldType("remember_me", "checkbox");
@@ -927,15 +1012,15 @@ describe("SetUIState", () => {
           "resource-id": "dark_mode",
           text: "Dark Mode",
           class: "android.widget.Switch",
-          checkable: "true" as any,
-          checked: "true" as any,
+          checkable: "true",
+          checked: "true",
         });
         const updatedHierarchy = createHierarchyWithElement({
           "resource-id": "dark_mode",
           text: "Dark Mode",
           class: "android.widget.Switch",
-          checkable: "true" as any,
-          checked: "false" as any,
+          checkable: "true",
+          checked: "false",
         });
 
         let observeCallCount = 0;
@@ -1038,7 +1123,7 @@ describe("SetUIState", () => {
                 text: "found!",
                 class: "android.widget.EditText",
               })
-            : { hierarchy: { node: [] } },
+            : { hierarchy: { node: { node: [] } } },
         ),
       );
       fakeFieldTypeDetector.setFieldType("field", "text");
@@ -1186,7 +1271,7 @@ describe("SetUIState", () => {
         observeCallCount++;
         if (observeCallCount <= 1) {
           // First call: element not present
-          return createObserveResult({ hierarchy: { node: [] } });
+          return createObserveResult({ hierarchy: { node: { node: [] } } });
         }
         // Subsequent calls: element appears
         return createObserveResult(
@@ -1217,36 +1302,40 @@ describe("SetUIState", () => {
     test("marks fields after a failed input as not attempted", async () => {
       const hierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {},
-              node: [1, 2, 3, 4].map((index) => ({
-                $: {
-                  "resource-id": `field${index}`,
-                  text: "",
-                  class: "android.widget.EditText",
-                  bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
-                },
-              })),
-            },
-          ],
+          node: {
+            node: [
+              {
+                $: {},
+                node: [1, 2, 3, 4].map((index) => ({
+                  $: {
+                    "resource-id": `field${index}`,
+                    text: "",
+                    class: "android.widget.EditText",
+                    bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
+                  },
+                })),
+              },
+            ],
+          },
         },
       };
       const verifiedFirstField: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {},
-              node: [1, 2, 3, 4].map((index) => ({
-                $: {
-                  "resource-id": `field${index}`,
-                  text: index === 1 ? "first" : "",
-                  class: "android.widget.EditText",
-                  bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
-                },
-              })),
-            },
-          ],
+          node: {
+            node: [
+              {
+                $: {},
+                node: [1, 2, 3, 4].map((index) => ({
+                  $: {
+                    "resource-id": `field${index}`,
+                    text: index === 1 ? "first" : "",
+                    class: "android.widget.EditText",
+                    bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
+                  },
+                })),
+              },
+            ],
+          },
         },
       };
       let observeCalls = 0;
@@ -1346,66 +1435,70 @@ describe("SetUIState", () => {
     test("processes fields in screen order", async () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-                "resource-id": "username",
-                text: "",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                  "resource-id": "username",
+                  text: "",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-                "resource-id": "password",
-                text: "",
-                class: "android.widget.EditText",
-                password: "true",
+              {
+                $: {
+                  bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+                  "resource-id": "password",
+                  text: "",
+                  class: "android.widget.EditText",
+                  password: "true",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 120, right: 100, bottom: 170 },
-                "resource-id": "remember",
-                class: "android.widget.CheckBox",
-                checkable: "true",
-                checked: "false",
+              {
+                $: {
+                  bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+                  "resource-id": "remember",
+                  class: "android.widget.CheckBox",
+                  checkable: "true",
+                  checked: "false",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
       const updatedHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-                "resource-id": "username",
-                text: "user@test.com",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                  "resource-id": "username",
+                  text: "user@test.com",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-                "resource-id": "password",
-                text: "",
-                class: "android.widget.EditText",
-                password: "true",
+              {
+                $: {
+                  bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+                  "resource-id": "password",
+                  text: "",
+                  class: "android.widget.EditText",
+                  password: "true",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 120, right: 100, bottom: 170 },
-                "resource-id": "remember",
-                class: "android.widget.CheckBox",
-                checkable: "true",
-                checked: "true",
+              {
+                $: {
+                  bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+                  "resource-id": "remember",
+                  class: "android.widget.CheckBox",
+                  checkable: "true",
+                  checked: "true",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
 
@@ -1445,68 +1538,74 @@ describe("SetUIState", () => {
     test("processes fields in screen order regardless of provided order", async () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-                "resource-id": "top_field",
-                text: "",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                  "resource-id": "top_field",
+                  text: "",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
-                "resource-id": "bottom_field",
-                text: "",
-                class: "android.widget.EditText",
+              {
+                $: {
+                  bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                  "resource-id": "bottom_field",
+                  text: "",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
       const afterTopFieldEdit: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-                "resource-id": "top_field",
-                text: "first",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                  "resource-id": "top_field",
+                  text: "first",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
-                "resource-id": "bottom_field",
-                text: "",
-                class: "android.widget.EditText",
+              {
+                $: {
+                  bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                  "resource-id": "bottom_field",
+                  text: "",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
       const afterBothEdits: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-                "resource-id": "top_field",
-                text: "first",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                  "resource-id": "top_field",
+                  text: "first",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
-                "resource-id": "bottom_field",
-                text: "second",
-                class: "android.widget.EditText",
+              {
+                $: {
+                  bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                  "resource-id": "bottom_field",
+                  text: "second",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
 
@@ -1581,16 +1680,18 @@ describe("SetUIState", () => {
       const calls: string[] = [];
       const hierarchy = (): ViewHierarchyResult => ({
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-                text: "Name",
-                value: currentValue,
-                class: "UITextField",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                  text: "Name",
+                  value: currentValue,
+                  class: "UITextField",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       });
       fakeObserve.setResultFactory(() => createObserveResult(hierarchy()));
@@ -1672,7 +1773,7 @@ describe("SetUIState", () => {
       fakeObserve.setResultFactory(() => {
         observeCallCount++;
         return createObserveResult(
-          observeCallCount === 1 ? initialHierarchy : { hierarchy: { node: [] } },
+          observeCallCount === 1 ? initialHierarchy : { hierarchy: { node: { node: [] } } },
         );
       });
       fakeFieldTypeDetector.setFieldType("Name", "text");
@@ -1731,69 +1832,75 @@ describe("SetUIState", () => {
       // moves to a different position (e.g., keyboard appears, fields shift)
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 100, right: 100, bottom: 150 },
-                "resource-id": "field_a",
-                text: "",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+                  "resource-id": "field_a",
+                  text: "",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
-                "resource-id": "field_b",
-                text: "",
-                class: "android.widget.EditText",
+              {
+                $: {
+                  bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                  "resource-id": "field_b",
+                  text: "",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
       // After editing field_a, field_b shifts up (keyboard pushes layout)
       const afterFirstEdit: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 100, right: 100, bottom: 150 },
-                "resource-id": "field_a",
-                text: "aaa",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+                  "resource-id": "field_a",
+                  text: "aaa",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 160, right: 100, bottom: 210 },
-                "resource-id": "field_b",
-                text: "",
-                class: "android.widget.EditText",
+              {
+                $: {
+                  bounds: { left: 0, top: 160, right: 100, bottom: 210 },
+                  "resource-id": "field_b",
+                  text: "",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
       const afterSecondEdit: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            {
-              $: {
-                bounds: { left: 0, top: 100, right: 100, bottom: 150 },
-                "resource-id": "field_a",
-                text: "aaa",
-                class: "android.widget.EditText",
+          node: {
+            node: [
+              {
+                $: {
+                  bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+                  "resource-id": "field_a",
+                  text: "aaa",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-            {
-              $: {
-                bounds: { left: 0, top: 160, right: 100, bottom: 210 },
-                "resource-id": "field_b",
-                text: "bbb",
-                class: "android.widget.EditText",
+              {
+                $: {
+                  bounds: { left: 0, top: 160, right: 100, bottom: 210 },
+                  "resource-id": "field_b",
+                  text: "bbb",
+                  class: "android.widget.EditText",
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       };
 
@@ -1837,7 +1944,7 @@ describe("SetUIState", () => {
   describe("unprocessed fields", () => {
     test("reports unprocessed fields when not found after scrolling", async () => {
       // Element never appears
-      fakeObserve.setResult(createObserveResult({ hierarchy: { node: [] } }));
+      fakeObserve.setResult(createObserveResult({ hierarchy: { node: { node: [] } } }));
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
@@ -1865,12 +1972,14 @@ describe("SetUIState iOS Forms nodes", () => {
     const observe = new FakeObserveScreenForSetUIState();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    observe.setResultFactory(() => ({
-      updatedAt: timer.now(),
-      screenSize: { width: 393, height: 852 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: hierarchy,
-    }));
+    observe.setResultFactory(() =>
+      buildObserveResult({
+        updatedAt: timer.now(),
+        screenSize: { width: 393, height: 852 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchy,
+      }),
+    );
     const action = new SetUIState(device, null, {
       tapOnElement: tap,
       inputText: input,
@@ -1915,12 +2024,14 @@ describe("SetUIState iOS Forms nodes", () => {
     const observe = new FakeObserveScreenForSetUIState();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    observe.setResultFactory(() => ({
-      updatedAt: timer.now(),
-      screenSize: { width: 402, height: 874 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: iosFormsSwitch(tap.getCallCount() === 0 ? "true" : "false"),
-    }));
+    observe.setResultFactory(() =>
+      buildObserveResult({
+        updatedAt: timer.now(),
+        screenSize: { width: 402, height: 874 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: iosFormsSwitch(tap.getCallCount() === 0 ? "true" : "false"),
+      }),
+    );
     const action = new SetUIState(device, null, {
       tapOnElement,
       inputText: new FakeInputText(),
@@ -2001,6 +2112,19 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
     expect(result.error).toContain("NeverPresent");
   });
 
+  test("the caller's abort signal reaches the off-screen search swipe", async () => {
+    const controller = new AbortController();
+    await build().execute(
+      { fields: [{ selector: { text: "NeverPresent" }, value: "x" }] },
+      undefined,
+      controller.signal,
+    );
+
+    const calls = fakeSwipe.getCalls();
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].call?.signal).toBe(controller.signal);
+  });
+
   test("the search is bounded — it does not scroll indefinitely", async () => {
     await build().execute({
       fields: [{ selector: { text: "NeverPresent" }, value: "x" }],
@@ -2020,11 +2144,12 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
     fakeObserve.setResultFactory(() => {
       observeCalls++;
       fakeTimer.advanceTime(5_000);
-      return {
+      return buildObserveResult({
+        observationId: "scripted-observation",
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      };
+      });
     });
 
     const result = await build().execute({
@@ -2040,20 +2165,24 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
   test("a matched but unclassifiable node reports what it matched, not 'unknown'", async () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: [
-          {
-            $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" },
-          },
-        ],
+        node: {
+          node: [
+            {
+              $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" },
+            },
+          ],
+        },
       },
     } as ViewHierarchyResult;
-    fakeObserve.setResult({
-      updatedAt: Date.now(),
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: hierarchy,
-    });
-    fakeFieldTypeDetector.setFieldType("Email", "unknown" as any);
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: Date.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchy,
+      }),
+    );
+    fakeFieldTypeDetector.setFieldType("Email", "unknown");
 
     const result = await build().execute({
       fields: [{ selector: { text: "Email" }, value: "a@b.c" }],
@@ -2067,20 +2196,24 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
   test("an unclassifiable node is not retried", async () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: [
-          {
-            $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" },
-          },
-        ],
+        node: {
+          node: [
+            {
+              $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" },
+            },
+          ],
+        },
       },
     } as ViewHierarchyResult;
-    fakeObserve.setResult({
-      updatedAt: Date.now(),
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: hierarchy,
-    });
-    fakeFieldTypeDetector.setFieldType("Email", "unknown" as any);
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: Date.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchy,
+      }),
+    );
+    fakeFieldTypeDetector.setFieldType("Email", "unknown");
 
     const result = await build().execute({
       fields: [{ selector: { text: "Email" }, value: "a@b.c" }],
@@ -2138,24 +2271,26 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
     // must not make the second -- still visible -- be reported as not found.
     const twoFields = {
       hierarchy: {
-        node: [
-          {
-            $: {
-              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-              "resource-id": "first",
-              class: "android.widget.EditText",
+        node: {
+          node: [
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "first",
+                class: "android.widget.EditText",
+              },
             },
-          },
-          {
-            $: {
-              bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-              "resource-id": "second",
-              class: "android.widget.EditText",
+            {
+              $: {
+                bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+                "resource-id": "second",
+                class: "android.widget.EditText",
+              },
             },
-          },
-        ],
+          ],
+        },
       },
-    } as unknown as ViewHierarchyResult;
+    };
 
     // Verification would need the fake hierarchy to echo the typed value; that is
     // orthogonal to what this test pins, so skip it for both fields.
@@ -2164,12 +2299,13 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
 
     fakeObserve.setResultFactory(() => {
       fakeTimer.advanceTime(9_000);
-      return {
+      return buildObserveResult({
+        observationId: "scripted-observation",
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: twoFields,
-      };
+      });
     });
 
     const result = await build().execute({
@@ -2230,32 +2366,34 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
 
   const threeFieldHierarchy = (values: [string, string, string]): ViewHierarchyResult => ({
     hierarchy: {
-      node: [
-        {
-          $: {
-            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-            "resource-id": "first",
-            text: values[0],
-            class: "android.widget.EditText",
+      node: {
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "first",
+              text: values[0],
+              class: "android.widget.EditText",
+            },
           },
-        },
-        {
-          $: {
-            bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-            "resource-id": "second",
-            text: values[1],
-            class: "android.widget.EditText",
+          {
+            $: {
+              bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+              "resource-id": "second",
+              text: values[1],
+              class: "android.widget.EditText",
+            },
           },
-        },
-        {
-          $: {
-            bounds: { left: 0, top: 120, right: 100, bottom: 170 },
-            "resource-id": "third",
-            text: values[2],
-            class: "android.widget.EditText",
+          {
+            $: {
+              bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+              "resource-id": "third",
+              text: values[2],
+              class: "android.widget.EditText",
+            },
           },
-        },
-      ],
+        ],
+      },
     },
   });
 
@@ -2322,9 +2460,7 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     // Never exceeds the declared total.
     expect(progressCalls.every((c) => c.progress <= 300)).toBe(true);
     // The three field-boundary ticks land at the top of each field's slice.
-    expect(progressCalls.map((c) => c.progress)).toEqual(
-      expect.arrayContaining([100, 200, 300]) as unknown as number[],
-    );
+    expect(progressCalls.map((c) => c.progress)).toEqual(expect.arrayContaining([100, 200, 300]));
     expect(progressCalls[progressCalls.length - 1].message).toContain("3/3");
   });
 
@@ -2335,26 +2471,28 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     // that follows, and never gets bumped across into the next field's slice.
     const twoCheckboxes: ViewHierarchyResult = {
       hierarchy: {
-        node: [
-          {
-            $: {
-              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-              "resource-id": "first",
-              class: "android.widget.CheckBox",
-              checkable: "true" as any,
-              checked: "false" as any,
+        node: {
+          node: [
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "first",
+                class: "android.widget.CheckBox",
+                checkable: "true",
+                checked: "false",
+              },
             },
-          },
-          {
-            $: {
-              bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-              "resource-id": "second",
-              class: "android.widget.CheckBox",
-              checkable: "true" as any,
-              checked: "false" as any,
+            {
+              $: {
+                bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+                "resource-id": "second",
+                class: "android.widget.CheckBox",
+                checkable: "true",
+                checked: "false",
+              },
             },
-          },
-        ],
+          ],
+        },
       },
     };
     fakeObserve.setResult(createObserveResultFor(twoCheckboxes));
@@ -2392,7 +2530,7 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
     };
 
     const setUIState = new SetUIState(device, null, {
-      tapOnElement: tapReportingFullCompletion as any,
+      tapOnElement: tapReportingFullCompletion,
       inputText: {
         execute: async (text: string, imeAction?: string) => {
           const result = await fakeInput.execute(text, imeAction);
@@ -2538,12 +2676,13 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
   });
 
   function createObserveResultFor(hierarchy: ViewHierarchyResult): ObserveResult {
-    return {
+    return buildObserveResult({
+      observationId: "scripted-observation",
       updatedAt: fakeTimer.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       viewHierarchy: hierarchy,
-    };
+    });
   }
 });
 
@@ -2595,17 +2734,19 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     // full budget rather than inheriting time already spent.
     const onlyFirst = {
       hierarchy: {
-        node: [
-          {
-            $: {
-              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-              "resource-id": "first",
-              class: "android.widget.EditText",
+        node: {
+          node: [
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "first",
+                class: "android.widget.EditText",
+              },
             },
-          },
-        ],
+          ],
+        },
       },
-    } as unknown as ViewHierarchyResult;
+    };
 
     fakeFieldTypeDetector.setSkipVerification("first", true);
 
@@ -2622,12 +2763,13 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
       // reopen — that budget is a different, larger concern this test does
       // not exercise.
       fakeTimer.advanceTime(observeCalls === 1 ? 1_000 : 25_000);
-      return {
+      return buildObserveResult({
+        observationId: "scripted-observation",
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: onlyFirst,
-      };
+      });
     });
 
     await build().execute({
@@ -2660,31 +2802,33 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
   /** All three fields are visible on screen from the very first observation. */
   const threeFieldHierarchy: ViewHierarchyResult = {
     hierarchy: {
-      node: [
-        {
-          $: {
-            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-            "resource-id": "firstName",
-            class: "android.widget.EditText",
+      node: {
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "firstName",
+              class: "android.widget.EditText",
+            },
           },
-        },
-        {
-          $: {
-            bounds: { left: 0, top: 60, right: 100, bottom: 110 },
-            "resource-id": "lastName",
-            class: "android.widget.EditText",
+          {
+            $: {
+              bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+              "resource-id": "lastName",
+              class: "android.widget.EditText",
+            },
           },
-        },
-        {
-          $: {
-            bounds: { left: 0, top: 120, right: 100, bottom: 170 },
-            "resource-id": "phone",
-            class: "android.widget.EditText",
+          {
+            $: {
+              bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+              "resource-id": "phone",
+              class: "android.widget.EditText",
+            },
           },
-        },
-      ],
+        ],
+      },
     },
-  } as unknown as ViewHierarchyResult;
+  };
 
   /**
    * A tap/clear/input trio that costs `perFieldMs` of simulated device time
@@ -2724,12 +2868,14 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     fakeFieldTypeDetector.setSkipVerification("firstName", true);
     fakeFieldTypeDetector.setSkipVerification("lastName", true);
     fakeFieldTypeDetector.setSkipVerification("phone", true);
-    fakeObserve.setResult({
-      updatedAt: 0,
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: threeFieldHierarchy,
-    });
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: threeFieldHierarchy,
+      }),
+    );
     return new SetUIState(device, null, {
       tapOnElement,
       clearText,
@@ -2868,20 +3014,24 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     // instantly with its own diagnosis, well under any budget.
     const hierarchyWithLabel: ViewHierarchyResult = {
       hierarchy: {
-        node: [
-          {
-            $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Phone" },
-          },
-        ],
+        node: {
+          node: [
+            {
+              $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Phone" },
+            },
+          ],
+        },
       },
-    } as unknown as ViewHierarchyResult;
-    fakeObserve.setResult({
-      updatedAt: 0,
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: hierarchyWithLabel,
-    });
-    fakeFieldTypeDetector.setFieldType("Phone", "unknown" as any);
+    };
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchyWithLabel,
+      }),
+    );
+    fakeFieldTypeDetector.setFieldType("Phone", "unknown");
 
     const result = await new SetUIState(device, null, {
       tapOnElement: { execute: async () => ({ success: true }) },
@@ -2956,12 +3106,13 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     // assertions below) that execute() never reached it.
     fakeObserve.setResultFactory(() => {
       fakeTimer.advanceTime(30_000);
-      return {
+      return buildObserveResult({
+        observationId: "scripted-observation",
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: threeFieldHierarchy,
-      };
+      });
     });
 
     const result = await build(500).execute(
@@ -3056,12 +3207,14 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     };
 
     fakeFieldTypeDetector.setSkipVerification("firstName", true);
-    fakeObserve.setResult({
-      updatedAt: 0,
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: threeFieldHierarchy,
-    });
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: threeFieldHierarchy,
+      }),
+    );
 
     const setUIState = new SetUIState(device, null, {
       ...stallingDependencies,
@@ -3138,12 +3291,14 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     };
 
     fakeFieldTypeDetector.setSkipVerification("firstName", true);
-    fakeObserve.setResult({
-      updatedAt: 0,
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: threeFieldHierarchy,
-    });
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: threeFieldHierarchy,
+      }),
+    );
 
     const setUIState = new SetUIState(device, null, {
       ...stallingDependencies,
@@ -3217,12 +3372,14 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     };
 
     fakeFieldTypeDetector.setSkipVerification("firstName", true);
-    fakeObserve.setResult({
-      updatedAt: 0,
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: threeFieldHierarchy,
-    });
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: threeFieldHierarchy,
+      }),
+    );
 
     const setUIState = new SetUIState(device, null, {
       ...stallingDependencies,
@@ -3299,12 +3456,14 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       timer: fakeTimer,
     });
     fakeFieldTypeDetector.setSkipVerification("firstName", true);
-    fakeObserve.setResult({
-      updatedAt: 0,
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: threeFieldHierarchy,
-    });
+    fakeObserve.setResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: threeFieldHierarchy,
+      }),
+    );
 
     const resultPromise = setUIState.execute(
       { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
@@ -3348,16 +3507,14 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     const callStartMs = fakeTimer.now();
     const transportDeadlineMs = callStartMs + 21_000;
 
-    const stallingObserve = {
-      execute: () => new Promise<never>(() => {}),
-    };
+    const stallingObserve = new ScriptedObserveScreen(() => new Promise<never>(() => {}));
 
     const setUIState = new SetUIState(device, null, {
       tapOnElement: { execute: async () => ({ success: true }) },
       clearText: { execute: async () => ({ success: true }) },
       inputText: { execute: async (text: string) => ({ success: true, text }) },
       swipeOn: fakeSwipe,
-      observeScreen: stallingObserve as unknown as FakeObserveScreenForSetUIState,
+      observeScreen: stallingObserve,
       fieldTypeDetector: fakeFieldTypeDetector,
       timer: fakeTimer,
     });
@@ -3389,6 +3546,17 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
   });
 });
 
+/** An ObserveScreen whose execute is driven by a per-test script (stalls, sequences). */
+class ScriptedObserveScreen extends FakeObserveScreenForSetUIState {
+  constructor(private readonly script: () => Promise<ObserveResult>) {
+    super();
+  }
+
+  override async execute(): Promise<ObserveResult> {
+    return this.script();
+  }
+}
+
 describe("SetUIState off-screen search device I/O is bounded by the result deadline (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", () => {
   const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
   let fakeFieldTypeDetector: FakeFieldTypeDetector;
@@ -3396,8 +3564,8 @@ describe("SetUIState off-screen search device I/O is bounded by the result deadl
 
   /** The requested field is absent from every observation -- the search loop runs. */
   const emptyHierarchy: ViewHierarchyResult = {
-    hierarchy: { node: [] },
-  } as unknown as ViewHierarchyResult;
+    hierarchy: {},
+  };
 
   beforeEach(() => {
     fakeFieldTypeDetector = new FakeFieldTypeDetector();
@@ -3421,21 +3589,22 @@ describe("SetUIState off-screen search device I/O is bounded by the result deadl
       },
     };
 
-    const observeScreen = {
-      execute: async () => ({
+    const observeScreen = new ScriptedObserveScreen(async () =>
+      buildObserveResult({
+        observationId: "scripted-observation",
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: emptyHierarchy,
       }),
-    };
+    );
 
     const setUIState = new SetUIState(device, null, {
       tapOnElement: { execute: async () => ({ success: true }) },
       clearText: { execute: async () => ({ success: true }) },
       inputText: { execute: async (text: string) => ({ success: true, text }) },
-      swipeOn: stallingSwipe as unknown as FakeSwipeOn,
-      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      swipeOn: stallingSwipe,
+      observeScreen,
       fieldTypeDetector: fakeFieldTypeDetector,
       timer: fakeTimer,
     });
@@ -3477,28 +3646,27 @@ describe("SetUIState off-screen search device I/O is bounded by the result deadl
     };
 
     let observeCalls = 0;
-    const observeScreen = {
-      execute: async () => {
-        observeCalls++;
-        if (observeCalls === 1) {
-          return {
-            updatedAt: fakeTimer.now(),
-            screenSize: { width: 1080, height: 1920 },
-            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-            viewHierarchy: emptyHierarchy,
-          };
-        }
-        // The follow-up re-observe after the swipe -- never resolves.
-        return new Promise<never>(() => {});
-      },
-    };
+    const observeScreen = new ScriptedObserveScreen(async () => {
+      observeCalls++;
+      if (observeCalls === 1) {
+        return buildObserveResult({
+          observationId: "scripted-observation",
+          updatedAt: fakeTimer.now(),
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: emptyHierarchy,
+        });
+      }
+      // The follow-up re-observe after the swipe -- never resolves.
+      return new Promise<never>(() => {});
+    });
 
     const setUIState = new SetUIState(device, null, {
       tapOnElement: { execute: async () => ({ success: true }) },
       clearText: { execute: async () => ({ success: true }) },
       inputText: { execute: async (text: string) => ({ success: true, text }) },
-      swipeOn: swipeOn as unknown as FakeSwipeOn,
-      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      swipeOn,
+      observeScreen,
       fieldTypeDetector: fakeFieldTypeDetector,
       timer: fakeTimer,
     });
@@ -3547,18 +3715,20 @@ describe("SetUIState post-success observation refresh is bounded by the result d
 
     const checkboxHierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: [
-          {
-            $: {
-              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-              "resource-id": "checkbox",
-              text: "",
-              class: "android.widget.CheckBox",
-              checkable: "true",
-              checked: "false",
+        node: {
+          node: [
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "checkbox",
+                text: "",
+                class: "android.widget.CheckBox",
+                checkable: "true",
+                checked: "false",
+              },
             },
-          },
-        ],
+          ],
+        },
       },
     };
 
@@ -3566,28 +3736,27 @@ describe("SetUIState post-success observation refresh is bounded by the result d
     fakeFieldTypeDetector.setSkipVerification("checkbox", true);
 
     let observeCalls = 0;
-    const observeScreen = {
-      execute: async () => {
-        observeCalls++;
-        if (observeCalls === 1) {
-          return {
-            updatedAt: fakeTimer.now(),
-            screenSize: { width: 1080, height: 1920 },
-            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-            viewHierarchy: checkboxHierarchy,
-          };
-        }
-        // The post-success observation refresh -- never resolves.
-        return new Promise<never>(() => {});
-      },
-    };
+    const observeScreen = new ScriptedObserveScreen(async () => {
+      observeCalls++;
+      if (observeCalls === 1) {
+        return buildObserveResult({
+          observationId: "scripted-observation",
+          updatedAt: fakeTimer.now(),
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: checkboxHierarchy,
+        });
+      }
+      // The post-success observation refresh -- never resolves.
+      return new Promise<never>(() => {});
+    });
 
     const setUIState = new SetUIState(device, null, {
       tapOnElement: { execute: async () => ({ success: true }) },
       clearText: { execute: async () => ({ success: true }) },
       inputText: { execute: async (text: string) => ({ success: true, text }) },
-      swipeOn: { execute: async () => ({ success: true }) } as unknown as FakeSwipeOn,
-      observeScreen: observeScreen as unknown as FakeObserveScreenForSetUIState,
+      swipeOn: { execute: async () => ({ success: true }) },
+      observeScreen,
       fieldTypeDetector: fakeFieldTypeDetector,
       timer: fakeTimer,
     });
@@ -3619,22 +3788,37 @@ describe("SetUIState post-success observation refresh is bounded by the result d
 });
 
 describe("SetUIState stale synthetic selector errors", () => {
-  test("unmatched synthetic ids require re-observe while plain ids keep their error", () => {
+  test("unmatched synthetic ids require re-observe while plain ids keep their error", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observe = new FakeObserveScreenForSetUIState();
+    observe.setResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: { hierarchy: {} },
+      }),
+    );
     const command = new SetUIState({ name: "test", platform: "android", deviceId: "test" }, null, {
-      timer: new FakeTimer(),
+      timer,
+      observeScreen: observe,
+      tapOnElement: new FakeTapOnElement(),
+      inputText: new FakeInputText(),
+      clearText: new FakeClearText(),
+      swipeOn: new FakeSwipeOn(),
+      fieldTypeDetector: new FakeFieldTypeDetector(),
     });
-    const results = command["collectResults"](
-      [],
-      [
+    const result = await command.execute({
+      fields: [
         { selector: { elementId: "s2-3340048129449c01-2" }, value: "test" },
         { selector: { elementId: "example:id/missing" }, value: "test" },
       ],
-      new Set(),
-    );
-    expect(results[0].error).toBe(
+    });
+    expect(result.fields[0].error).toBe(
       "Element id 's2-3340048129449c01-2' is stale; re-observe and use the id from the new observation.",
     );
-    expect(results[1].error).toBe('Element not found: elementId="example:id/missing"');
+    expect(result.fields[1].error).toBe('Element not found: elementId="example:id/missing"');
   });
 });
 
@@ -3646,7 +3830,7 @@ describe("SetUIState resolver lookups on captured hierarchies (#10269)", () => {
       readFileSync(new URL(`../../fixtures/${path}`, import.meta.url), "utf8"),
     );
     const action = new SetUIState({ name: "capture", deviceId: "capture", platform }, null, {});
-    return action["findElement"](
+    return action.findElement(
       {
         ...selector,
         screenSizeOptions: {

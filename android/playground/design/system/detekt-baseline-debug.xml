@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongMethod:DesignSystemDemoScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun DesignSystemDemoScreen</ID>
+    <ID>LongParameterList:Card.kt:@Composable fun AutoMobileCard</ID>
+    <ID>LongParameterList:Card.kt:@Composable fun AutoMobileOutlinedCard</ID>
+    <ID>LongParameterList:ContentButton.kt:@Composable fun AutoMobileContentButton</ID>
+    <ID>LongParameterList:ContentButton.kt:@Composable fun AutoMobileContentElevatedButton</ID>
+    <ID>LongParameterList:ContentButton.kt:@Composable fun AutoMobileContentOutlinedButton</ID>
+    <ID>LongParameterList:ContentButton.kt:@Composable fun AutoMobileContentTextButton</ID>
+    <ID>LongParameterList:ContentButton.kt:@Composable fun AutoMobileContentTonalButton</ID>
+    <ID>LongParameterList:ContentCard.kt:@Composable fun AutoMobileClickableCard</ID>
+    <ID>LongParameterList:ContentCard.kt:@Composable fun AutoMobileContentCard</ID>
+    <ID>LongParameterList:CrayonSketch.kt:fun crayonOutlineOffsets: List&lt;Offset&gt;</ID>
+    <ID>LongParameterList:Dialog.kt:@Composable fun AutoMobileAlertDialog</ID>
+    <ID>LongParameterList:Dialog.kt:@Composable fun AutoMobileConfirmationDialog</ID>
+    <ID>LongParameterList:Text.kt:@Composable fun AutoMobileText</ID>
+    <ID>LongParameterList:TextField.kt:@Composable fun AutoMobileOutlinedTextField</ID>
+    <ID>LongParameterList:TextField.kt:@Composable fun AutoMobileTextField</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -2,7 +2,7 @@ import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../android";
 import { IOSCtrlProxyClient } from "../ios";
 import { appendObserveError } from "../ObserveError";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
@@ -12,6 +12,17 @@ import type { Timer } from "../../../utils/SystemTimer";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { extractHierarchyScreenSize } from "../hierarchyScreenSize";
+
+export interface HierarchyCollectOptions {
+  queryOptions?: ViewHierarchyQueryOptions;
+  perf?: PerformanceTracker;
+  skipWaitForFresh?: boolean;
+  minTimestamp?: number;
+  signal?: AbortSignal;
+  readOnly?: boolean;
+  capturedHierarchy?: ViewHierarchyResult;
+  readOptions?: number | HierarchyReadOptions;
+}
 
 export interface HierarchyCollectorOptions {
   device: BootedDevice;
@@ -24,7 +35,7 @@ export interface HierarchyCollectorOptions {
   androidRawClient?: (
     device: BootedDevice,
     adbFactory: AdbClientFactory,
-  ) => Pick<AndroidCtrlProxyClient, "requestHierarchySync" | "invalidateCache">;
+  ) => Pick<AndroidCtrlProxy, "requestHierarchySync" | "invalidateCache">;
 }
 
 /**
@@ -59,17 +70,17 @@ export class HierarchyCollector {
   /**
    * Collect view hierarchy and handle errors with accessibility service caching.
    */
-  async collect(
-    result: ObserveResult,
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
-    readOnly: boolean = false,
-    capturedHierarchy?: ViewHierarchyResult,
-    readOptions?: number | HierarchyReadOptions,
-  ): Promise<void> {
+  async collect(result: ObserveResult, options: HierarchyCollectOptions = {}): Promise<void> {
+    const {
+      queryOptions,
+      perf = new NoOpPerformanceTracker(),
+      skipWaitForFresh = false,
+      minTimestamp = 0,
+      signal,
+      readOnly = false,
+      capturedHierarchy,
+      readOptions,
+    } = options;
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {
       if (device.platform === "android" && !readOnly) {

@@ -30,19 +30,21 @@ async function fixture() {
   const timer = new FakeTimer();
   const daemon = new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+    },
   );
   const sessions = daemon.getSessionManager();
   sessions.stopCleanupTimer();
   const pool = daemon.getDevicePool();
   const manager = new FakeDeviceManager([], [original]);
-  Object.assign(pool, { deviceManager: manager });
+  pool.testHooks.deviceManager = manager;
   const restores: string[] = [];
-  Object.assign(sessions, {
-    getBarrier: () => new FakeDbWriteBarrier(),
-    keepScreenAwakeRestorerFactory: (device: BootedDevice) => ({
+  Object.assign(sessions, { getBarrier: () => new FakeDbWriteBarrier() });
+  Object.assign(sessions["stateRestore"], {
+    keepScreenAwakeRestorer: (device: BootedDevice) => ({
       restore: async () => {
         restores.push(device.deviceId);
         return { status: "restored" as const };
@@ -61,7 +63,11 @@ async function fixture() {
     forget.mockRestore();
   };
   await pool.initializeWithDevices([original]);
-  await pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "holder",
+    deviceId: original.deviceId,
+    platform: "android",
+  });
   sessions.setKeepScreenAwake("holder", { applied: true, method: "settings" });
   return { pool, sessions, manager, restores, release, cleanup };
 }
@@ -71,7 +77,11 @@ test("daemon serial-reuse wiring forwards identity replacement and sends no rest
   try {
     h.manager.bootedDevices = [{ ...original, name: "AVD-B", observedAt: 10 }];
     expect(await h.pool.settlePooledRuntimeIdentity(original.deviceId)).toBe("replaced");
-    expect(h.release.mock.calls[0]?.[4]).toEqual({ deviceIdentityReplaced: true });
+    expect(h.release.mock.calls[0]?.[2]).toEqual({
+      allowExpired: false,
+      commitFence: expect.any(Function),
+      deviceIdentityReplaced: true,
+    });
     expect(h.restores).toEqual([]);
     expect(h.sessions.getSession("holder")).toBeNull();
     expect(h.pool.getDevice(original.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
@@ -84,13 +94,13 @@ for (const fenced of [true, false]) {
   test(`daemon ordinary device-loss wiring retains restores with fence=${fenced}`, async () => {
     const h = await fixture();
     try {
-      await h.pool["releaseSessionForDisconnectedDevice"](
+      await h.pool.testHooks.releaseSessionForDisconnectedDevice.call(
         "holder",
         original.deviceId,
         "device-disconnected:emulator-5554",
         fenced ? () => true : undefined,
       );
-      expect(h.release.mock.calls[0]?.[4]?.deviceIdentityReplaced).toBeUndefined();
+      expect(h.release.mock.calls[0]?.[2]?.deviceIdentityReplaced).toBeUndefined();
       expect(h.restores).toEqual([original.deviceId]);
     } finally {
       h.cleanup();

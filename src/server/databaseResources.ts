@@ -12,13 +12,16 @@ import {
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import {
+  defaultIosDatabaseClientResolver,
+  type IosDatabaseClientResolver,
+} from "./iosDatabaseClient";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
 import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { optionalInteger } from "./queryParamValidation";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 import { ActionableError } from "../models/ActionableError";
-import { iosStorageErrorMessage } from "./storageSdkErrors";
+import { iosStorageErrorMessage } from "../utils/storageSdkErrors";
 import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
 import { MALFORMED_URI_SEGMENT_MESSAGE, safeDecodeSegment } from "./resourceUriSegments";
 import { encodeUriSegment } from "../utils/encodeUriSegment";
@@ -137,7 +140,8 @@ async function iosStorageRequest<T>(request: () => Promise<T>): Promise<T> {
 
 function createDatabaseClient(
   device: BootedDevice,
-  context?: ResourceReadContext,
+  context: ResourceReadContext | undefined,
+  iosClient: IosDatabaseClientResolver,
 ): AppDatabaseClient {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
@@ -147,7 +151,7 @@ function createDatabaseClient(
   }
 
   if (device.platform === "ios") {
-    const client = IOSCtrlProxyClient.getInstance(device);
+    const client = iosClient(device);
     return {
       listDatabases: async (appId) => iosStorageRequest(() => client.listDatabasesForIos(appId)),
       listTables: async (appId, databasePath) =>
@@ -226,7 +230,8 @@ function buildTableStructureUri(
  */
 async function getDatabasesResource(
   params: Record<string, string>,
-  context?: ResourceReadContext,
+  context: ResourceReadContext | undefined,
+  iosClient: IosDatabaseClientResolver,
 ): Promise<ResourceContent> {
   const { deviceId, appId } = params;
   const uri = buildDatabasesUri(deviceId, appId);
@@ -241,7 +246,7 @@ async function getDatabasesResource(
       };
     }
 
-    const inspector = createDatabaseClient(device, context);
+    const inspector = createDatabaseClient(device, context, iosClient);
     const databases = await inspector.listDatabases(appId);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(databases);
@@ -302,7 +307,8 @@ function malformedUriContent(params: Record<string, string>): ResourceContent {
  */
 async function getTablesResource(
   params: Record<string, string>,
-  context?: ResourceReadContext,
+  context: ResourceReadContext | undefined,
+  iosClient: IosDatabaseClientResolver,
 ): Promise<ResourceContent> {
   const { deviceId, databasePath, appId } = params;
   const decodedPath = safeDecodeSegment(databasePath);
@@ -321,7 +327,7 @@ async function getTablesResource(
       };
     }
 
-    const inspector = createDatabaseClient(device, context);
+    const inspector = createDatabaseClient(device, context, iosClient);
     const tables = await inspector.listTables(appId, decodedPath);
     const lastUpdated = new Date().toISOString();
 
@@ -360,7 +366,8 @@ async function getTablesResource(
  */
 async function getTableDataResource(
   params: Record<string, string>,
-  context?: ResourceReadContext,
+  context: ResourceReadContext | undefined,
+  iosClient: IosDatabaseClientResolver,
 ): Promise<ResourceContent> {
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = safeDecodeSegment(databasePath);
@@ -417,7 +424,7 @@ async function getTableDataResource(
       };
     }
 
-    const inspector = createDatabaseClient(device, context);
+    const inspector = createDatabaseClient(device, context, iosClient);
     const data = await inspector.getTableData(appId, decodedPath, decodedTable, limit, offset);
     const lastUpdated = new Date().toISOString();
 
@@ -461,7 +468,8 @@ async function getTableDataResource(
  */
 async function getTableStructureResource(
   params: Record<string, string>,
-  context?: ResourceReadContext,
+  context: ResourceReadContext | undefined,
+  iosClient: IosDatabaseClientResolver,
 ): Promise<ResourceContent> {
   const { deviceId, databasePath, table, appId } = params;
   const decodedPath = safeDecodeSegment(databasePath);
@@ -481,7 +489,7 @@ async function getTableStructureResource(
       };
     }
 
-    const inspector = createDatabaseClient(device, context);
+    const inspector = createDatabaseClient(device, context, iosClient);
     const structure = await inspector.getTableStructure(appId, decodedPath, decodedTable);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(structure);
@@ -573,14 +581,16 @@ export async function notifyDatabaseChanged(
 /**
  * Register database resources
  */
-export function registerDatabaseResources(): void {
+export function registerDatabaseResources(
+  iosClient: IosDatabaseClientResolver = defaultIosDatabaseClientResolver,
+): void {
   // Register template for listing databases
   ResourceRegistry.registerTemplateWithReadContext(
     DATABASE_RESOURCE_TEMPLATES.DATABASES,
     "App Databases",
     "List all SQLite databases in an Android or iOS app. Requires app to have AutoMobile SDK with database inspection enabled; iOS support requires a DEBUG SDK server.",
     "application/json",
-    getDatabasesResource,
+    (params, context) => getDatabasesResource(params, context, iosClient),
   );
 
   // Register template for listing tables
@@ -589,7 +599,7 @@ export function registerDatabaseResources(): void {
     "Database Tables",
     "List all tables in a database.",
     "application/json",
-    getTablesResource,
+    (params, context) => getTablesResource(params, context, iosClient),
   );
 
   // Register template for table data. appId, limit, and offset are all
@@ -604,7 +614,7 @@ export function registerDatabaseResources(): void {
     "Table Data",
     "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
     "application/json",
-    getTableDataResource,
+    (params, context) => getTableDataResource(params, context, iosClient),
     ["limit", "offset"],
   );
 
@@ -614,7 +624,7 @@ export function registerDatabaseResources(): void {
     "Table Structure",
     "Get column definitions for a database table.",
     "application/json",
-    getTableStructureResource,
+    (params, context) => getTableStructureResource(params, context, iosClient),
   );
 
   logger.info("[DatabaseResources] Registered database resources");

@@ -1,9 +1,8 @@
-import { EmulatorProcessOutputTail } from "../../../src/daemon/emulatorProcessLifecycle";
+import { EmulatorProcessOutputTail } from "../../../src/daemon/EmulatorProcessOutputTail";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import type { SpawnFn } from "../../../src/utils/HostCommandExecutor";
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
-import { Readable } from "node:stream";
 import {
   AndroidEmulatorClient,
   emulatorLaunchOutputSource,
@@ -54,23 +53,14 @@ class TestAdbClientFactory implements AdbClientFactory {
   }
 }
 
-function createChild(): ChildProcess & EventEmitter {
-  const child = new EventEmitter() as ChildProcess & EventEmitter;
-  child.stdout = new Readable({ read() {} }) as never;
-  child.stderr = new Readable({ read() {} }) as never;
-  child.killed = false;
-  child.pid = 1234;
-  child.kill = (() => {
-    child.killed = true;
-    return true;
-  }) as ChildProcess["kill"];
-  return child;
+function createChild(): FakeChildProcess {
+  return new FakeChildProcess();
 }
 
 type ProbeResult = (signal?: AbortSignal) => Promise<ExecResult>;
 
 function createClient(
-  child: ChildProcess & EventEmitter,
+  child: FakeChildProcess,
   onSpawn: () => void,
   accelCheck: ProbeResult = async () => execResult(),
 ): {
@@ -98,20 +88,19 @@ function createClient(
     }
     return execResult();
   };
-  const spawnFn = (() => {
+  const spawnFn: SpawnFn = () => {
     queueMicrotask(onSpawn);
     return child;
-  }) as never;
-  const client = new AndroidEmulatorClient(
+  };
+  const client = new AndroidEmulatorClient({
+    emulatorPathLocator: async () => "emulator",
     execAsync,
     spawnFn,
     timer,
-    factory,
+    adbFactory: factory,
     avdConfigReader,
-    "linux",
-  );
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
+    platform: "linux",
+  });
 
   return {
     client,
@@ -122,16 +111,16 @@ function createClient(
 }
 
 function emitFailure(
-  child: ChildProcess & EventEmitter,
+  child: FakeChildProcess,
   stderr: string,
   order: "stderr-before-exit" | "stderr-after-exit",
 ): void {
   if (order === "stderr-before-exit") {
-    child.stderr!.emit("data", Buffer.from(stderr));
+    child.stderr.emit("data", Buffer.from(stderr));
   }
   child.emit("exit", 1, null);
   if (order === "stderr-after-exit") {
-    child.stderr!.emit("data", Buffer.from(stderr));
+    child.stderr.emit("data", Buffer.from(stderr));
   }
   child.emit("close", 1, null);
 }
@@ -141,17 +130,17 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const child = createChild();
     expect(emulatorLaunchOutputSource(child)).toBeUndefined();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", "Detected GPU type: host token=private\n");
+      child.stdout.emit("data", "Detected GPU type: host token=private\n");
     });
     expect(await client.startEmulator(avdName)).toBe(child);
     expect(emulatorLaunchOutputSource(child)?.snapshot()).toContain(
       "Detected GPU type: host token=[REDACTED]",
     );
     expect(emulatorLaunchOutputSource(child)?.snapshot()).not.toContain("private");
-    child.stderr!.emit("data", "later crashpad line\n");
+    child.stderr.emit("data", "later crashpad line\n");
     expect(emulatorLaunchOutputSource(child)?.snapshot()).toContain("later crashpad line");
     const tail = new EmulatorProcessOutputTail(child, timer);
-    child.stdout!.emit("data", "post-track line\n");
+    child.stdout.emit("data", "post-track line\n");
     child.emit("exit", null, "SIGSEGV");
     child.emit("close", null, "SIGSEGV");
     expect(await tail.finalize()).toBe(
@@ -165,7 +154,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       test(`readiness exit regression: ${path} code ${exitCode} rejects promptly`, async () => {
         const child = createChild();
         const { client, timer } = createClient(child, () => {
-          child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+          child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
         });
         if (path !== "monitor") {
           await client.startEmulator(avdName);
@@ -238,13 +227,13 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
         await timer.advanceTimeAsync(0);
         const diagnostic = "qemu: FATAL UNIQUE_DIAG_MARKER out of memory\n";
         if (order === "stderr-before-exit") {
-          child.stderr!.emit("data", Buffer.from(diagnostic));
+          child.stderr.emit("data", Buffer.from(diagnostic));
         }
         child.emit("exit", exitCode, signal);
         if (order === "stderr-after-exit") {
-          child.stderr!.emit("data", Buffer.from(diagnostic));
+          child.stderr.emit("data", Buffer.from(diagnostic));
         }
-        child.stderr!.emit("data", Buffer.from("token=diagnostic-secret\n"));
+        child.stderr.emit("data", Buffer.from("token=diagnostic-secret\n"));
         child.emit("close", exitCode, signal);
         await timer.advanceTimeAsync(1_000);
 
@@ -272,7 +261,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       test(`readiness exit regression: duplicate AVD code ${exitCode}, validated=${postValidation} keeps polling`, async () => {
         const child = createChild();
         const { client, timer } = createClient(child, () => {
-          child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+          child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
         });
         if (postValidation) {
           await client.startEmulator(avdName);
@@ -290,7 +279,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
             },
           );
         try {
-          child.stderr!.emit("data", Buffer.from("Running multiple emulators with the same AVD\n"));
+          child.stderr.emit("data", Buffer.from("Running multiple emulators with the same AVD\n"));
           child.emit("exit", exitCode, exitCode === null ? "SIGTERM" : null);
           child.emit("close", exitCode, exitCode === null ? "SIGTERM" : null);
           await timer.advanceTimeAsync(1_000);
@@ -308,7 +297,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("readiness exit regression: exit after completed readiness is a non-event", async () => {
     const child = createChild();
     const { client, timer, executor } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     await client.startEmulator(avdName);
     executor.setDevices([{ name: avdName, platform: "android", deviceId: "emulator-5554" }]);
@@ -375,11 +364,11 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("preserves a split failure signature while redacting a multiline credential", async () => {
     const child = createChild();
     const { client } = createClient(child, () => {
-      child.stderr!.emit(
+      child.stderr.emit(
         "data",
         Buffer.from('token="redaction-canary\nsecret-tail"\nemulator: error while loading shared '),
       );
-      child.stderr!.emit(
+      child.stderr.emit(
         "data",
         Buffer.from("libraries: libxkbfile.so.1: cannot open shared object file\n"),
       );
@@ -399,9 +388,9 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("does not combine credential state between stdout and stderr", async () => {
     const child = createChild();
     const { client } = createClient(child, () => {
-      child.stderr!.emit("data", Buffer.from("token="));
-      child.stdout!.emit("data", Buffer.from("diagnostic output\n"));
-      child.stderr!.emit(
+      child.stderr.emit("data", Buffer.from("token="));
+      child.stdout.emit("data", Buffer.from("diagnostic output\n"));
+      child.stderr.emit(
         "data",
         Buffer.from(
           "actual-secret\nemulator: error while loading shared libraries: libxkbfile.so.1\n",
@@ -464,7 +453,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("keeps duplicate-AVD detection after later output overflows the diagnostic tail", async () => {
     const child = createChild();
     const { client, accelChecks } = createClient(child, () => {
-      child.stderr!.emit(
+      child.stderr.emit(
         "data",
         Buffer.from(
           [
@@ -486,7 +475,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("keeps corrupt-image detection when a noisy chunk exceeds the diagnostic tail", async () => {
     const child = createChild();
     const { client } = createClient(child, () => {
-      child.stderr!.emit(
+      child.stderr.emit(
         "data",
         Buffer.from(
           [
@@ -505,7 +494,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("keeps a validated launch resolved after a later clean exit", async () => {
     const child = createChild();
     const { client, accelChecks } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
 
     const launchedChild = await client.startEmulator(avdName);
@@ -519,20 +508,20 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("detaches startup classification after the success marker but keeps output capture", async () => {
     const child = createChild();
     const { client } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
 
     const launchedChild = await client.startEmulator(avdName);
     expect(launchedChild).toBe(child);
-    expect(child.stdout!.listenerCount("data")).toBe(1);
-    expect(child.stderr!.listenerCount("data")).toBe(1);
+    expect(child.stdout.listenerCount("data")).toBe(1);
+    expect(child.stderr.listenerCount("data")).toBe(1);
 
-    child.stderr!.emit("data", Buffer.from("PANIC: QEMU later runtime diagnostic\n"));
-    child.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; later runtime text\n"));
+    child.stderr.emit("data", Buffer.from("PANIC: QEMU later runtime diagnostic\n"));
+    child.stderr.emit("data", Buffer.from("qcow2: Image is corrupt; later runtime text\n"));
 
     expect(child.killed).toBe(false);
-    expect(child.stdout!.listenerCount("data")).toBe(1);
-    expect(child.stderr!.listenerCount("data")).toBe(1);
+    expect(child.stdout.listenerCount("data")).toBe(1);
+    expect(child.stderr.listenerCount("data")).toBe(1);
   });
 
   test("detaches startup classification after the assume-success timeout", async () => {
@@ -544,26 +533,26 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const launchedChild = await launch;
 
     expect(launchedChild).toBe(child);
-    expect(child.stdout!.listenerCount("data")).toBe(1);
-    expect(child.stderr!.listenerCount("data")).toBe(1);
-    child.stderr!.emit("data", Buffer.from("PANIC: QEMU later runtime diagnostic\n"));
-    child.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; later runtime text\n"));
+    expect(child.stdout.listenerCount("data")).toBe(1);
+    expect(child.stderr.listenerCount("data")).toBe(1);
+    child.stderr.emit("data", Buffer.from("PANIC: QEMU later runtime diagnostic\n"));
+    child.stderr.emit("data", Buffer.from("qcow2: Image is corrupt; later runtime text\n"));
     expect(child.killed).toBe(false);
   });
 
   test("replays a post-validation exit to readiness with launch diagnostics", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     const baselineExitListeners = child.listenerCount("exit");
-    child.stderr!.emit("data", Buffer.from("token=handoff-secret\nhandoff diagnostic\n"));
+    child.stderr.emit("data", Buffer.from("token=handoff-secret\nhandoff diagnostic\n"));
     child.emit("exit", 1, null);
 
     const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
 
-    child.stderr!.emit(
+    child.stderr.emit(
       "data",
       Buffer.from(
         "late handoff diagnostic\nqemu_mprotect__osdep: mprotect failed: Permission denied\n",
@@ -586,12 +575,12 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("preserves richer diagnostics emitted after a post-validation exit", async () => {
     const child = createChild();
     const { client } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     child.emit("exit", 1, null);
     const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
-    child.stderr!.emit(
+    child.stderr.emit(
       "data",
       Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
     );
@@ -606,10 +595,10 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("keeps a post-validation duplicate-AVD exit nonfatal", async () => {
     const child = createChild();
     const { client, accelChecks } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
-    child.stderr!.emit(
+    child.stderr.emit(
       "data",
       Buffer.from("Running multiple emulators with the same AVD is an experimental feature.\n"),
     );
@@ -641,7 +630,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("bounds post-validation exit diagnostic draining", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     child.emit("exit", 1, null);
@@ -664,7 +653,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("installs readiness exit monitoring without a check-to-listener yield", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     const baselineExitListeners = child.listenerCount("exit");
@@ -684,7 +673,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("keeps post-validation exit finalization bounded after a child error", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     child.emit("exit", 1, null);
@@ -708,13 +697,13 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("preserves diagnostics emitted after a post-exit child error", async () => {
     const child = createChild();
     const { client } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     child.emit("exit", 1, null);
     const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
     child.emit("error", new Error("stdio failed after exit"));
-    child.stderr!.emit(
+    child.stderr.emit(
       "data",
       Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
     );
@@ -729,7 +718,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("prefers finalized diagnostics for exits observed during readiness", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
@@ -738,7 +727,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     child.emit("exit", 1, null);
-    child.stderr!.emit(
+    child.stderr.emit(
       "data",
       Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
     );
@@ -754,7 +743,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("does not classify post-validation duplicate-looking output as startup adoption", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     const controller = new AbortController();
@@ -774,12 +763,12 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       for (let turn = 0; turn < 10 && timer.getPendingTimeoutCount() < 2; turn += 1) {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
-      child.stderr!.emit(
+      child.stderr.emit(
         "data",
         Buffer.from("Running multiple emulators with the same AVD is an experimental feature.\n"),
       );
       for (let index = 0; index < 51; index += 1) {
-        child.stderr!.emit("data", Buffer.from(`later readiness diagnostic ${index}\n`));
+        child.stderr.emit("data", Buffer.from(`later readiness diagnostic ${index}\n`));
       }
       child.emit("exit", 1, null);
       child.emit("close", 1, null);
@@ -796,12 +785,12 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
   test("removes readiness listeners after observing a process exit", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
     const baselineExitListeners = child.listenerCount("exit");
-    const baselineStdoutListeners = child.stdout!.listenerCount("data");
-    const baselineStderrListeners = child.stderr!.listenerCount("data");
+    const baselineStdoutListeners = child.stdout.listenerCount("data");
+    const baselineStderrListeners = child.stderr.listenerCount("data");
     const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild);
     const readinessError = expectRejection(readiness);
 
@@ -815,8 +804,8 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const error = await readinessError;
     expect(error.message).toContain("exited with code: 1");
     expect(child.listenerCount("exit")).toBe(baselineExitListeners);
-    expect(child.stdout!.listenerCount("data")).toBe(baselineStdoutListeners);
-    expect(child.stderr!.listenerCount("data")).toBe(baselineStderrListeners);
+    expect(child.stdout.listenerCount("data")).toBe(baselineStdoutListeners);
+    expect(child.stderr.listenerCount("data")).toBe(baselineStderrListeners);
   });
 
   test("times out an acceleration check without masking the original exit code", async () => {
@@ -887,7 +876,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const child = createChild();
     const { client, accelChecks } = createClient(child, () => {
       child.emit("exit", 0, null);
-      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+      child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
       child.emit("close", 0, null);
     });
 

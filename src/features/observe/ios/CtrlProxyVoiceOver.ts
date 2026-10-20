@@ -31,6 +31,16 @@ import { ActionableError } from "../../../models/ActionableError";
  */
 export const IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS = 5000;
 
+export interface IosActivateAccessibilityLinkRequest {
+  text: string;
+  occurrence: number;
+  ownerResourceId?: string;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export interface VoiceOverActivationOptions {
   bounds?: ElementBounds;
   duration?: number;
@@ -186,17 +196,20 @@ export class CtrlProxyVoiceOver {
    * Android remains unchanged: count matching links in document order within the
    * owner's subtree, or the whole active-window tree when owner-less.
    */
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
+
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosActivateAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult> {
+    const {
+      text,
+      occurrence,
+      ownerResourceId,
+      timeoutMs = 5000,
+      perf,
+      signal,
+      onDispatch,
+    } = request;
+
     const combinedSignal = combineWithAmbientAbort(signal);
     let dispatched = false;
     const unconfirmed = (error: string): CtrlProxyActionResult => ({

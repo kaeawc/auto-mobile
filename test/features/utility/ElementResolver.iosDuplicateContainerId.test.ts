@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import capture from "../../fixtures/ios/nested-selection/scroll-cart-duplicate-container-id.json";
-import type { ViewHierarchyResult } from "../../../src/models";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { wireCapture } from "../../helpers/wireCapture";
 
 /**
  * Issue #10266: a real iOS 26 simulator capture of the Playground nested-selection screen,
@@ -11,7 +11,7 @@ import { SearchableHierarchy } from "../../../src/features/utility/SearchableNod
  * `item_40`...`item_47` rows, and the SDK walker's `HostingScrollView` nested inside it, with
  * the same id and no rows. Scoping to the empty inner node found no targets.
  */
-const hierarchy = () => structuredClone(capture.viewHierarchy) as unknown as ViewHierarchyResult;
+const hierarchy = () => wireCapture(structuredClone(capture.viewHierarchy));
 
 function select(
   elementId: string,
@@ -48,7 +48,7 @@ describe("iOS container captured twice with one id (#10266)", () => {
       { elementId: "item_42", container: { elementId: "cart_A" } },
       { strategy: "unique" },
     );
-    expect(result.error).toBeUndefined();
+    expect(result.element).not.toBeNull();
     expect(result.element?.["resource-id"]).toBe("remove");
     expect(result.element?.bounds).toEqual({ left: 304, top: 343, right: 389, bottom: 378 });
   });
@@ -59,7 +59,7 @@ describe("iOS container captured twice with one id (#10266)", () => {
       { elementId: "item_42", container: { elementId: "cart_B" } },
       { strategy: "unique", intentAction: "focus-input" },
     );
-    expect(result.error).toBeUndefined();
+    expect(result.element).not.toBeNull();
     expect(result.element?.["resource-id"]).toBe("quantity");
     expect(result.element?.bounds).toEqual({ left: 12, top: 589, right: 296, bottom: 624 });
   });

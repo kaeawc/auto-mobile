@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "swipe",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "listItem",
+          "headline": "Order",
+          "swipeActions": {
+            "end": [
+              {
+                "label": "Go",
+                "onTap": []
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].swipeActions.end[0].onTap"
+}

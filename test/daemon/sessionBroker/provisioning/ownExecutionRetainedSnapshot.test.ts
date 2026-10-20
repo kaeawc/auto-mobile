@@ -16,6 +16,7 @@ import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../../../helpers/devicePoolDependencies";
 import { assignBindingDevice } from "./bindingFixtures";
+import { patchDeviceBinding } from "../../../helpers/patchDeviceBinding";
 
 /**
  * Hunt (bindings, 2026-10-12): the fail-closed exclusion snapshot (#12094) judges a failed
@@ -84,8 +85,7 @@ describe("a binding's own execution while the registry is briefly unreadable", (
       );
       await sessionManager.createSession(sessionUuid, DEVICE.deviceId, "ios");
       const pooled = pool.getDevice(DEVICE.deviceId)!;
-      pooled.sessionId = sessionUuid;
-      pooled.status = "assigned";
+      patchDeviceBinding(pooled, { sessionId: sessionUuid, status: "busy" });
     };
     /** The reconciler's `claimAndReady`: the binding now names the provisioned session. */
     const claim = async (key: BindingKey, sessionUuid: string) => {

@@ -13,7 +13,9 @@ let cancellations: number;
 beforeEach(async () => {
   rig = slotAgreementRig();
   slots = Reflect.get(rig.manager, "sessionSlots") as SessionManager["sessionSlots"];
-  session = await rig.manager.createSession("find-id", "fake-device", "android", 1000);
+  session = await rig.manager.createSession("find-id", "fake-device", "android", {
+    timeoutMs: 1000,
+  });
   hold = Promise.withResolvers<"teardown">();
   rig.manager.setReleaseDeviceHold(() => ({ settled: hold.promise, capMs: 1000 }));
   cancellations = 0;
@@ -66,7 +68,8 @@ test("getSession expires the same session synchronously and starts exactly one l
   expect(rig.manager.findSession(session.sessionId)).toBeNull();
   expectNoRelease();
   expect(rig.manager.getSession(session.sessionId)).toBeNull();
-  expect(releaseSpy).toHaveBeenCalledWith(session.sessionId, "cleanup-expired", true, undefined, {
+  expect(releaseSpy).toHaveBeenCalledWith(session.sessionId, "cleanup-expired", {
+    allowExpired: true,
     expiryOrigin: "lazy-expiry",
   });
   expect(slots.releaseOps.get(session.sessionId)?.session).toBe(session);
@@ -145,4 +148,44 @@ test("retained ownership lookup still dispatches an instance getSession patch", 
   } finally {
     getSession.mockRestore();
   }
+});
+
+test("expireIfDue releases an expired session only when asked to release", () => {
+  const expireIfDue = Reflect.get(rig.manager, "expireIfDue") as (
+    sessionId: string,
+    expireDespiteActiveExecution: boolean,
+    execution?: undefined,
+    releaseExpired?: boolean,
+  ) => Session | null;
+  rig.timer.advanceTime(1001);
+  expect(expireIfDue.call(rig.manager, session.sessionId, false, undefined, false)).toBeNull();
+  expectNoRelease();
+  expect(expireIfDue.call(rig.manager, session.sessionId, false)).toBeNull();
+  expect(releaseSpy).toHaveBeenCalledTimes(1);
+});
+
+test("cache writers and the device lookup on an expired session release nothing", () => {
+  rig.manager.setDeviceLabels(session.sessionId, { A: "derived" });
+  rig.manager.setDisplayPin(session.sessionId, "pin");
+  rig.timer.advanceTime(1001);
+  const timeouts = rig.timer.getPendingTimeouts();
+  const before = { ...session.cacheData };
+  expect(rig.manager.getDeviceForSession(session.sessionId)).toBeNull();
+  rig.manager.updateSessionCache(session.sessionId, { deviceReadiness: "booted" });
+  rig.manager.setDisplayPin(session.sessionId, null);
+  rig.manager.invalidateAutomationReadiness(session.sessionId, "test");
+  rig.manager.setDeviceLabels(session.sessionId, { B: "derived-b" });
+  rig.manager.clearSessionCache(session.sessionId);
+  rig.manager.clearSessionCache(session.sessionId, "displayPin");
+  expect(session.cacheData).toEqual(before);
+  expect(rig.timer.getPendingTimeouts()).toEqual(timeouts);
+  expectNoRelease();
+});
+
+test("the device lookup and cache writers still serve a live session", () => {
+  expect(rig.manager.getDeviceForSession(session.sessionId)).toBe("fake-device");
+  rig.manager.updateSessionCache(session.sessionId, { deviceReadiness: "booted" });
+  expect(rig.manager.getDeviceReadiness(session.sessionId)).toBe("booted");
+  rig.manager.clearSessionCache(session.sessionId, "deviceReadiness");
+  expect(rig.manager.getDeviceReadiness(session.sessionId)).toBeUndefined();
 });

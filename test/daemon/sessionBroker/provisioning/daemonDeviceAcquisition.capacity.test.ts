@@ -19,7 +19,7 @@ import { ToolRegistry } from "../../../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../../src/server/videoRecordingManager";
+} from "../../../../src/daemon/videoRecordingManager";
 import { classifyDisplayCutout } from "../../../../src/utils/displayCutout";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../../../src/utils/provisionedDeviceTransportFence";
 import { FakeDeviceResourceObserver } from "../../../fakes/FakeDeviceResourceObserver";
@@ -208,7 +208,7 @@ describe("daemon binding wiring: replacing a binding's device against boot capac
       owner: () => ({ daemonId: "daemon-1", pid: 1 }),
       timer,
       journal: {
-        owner: { daemonId: "daemon-1", pid: 1, processGeneration: "gen-1" },
+        owner: { daemonId: "daemon-1", pid: 1, processGenerationToken: "gen-1" },
         inFlight: new BindingJournalInFlight(),
       },
       tooling: {

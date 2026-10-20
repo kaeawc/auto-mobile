@@ -16,10 +16,14 @@ import type {
   ListSharedStorageRequest,
   ReadSharedStorageRequest,
 } from "../../src/server/sharedStorageReadService";
+import { readTemplateMatch } from "../helpers/resourceTemplate";
 
-const calls: Array<
-  AppFileListRequest | AppFileReadRequest | ListSharedStorageRequest | ReadSharedStorageRequest
-> = [];
+type RecordedRequest =
+  | AppFileListRequest
+  | AppFileReadRequest
+  | ListSharedStorageRequest
+  | ReadSharedStorageRequest;
+const calls: RecordedRequest[] = [];
 const appService: AppFileService = {
   putFile: async () => {
     throw new Error("unused");
@@ -53,7 +57,7 @@ const sharedService: SharedStorageReadService = {
 async function read(uri: string) {
   const match = ResourceRegistry.matchTemplate(uri);
   expect(match).toBeDefined();
-  return match!.template.handler(match!.params);
+  return readTemplateMatch(match!);
 }
 function register() {
   calls.length = 0;
@@ -66,7 +70,7 @@ afterEach(() => {
 });
 
 describe("storage-domain URI compatibility", () => {
-  test.each([
+  test.each<[string, string, RecordedRequest]>([
     [
       "apps/com.example/files/documents?userId=10",
       "storage-domains/app_containers/com.example/documents?userId=10",

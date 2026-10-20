@@ -1,20 +1,18 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { BootedDevice } from "../../../../src/models";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const DEVICE_A: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Pixel A",
 };
 const DEVICE_B: BootedDevice = {
   deviceId: "emulator-5556",
   platform: "android",
-  isEmulator: true,
   name: "Pixel B",
 };
 
@@ -43,14 +41,12 @@ describe("AndroidCtrlProxyClient network state sync is scoped to its device", ()
   });
 
   function syncedMessages(device: BootedDevice): Array<Record<string, unknown>> {
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      new FakeAdbExecutor(),
-      () => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: () => {
         throw new Error("no socket in this test");
       },
       timer,
-    );
+    });
     const sent: string[] = [];
     const sendSpy = spyOn(client, "sendMessage").mockImplementation((message: string) => {
       sent.push(message);
@@ -114,14 +110,12 @@ describe("AndroidCtrlProxyClient reconnect sends the remaining error simulation 
   });
 
   function reconnectSimulationMessage(): Record<string, unknown> | undefined {
-    const client = AndroidCtrlProxyClient.createForTesting(
-      DEVICE_A,
-      new FakeAdbExecutor(),
-      () => {
+    const client = AndroidCtrlProxyClient.createForTesting(DEVICE_A, new FakeAdbExecutor(), {
+      webSocketFactory: () => {
         throw new Error("no socket in this test");
       },
       timer,
-    );
+    });
     const sent: string[] = [];
     const sendSpy = spyOn(client, "sendMessage").mockImplementation((message: string) => {
       sent.push(message);

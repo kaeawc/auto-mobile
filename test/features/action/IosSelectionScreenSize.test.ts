@@ -1,3 +1,5 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
@@ -27,7 +29,7 @@ test.each([false, true])(
     const target = new DefaultElementParser().parseNodeBounds(raw.hierarchy.node!.node![1])!;
     const selector = new FakeElementSelector(target);
     let selectedSize: ObserveResult["screenSize"] | undefined;
-    selector.selectClickable = (capture, options) => {
+    selector.select = (capture, _query, options) => {
       selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
       return { element: target, totalMatches: 1, indexInMatches: 0, strategy: "first" };
     };
@@ -55,7 +57,7 @@ test("tapAny single-panel iOS converges on runner geometry while Android keeps d
   const hierarchy = issue8379Hierarchy();
   const selector = new FakeElementSelector();
   let selectedSize: ObserveResult["screenSize"] | undefined;
-  selector.selectClickable = (capture, options) => {
+  selector.select = (capture, _query, options) => {
     selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
     return { element: null, totalMatches: 0, indexInMatches: -1, strategy: "first" };
   };
@@ -87,23 +89,25 @@ test("tapOn text selection dispatches the derived right-hand target's centre wit
     tapStrategy: new FakeTapStrategy(),
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     observationId: "derived-geometry",
     updatedAt: 1,
     viewHierarchy: hierarchy,
     screenSize: { width: 951, height: 669 },
-  };
+  });
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.prepareSelectionCapture = async () => null;
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
     observation: current,
+    effect: undefined,
   });
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({ text: duoSelectionText, action: "tap" });
   expect(result.success).toBe(true);
@@ -115,7 +119,7 @@ test("tapAny folded portrait stand-in, single iPhone and Android preserve the pr
   const hierarchy = structuredClone(portraitCapture.viewHierarchy);
   const selector = new FakeElementSelector();
   let selectedSize: ObserveResult["screenSize"] | undefined;
-  selector.selectClickable = (capture, options) => {
+  selector.select = (capture, _query, options) => {
     selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
     return { element: null, totalMatches: 0, indexInMatches: -1, strategy: "first" };
   };

@@ -32,6 +32,7 @@ const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 
@@ -105,16 +106,10 @@ async function setUpRig(ownership?: "awaiting-owner"): Promise<Rig> {
     getDevicePool: () => DEVICE_POOL,
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
-  await manager.createSession(
-    SESSION,
-    DEVICE,
-    "android",
-    120_000,
-    undefined,
-    undefined,
-    undefined,
-    ownership,
-  );
+  await manager.createSession(SESSION, DEVICE, "android", {
+    timeoutMs: 120_000,
+    initialOwnership: ownership,
+  });
   monitor.start();
   const advance = (ms: number) => timer.setCurrentTime(timer.getCurrentTime() + ms);
   return {

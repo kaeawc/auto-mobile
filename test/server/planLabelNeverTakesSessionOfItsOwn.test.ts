@@ -112,7 +112,7 @@ describe("who creates a session named like a label of a live base", () => {
       await hunt.acquire(BASE);
       let source: string | undefined;
       hunt.setProbeStep(async () => {
-        source = sessionManager.peekSession(LABEL_B)?.persistenceMetadata?.source;
+        source = sessionManager.peekSession(LABEL_B)?.persistenceMetadata?.source ?? undefined;
       });
 
       const result = await hunt.runPlan(twoDevicePlan(["B"]));

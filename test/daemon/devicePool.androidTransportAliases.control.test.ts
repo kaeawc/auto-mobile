@@ -1,5 +1,5 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { androidTransportCouldAliasHeldDevice } from "../../src/daemon/frameDeviceIdentity";
 import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
@@ -11,9 +11,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 const USB = "PHONE-A";
 const WIRELESS = "192.168.1.20:5555";
@@ -30,15 +28,12 @@ function harness(bindingExclusion?: BindingExclusion) {
   adb.setCommandResponse("ro.serialno", createExecResult(USB, ""));
   adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
   adb.setCommandResponse("boot_id", createExecResult("boot-a", ""));
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "control-alias", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      androidAdbFactory: new FakeAdbClientFactory(adb),
-      bindingExclusion,
-    }),
-  );
+  const pool = makePool(sessions, "control-alias", {
+    timer,
+    deviceManager: manager,
+    androidAdbFactory: new FakeAdbClientFactory(adb),
+    bindingExclusion,
+  });
   return { pool, adb, manager, timer };
 }
 

@@ -22,6 +22,7 @@ const FIXED_OBSERVATION_ACTION_CLASSES: Readonly<Record<string, ObservationActio
   keyboard: "inPlace",
   clipboard: "inPlace",
   swipeOn: "scroll",
+  swipeAt: "scroll",
   dragAndDrop: "scroll",
 };
 

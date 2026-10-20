@@ -416,3 +416,16 @@ export function prototypePatchTouchesState(ops: unknown): boolean {
     })
   );
 }
+
+/** The `/data` paths the ops address; `replaceNode` and `/state` ops touch none. */
+export function prototypePatchDataPaths(ops: unknown): string[] {
+  return Array.isArray(ops)
+    ? ops.flatMap((value) => {
+        const op = record(value);
+        const path = op ? own(op, "path") : undefined;
+        return typeof path === "string" && (path === "/data" || path.startsWith("/data/"))
+          ? [path]
+          : [];
+      })
+    : [];
+}

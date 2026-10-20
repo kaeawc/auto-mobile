@@ -325,6 +325,49 @@ data class PrototypeDecrementAction(val key: String, val by: Double? = null) : P
 
 @SerialName("dismiss") @Serializable data object PrototypeDismissAction : PrototypeAction()
 
+/**
+ * `setData`, `appendData` and `removeData` change the prototype's own `/data` on the device
+ * (`prototype_data_actions_v1`, #12519). [path] is `/data/<RFC 6901 pointer>`; inside a `repeat`, a
+ * whole `{index}` segment binds to the current row. [value] is an emit-context binding without
+ * `page`: `{value}`, `{state}`, `{data}` and, in a repeat, `{item}` or `{index}`.
+ */
+@SerialName("setData")
+@Serializable
+data class PrototypeSetDataAction(val path: String, val value: EmitContextBinding) :
+  PrototypeAction()
+
+@SerialName("appendData")
+@Serializable
+data class PrototypeAppendDataAction(val path: String, val value: EmitContextBinding) :
+  PrototypeAction()
+
+@SerialName("removeData")
+@Serializable
+data class PrototypeRemoveDataAction(val path: String) : PrototypeAction()
+
+/**
+ * An HTTP call from a tap (`prototype_network_v1`, #12523): the response goes to [into] (and its
+ * `<into>__meta` sibling), [statusKey] follows `loading`, `success` and `error`, and [onSuccess] or
+ * [onError] runs afterwards. [headers] and [query] entries are a literal string or a value binding
+ * (`{state}`, `{data}`, `{value}`, and `{item}` / `{index}` in a repeat), kept as JSON because both
+ * forms share a slot; [body] is a binding. [method] defaults to GET and [via] to `host`.
+ */
+@SerialName("request")
+@Serializable
+data class PrototypeRequestAction(
+  val url: String,
+  val method: String? = null,
+  val headers: Map<String, JsonElement>? = null,
+  val query: Map<String, JsonElement>? = null,
+  val body: EmitContextBinding? = null,
+  val into: String? = null,
+  val statusKey: String? = null,
+  val via: String? = null,
+  val timeoutMs: Int? = null,
+  val onSuccess: List<PrototypeAction>? = null,
+  val onError: List<PrototypeAction>? = null,
+) : PrototypeAction()
+
 @Serializable
 sealed class PrototypeNode {
   abstract val id: String?
@@ -386,6 +429,7 @@ data class PrototypeRowNode(
   override val span: Int? = null,
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
+  val swipeActions: PrototypeSwipeActions? = null,
 ) : PrototypeNode()
 
 @SerialName("column")
@@ -407,6 +451,29 @@ data class PrototypeColumnNode(
   val children: List<PrototypeNode>,
   val repeat: PrototypeRepeat? = null,
 ) : PrototypeNode()
+
+/**
+ * One swipe-revealed button: [label] is its text and accessibility name, [role] `destructive`
+ * selects error colours, [color] (hex or theme role) overrides the background.
+ */
+@Serializable
+data class PrototypeSwipeAction(
+  val label: String,
+  val icon: String? = null,
+  val role: String? = null,
+  val color: String? = null,
+  val onTap: List<PrototypeAction>,
+)
+
+/**
+ * `start` is revealed by a right swipe, `end` by a left swipe; [fullSwipe] runs the first entry.
+ */
+@Serializable
+data class PrototypeSwipeActions(
+  val start: List<PrototypeSwipeAction>? = null,
+  val end: List<PrototypeSwipeAction>? = null,
+  val fullSwipe: Boolean? = null,
+)
 
 @SerialName("flow")
 @Serializable
@@ -437,16 +504,13 @@ sealed class PrototypeGridColumns {
 
 object PrototypeGridColumnsSerializer :
   PrototypeJsonValueSerializer<PrototypeGridColumns>("PrototypeGridColumns") {
+  private fun isColumnCount(count: Double): Boolean =
+    count.isFinite() && count in 1.0..Int.MAX_VALUE.toDouble() && count % 1.0 == 0.0
+
   override fun fromJson(value: JsonElement): PrototypeGridColumns {
     if (value is JsonPrimitive && !value.isString) {
       val count = value.doubleOrNull
-      if (
-        count != null &&
-          count.isFinite() &&
-          count >= 1 &&
-          count <= Int.MAX_VALUE &&
-          count % 1.0 == 0.0
-      ) {
+      if (count != null && isColumnCount(count)) {
         return PrototypeGridColumns.Fixed(count.toInt())
       }
     }
@@ -612,6 +676,10 @@ data class PrototypeTextFieldNode(
   val minLines: Int? = null,
   val maxLines: Int? = null,
   val maxLength: Int? = null,
+  val leadingIcon: String? = null,
+  val trailingIcon: PrototypeAppBarAction? = null,
+  val imeAction: String? = null,
+  val onSubmit: List<PrototypeAction>? = null,
   val enabledWhen: PrototypeCondition? = null,
   val checks: List<PrototypeCheck>? = null,
   val validateOn: PrototypeValidateOn? = null,
@@ -827,6 +895,7 @@ data class PrototypeListItemNode(
   val supporting: String? = null,
   val leadingIcon: String? = null,
   val trailing: PrototypeListItemTrailing? = null,
+  val swipeActions: PrototypeSwipeActions? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
@@ -1157,8 +1226,17 @@ data class PrototypeScrollNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
   val axis: String = "vertical",
+  val refresh: PrototypeScrollRefresh? = null,
   val child: PrototypeNode,
 ) : PrototypeNode()
+
+/**
+ * Pull-to-refresh on a vertical [PrototypeScrollNode]: the indicator shows while the boolean state
+ * [stateKey] is true. A pull writes true to it and runs [onRefresh]; the prototype or a patch
+ * writes false to end it.
+ */
+@Serializable
+data class PrototypeScrollRefresh(val stateKey: String, val onRefresh: List<PrototypeAction>)
 
 @SerialName("pager")
 @Serializable
@@ -1179,6 +1257,33 @@ data class PrototypePagerNode(
   val pageSpacing: Double? = null,
   val peek: PrototypePagerPeek? = null,
   val pageSize: PrototypePagerPageSize? = null,
+  val indicator: String? = null,
+) : PrototypeNode()
+
+/**
+ * A horizontally scrolling, snapping row of [children] (one item each, expanded from [repeat]).
+ * [variant] is `multiBrowse` (default), `hero` or `uncontained`; [itemWidth] is the preferred or
+ * fixed item width in dp.
+ */
+@SerialName("carousel")
+@Serializable
+data class PrototypeCarouselNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val children: List<PrototypeNode>,
+  val repeat: PrototypeRepeat? = null,
+  val variant: String? = null,
+  val itemWidth: Double,
+  val itemSpacing: Double? = null,
 ) : PrototypeNode()
 
 @Serializable data class PrototypePagerPeek(val start: Double? = null, val end: Double? = null)
@@ -1359,6 +1464,8 @@ data class PrototypeSpec(
   /** `none` opts out of prototype animation; absent or `standard` follows the system scale. */
   val motion: String? = null,
   val data: JsonObject? = null,
+  /** The state keys and `/data` pointers the device keeps across shows (#12522). */
+  val storage: PrototypeStorageBlock? = null,
 )
 
 @Serializable

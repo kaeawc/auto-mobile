@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -10,8 +11,8 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -35,16 +36,18 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const sessionManager = daemon.getSessionManager();
     sessionManager.stopCleanupTimer();
     started = [];
     await sessionManager.createSession(SESSION, DEVICE_ID, "android");
     expect(await sessionManager.claimLivenessOwnership(SESSION, OWNER_TOKEN)).toBe("claimed");
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION);
   });
 
   afterEach(() => {
@@ -165,16 +168,18 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     daemon.getSessionManager().stopCleanupTimer();
     started = [];
     const devicePool = daemon.getDevicePool();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    Object.assign(devicePool, { deviceManager });
+    devicePool.testHooks.deviceManager = deviceManager;
     await devicePool.initializeWithDevices([DEVICE]);
   });
 
@@ -193,7 +198,7 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
   async function lapseOwnerLease(sessionId: string): Promise<void> {
     const sessionManager = daemon.getSessionManager();
     expect(await sessionManager.claimLivenessOwnership(sessionId, OWNER_TOKEN)).toBe("claimed");
-    sessionManager.recordHeartbeat(sessionId);
+    await deliverDaemonHeartbeat(sessionManager, sessionId);
     timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 1);
     expect(sessionManager.getSessionLeaseState(sessionId)?.phase).toBe("lapsed");
   }
@@ -241,19 +246,13 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
   test("an explicit bind reusing the holder is refused terminally, not as suspect", async () => {
     const devicePool = daemon.getDevicePool();
     const bind = () =>
-      devicePool.bindOrReuseDeviceSession(
-        SESSION,
-        DEVICE_ID,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        MCP_CONNECTION,
-      );
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: SESSION,
+        deviceId: DEVICE_ID,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: MCP_CONNECTION,
+      });
     await bind();
     await lapseOwnerLease(SESSION);
 

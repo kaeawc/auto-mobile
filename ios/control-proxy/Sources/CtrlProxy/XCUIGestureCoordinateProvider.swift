@@ -84,14 +84,12 @@ import os
         func synthesizePinch(_ pinch: DisplayPinch) throws -> Bool {
             var unavailable: ObjCBool = false
             var message: NSString?
-            let points = ObjCPinchPoints(
-                start1: CGPoint(x: pinch.first.start.x, y: pinch.first.start.y),
-                end1: CGPoint(x: pinch.first.end.x, y: pinch.first.end.y),
-                start2: CGPoint(x: pinch.second.start.x, y: pinch.second.start.y),
-                end2: CGPoint(x: pinch.second.end.x, y: pinch.second.end.y)
-            )
+            func flatten(_ path: DisplayFingerPath) -> [NSNumber] {
+                ([path.start] + path.via + [path.end]).flatMap { [NSNumber(value: $0.x), NSNumber(value: $0.y)] }
+            }
             let succeeded = ObjCExceptionCatcher_synthesizeDisplayPinch(
-                points, pinch.duration, pinch.displayId, pinch.interfaceOrientation, &unavailable, &message
+                flatten(pinch.first), flatten(pinch.second), pinch.duration, pinch.displayId,
+                pinch.interfaceOrientation, &unavailable, &message
             )
             if succeeded { return true }
             guard unavailable.boolValue else {

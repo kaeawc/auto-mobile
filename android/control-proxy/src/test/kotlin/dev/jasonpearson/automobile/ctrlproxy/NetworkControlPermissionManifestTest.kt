@@ -62,6 +62,21 @@ class NetworkControlPermissionManifestTest {
   }
 
   @Test
+  fun `CtrlProxy can reach the local network on API 37 and permits cleartext`() {
+    val document = readManifest("control-proxy")
+    assertTrue(
+      "Device-side prototype requests to 10.0.2.2 time out on API 37 without it (#13018).",
+      usesPermissions(document).contains("android.permission.ACCESS_LOCAL_NETWORK"),
+    )
+    val config =
+      File(
+        locateManifest("control-proxy", "main").parentFile,
+        "res/xml/network_security_config.xml",
+      )
+    assertTrue(config.readText().contains("cleartextTrafficPermitted=\"true\""))
+  }
+
+  @Test
   fun `CtrlProxy accessibility service is exported for system discovery`() {
     val service =
       elements(readManifest("control-proxy"), "service").single {

@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { BootedDevice, ObserveResult } from "../../../src/models";
@@ -7,7 +9,6 @@ const testDevice: BootedDevice = {
   platform: "android",
   deviceId: "emulator-5554",
 };
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -16,6 +17,8 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
+import { observeResultFromFixture } from "../../helpers/observeFixture";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("RecentApps", () => {
   let recentApps: RecentApps;
@@ -48,24 +51,31 @@ describe("RecentApps", () => {
     fakeObserveScreen.setObserveResult(() => {
       // Create new object to simulate actual change detection
       return fakeAdb.getExecutedCommands().includes("shell input keyevent 187")
-        ? { ...capturedRecents, timestamp: fakeTimer.now() }
+        ? buildObserveResult({
+            ...observeResultFromFixture(capturedRecents),
+            updatedAt: fakeTimer.now(),
+          })
         : createObserveResult(createAppHierarchy());
     });
 
     // Inject the fakes into the feature
-    recentApps = new RecentApps(testDevice, fakeAdb, fakeTimer);
-    (recentApps as any).observeScreen = fakeObserveScreen;
-    (recentApps as any).window = fakeWindow;
-    (recentApps as any).awaitIdle = fakeAwaitIdle;
+    recentApps = new RecentApps(testDevice, fakeAdb, fakeTimer, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
   });
 
   // Helper function to create mock ObserveResult
-  const createObserveResult = (viewHierarchy?: any): ObserveResult => ({
-    timestamp: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
-    viewHierarchy: viewHierarchy || { node: {} },
-  });
+  const createObserveResult = (viewHierarchy?: any): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      observationId: "test-observation",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
+      viewHierarchy: viewHierarchy || { node: {} },
+    });
 
   // Minimal app hierarchy; navigation must never target its controls (see #9979)
   const createAppHierarchy = () => ({
@@ -81,15 +91,17 @@ describe("RecentApps", () => {
 
   describe("execute", () => {
     test("should open recents via the key event on a real captured app hierarchy", async () => {
-      fakeObserveScreen.setObserveResult(() => ({
-        ...(fakeAdb.getExecutedCommands().includes("shell input keyevent 187")
-          ? capturedRecents
-          : capturedAppHierarchy),
-        timestamp: Date.now(),
-        screenSize: { width: 1080, height: 2400 },
-        systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
-      }));
-      fakeAdb.setCommandResponse("shell input keyevent 187", { stdout: "", stderr: "" });
+      fakeObserveScreen.setObserveResult(() =>
+        observeResultFromFixture({
+          ...(fakeAdb.getExecutedCommands().includes("shell input keyevent 187")
+            ? observeResultFromFixture(capturedRecents)
+            : capturedAppHierarchy),
+          updatedAt: Date.now(),
+          screenSize: { width: 1080, height: 2400 },
+          systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
+        }),
+      );
+      fakeAdb.setCommandResponse("shell input keyevent 187", createExecResult("", ""));
 
       const result = await recentApps.execute();
 
@@ -104,16 +116,19 @@ describe("RecentApps", () => {
     test("should work with progress callback", async () => {
       fakeObserveScreen.setObserveResult(() =>
         fakeAdb.getExecutedCommands().includes("shell input keyevent 187")
-          ? { ...capturedRecents, timestamp: fakeTimer.now() }
+          ? buildObserveResult({
+              ...observeResultFromFixture(capturedRecents),
+              updatedAt: fakeTimer.now(),
+            })
           : createObserveResult(createAppHierarchy()),
       );
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
 
       let callbackCalled = false;
       const progressCallback = () => {
         callbackCalled = true;
       };
-      const result = await recentApps.execute({ progress: progressCallback });
+      const result = await recentApps.execute({ progress: async () => progressCallback() });
 
       expect(result.success).toBe(true);
       expect(callbackCalled).toBe(true);
@@ -121,11 +136,9 @@ describe("RecentApps", () => {
 
     test("should still press recents when the view hierarchy is unavailable", async () => {
       fakeObserveScreen.setObserveResult(() => {
-        const result = createObserveResult();
-        (result.viewHierarchy as any) = null;
-        return result;
+        return { ...createObserveResult(), viewHierarchy: undefined };
       });
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
 
       const result = await recentApps.execute();
 
@@ -136,11 +149,11 @@ describe("RecentApps", () => {
 
   describe("fresh overview reads (#10349)", () => {
     const overview = (fresh: boolean): ObserveResult =>
-      ({
-        ...capturedRecents,
-        timestamp: fakeTimer.now(),
+      buildObserveResult({
+        ...observeResultFromFixture(capturedRecents, "capturedRecents"),
+        updatedAt: fakeTimer.now(),
         freshness: { isFresh: fresh, verified: fresh },
-      }) as unknown as ObserveResult;
+      });
 
     // Models the hierarchy source: without a minTimestamp floor it serves its
     // cached (stale) tree even when requireFreshExtraction is set.
@@ -154,7 +167,7 @@ describe("RecentApps", () => {
     const pressed = () => fakeAdb.getExecutedCommands().includes("shell input keyevent 187");
 
     test("does not press Recents again when the overview is already open", async () => {
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
       fakeObserveScreen.setObserveResult(() => overview(true));
       serveCache(overview(false), () => overview(true));
 
@@ -165,7 +178,7 @@ describe("RecentApps", () => {
     });
 
     test("re-reads once when the first fresh read is still reported stale", async () => {
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
       fakeObserveScreen.setObserveResult(() => overview(true));
       let floorReads = 0;
       const origExecute = fakeObserveScreen.execute.bind(fakeObserveScreen);
@@ -204,15 +217,14 @@ describe("RecentApps", () => {
         platform: "ios",
         deviceId: "ios-device",
       };
-      iosRecentApps = new RecentApps(iosDevice, fakeAdb, fakeTimer);
-      (iosRecentApps as any).observeScreen = fakeObserveScreen;
-      (iosRecentApps as any).window = fakeWindow;
-      (iosRecentApps as any).awaitIdle = fakeAwaitIdle;
+      iosRecentApps = new RecentApps(iosDevice, fakeAdb, fakeTimer, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
     });
 
     afterEach(() => {

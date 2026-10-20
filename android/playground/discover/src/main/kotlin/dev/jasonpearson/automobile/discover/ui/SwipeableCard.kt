@@ -90,38 +90,7 @@ fun SwipeableCard(card: SwipeCard, onSwipeAway: () -> Unit) {
         },
     colors = CardDefaults.cardColors(containerColor = card.color.copy(alpha = 0.1f)),
   ) {
-    Row(
-      modifier = Modifier.fillMaxSize().padding(16.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      AsyncImage(
-        model = card.imageUrl,
-        contentDescription = card.title,
-        modifier = Modifier.size(120.dp).clip(RoundedCornerShape(8.dp)),
-        contentScale = ContentScale.Crop,
-      )
-
-      Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
-        Text(
-          text = card.title,
-          fontSize = 18.sp,
-          fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-          text = card.description,
-          fontSize = 14.sp,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          modifier = Modifier.padding(top = 8.dp),
-        )
-      }
-
-      Icon(
-        imageVector = Icons.Filled.DragHandle,
-        contentDescription = "Swipe indicator",
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-    }
+    SwipeCardContent(card)
   }
 }
 
@@ -138,4 +107,40 @@ fun PreviewSwipeableCard() {
     )
 
   MaterialTheme { SwipeableCard(card = sampleCard, onSwipeAway = {}) }
+}
+
+@Composable
+private fun SwipeCardContent(card: SwipeCard) {
+  Row(
+    modifier = Modifier.fillMaxSize().padding(16.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    AsyncImage(
+      model = card.imageUrl,
+      contentDescription = card.title,
+      modifier = Modifier.size(120.dp).clip(RoundedCornerShape(8.dp)),
+      contentScale = ContentScale.Crop,
+    )
+
+    Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
+      Text(
+        text = card.title,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface,
+      )
+      Text(
+        text = card.description,
+        fontSize = 14.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp),
+      )
+    }
+
+    Icon(
+      imageVector = Icons.Filled.DragHandle,
+      contentDescription = "Swipe indicator",
+      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+  }
 }

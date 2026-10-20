@@ -294,3 +294,134 @@ export function diffGoldenTables(
   }
   return diffs;
 }
+
+/** Canonical single source for the pinch PATH table (issue #12996): finger positions at a fraction. */
+export const PATH_CANONICAL_JSON_PATH = join(
+  REPO_ROOT,
+  "test",
+  "fixtures",
+  "pinch-path-golden-vectors.json",
+);
+
+/** One path golden row: the five endpoint inputs, a gesture fraction, and the unordered finger pair. */
+export interface PathGoldenVector {
+  centerX: number;
+  centerY: number;
+  distanceStart: number;
+  distanceEnd: number;
+  rotationDegrees: number;
+  fraction: number;
+  expected: Array<[number, number]>;
+}
+
+/** 6 scalar inputs + 2 finger positions x 2 coords. Every path golden row has exactly this shape. */
+const PATH_NUMBERS_PER_ROW = 10;
+
+function pathRowsFromNumbers(numbers: number[], label: string): PathGoldenVector[] {
+  if (numbers.length === 0 || numbers.length % PATH_NUMBERS_PER_ROW !== 0) {
+    throw new Error(
+      `${label}: expected a positive multiple of ${PATH_NUMBERS_PER_ROW} numbers, got ${numbers.length}`,
+    );
+  }
+  const rows: PathGoldenVector[] = [];
+  for (let i = 0; i < numbers.length; i += PATH_NUMBERS_PER_ROW) {
+    const [cx, cy, ds, de, rot, fraction, x1, y1, x2, y2] = numbers.slice(
+      i,
+      i + PATH_NUMBERS_PER_ROW,
+    );
+    rows.push({
+      centerX: cx,
+      centerY: cy,
+      distanceStart: ds,
+      distanceEnd: de,
+      rotationDegrees: rot,
+      fraction,
+      expected: [
+        [x1, y1],
+        [x2, y2],
+      ],
+    });
+  }
+  return rows;
+}
+
+export function parseSwiftPathGoldenTable(): PathGoldenVector[] {
+  const region = extractNumericTableRegion(
+    SWIFT_TEST_PATH,
+    "let pathVectors: [PathVector] =",
+    "[",
+    "]",
+  );
+  return pathRowsFromNumbers(extractNumbers(region), SWIFT_TEST_PATH);
+}
+
+export function parseKotlinPathGoldenTable(): PathGoldenVector[] {
+  const region = extractNumericTableRegion(KOTLIN_TEST_PATH, "val pathVectors =", "(", ")");
+  return pathRowsFromNumbers(extractNumbers(region), KOTLIN_TEST_PATH);
+}
+
+export function loadCanonicalPathVectors(): PathGoldenVector[] {
+  const parsed = JSON.parse(readFileSync(PATH_CANONICAL_JSON_PATH, "utf8")) as {
+    vectors: PathGoldenVector[];
+  };
+  if (!Array.isArray(parsed.vectors) || parsed.vectors.length === 0) {
+    throw new Error(`${PATH_CANONICAL_JSON_PATH}: missing non-empty "vectors" array`);
+  }
+  return parsed.vectors;
+}
+
+/**
+ * Reference TypeScript port of the pinch path math (issue #12996): after `fraction` of the gesture
+ * the axis angle is `rotationDegrees * fraction` and the radius is the linear interpolation of the
+ * start and end radii, so a pure rotation keeps a constant radius. Mirrors Android
+ * `computePinchFingerPositions` and iOS `ObjCExceptionCatcher_computePinchFingersAt`.
+ */
+export function referencePinchFingersAt(
+  row: Omit<PathGoldenVector, "expected">,
+): Array<[number, number]> {
+  const radius = (row.distanceStart + (row.distanceEnd - row.distanceStart) * row.fraction) / 2;
+  const angle = ((row.rotationDegrees * Math.PI) / 180) * row.fraction;
+  const dx = radius * Math.cos(angle);
+  const dy = radius * Math.sin(angle);
+  return [
+    [row.centerX + dx, row.centerY + dy],
+    [row.centerX - dx, row.centerY - dy],
+  ];
+}
+
+/** Order-independent comparison of two path tables; returns mismatch strings (empty === identical). */
+export function diffPathGoldenTables(
+  actual: PathGoldenVector[],
+  expected: PathGoldenVector[],
+  tolerance = 1e-3,
+): string[] {
+  const diffs: string[] = [];
+  if (actual.length !== expected.length) {
+    return [`row count ${actual.length} !== ${expected.length}`];
+  }
+  const near = (a: number, b: number) => Math.abs(a - b) <= tolerance;
+  for (let i = 0; i < expected.length; i++) {
+    const a = actual[i];
+    const e = expected[i];
+    for (const key of [
+      "centerX",
+      "centerY",
+      "distanceStart",
+      "distanceEnd",
+      "rotationDegrees",
+      "fraction",
+    ] as const) {
+      if (!near(a[key], e[key])) {
+        diffs.push(`row ${i} input ${key}: ${a[key]} !== ${e[key]}`);
+      }
+    }
+    const ap = sortPoints(a.expected);
+    const ep = sortPoints(e.expected);
+    for (let j = 0; j < ep.length; j++) {
+      if (!near(ap[j][0], ep[j][0]) || !near(ap[j][1], ep[j][1])) {
+        diffs.push(`row ${i} point ${j}: (${ap[j]}) !== (${ep[j]})`);
+      }
+    }
+  }
+  return diffs;
+}

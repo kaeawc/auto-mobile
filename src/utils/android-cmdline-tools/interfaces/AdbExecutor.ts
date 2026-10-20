@@ -109,17 +109,6 @@ export interface AdbExecutor {
    * @returns Promise with command output
    */
   executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult>;
-  /**
-   * @deprecated Pass an {@link AdbExecuteOptions} object instead of positional arguments.
-   */
-  executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-  ): Promise<ExecResult>;
 
   /**
    * Get the device time in milliseconds since the Unix epoch.

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { toolText } from "../helpers/toolResponse";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -20,6 +21,9 @@ import {
   derivePhysicalDevicectlRecord,
   loadDerivedDevicectlListing,
 } from "../helpers/devicectlListFixtures";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 const DEVICECTL_CACHE_TTL_MS = 3_000;
@@ -45,7 +49,7 @@ describe("listDevices default device manager (#11063)", () => {
 
   const callListDevices = async (): Promise<ListDevicesPayload> => {
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "ios" });
-    return JSON.parse(response.content?.[0]?.text ?? "{}");
+    return JSON.parse(toolText(response));
   };
 
   beforeAll(() => {

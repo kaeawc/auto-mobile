@@ -18,6 +18,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case multiFingerSwipe(RequestMultiFingerSwipe)
     case drag(RequestDrag)
     case pinch(RequestPinch)
+    case pathGesture(RequestPathGesture)
 
     case setText(RequestSetText)
     case appendText(RequestAppendText)
@@ -81,111 +82,203 @@ public enum WebSocketRequest: Decodable, Sendable {
             throw CommandError.unknownCommand(typeString)
         }
 
+        self = try Self.decode(requestType, from: decoder)
+    }
+
+    private static func decode(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
+        case .requestHierarchy, .requestHierarchyIfStale, .setHierarchyPollInterval, .requestScreenshot:
+            return try decodeHierarchy(requestType, from: decoder)
+        case .requestTapCoordinates, .requestSwipe, .requestTwoFingerSwipe, .requestMultiFingerSwipe, .requestDrag,
+             .requestPinch, .requestPathGesture:
+            return try decodeGesture(requestType, from: decoder)
+        case .requestSetText, .requestAppendText, .requestClearText, .requestImeAction, .requestSelectAll,
+             .requestPressKey, .requestKeyboard:
+            return try decodeTextInput(requestType, from: decoder)
+        case .requestPressButton, .requestPressHome, .requestPressBack, .requestShake, .requestRecentApps:
+            return try decodeNavigation(requestType, from: decoder)
+        case .requestAction, .requestActivateAccessibilityLink, .requestLaunchApp, .requestResetPermissions,
+             .requestRotate, .setHingeAngle, .requestClipboard:
+            return try decodeAppAndDevice(requestType, from: decoder)
+        case .getCurrentFocus, .getTraversalOrder, .addHighlight, .magicTap, .sdkTrigger, .getVoiceOverState,
+             .setVoiceOverState:
+            return try decodeAccessibility(requestType, from: decoder)
+        case .listPreferenceFiles, .getPreferences, .getPreference, .setPreference, .removePreference,
+             .clearPreferences:
+            return try decodePreferences(requestType, from: decoder)
+        case .setNetworkMockRules, .setNetworkFaultRules, .setNetworkErrorSimulation, .getSdkCapabilities:
+            return try decodeNetwork(requestType, from: decoder)
+        case .executeSql, .listDatabases, .storageCapabilities, .listTables, .getTableData, .getTableStructure:
+            return try decodeDatabase(requestType, from: decoder)
+        }
+    }
+
+    private static func decodeHierarchy(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
         switch requestType {
         case .requestHierarchy:
-            self = try .requestHierarchy(RequestHierarchy(from: decoder))
+            return try .requestHierarchy(RequestHierarchy(from: decoder))
         case .requestHierarchyIfStale:
-            self = try .requestHierarchyIfStale(RequestHierarchy(from: decoder))
+            return try .requestHierarchyIfStale(RequestHierarchy(from: decoder))
         case .setHierarchyPollInterval:
-            self = try .setHierarchyPollInterval(RequestSetHierarchyPollInterval(from: decoder))
+            return try .setHierarchyPollInterval(RequestSetHierarchyPollInterval(from: decoder))
         case .requestScreenshot:
-            self = try .requestScreenshot(RequestEnvelope(from: decoder))
+            return try .requestScreenshot(RequestEnvelope(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodeGesture(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .requestTapCoordinates:
-            self = try .tapCoordinates(RequestTapCoordinates(from: decoder))
+            return try .tapCoordinates(RequestTapCoordinates(from: decoder))
         case .requestSwipe:
-            self = try .swipe(RequestSwipe(from: decoder))
+            return try .swipe(RequestSwipe(from: decoder))
         case .requestTwoFingerSwipe:
-            self = try .twoFingerSwipe(RequestMultiFingerSwipe(from: decoder))
+            return try .twoFingerSwipe(RequestMultiFingerSwipe(from: decoder))
         case .requestMultiFingerSwipe:
-            self = try .multiFingerSwipe(RequestMultiFingerSwipe(from: decoder))
+            return try .multiFingerSwipe(RequestMultiFingerSwipe(from: decoder))
         case .requestDrag:
-            self = try .drag(RequestDrag(from: decoder))
+            return try .drag(RequestDrag(from: decoder))
         case .requestPinch:
-            self = try .pinch(RequestPinch(from: decoder))
+            return try .pinch(RequestPinch(from: decoder))
+        case .requestPathGesture:
+            return try .pathGesture(RequestPathGesture(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodeTextInput(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .requestSetText:
-            self = try .setText(RequestSetText(from: decoder))
+            return try .setText(RequestSetText(from: decoder))
         case .requestAppendText:
-            self = try .appendText(RequestAppendText(from: decoder))
+            return try .appendText(RequestAppendText(from: decoder))
         case .requestClearText:
-            self = try .clearText(RequestClearText(from: decoder))
+            return try .clearText(RequestClearText(from: decoder))
         case .requestImeAction:
-            self = try .imeAction(RequestImeAction(from: decoder))
+            return try .imeAction(RequestImeAction(from: decoder))
         case .requestSelectAll:
-            self = try .selectAll(RequestEnvelope(from: decoder))
+            return try .selectAll(RequestEnvelope(from: decoder))
         case .requestPressKey:
-            self = try .pressKey(RequestPressKey(from: decoder))
+            return try .pressKey(RequestPressKey(from: decoder))
         case .requestKeyboard:
-            self = try .keyboard(RequestKeyboard(from: decoder))
+            return try .keyboard(RequestKeyboard(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodeNavigation(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .requestPressButton:
-            self = try .pressButton(RequestPressButton(from: decoder))
+            return try .pressButton(RequestPressButton(from: decoder))
         case .requestPressHome:
-            self = try .pressHome(RequestEnvelope(from: decoder))
+            return try .pressHome(RequestEnvelope(from: decoder))
         case .requestPressBack:
-            self = try .pressBack(RequestEnvelope(from: decoder))
+            return try .pressBack(RequestEnvelope(from: decoder))
         case .requestShake:
-            self = try .shake(RequestEnvelope(from: decoder))
+            return try .shake(RequestEnvelope(from: decoder))
         case .requestRecentApps:
-            self = try .recentApps(RequestEnvelope(from: decoder))
+            return try .recentApps(RequestEnvelope(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodeAppAndDevice(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .requestAction:
-            self = try .action(RequestAction(from: decoder))
+            return try .action(RequestAction(from: decoder))
         case .requestActivateAccessibilityLink:
-            self = try .activateAccessibilityLink(RequestActivateAccessibilityLink(from: decoder))
+            return try .activateAccessibilityLink(RequestActivateAccessibilityLink(from: decoder))
         case .requestLaunchApp:
-            self = try .launchApp(RequestLaunchApp(from: decoder))
+            return try .launchApp(RequestLaunchApp(from: decoder))
         case .requestResetPermissions:
-            self = try .resetPermissions(RequestResetPermissions(from: decoder))
+            return try .resetPermissions(RequestResetPermissions(from: decoder))
         case .requestRotate:
-            self = try .rotate(RequestRotate(from: decoder))
+            return try .rotate(RequestRotate(from: decoder))
         case .setHingeAngle:
-            self = try .setHingeAngle(RequestSetHingeAngle(from: decoder))
+            return try .setHingeAngle(RequestSetHingeAngle(from: decoder))
         case .requestClipboard:
-            self = try .clipboard(RequestClipboard(from: decoder))
+            return try .clipboard(RequestClipboard(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodeAccessibility(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .getCurrentFocus:
-            self = try .getCurrentFocus(RequestEnvelope(from: decoder))
+            return try .getCurrentFocus(RequestEnvelope(from: decoder))
         case .getTraversalOrder:
-            self = try .getTraversalOrder(RequestEnvelope(from: decoder))
+            return try .getTraversalOrder(RequestEnvelope(from: decoder))
         case .addHighlight:
-            self = try .addHighlight(RequestAddHighlight(from: decoder))
+            return try .addHighlight(RequestAddHighlight(from: decoder))
         case .magicTap:
-            self = try .magicTap(RequestEnvelope(from: decoder))
+            return try .magicTap(RequestEnvelope(from: decoder))
         case .sdkTrigger:
-            self = try .sdkTrigger(RequestSdkTrigger(from: decoder))
+            return try .sdkTrigger(RequestSdkTrigger(from: decoder))
         case .getVoiceOverState:
-            self = try .getVoiceOverState(RequestEnvelope(from: decoder))
+            return try .getVoiceOverState(RequestEnvelope(from: decoder))
         case .setVoiceOverState:
-            self = try .setVoiceOverState(RequestSetVoiceOverState(from: decoder))
+            return try .setVoiceOverState(RequestSetVoiceOverState(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodePreferences(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .listPreferenceFiles:
-            self = try .listPreferenceFiles(RequestEnvelope(from: decoder))
+            return try .listPreferenceFiles(RequestEnvelope(from: decoder))
         case .getPreferences:
-            self = try .getPreferences(RequestGetPreferences(from: decoder))
+            return try .getPreferences(RequestGetPreferences(from: decoder))
         case .getPreference:
-            self = try .getPreference(RequestGetPreference(from: decoder))
+            return try .getPreference(RequestGetPreference(from: decoder))
         case .setPreference:
-            self = try .setPreference(RequestSetPreference(from: decoder))
+            return try .setPreference(RequestSetPreference(from: decoder))
         case .removePreference:
-            self = try .removePreference(RequestRemovePreference(from: decoder))
+            return try .removePreference(RequestRemovePreference(from: decoder))
         case .clearPreferences:
-            self = try .clearPreferences(RequestClearPreferences(from: decoder))
+            return try .clearPreferences(RequestClearPreferences(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodeNetwork(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .setNetworkMockRules:
-            self = try .setNetworkMockRules(RequestSetNetworkMockRules(from: decoder))
+            return try .setNetworkMockRules(RequestSetNetworkMockRules(from: decoder))
         case .setNetworkFaultRules:
-            self = try .setNetworkFaultRules(RequestSetNetworkFaultRules(from: decoder))
+            return try .setNetworkFaultRules(RequestSetNetworkFaultRules(from: decoder))
         case .setNetworkErrorSimulation:
-            self = try .setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(from: decoder))
+            return try .setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(from: decoder))
         case .getSdkCapabilities:
-            self = try .getSdkCapabilities(RequestEnvelope(from: decoder))
+            return try .getSdkCapabilities(RequestEnvelope(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
+        }
+    }
+
+    private static func decodeDatabase(_ requestType: RequestType, from decoder: Decoder) throws -> Self {
+        switch requestType {
         case .executeSql:
-            self = try .executeSql(RequestExecuteSql(from: decoder))
+            return try .executeSql(RequestExecuteSql(from: decoder))
         case .listDatabases:
-            self = try .listDatabases(RequestListDatabases(from: decoder))
+            return try .listDatabases(RequestListDatabases(from: decoder))
         case .storageCapabilities:
-            self = try .storageCapabilities(RequestStorageCapabilities(from: decoder))
+            return try .storageCapabilities(RequestStorageCapabilities(from: decoder))
         case .listTables:
-            self = try .listTables(RequestListTables(from: decoder))
+            return try .listTables(RequestListTables(from: decoder))
         case .getTableData:
-            self = try .getTableData(RequestGetTableData(from: decoder))
+            return try .getTableData(RequestGetTableData(from: decoder))
         case .getTableStructure:
-            self = try .getTableStructure(RequestGetTableStructure(from: decoder))
+            return try .getTableStructure(RequestGetTableStructure(from: decoder))
+        default:
+            throw CommandError.unknownCommand(requestType.rawValue)
         }
     }
 
@@ -202,6 +295,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .multiFingerSwipe: return .requestMultiFingerSwipe
         case .drag: return .requestDrag
         case .pinch: return .requestPinch
+        case .pathGesture: return .requestPathGesture
         case .setText: return .requestSetText
         case .appendText: return .requestAppendText
         case .clearText: return .requestClearText
@@ -280,6 +374,7 @@ public enum WebSocketRequest: Decodable, Sendable {
             return payload
         case let .drag(payload): return payload
         case let .pinch(payload): return payload
+        case let .pathGesture(payload): return payload
         case let .setText(payload): return payload
         case let .appendText(payload): return payload
         case let .clearText(payload): return payload

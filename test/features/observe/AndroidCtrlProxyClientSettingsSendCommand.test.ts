@@ -1,5 +1,5 @@
+import { createObserveResultForTest } from "./flatHierarchyBuilders";
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
@@ -46,25 +46,14 @@ async function harness() {
     isEmulator: true,
   };
   const adb = new FakeAdbExecutor();
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    () => socket as unknown as WebSocket,
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: () => socket,
     timer,
-    new FakeInstalledAppsRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    ids,
-  );
+    installedAppsRepository: new FakeInstalledAppsRepository(),
+    idGenerator: ids,
+  });
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   const requestIds = new CountingIdGenerator("wire");
   const manager = client["requestManager"];
   manager.generateId = (prefix) => `${prefix}_${requestIds.next()}`;
@@ -119,12 +108,16 @@ test("cancelled Rotate sends the auto-rotate restore put through the real settin
   h.adb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=0", ""));
   const rotate = new Rotate(h.device, h.adb, h.timer);
   const observeScreen = new FakeObserveScreen();
-  observeScreen.setObserveResult(() => ({
-    timestamp: h.timer.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-  }));
+  observeScreen.setObserveResult(() =>
+    createObserveResultForTest({
+      observationId: "settings",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      updatedAt: h.timer.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
+    }),
+  );
   const window = new FakeWindow();
   window.configureCachedActiveWindow(null);
   window.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });
@@ -238,7 +231,7 @@ for (const method of methods) {
 
     test("returns the original disconnected shape without connecting or registering", async () => {
       const h = await harness();
-      h.client["ws"] = null;
+      h.client.connectionTestHooks.socket = null;
       expect(await method.invoke(h.client)).toEqual(failure("WebSocket not connected"));
       expect(h.connects()).toBe(0);
       expect(h.cancels()).toBe(0);

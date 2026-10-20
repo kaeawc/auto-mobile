@@ -201,6 +201,9 @@ describe("RealEmulatorConsoleClient", () => {
   test("reports CRLF KO reasons without carriage returns", async () => {
     transport.nextOutput = "Android Console\r\nOK\r\nOK\r\nKO: some reason\r\n";
     const error = await client.gsmCall("5551234567").catch((caught: Error) => caught);
+    if (!(error instanceof Error)) {
+      throw new Error("Expected console failure");
+    }
     expect(error.message).toContain("some reason");
     expect(error.message).not.toContain("\r");
   });

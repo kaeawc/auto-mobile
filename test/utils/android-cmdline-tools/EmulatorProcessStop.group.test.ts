@@ -58,6 +58,9 @@ function fixture(processGeneration?: FakeLockOwnerGenerationProbe) {
 }
 test("own group generation change during escalation read withholds every KILL", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   const f = fixture(generation);
   f.signaler.exitOn = "SIGKILL";
   generation.onCompare = () => (f.table.calls.length === 2 ? "different" : "same");
@@ -73,6 +76,9 @@ test("own group generation change during escalation read withholds every KILL", 
 });
 test("own group generation change after TERM stops waiting without escalation", async () => {
   const generation = new FakeLockOwnerGenerationProbe();
+  if (generation.token === undefined) {
+    throw new Error("Expected generation token");
+  }
   generation.verdict = "same";
   const f = fixture(generation);
   f.signaler.exitOn = "SIGKILL";

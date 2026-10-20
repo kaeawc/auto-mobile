@@ -1,12 +1,12 @@
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
 import { describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { DefaultEmulatorLaunchTargets } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchTargets";
 import type { EmulatorDeviceIdReservation } from "../../../src/utils/android-cmdline-tools/EmulatorPortReservations";
 
-function child(): ChildProcess {
-  return new EventEmitter() as ChildProcess;
+function child(): HostChildProcess {
+  return new FakeChildProcess();
 }
 
 function booted(name: string, deviceId: string): BootedDevice {
@@ -14,7 +14,7 @@ function booted(name: string, deviceId: string): BootedDevice {
 }
 
 function targets() {
-  const recorded: { child: ChildProcess; reservation: EmulatorDeviceIdReservation }[] = [];
+  const recorded: { child: HostChildProcess; reservation: EmulatorDeviceIdReservation }[] = [];
   const subject = new DefaultEmulatorLaunchTargets(() => ({
     recordReservedEmulatorDeviceId: (process, reservation) => {
       recorded.push({ child: process, reservation });
@@ -46,7 +46,7 @@ describe("DefaultEmulatorLaunchTargets", () => {
     const process = child();
     const reservation: EmulatorDeviceIdReservation = {
       deviceId: "emulator-5554",
-      ports: { console: 5554, adb: 5555 },
+      ports: { consolePort: 5554, adbPort: 5555 },
       appendPort: true,
       avdName: "Pixel",
     };

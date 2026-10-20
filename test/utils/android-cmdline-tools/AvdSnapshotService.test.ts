@@ -334,7 +334,7 @@ describe("AvdSnapshotService (#6490)", () => {
           probes.push({ serial, timeoutMs: options.timeoutMs, signal: options.signal });
           return "am-api36";
         },
-      } as never,
+      },
       adb.factory,
     );
 

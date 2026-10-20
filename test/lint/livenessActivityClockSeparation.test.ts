@@ -89,7 +89,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "SessionLivenessController.adoptCliLivenessPolicy",
     "SessionLivenessController.restoreHeartbeatLivenessPolicy",
   ],
-  "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts": ["handleHeartbeat"],
   "src/daemon/daemonHttpIngress.ts": ["DaemonHttpIngress.handleHeartbeatHttpRequest"],
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
   "src/daemon/mcpProxy/ProxySessionOwnership.ts": [
@@ -352,7 +352,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "A read projection (#11243): the sessionInfo answer reports the session's lastUsedAt and " +
       "expiresAt converted to wall-clock ms for the CLI; it stamps nothing.",
   },
-  "src/daemon/daemonRequestHandlers.ts handleTokenOwnedSessions": {
+  "src/daemon/daemonRequestHandlersParts/heartbeat.ts handleTokenOwnedSessions": {
     writes: 1,
     reason:
       "A read projection (#11117): the tokenOwnedSessions answer reports the session's lastUsedAt " +

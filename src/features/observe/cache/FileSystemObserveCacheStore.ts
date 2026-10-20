@@ -14,6 +14,7 @@ import { logger } from "../../../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
+import type { FileSystem } from "../../../utils/filesystem/DefaultFileSystem";
 import type { ObserveResult } from "../../../models";
 import type { ObserveResultCacheStore, RecentObserveCacheEntry } from "./ObserveResultCacheStore";
 
@@ -113,6 +114,10 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     writeFile: ObserveCacheFileWriter = writeFileAsync,
     idGenerator: IdGenerator = defaultIdGenerator,
     unlinkFile: typeof unlinkAsync = unlinkAsync,
+    private readonly diskMetadata: Pick<FileSystem, "readdir" | "stat"> = {
+      readdir: sortedReaddir,
+      stat: statAsync,
+    },
   ) {
     this.timer = timer;
     this.cacheDir = cacheDir ?? getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS);
@@ -183,14 +188,15 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       const stampGeneration = this.currentGeneration(deviceId);
       const filename =
         existingEntry?.entry.filename ?? this.diskFilename(cacheKey, stampGeneration);
+      const cachedResult = cloneWithoutScreenshotDeadlines(result);
       this.cache.set(cacheKey, {
         timestamp,
         deviceId,
         observationId: result.observationId,
         filename,
-        observeResult: cloneWithoutScreenshotDeadlines(result),
+        observeResult: cachedResult,
       });
-      await this.saveObserveResultToDisk(filename, result);
+      await this.saveObserveResultToDisk(filename, cachedResult);
       await this.reapExpiredDiskFiles(deviceId);
       // Residual 1: a clear() can land during the disk write above, and its
       // deletion snapshot predates our file — so it survives on disk. Re-check
@@ -513,10 +519,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   ): Promise<void> {
     try {
       const filePath = path.join(this.cacheDir, filename);
-      await this.writeFile(
-        filePath,
-        JSON.stringify(cloneWithoutScreenshotDeadlines(observeResult), null, 2),
-      );
+      await this.writeFile(filePath, JSON.stringify(observeResult));
       logger.debug(`[OBSERVE_CACHE] Saved observe result to disk: ${filename}`);
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Failed to save observe result to disk: ${error}`);
@@ -543,7 +546,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   private async reapExpiredDiskFiles(deviceId: string): Promise<void> {
     try {
       const devicePrefix = `observe_${this.sanitizeDeviceId(deviceId)}_`;
-      const files = await sortedReaddir(this.cacheDir);
+      const files = await this.diskMetadata.readdir(this.cacheDir);
       const now = this.timer.now();
       const expiredFiles: string[] = [];
 
@@ -551,8 +554,12 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
         if (!file.endsWith(".json") || !file.startsWith(devicePrefix)) {
           continue;
         }
-        const stats = await statAsync(path.join(this.cacheDir, file));
-        if (now - stats.mtime.getTime() >= OBSERVE_RESULT_CACHE_TTL_MS) {
+        // Use the original cache timestamp, like the memory TTL. Legacy names
+        // without a timestamp still fall back to their modification time.
+        const timestamp =
+          this.parseTimestampFromFilename(file) ??
+          (await this.diskMetadata.stat(path.join(this.cacheDir, file))).mtimeMs;
+        if (now - timestamp >= OBSERVE_RESULT_CACHE_TTL_MS) {
           expiredFiles.push(file);
         }
       }

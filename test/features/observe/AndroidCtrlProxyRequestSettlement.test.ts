@@ -348,7 +348,7 @@ const methods: Method[] = [
     invoke: (h) =>
       h.client["highlights"].requestAddHighlight(
         "h",
-        { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } },
+        { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } },
         50,
       ),
   },

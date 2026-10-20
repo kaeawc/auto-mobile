@@ -37,11 +37,11 @@ internal class OwnWindowTypeMemo(
     val entry = entries[windowId]
     if (entry != null) {
       val ttlMs = if (entry.type == null) unresolvedRetryMs else resolvedTtlMs
-      if (
+      val canReuseEntry =
         (entry.type != null || !retryUnresolvedImmediately) &&
           now >= entry.atMs &&
           now - entry.atMs < ttlMs
-      ) {
+      if (canReuseEntry) {
         return entry.type
       }
     }

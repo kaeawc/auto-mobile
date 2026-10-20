@@ -97,7 +97,22 @@ internal class FocusController(
       host.launchRequestScope(requestId) {
         broadcastCurrentFocusResult(requestId, focusedElement, totalTime)
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting current focus", e)
+      host.launchRequestScope(requestId) {
+        broadcastCurrentFocusError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting current focus", e)
+      host.launchRequestScope(requestId) {
+        broadcastCurrentFocusError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error getting current focus", e)
@@ -142,7 +157,22 @@ internal class FocusController(
       host.launchRequestScope(requestId) {
         broadcastTraversalOrderResult(requestId, traversalResult, totalTime)
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting traversal order", e)
+      host.launchRequestScope(requestId) {
+        broadcastTraversalOrderError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error getting traversal order", e)
+      host.launchRequestScope(requestId) {
+        broadcastTraversalOrderError(requestId, e.message, errorTime - startTime)
+      }
+    } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error getting traversal order", e)
@@ -171,7 +201,15 @@ internal class FocusController(
           // Let cooperative cancellation unwind cleanly rather than reporting a failed highlight
           // result (#3130).
           throw e
-        } catch (e: Exception) {
+        } catch (e: IllegalArgumentException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: IllegalStateException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: SecurityException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: android.view.WindowManager.BadTokenException) {
+          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
+        } catch (e: android.view.WindowManager.InvalidDisplayException) {
           HighlightOperationResult(false, e.message ?: "Failed to add highlight")
         }
 

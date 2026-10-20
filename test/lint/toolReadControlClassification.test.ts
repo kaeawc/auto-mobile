@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../src/server";
 import { registerDoctorTools } from "../../src/server/doctorTools";
@@ -301,9 +302,15 @@ describe("device-aware tool read/control classification (#10965)", () => {
 
     test("an unclassified hidden device tool in a scratch registry fails (#11353)", () => {
       const scratch = new ToolRegistryClass();
-      scratch.registerDeviceAware("hiddenNewTool", "x", {}, async () => ({ content: [] }), {
-        hidden: true,
-      });
+      scratch.registerDeviceAware(
+        "hiddenNewTool",
+        "x",
+        z.object({}),
+        async () => ({ content: [] }),
+        {
+          hidden: true,
+        },
+      );
       const tools = registeredTools(scratch).filter((tool) => tool.requiresDevice);
       expect(tools.map((tool) => tool.name)).toEqual(["hiddenNewTool"]);
       expect(classificationViolations(tools, { read: [], perArgs: {}, control: [] })).toEqual([

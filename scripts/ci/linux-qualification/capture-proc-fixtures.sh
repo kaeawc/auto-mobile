@@ -83,8 +83,7 @@ tar -cf - environment.txt manifest.txt ./*/status ./*/cmdline
 CONTAINER
 {
   printf '# Real procfs capture\n\nDate: %s\n\nRunner kernel: %s\n\n' "$(date -u +%FT%TZ)" "$(uname -srm)"
-  # shellcheck disable=SC2016 # Markdown fences are literal.
-  printf 'When committing, pin attributes:\n```gitattributes\n**/status text eol=lf\n**/cmdline binary\n```\n\nIn-container commands (verbatim capture.sh):\n```sh\n'
+  printf "When committing, pin attributes:\\n\`\`\`gitattributes\\n**/status text eol=lf\\n**/cmdline binary\\n\`\`\`\\n\\nIn-container commands (verbatim capture.sh):\\n\`\`\`sh\\n"
   cat "$out/capture.sh"
   printf '\n```\n'
   cat <<'CASES'

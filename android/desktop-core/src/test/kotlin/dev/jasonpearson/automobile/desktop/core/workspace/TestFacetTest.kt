@@ -21,27 +21,31 @@ class TestFacetTest {
 
   private fun column() = DeviceColumn(deviceId = "d", name = "Pixel", platform = Platform.Android)
 
-  private fun run(
-    id: String,
-    name: String,
-    status: TestStatus = TestStatus.Passed,
-    startTime: Long = 0,
-    durationMs: Int = 4000,
-    deviceName: String = "Pixel 8 API 35",
-  ) =
-    TestRun(
-      id = id,
-      testId = "test-$id",
-      testName = name,
-      status = status,
-      startTime = startTime,
-      durationMs = durationMs,
-      steps = emptyList(),
-      screensVisited = emptyList(),
-      deviceId = "d",
-      deviceName = deviceName,
-      platform = TestPlatform.Android,
-    )
+  private data class RunSpec(
+    val id: String,
+    val name: String,
+    val status: TestStatus = TestStatus.Passed,
+    val startTime: Long = 0,
+    val durationMs: Int = 4000,
+    val deviceName: String = "Pixel 8 API 35",
+  )
+
+  private fun run(spec: RunSpec) =
+    with(spec) {
+      TestRun(
+        id = id,
+        testId = "test-$id",
+        testName = name,
+        status = status,
+        startTime = startTime,
+        durationMs = durationMs,
+        steps = emptyList(),
+        screensVisited = emptyList(),
+        deviceId = "d",
+        deviceName = deviceName,
+        platform = TestPlatform.Android,
+      )
+    }
 
   private fun source(result: Result<List<TestRun>>) =
     object : TestDataSource {
@@ -75,8 +79,15 @@ class TestFacetTest {
             source(
               Result.Success(
                 listOf(
-                  run("1", "testLoginFlow", startTime = 100),
-                  run("2", "testSignupValidation", status = TestStatus.Failed, startTime = 200),
+                  run(RunSpec("1", "testLoginFlow", startTime = 100)),
+                  run(
+                    RunSpec(
+                      "2",
+                      "testSignupValidation",
+                      status = TestStatus.Failed,
+                      startTime = 200,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -120,7 +131,7 @@ class TestFacetTest {
           object : TestDataSource {
             override suspend fun getTestRuns(): Result<List<TestRun>> =
               if (attempts.getAndIncrement() == 0) Result.Error(RuntimeException("daemon down"))
-              else Result.Success(listOf(run("1", "testNavigationSmoke")))
+              else Result.Success(listOf(run(RunSpec("1", "testNavigationSmoke"))))
           }
         TestFacet(column = column(), dataSource = recovering)
       }

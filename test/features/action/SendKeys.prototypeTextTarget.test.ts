@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -726,7 +727,7 @@ for (const platform of ["android", "ios"] as const) {
     const h = harness(platform, { reader: platform === "ios" ? r.reader : undefined });
     const frame = platform === "android" ? androidFrame("Rb one") : iosPrototypeObservation("old");
     const interaction = spyOn(TapOnElement.prototype, "observedInteraction").mockImplementation(
-      async (block) => block(recordObservationRead(frame)),
+      runBlockWith(() => recordObservationRead(frame)),
     );
     const capability =
       platform === "android"
@@ -763,7 +764,7 @@ test("no-prototype focus reports no layer and implicit sendKeys makes no prototy
   };
   const read = spyOn(reader, "read");
   const interaction = spyOn(TapOnElement.prototype, "observedInteraction").mockImplementation(
-    async (block) => block(recordObservationRead(frame)),
+    runBlockWith(() => recordObservationRead(frame)),
   );
   const capability = spyOn(IOSCtrlProxyClient.prototype, "getSupportedCommands").mockResolvedValue(
     [],

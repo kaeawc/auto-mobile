@@ -137,7 +137,11 @@ object AutoMobileCrashes {
         originalHandler?.uncaughtException(thread, throwable)
       } catch (t: Throwable) {
         // Original handler threw — ensure process terminates
-        Runtime.getRuntime().exit(1)
+        try {
+          android.util.Log.w(TAG, "Host crash handler failed", t)
+        } finally {
+          Runtime.getRuntime().exit(1)
+        }
       }
     }
   }
@@ -154,37 +158,7 @@ object AutoMobileCrashes {
       val timestamp = System.currentTimeMillis()
       val stackTrace = StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
 
-      // Collect all-thread dumps for full crash context.
-      // Cap total size to avoid exceeding Android's 1MB Binder transaction limit
-      // when sending the broadcast (the payload is duplicated in both JSON and
-      // legacy extras, so 50KB keeps us well under the 100KB batch limit).
-      val maxAllThreadBytes = 50_000
-      val allThreadsBuilder = StringBuilder(stackTrace)
-      allThreadsBuilder.append("\n\n--- All Threads ---\n")
-      val allTraces = Thread.getAllStackTraces()
-      var includedCount = 0
-      var truncated = false
-      for ((t, frames) in allTraces) {
-        if (t.id == thread.id) continue // skip crashing thread (already included)
-        val threadDump = buildString {
-          append("\n\"${t.name}\" ${t.state}\n")
-          for (frame in frames) {
-            append("    at $frame\n")
-          }
-        }
-        if (allThreadsBuilder.length + threadDump.length > maxAllThreadBytes) {
-          truncated = true
-          break
-        }
-        allThreadsBuilder.append(threadDump)
-        includedCount++
-      }
-      if (truncated) {
-        val totalOtherThreads = allTraces.keys.count { it.id != thread.id }
-        val remaining = totalOtherThreads - includedCount
-        allThreadsBuilder.append("\n(truncated — $remaining more threads omitted)\n")
-      }
-      val fullStackTrace = allThreadsBuilder.toString()
+      val fullStackTrace = collectThreadDumps(thread, stackTrace)
 
       val currentScreen = currentScreenProvider?.invoke()
       val appVersion = getAppVersion(ctx)
@@ -209,32 +183,7 @@ object AutoMobileCrashes {
             ),
         )
 
-      val intent =
-        Intent(ACTION_CRASH).apply {
-          // Scope broadcast to only the accessibility service to prevent data leakage
-          setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
-
-          // Type-safe serialized event (new protocol)
-          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(sdkEvent))
-          putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.CRASH)
-
-          // Legacy extras for backward compatibility
-          putExtra(EXTRA_TIMESTAMP, timestamp)
-          putExtra(EXTRA_EXCEPTION_CLASS, throwable.javaClass.name)
-          putExtra(EXTRA_EXCEPTION_MESSAGE, throwable.message)
-          putExtra(EXTRA_STACK_TRACE, fullStackTrace)
-          putExtra(EXTRA_THREAD_NAME, thread.name)
-          putExtra(EXTRA_CURRENT_SCREEN, currentScreen)
-          putExtra(EXTRA_PACKAGE_NAME, ctx.packageName)
-          putExtra(EXTRA_APP_VERSION, appVersion)
-          putExtra(EXTRA_DEVICE_MODEL, Build.MODEL)
-          putExtra(EXTRA_DEVICE_MANUFACTURER, Build.MANUFACTURER)
-          putExtra(EXTRA_OS_VERSION, Build.VERSION.RELEASE)
-          putExtra(EXTRA_SDK_INT, Build.VERSION.SDK_INT)
-
-          // Attach breadcrumb trail snapshot
-          serializeBreadcrumbs()?.let { putExtra(EXTRA_BREADCRUMBS, it) }
-        }
+      val intent = crashIntent(ctx, thread, throwable, sdkEvent)
 
       ctx.sendBroadcast(intent)
 
@@ -248,6 +197,73 @@ object AutoMobileCrashes {
       }
     } catch (e: Exception) {
       AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast crash" }
+    }
+  }
+
+  private fun collectThreadDumps(thread: Thread, stackTrace: String): String {
+    // Collect all-thread dumps for full crash context.
+    // Cap total size to avoid exceeding Android's 1MB Binder transaction limit
+    // when sending the broadcast (the payload is duplicated in both JSON and
+    // legacy extras, so 50KB keeps us well under the 100KB batch limit).
+    val maxAllThreadBytes = 50_000
+    val allThreadsBuilder = StringBuilder(stackTrace)
+    allThreadsBuilder.append("\n\n--- All Threads ---\n")
+    val allTraces = Thread.getAllStackTraces()
+    var includedCount = 0
+    var truncated = false
+    for ((t, frames) in allTraces) {
+      if (t.id == thread.id) continue // skip crashing thread (already included)
+      val threadDump = buildString {
+        append("\n\"${t.name}\" ${t.state}\n")
+        for (frame in frames) {
+          append("    at $frame\n")
+        }
+      }
+      if (allThreadsBuilder.length + threadDump.length > maxAllThreadBytes) {
+        truncated = true
+        break
+      }
+      allThreadsBuilder.append(threadDump)
+      includedCount++
+    }
+    if (truncated) {
+      val totalOtherThreads = allTraces.keys.count { it.id != thread.id }
+      val remaining = totalOtherThreads - includedCount
+      allThreadsBuilder.append("\n(truncated — $remaining more threads omitted)\n")
+    }
+    return allThreadsBuilder.toString()
+  }
+
+  private fun crashIntent(
+    ctx: Context,
+    thread: Thread,
+    throwable: Throwable,
+    sdkEvent: SdkCrashEvent,
+  ): Intent {
+    return Intent(ACTION_CRASH).apply {
+      // Scope broadcast to only the accessibility service to prevent data leakage
+      setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
+
+      // Type-safe serialized event (new protocol)
+      putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, SdkEventSerializer.toJson(sdkEvent))
+      putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.CRASH)
+
+      // Legacy extras for backward compatibility
+      putExtra(EXTRA_TIMESTAMP, sdkEvent.timestamp)
+      putExtra(EXTRA_EXCEPTION_CLASS, throwable.javaClass.name)
+      putExtra(EXTRA_EXCEPTION_MESSAGE, throwable.message)
+      putExtra(EXTRA_STACK_TRACE, sdkEvent.stackTrace)
+      putExtra(EXTRA_THREAD_NAME, thread.name)
+      putExtra(EXTRA_CURRENT_SCREEN, sdkEvent.currentScreen)
+      putExtra(EXTRA_PACKAGE_NAME, ctx.packageName)
+      putExtra(EXTRA_APP_VERSION, sdkEvent.appVersion)
+      putExtra(EXTRA_DEVICE_MODEL, Build.MODEL)
+      putExtra(EXTRA_DEVICE_MANUFACTURER, Build.MANUFACTURER)
+      putExtra(EXTRA_OS_VERSION, Build.VERSION.RELEASE)
+      putExtra(EXTRA_SDK_INT, Build.VERSION.SDK_INT)
+
+      // Attach breadcrumb trail snapshot
+      serializeBreadcrumbs()?.let { putExtra(EXTRA_BREADCRUMBS, it) }
     }
   }
 

@@ -26,7 +26,7 @@ class VideoHandshakeTest {
       return slice
     }
 
-    override fun close() {}
+    override fun close() = Unit
   }
 
   private fun frame(

@@ -75,7 +75,10 @@ class PermissionManager(private val context: Context) {
       intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
       context.startActivity(intent)
       true
-    } catch (e: Exception) {
+    } catch (e: android.content.ActivityNotFoundException) {
+      Log.w(TAG, "Unable to launch overlay permission settings", e)
+      false
+    } catch (e: SecurityException) {
       Log.w(TAG, "Unable to launch overlay permission settings", e)
       false
     }

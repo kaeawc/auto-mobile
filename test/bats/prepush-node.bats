@@ -50,6 +50,9 @@ if [[ "$1" == "scripts/lib/affectedTests.ts" ]]; then
   done
   exit "${MOCK_SELECTOR_STATUS:-0}"
 fi
+if [[ "$*" == "run typecheck:test" ]]; then
+  exit "${MOCK_TEST_TYPECHECK_STATUS:-0}"
+fi
 if [[ "$*" == "scripts/generate-tool-definitions.ts --check" ]]; then
   exit "${MOCK_TOOL_DEFINITIONS_STATUS:-0}"
 fi
@@ -59,9 +62,6 @@ SCRIPT
   cat > "${MOCK_BIN}/bash" <<'SCRIPT'
 #!/bin/bash
 printf 'bash %s\n' "$*" >> "$COMMAND_LOG"
-if [[ "$*" == "scripts/test-as-any-baseline.sh" ]]; then
-  exit "${MOCK_TEST_AS_ANY_STATUS:-0}"
-fi
 if [[ "$1" == "scripts/validate-bun-test-timings.sh" ]]; then
   exit "${MOCK_TIMING_STATUS:-0}"
 fi
@@ -104,7 +104,7 @@ teardown() {
   run env -u RUNNER_OS MOCK_UNAME=Linux PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  expected_log=$'git fetch --quiet origin main\ngit merge-base --is-ancestor origin/main HEAD\nbun run format:check\nbun run typecheck\nbun run lint\nbash scripts/test-as-any-baseline.sh\nbun scripts/generate-tool-definitions.ts --check\nbash scripts/all_fast_validate_checks.sh --only yaml,schema-copy-drift,bun-version-coherence,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,workflow-assertion-triggers,mkdocs-nav,docs-assets,env-var-docs,debug-tags,datetime-now-literal,lfs-pointers,lychee-offline --max-parallel 4\nbun test test/lint/\nbun run test:image:bun\nenv AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports bash scripts/test-ts.sh unit\nbash scripts/test-ts.sh unit\ngit diff --no-renames --name-only origin/main...HEAD --\ngit diff --no-renames --cached --name-only --diff-filter=ACMRD\ngit diff --no-renames --name-only --diff-filter=ACMRD\nenv BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR=scratch/timing-unit-reports bash scripts/validate-bun-test-timings.sh\nbash scripts/validate-bun-test-timings.sh'
+  expected_log=$'git fetch --quiet origin main\ngit merge-base --is-ancestor origin/main HEAD\nbun run format:check\nbun run typecheck\nbun run lint\nbun run typecheck:test\nbun scripts/generate-tool-definitions.ts --check\nbash scripts/all_fast_validate_checks.sh --only yaml,schema-copy-drift,bun-version-coherence,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,workflow-assertion-triggers,mkdocs-nav,docs-assets,env-var-docs,debug-tags,datetime-now-literal,lfs-pointers,lychee-offline --max-parallel 4\nbun test test/lint/\nbun run test:image:bun\nenv AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports bash scripts/test-ts.sh unit\nbash scripts/test-ts.sh unit\ngit diff --no-renames --name-only origin/main...HEAD --\ngit diff --no-renames --cached --name-only --diff-filter=ACMRD\ngit diff --no-renames --name-only --diff-filter=ACMRD\nenv BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR=scratch/timing-unit-reports bash scripts/validate-bun-test-timings.sh\nbash scripts/validate-bun-test-timings.sh'
   [ "$(grep -v '/scripts/ci/record-attestations.sh node ' "$COMMAND_LOG")" = "$expected_log" ] || {
     printf 'Expected:\n%s\nActual:\n%s\n' "$expected_log" "$(cat "$COMMAND_LOG")"
     return 1
@@ -132,7 +132,7 @@ SCRIPT
   [ "$(grep -n '^record node ' "$COMMAND_LOG" | cut -d: -f1)" -gt "$(grep -n '^env BUN_TEST_TIMING_BASE_REF=origin/main bash scripts/validate-bun-test-timings.sh' "$COMMAND_LOG" | tail -1 | cut -d: -f1)" ]
 }
 
-@test "test as-any ratchet runs once in default and changed modes" {
+@test "test typecheck runs once in default and changed modes" {
   for mode in default changed; do
     : > "$COMMAND_LOG"
     if [[ "$mode" == "changed" ]]; then
@@ -142,16 +142,16 @@ SCRIPT
     fi
 
     [ "$status" -eq 0 ]
-    [ "$(grep -c '^bash scripts/test-as-any-baseline.sh$' "$COMMAND_LOG")" -eq 1 ]
-    [[ "$output" == *"PASS"*"test as-any ratchet"* ]]
+    [ "$(grep -c '^bun run typecheck:test$' "$COMMAND_LOG")" -eq 1 ]
+    [[ "$output" == *"PASS"*"test typecheck"* ]]
   done
 }
 
-@test "test as-any ratchet failure stops later gates" {
-  run env -u RUNNER_OS MOCK_UNAME=Linux MOCK_TEST_AS_ANY_STATUS=1 PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+@test "test typecheck failure stops later gates" {
+  run env -u RUNNER_OS MOCK_UNAME=Linux MOCK_TEST_TYPECHECK_STATUS=1 PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"FAIL"*"test as-any ratchet"* ]]
+  [[ "$output" == *"FAIL"*"test typecheck"* ]]
   ! grep -F 'bun scripts/generate-tool-definitions.ts --check' "$COMMAND_LOG"
   ! grep -F 'bun test test/lint/' "$COMMAND_LOG"
 }

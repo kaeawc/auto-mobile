@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { generateKeyPairSync, verify } from "node:crypto";
+import { generateKeyPairSync, verify, type KeyObject } from "node:crypto";
 import {
   GitHubAppTokenProvider,
   RsaJwtSigner,
@@ -59,7 +59,7 @@ describe("GitHub App authentication", () => {
   );
 
   let pem: string;
-  let publicKey: ReturnType<typeof generateKeyPairSync>["publicKey"];
+  let publicKey: KeyObject;
   beforeAll(() => {
     // 512 bits is only a fast unit fixture, never an App production key.
     const keys = generateKeyPairSync("rsa", { modulusLength: 512 });

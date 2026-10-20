@@ -1,17 +1,22 @@
 import { ConnectionFailureRecord } from "./ConnectionFailureRecord";
 import { ConnectionLivenessMonitor } from "./ConnectionLivenessMonitor";
+import { DeviceServiceClientDelegates } from "./DeviceServiceClientDelegates";
+import { awaitRecovery, waitForConnection, waitForHandshake } from "./deviceServiceClientWaits";
 import {
-  awaitRecovery,
-  waitForConnection,
-  waitForHandshake,
-  waitForPendingRequests,
-} from "./deviceServiceClientWaits";
-import {
-  buildScreenshotBackoffScheduler,
-  forwardHierarchyToObservationStream,
-} from "./deviceServiceObservationStream";
+  ConnectionConfig,
+  DEFAULT_CONNECTION_CONFIG,
+  WebSocketFactory,
+  defaultWebSocketFactory,
+} from "./deviceServiceWebSocketFactory";
 import { protectRegisteredRequestSends } from "./protectRegisteredRequestSends";
 import { WebSocketHandshake } from "./WebSocketHandshake";
+export {
+  REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV,
+  type WebSocketFactory,
+  assertUnitTestRealWebSocketAllowed,
+  defaultWebSocketFactory,
+  rethrowRealCtrlProxyWebSocketInTestError,
+} from "./deviceServiceWebSocketFactory";
 /**
  * DeviceServiceClient - Abstract base class for device service WebSocket clients
  *
@@ -28,21 +33,30 @@ import { WebSocketHandshake } from "./WebSocketHandshake";
  * Platform-specific behavior is implemented by subclasses through abstract methods.
  */
 
-import type { BootedDevice, ViewHierarchyResult } from "../../models";
+/**
+ * DeviceServiceClient - Abstract base class for device service WebSocket clients
+ *
+ * This base class provides shared connection lifecycle management used by both
+ * CtrlProxyClient (Android) and CtrlProxyClient (iOS).
+ *
+ * Shared functionality:
+ * - WebSocket connection management
+ * - Auto-reconnection on disconnect
+ * - Periodic health checks
+ * - RequestManager integration for request/response correlation
+ * - Connection attempt tracking and cooldown
+ *
+ * Platform-specific behavior is implemented by subclasses through abstract methods.
+ */
+import type { BootedDevice } from "../../models";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
-import {
-  DefaultScreenshotBackoffScheduler,
-  type ScreenshotBackoffScheduler,
-  type ScreenshotCaptureResult,
-} from "./ScreenshotBackoffScheduler";
+import { type ScreenshotBackoffScheduler } from "./ScreenshotBackoffScheduler";
 
 import WebSocket from "ws";
-import { ENV } from "../../config/env";
 import { toActionableError } from "../../models/ActionableError";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 import { getAbortSignal } from "../../utils/AbortContext";
 import { exponentialBackoff } from "../../utils/Backoff";
-import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
 import { logger } from "../../utils/logger";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -55,113 +69,14 @@ import {
   type DeviceServiceClientConnectionTestHooks,
 } from "./DeviceServiceClientConnectionTestHooks";
 import { RealCtrlProxyWebSocketInTestError } from "./RealCtrlProxyWebSocketInTestError";
-import type { CtrlSocket, DelegateContext } from "./shared/types";
-
-/**
- * Factory function type for creating WebSocket instances.
- * Used for testing to inject fake WebSocket implementations.
- */
-export type WebSocketFactory = (url: string) => CtrlSocket;
-
-/**
- * Env flag a unit test sets (`1`/`true`/`yes`) to opt into a real WebSocket from
- * {@link defaultWebSocketFactory} under `bun test`. Prefer injecting a
- * `WebSocketFactory` instead; this exists for suites that must exercise the
- * default factory against a local fake server.
- */
-export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = ENV.ALLOW_REAL_CTRL_PROXY_WEBSOCKET.name;
-
-function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
-  const normalized = env[REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV]?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes";
-}
-
-/** Rethrow {@link RealCtrlProxyWebSocketInTestError} from a connect-path catch that would otherwise degrade it. */
-export function rethrowRealCtrlProxyWebSocketInTestError(error: unknown): void {
-  if (error instanceof RealCtrlProxyWebSocketInTestError) {
-    throw error;
-  }
-}
-
-/**
- * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
- * CtrlProxy socket. On a developer machine with an emulator or simulator running,
- * adb/port forwards make `ws://127.0.0.1:<port>/ws` a live device, so an
- * unstubbed client method sent real taps from a unit test (#10470). Like the
- * real-DB guard (#3067) it needs Bun's test context signal (`NODE_ENV=test`),
- * but it also requires this process to be the `bun test` runner itself (see
- * {@link isBunTestRunnerProcess}), so CLI/daemon children of an on-device
- * integration test are never armed. It fires only on the default path.
- * Injecting a `WebSocketFactory` (or setting
- * {@link REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}) opts out.
- */
-export function assertUnitTestRealWebSocketAllowed(
-  url: string,
-  env: NodeJS.ProcessEnv = process.env,
-  entrypoint: string | undefined = currentProcessEntrypoint(),
-): void {
-  if (!isBunTestRunnerProcess(env, entrypoint) || isRealCtrlProxyWebSocketOptInEnabled(env)) {
-    return;
-  }
-  throw new RealCtrlProxyWebSocketInTestError(
-    `Unit test tried to open a real CtrlProxy WebSocket to ${url}. With an ` +
-      "emulator or simulator running this reaches a live device (issue #10470). " +
-      "Stub the client method the code under test calls (e.g. " +
-      "AndroidCtrlProxyClient.prototype.requestTapCoordinates or the matching " +
-      "IOSCtrlProxyClient method), inject a fake WebSocketFactory, or, for a " +
-      `suite that runs its own local fake server, set ${REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}=1.`,
-  );
-}
-
-/**
- * Default WebSocket factory that creates real WebSocket instances. Guarded under
- * `bun test`; see {@link assertUnitTestRealWebSocketAllowed}.
- */
-export const defaultWebSocketFactory: WebSocketFactory = (url: string) => {
-  assertUnitTestRealWebSocketAllowed(url);
-  return new WebSocket(url);
-};
-
-/**
- * Configuration for connection behavior.
- */
-interface ConnectionConfig {
-  /** Maximum number of connection attempts before entering cooldown */
-  maxConnectionAttempts: number;
-  /** Time to wait after max attempts before allowing new attempts (ms) */
-  connectionResetMs: number;
-  /** Delay before attempting auto-reconnection (ms) */
-  reconnectDelayMs: number;
-  /** Interval between health checks (ms) */
-  healthCheckIntervalMs: number;
-  /** WebSocket connection timeout (ms) */
-  connectionTimeoutMs: number;
-}
-
-/**
- * Default connection configuration.
- */
-const DEFAULT_CONNECTION_CONFIG: ConnectionConfig = {
-  maxConnectionAttempts: 3,
-  connectionResetMs: 10000,
-  reconnectDelayMs: 2000,
-  healthCheckIntervalMs: 30000,
-  connectionTimeoutMs: 5000,
-};
+import type { CtrlSocket } from "./shared/types";
 
 /**
  * Abstract base class for device service WebSocket clients.
  *
  * Provides shared connection lifecycle management for both Android and iOS clients.
  */
-export abstract class DeviceServiceClient {
-  protected async waitForPendingRequests(timeoutMs: number, signal?: AbortSignal): Promise<void> {
-    return waitForPendingRequests(
-      { timer: this.timer, requestManager: this.requestManager },
-      timeoutMs,
-      signal,
-    );
-  }
+export abstract class DeviceServiceClient extends DeviceServiceClientDelegates {
   // Connection state
   protected ws: CtrlSocket | null = null;
 
@@ -252,6 +167,7 @@ export abstract class DeviceServiceClient {
     config: Partial<ConnectionConfig> = {},
     retryExecutor: RetryExecutor = defaultRetryExecutor,
   ) {
+    super();
     this.timer = timer;
     this.webSocketFactory = webSocketFactory;
     this.config = { ...DEFAULT_CONNECTION_CONFIG, ...config };
@@ -952,78 +868,6 @@ export abstract class DeviceServiceClient {
   /** A silent request timeout whose confirmation ping also went unanswered. */
   protected onConfirmedRequestStall(_request: TimedOutRequest): void {}
 
-  // ===========================================================================
-  // Utility methods for subclasses
-  // ===========================================================================
-
-  /**
-   * Get the RequestManager instance for use by subclasses.
-   */
-  protected getRequestManager(): RequestManager {
-    return this.requestManager;
-  }
-
-  /**
-   * Get the Timer instance for use by subclasses.
-   */
-  protected getTimer(): Timer {
-    return this.timer;
-  }
-
-  // ===========================================================================
-  // Delegate context + lazy delegate scaffolding (shared implementation)
-  // ===========================================================================
-
-  /**
-   * Platform-specific additions to the base {@link DelegateContext}.
-   *
-   * The base builds the fields common to both platforms; a subclass overrides
-   * this hook to contribute the fields only it wires (e.g. iOS's command-
-   * capability accessors). The default contributes nothing, so a platform whose
-   * context is exactly the shared set (Android) needs no override.
-   */
-  protected extraDelegateContextFields(): Partial<DelegateContext> {
-    return {};
-  }
-
-  /**
-   * Build the base {@link DelegateContext} handed to every delegate.
-   *
-   * The shared fields are wired here from base state; platform-specific fields
-   * come from {@link extraDelegateContextFields}. Subclasses that need an
-   * extended context (e.g. a HierarchyDelegateContext) spread the result of this
-   * method and add their own fields.
-   */
-  protected createDelegateContext(): DelegateContext {
-    return {
-      getWebSocket: () => this.ws,
-      requestManager: this.requestManager,
-      timer: this.timer,
-      ensureConnected: (perf) => this.ensureConnected(perf),
-      cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),
-      ...this.extraDelegateContextFields(),
-    };
-  }
-
-  /**
-   * Lazily construct and cache a delegate, replacing the copy-pasted
-   * `if (!this._x) { this._x = new X(...); } return this._x;` getter body.
-   *
-   * The cache slot stays a subclass field (accessed through the get/set pair)
-   * so existing direct-field reads keep working and the singleton semantics are
-   * unchanged: the factory runs at most once and the same instance is returned
-   * on every subsequent access.
-   */
-  protected lazyDelegate<T>(get: () => T | null, set: (value: T) => void, factory: () => T): T {
-    const existing = get();
-    if (existing) {
-      return existing;
-    }
-    const created = factory();
-    set(created);
-    return created;
-  }
-
   /**
    * Release this client's binding to a session that has ended. If still bound
    * to that session, dispose its cached hierarchy detector before clearing it.
@@ -1159,35 +1003,6 @@ export abstract class DeviceServiceClient {
       timeoutMs,
       signal,
     );
-  }
-  protected forwardHierarchyToObservationStream(
-    hierarchy: ViewHierarchyResult,
-    frameContext: string | undefined,
-    hooks: {
-      logTag: string;
-      prepare?: () => void;
-      recordForwarded: (captureSequence: number) => void;
-    },
-  ): void {
-    return forwardHierarchyToObservationStream(
-      this.device.deviceId,
-      hierarchy,
-      frameContext,
-      hooks,
-    );
-  }
-  protected createScreenshotBackoffScheduler(
-    capture: () => Promise<ScreenshotCaptureResult>,
-    emit: (result: ScreenshotCaptureResult) => void,
-    options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
-  ): ScreenshotBackoffScheduler {
-    return (this.screenshotBackoffScheduler ??= buildScreenshotBackoffScheduler(
-      this.device.deviceId,
-      this.timer,
-      capture,
-      emit,
-      options,
-    ));
   }
 
   private createWebSocketHandshake(): WebSocketHandshake {

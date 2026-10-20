@@ -16,5 +16,5 @@ test("prototype suspension uses the shared MCP and socket typed refusal fields",
     error: error.message,
     ...fields,
   });
-  expect(mcpRequestFailureDetails(error)).toMatchObject(fields!);
+  expect(mcpRequestFailureDetails(error, undefined)).toMatchObject(fields!);
 });

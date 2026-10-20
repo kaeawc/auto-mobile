@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -153,7 +154,10 @@ describe("spilled output-schema residue contract (#6950)", () => {
   )(
     "%s preserves every required top-level output field after a spill",
     (_name, tool, requiredKeys) => {
-      const shape = (tool.outputSchema as ObjectOutputSchema).shape;
+      if (!(tool.outputSchema instanceof z.ZodObject)) {
+        throw new Error("Expected object output schema");
+      }
+      const shape = tool.outputSchema.shape;
       const payload = Object.fromEntries(
         requiredKeys.map((key) => [key, minimalFieldValue(shape[key])]),
       );

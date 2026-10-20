@@ -18,6 +18,7 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 
 // #9976: a "not installed" verdict read from the installed-apps cache is confirmed
 // with one live `pm list packages --user N` before launchApp fails.
@@ -140,6 +141,31 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       }),
     ).rejects.toThrow(`Could not determine whether ${packageName} is installed`);
     expect(hasAmStart()).toBe(false);
+  });
+
+  test("preserves a transport refusal during live install confirmation", async () => {
+    const error = new AdbDeviceTransportUnavailableError(deviceId, new Error("offline"));
+    fakeAdb.setCommandError(listCommand, error);
+
+    await expect(
+      createLaunchApp([]).execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).rejects.toBe(error);
+    expect(hasAmStart()).toBe(false);
+  });
+
+  test("preserves a transport refusal when confirming install after a launch failure", async () => {
+    fakeAdb.setCommandResponse(
+      "shell am start --user 0",
+      createExecResult("Error: Activity not started, unable to resolve Intent", ""),
+    );
+    const error = new AdbDeviceTransportUnavailableError(deviceId, new Error("offline"));
+    fakeAdb.setCommandError(listCommand, error);
+
+    await expect(
+      createLaunchApp([packageName]).execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).rejects.toBe(error);
+    expect(listCommandCount()).toBe(1);
+    expect(fakeAdb.getExecutedCommands().some((cmd) => cmd.includes("shell monkey"))).toBe(false);
   });
 
   // #10192: the mirror of the case above. The cache still lists an app that was removed

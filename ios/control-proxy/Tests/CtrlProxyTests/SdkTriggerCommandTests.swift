@@ -3,8 +3,6 @@ import AutoMobileSdkWire
 import Foundation
 import XCTest
 
-// swiftlint:disable force_unwrapping
-
 @MainActor
 final class SdkTriggerCommandTests: XCTestCase {
     private static let triggerInfo = SdkHierarchyServerInfo(
@@ -106,11 +104,11 @@ final class SdkTriggerCommandTests: XCTestCase {
         XCTAssertEqual(sent, ["module": "callkit", "trigger": "hold", "payload": [String: Any]()])
     }
 
-    func testClientPostsToTriggerRouteAndDecodesStructuredErrors() async {
+    func testClientPostsToTriggerRouteAndDecodesStructuredErrors() async throws {
         let body = Data(#"{"error":"unknown_trigger","supportedTriggers":["call","hold"]}"#.utf8)
         let transport = StubHTTPTransport(status: 400, body: body)
-        let client = SdkHierarchyClient(
-            baseURL: URL(string: "http://localhost:8766")!, transport: transport, healthTransport: transport
+        let client = try SdkHierarchyClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:8766")), transport: transport, healthTransport: transport
         )
         let reply = await client.sendTrigger(Data("{}".utf8))
         XCTAssertEqual(
@@ -120,8 +118,8 @@ final class SdkTriggerCommandTests: XCTestCase {
         XCTAssertEqual(transport.recordedRequests.first?.url?.path, "/trigger")
         XCTAssertEqual(transport.recordedRequests.first?.httpMethod, "POST")
 
-        let unreachable = SdkHierarchyClient(
-            baseURL: URL(string: "http://localhost:8766")!,
+        let unreachable = try SdkHierarchyClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
             transport: StubHTTPTransport([.transportError]),
             healthTransport: StubHTTPTransport([.transportError])
         )

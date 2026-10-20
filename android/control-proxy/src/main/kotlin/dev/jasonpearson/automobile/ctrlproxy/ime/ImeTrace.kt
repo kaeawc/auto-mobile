@@ -35,17 +35,13 @@ internal class ImeTraceRecorder(
 
   private fun valueToken(value: Any): String =
     when (value) {
-      is Number ->
-        if (
-          value is Byte ||
-            value is Short ||
-            value is Int ||
-            value is Long ||
-            value is Float ||
-            value is Double
-        )
-          token(value.toString())
-        else "invalid"
+      is Byte,
+      is Short,
+      is Int,
+      is Long,
+      is Float,
+      is Double -> token(value.toString())
+      is Number -> "invalid"
       is Boolean -> value.toString()
       is String -> token(value)
       is CharSequence -> token(value.toString())

@@ -5,7 +5,7 @@ set -euo pipefail
 HADOLINT_VERSION="2.12.0" # Change this to the desired version
 
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
-# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+# shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Install hadolint on macOS

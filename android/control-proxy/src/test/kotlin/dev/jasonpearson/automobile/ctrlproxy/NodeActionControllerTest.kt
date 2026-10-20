@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ClickableSpan
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
@@ -42,6 +45,8 @@ class NodeActionControllerTest {
 
   private class FakeHost(private val scope: CoroutineScope) : NodeActionController.Host {
     var node: AccessibilityNodeInfo? = null
+    var root: AccessibilityNodeInfo? = null
+    var view: View? = null
     val events = mutableListOf<String>()
     val results = mutableListOf<Result>()
 
@@ -49,7 +54,7 @@ class NodeActionControllerTest {
       scope.launch { block() }
     }
 
-    override fun activeWindowRoot(): AccessibilityNodeInfo? = null
+    override fun activeWindowRoot(): AccessibilityNodeInfo? = root
 
     override fun findNodeInDisplayWindows(
       find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
@@ -57,7 +62,7 @@ class NodeActionControllerTest {
 
     override fun screenDimensions(displayId: Int): ScreenDimensions? = null
 
-    override fun createView(): View = error("not used")
+    override fun createView(): View = checkNotNull(view)
 
     override suspend fun publishSettledHierarchy() {
       events += "publish"
@@ -204,5 +209,29 @@ class NodeActionControllerTest {
       "Semantic accessibility links require Android API 26 or later",
       host.results.single().error,
     )
+  }
+
+  @Test
+  fun `a plain runtime span failure preserves the typed link result`() = runTest {
+    val (controller, host) = setup()
+    val span = mockk<ClickableSpan>()
+    every { span.onClick(any()) } throws RuntimeException("span failed")
+    val text =
+      SpannableString("Terms").apply {
+        setSpan(span, 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+      }
+    host.root =
+      mockk<AccessibilityNodeInfo>(relaxed = true).also {
+        every { it.text } returns text
+      }
+    host.view = mockk()
+
+    controller.performAccessibilityLinkActivation("r1", "Terms", 0, null)
+    advanceUntilIdle()
+
+    val result = host.results.single()
+    assertEquals("activate_accessibility_link", result.action)
+    assertFalse(result.success)
+    assertEquals("Semantic link activation failed: span failed", result.error)
   }
 }

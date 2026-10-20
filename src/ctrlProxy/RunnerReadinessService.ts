@@ -1,205 +1,60 @@
+import {
+  READINESS_RETRY_DELAY_MS,
+  CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS,
+  RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
+  CTRL_PROXY_REBIND_RECOVERY_POLL_MS,
+  CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS,
+  CTRL_PROXY_RESTART_MIN_FAILED_PROBES,
+  IOS_CTRL_PROXY_MINIMUM_IOS_VERSION,
+} from "./RunnerReadinessPolicy";
+export {
+  RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
+  IOS_CTRL_PROXY_MINIMUM_IOS_VERSION,
+} from "./RunnerReadinessPolicy";
+import type { BootedDevice } from "../models";
+import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { errorMessage } from "../utils/describeUnknownError";
-import type { TapCoordinatesRequest } from "../utils/interfaces/TapCoordinatesRequest";
-import type { BootedDevice, DeviceLockState } from "../models";
-import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
-import { CtrlProxyInspectionError } from "./CtrlProxyManager";
-import { compareIosVersions } from "../utils/ios-cmdline-tools/iosVersion";
-import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
-import type { Timer } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,
   type DeviceReadinessLockRelease,
 } from "../utils/deviceReadinessLock";
-import type { PerformanceTracker } from "../utils/PerformanceTracker";
-import type { AccessibilityHierarchyRequest } from "../utils/interfaces/DeviceService";
-import type { ProxySetupResult } from "../utils/interfaces/ProxyManager";
-import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
+import { compareIosVersions } from "../utils/ios-cmdline-tools/iosVersion";
 import { logger } from "../utils/logger";
-import { RunnerReadinessError } from "./RunnerReadinessError";
-import { SystemUiAnrRecoveryRequiredError } from "./SystemUiAnrRecoveryRequiredError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import { CtrlProxyInspectionError } from "./CtrlProxyManager";
+import { READINESS_PROBE_TIMEOUT_MS, ReadinessPhaseRunner } from "./ReadinessPhaseRunner";
 import type {
   AndroidCompatibilityResult,
   ReadinessAttemptContext,
   RunnerReadinessPhase,
   RunnerReadinessRequest,
 } from "./RunnerReadinessAttemptContext";
-import { READINESS_PROBE_TIMEOUT_MS, ReadinessPhaseRunner } from "./ReadinessPhaseRunner";
+import {
+  ReadinessAndroidManager,
+  ReadinessClient,
+  ReadinessIosClient,
+  ReadinessIosManager,
+  RunnerReadinessDependencies,
+} from "./RunnerReadinessDependencies";
+import { RunnerReadinessError } from "./RunnerReadinessError";
 import { SYSTEM_UI_ANR_RECOVERY_POLL_MS, SystemUiAnrRecovery } from "./SystemUiAnrRecovery";
+import { SystemUiAnrRecoveryRequiredError } from "./SystemUiAnrRecoveryRequiredError";
+import { isTerminalLeaseConflict } from "./readinessLeaseConflict";
 import { normalizeDiagnostic } from "./runnerReadinessDiagnosticText";
-
+export type {
+  AndroidFrameworkReadinessResult,
+  AndroidRunnerConnectDiagnostic,
+  AndroidRunnerHealthDiagnostic,
+  ReadinessAndroidManager,
+  ReadinessClient,
+  ReadinessIosClient,
+  ReadinessIosManager,
+  RunnerReadinessDependencies,
+} from "./RunnerReadinessDependencies";
 export { normalizeDiagnostic, RunnerReadinessError, SystemUiAnrRecoveryRequiredError };
 export type { AndroidCompatibilityResult, RunnerReadinessPhase, RunnerReadinessRequest };
-
-const READINESS_RETRY_DELAY_MS = 250;
-const CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS = 5_000;
-export const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
-const CTRL_PROXY_REBIND_RECOVERY_POLL_MS = 1_000;
-/**
- * Minimum time to give a just-rebound accessibility service before escalating
- * to a full process restart (issue #7533 follow-up). A freshly re-bound
- * service on a loaded emulator can take well over a couple of seconds to
- * serve its first hierarchy; without this grace period the 1s rebind-recovery
- * cooldown alone let one slow-but-healthy probe (~2.3s after the rebind, once
- * the probe timeout is included) force-stop the service that had just been
- * repaired.
- */
-const CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS = 5_000;
-/**
- * Minimum number of consecutive failed health probes since the last rebind
- * before escalating to a full process restart (issue #7533 follow-up).
- * Pairs with the grace period above so a single unlucky probe miss cannot
- * trigger a restart on its own.
- */
-const CTRL_PROXY_RESTART_MIN_FAILED_PROBES = 2;
-
-// Keep this aligned with ios/control-proxy/project.yml. The Swift rewrite uses
-// iOS-17-only APIs, so trying to launch it on an older runtime can never make
-// the runner healthy and must fail before setup/restart begins.
-export const IOS_CTRL_PROXY_MINIMUM_IOS_VERSION = "17.0";
-
-export interface ReadinessAndroidManager {
-  isInstalled(signal?: AbortSignal): Promise<boolean>;
-  isEnabled(signal?: AbortSignal, options?: { bypassCache?: boolean }): Promise<boolean>;
-  /** Returns whether an unhealthy CtrlProxy accessibility service was rebound. */
-  rebindIfUnhealthy?(): Promise<boolean>;
-  /**
-   * Force-stop and re-enable CtrlProxy unconditionally, for a service whose
-   * accessibility binding is already healthy but which still cannot produce a
-   * hierarchy (issue #7533) — the Android counterpart of
-   * {@link ReadinessIosManager.forceRestart}. Returns whether a restart was
-   * attempted (false when the device is offline or missing).
-   */
-  forceRestartProcess?(): Promise<boolean>;
-  isVersionCompatible(): Promise<boolean>;
-  enable(): Promise<void>;
-  ensureCompatibleVersion(
-    options?: {
-      allowDownloadWhenInstalled?: boolean;
-      bypassVersionCheckCache?: boolean;
-    },
-    signal?: AbortSignal,
-  ): Promise<AndroidCompatibilityResult>;
-  setup(
-    force?: boolean,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<ProxySetupResult>;
-  resetSetupState(): void;
-}
-
-export interface ReadinessIosManager {
-  isInstalled(): Promise<boolean>;
-  resetSetupState(): void;
-  forceRestart(options?: {
-    signal?: AbortSignal;
-    minimumHealthPollDurationMs?: number;
-  }): Promise<void>;
-  start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void>;
-  setup(
-    force?: boolean,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    minimumHealthPollDurationMs?: number,
-  ): Promise<ProxySetupResult>;
-  getServicePort(): number;
-}
-
-export interface ReadinessClient {
-  beginReadinessHold?(): () => void;
-  isClosed?(): boolean;
-  getForwardFailureCause?(): string | undefined;
-  isConnected(): boolean;
-  waitForConnection(maxAttempts?: number, delayMs?: number): Promise<boolean>;
-  verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;
-  /**
-   * The most recent connect-attempt failure message, when the client tracks
-   * one (issue #6260) — e.g. "Another AutoMobile process (PID N) owns
-   * CtrlProxy forwarding...". Used to replace a generic "runner did not
-   * become responsive" failure with the real, actionable cause when one is
-   * known, instead of leaving it stuck at WARN in the daemon log where the
-   * caller never sees it.
-   */
-  getLastConnectionFailureMessage?(): string | undefined;
-  /**
-   * Whether {@link getLastConnectionFailureMessage}'s message describes the
-   * CtrlProxy forwarding-lease conflict specifically (issue #6260 PRRT
-   * ft82e) — another AutoMobile process (typically a stale/orphaned daemon)
-   * already owns forwarding for this device. Every OTHER connect failure
-   * (ECONNREFUSED, a timeout, ...) must fall through to the existing
-   * device diagnostics below instead of this generic transport text, so a
-   * runner unavailable because its user is locked or still booting keeps
-   * surfacing `primaryUserStartState`/`deviceLock`, not raw transport text.
-   */
-  isLastConnectionFailureForwardingLeaseConflict?(): boolean;
-  /** Whether that conflict is a time-based refusal worth retrying within budget (#10485). */
-  isLastConnectionFailureTransientLeaseConflict?(): boolean;
-  /**
-   * Clear the client's connection-attempt budget and cooldown clock (issue
-   * #7538). Called after {@link ReadinessAndroidManager.rebindIfUnhealthy}
-   * actually rebound the accessibility service, so the next
-   * `waitForConnection` dials immediately instead of waiting out a cooldown
-   * recorded before the rebind. Optional so fakes that never exercise the
-   * cooldown gate need not implement it.
-   */
-  resetConnectionBudget?(): void;
-  getAccessibilityHierarchy?(
-    queryOptions?: undefined,
-    request?: Pick<
-      AccessibilityHierarchyRequest,
-      "skipWaitForFresh" | "minTimestamp" | "disableAllFiltering" | "signal" | "timeoutMs"
-    >,
-  ): Promise<ViewHierarchyResult | null>;
-  requestTapCoordinates?(
-    request: TapCoordinatesRequest,
-  ): Promise<{ success: boolean; error?: string }>;
-}
-
-export interface ReadinessIosClient extends ReadinessClient {
-  /** Connect once without invoking the client's automatic CtrlProxy setup path. */
-  connectWithoutSetup(signal?: AbortSignal): Promise<boolean>;
-}
-
-export interface AndroidRunnerConnectDiagnostic {
-  deviceLock: DeviceLockState | null;
-  primaryUserStartState?: string;
-}
-
-export interface AndroidRunnerHealthDiagnostic {
-  sysBootCompleted: string;
-  adbDevices: string;
-  emulatorQemuHealth: string;
-}
-
-export interface AndroidFrameworkReadinessResult {
-  ready: boolean;
-  unavailableResources?: string[];
-  diagnostic?: string;
-}
-
-export interface RunnerReadinessDependencies {
-  timer: Timer;
-  getAndroidFrameworkReadiness?(
-    device: BootedDevice,
-    signal: AbortSignal,
-    timeoutMs: number,
-  ): Promise<AndroidFrameworkReadinessResult>;
-  getAndroidManager(device: BootedDevice): ReadinessAndroidManager;
-  getAndroidClient(device: BootedDevice): ReadinessClient;
-  getIosManager(device: BootedDevice): ReadinessIosManager;
-  getIosClient(device: BootedDevice, port: number): ReadinessIosClient;
-  checkIosOverride(): Promise<{ present: boolean; usable: boolean; reason?: string }>;
-  awaitIosStartupMaintenance(): Promise<void>;
-  getAndroidRunnerConnectDiagnostic?(
-    device: BootedDevice,
-    signal: AbortSignal,
-  ): Promise<AndroidRunnerConnectDiagnostic>;
-  getAndroidRunnerHealthDiagnostic?(
-    device: BootedDevice,
-    signal: AbortSignal,
-  ): Promise<AndroidRunnerHealthDiagnostic>;
-}
 
 export class RunnerReadinessService {
   private readonly phases: ReadinessPhaseRunner;
@@ -1160,17 +1015,4 @@ export class RunnerReadinessService {
       return undefined;
     }
   }
-}
-
-/**
- * The owner kept the lease for a live session, stream, or in-flight work
- * (#10497); retrying to the deadline cannot change that, so readiness fails
- * fast (#10485). A time-based refusal (recent use, busy owner) is retried
- * within the existing readiness budget instead.
- */
-function isTerminalLeaseConflict(client: ReadinessClient): boolean {
-  return (
-    (client.isLastConnectionFailureForwardingLeaseConflict?.() ?? false) &&
-    !(client.isLastConnectionFailureTransientLeaseConflict?.() ?? false)
-  );
 }

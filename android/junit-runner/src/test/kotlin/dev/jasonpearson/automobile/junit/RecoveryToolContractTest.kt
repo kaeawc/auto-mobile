@@ -69,7 +69,7 @@ class RecoveryToolContractTest {
 
   /** One or more realistic invocations per agent tool, keyed by the agent-facing tool name. */
   private fun cases(client: AutoMobileAgent.MCPClient): Map<String, List<suspend () -> Unit>> {
-    return mapOf(
+    return mapOf<String, List<suspend () -> Unit>>(
       "observe" to
         listOf(
           { AutoMobileAgent.ObserveTool(client).execute(AutoMobileAgent.ObserveTool.Args()) },
@@ -95,6 +95,30 @@ class RecoveryToolContractTest {
               .execute(AutoMobileAgent.TapOnTool.Args(text = "OK", action = "longPress"))
           },
         ),
+      "waitFor" to
+        listOf(
+          {
+            // The capturing client's observe result contains the text, so the first poll matches.
+            AutoMobileAgent.WaitForTool(client)
+              .execute(AutoMobileAgent.WaitForTool.Args(text = "Settings"))
+          },
+        ),
+      "goBack" to
+        listOf({ AutoMobileAgent.GoBackTool(client).execute(AutoMobileAgent.GoBackTool.Args()) }),
+      "pressButton" to
+        listOf(
+          {
+            AutoMobileAgent.PressButtonTool(client)
+              .execute(AutoMobileAgent.PressButtonTool.Args("home"))
+          },
+        ),
+    ) + textAndNavigationCases(client) + appAndPressCases(client)
+  }
+
+  private fun textAndNavigationCases(
+    client: AutoMobileAgent.MCPClient,
+  ): Map<String, List<suspend () -> Unit>> =
+    mapOf(
       "typeText" to
         listOf(
           {
@@ -147,23 +171,12 @@ class RecoveryToolContractTest {
               )
           },
         ),
-      "waitFor" to
-        listOf(
-          {
-            // The capturing client's observe result contains the text, so the first poll matches.
-            AutoMobileAgent.WaitForTool(client)
-              .execute(AutoMobileAgent.WaitForTool.Args(text = "Settings"))
-          },
-        ),
-      "goBack" to
-        listOf({ AutoMobileAgent.GoBackTool(client).execute(AutoMobileAgent.GoBackTool.Args()) }),
-      "pressButton" to
-        listOf(
-          {
-            AutoMobileAgent.PressButtonTool(client)
-              .execute(AutoMobileAgent.PressButtonTool.Args("home"))
-          },
-        ),
+    )
+
+  private fun appAndPressCases(
+    client: AutoMobileAgent.MCPClient,
+  ): Map<String, List<suspend () -> Unit>> =
+    mapOf(
       "launchApp" to
         listOf(
           {
@@ -196,7 +209,6 @@ class RecoveryToolContractTest {
           },
         ),
     )
-  }
 
   @Test
   fun `every agent tool has a contract case`() {

@@ -291,25 +291,31 @@ internal class HierarchyController(
         viewHierarchyExtractor.extractFromAllWindows(
           allWindows,
           rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          host.occlusionEnabled(),
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = null,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              occlusionEnabled = host.occlusionEnabled(),
+              snapshotOptions = snapshotOptions,
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
           rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = null,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              snapshotOptions = snapshotOptions,
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       }
 
@@ -410,17 +416,14 @@ internal class HierarchyController(
         },
       )
     try {
-      val hierarchy =
-        try {
-          debouncer.extractImmediately(
-            skipFlowEmit = true,
-            disableAllFiltering = disableAllFiltering,
-            snapshotOptions = cancellableOptions,
-          )
-        } catch (e: CancellationException) {
-          // Command cancellation must unwind; an independently cancelled snapshot returns null.
-          throw e
-        } catch (e: Exception) {
+      val hierarchy = hierarchyExtractionResult {
+        debouncer.extractImmediately(
+          skipFlowEmit = true,
+          disableAllFiltering = disableAllFiltering,
+          snapshotOptions = cancellableOptions,
+        )
+      }
+        .getOrElse { e ->
           Log.e(TAG, "Error extracting WebSocket hierarchy for requestId=$requestId", e)
           if (requestId == null) throw e
           commandJob?.let { it.ensureActive() }
@@ -433,6 +436,7 @@ internal class HierarchyController(
           // The extraction failure is settled here, so neither the queue nor scope guard replies.
           return
         }
+
       if (hierarchy != null) {
         // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
         // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
@@ -469,6 +473,19 @@ internal class HierarchyController(
     }
   }
 
+  private inline fun <T> hierarchyExtractionResult(block: () -> T): Result<T> =
+    try {
+      Result.success(block())
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: IllegalArgumentException) {
+      Result.failure(e)
+    } catch (e: IllegalStateException) {
+      Result.failure(e)
+    } catch (e: SecurityException) {
+      Result.failure(e)
+    }
+
   /**
    * Writes the hierarchy to a file for synchronous access. Callers that already serialized the tree
    * for the wire frame pass that exact compact string via [serialized] so a single change is never
@@ -487,7 +504,11 @@ internal class HierarchyController(
         output.write(jsonBytes)
         output.flush()
       }
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      Log.e(TAG, "Error writing hierarchy to file: $filename", e)
+    } catch (e: SecurityException) {
+      Log.e(TAG, "Error writing hierarchy to file: $filename", e)
+    } catch (e: IllegalArgumentException) {
       Log.e(TAG, "Error writing hierarchy to file: $filename", e)
     }
   }
@@ -527,23 +548,29 @@ internal class HierarchyController(
         viewHierarchyExtractor.extractFromAllWindows(
           allWindows,
           rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          host.occlusionEnabled(),
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = textFilter,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              occlusionEnabled = host.occlusionEnabled(),
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
           rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          options =
+            HierarchyExtractionOptions(
+              textFilter = textFilter,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
         )
       }
     val rotation =
@@ -652,7 +679,13 @@ internal class HierarchyController(
     } catch (e: CancellationException) {
       // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
       throw e
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      Log.e(TAG, "Error broadcasting hierarchy update", e)
+    } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "Error broadcasting hierarchy update", e)
+    } catch (e: IllegalStateException) {
+      Log.e(TAG, "Error broadcasting hierarchy update", e)
+    } catch (e: SecurityException) {
       Log.e(TAG, "Error broadcasting hierarchy update", e)
     }
   }
@@ -682,9 +715,10 @@ internal class HierarchyController(
       if (deletedCount > 0) {
         Log.i(TAG, "Cleaned up $deletedCount old UUID hierarchy files")
       }
-    } catch (e: Exception) {
+    } catch (e: SecurityException) {
       Log.e(TAG, "Error cleaning up UUID hierarchy files", e)
       // Don't let cleanup errors prevent the main operation
+
     }
   }
 }

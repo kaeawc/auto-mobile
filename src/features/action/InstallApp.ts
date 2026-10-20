@@ -35,10 +35,6 @@ import { withAndroidPackageMutationLock } from "../../utils/androidPackageMutati
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import {
-  resolveIosDowngradeRecoveryBackend,
-  resolveIosInstallBackend,
-} from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
@@ -48,9 +44,21 @@ import { normalizeSignerSet } from "../../utils/signingIdentity";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { InspectPackageSigning } from "../observe/InspectPackageSigning";
-import type { IosPhysicalAppLister } from "../observe/ListInstalledApps";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidInstallPackageTools } from "./AndroidInstallPackageTools";
+import {
+  type AndroidInstallAttempt,
+  type AndroidInstallRecovery,
+  type AndroidInstallStepOptions,
+  type AndroidPackageUsers,
+  type AndroidRestoreProgress,
+  type DeviceAppInstaller,
+  type InstallAppCall,
+  type InstallAppOptions,
+  type InstallGuardOptions,
+  installStepOptions,
+} from "./InstallAppTypes";
 import { IosAppInstaller } from "./IosAppInstaller";
 import { checkSigningIdentity, type PackageSigningInspector } from "./SigningIdentityGuard";
 import {
@@ -58,10 +66,15 @@ import {
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
 import { diffInstalledPackages, extractInstallErrorText } from "./installAppParsing";
+export {
+  type DeviceAppInstaller,
+  type InstallAppCall,
+  type InstallAppOptions,
+  type InstallGuardOptions,
+} from "./InstallAppTypes";
 
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
-import type { ActionCall } from "./ActionCall";
 import {
   ANDROID_INSTALL_OUTLIVED_WARNING,
   indeterminateAndroidInstallMessage,
@@ -75,90 +88,6 @@ import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 
 export { IOS_INSTALL_VERIFY_ATTEMPTS, IOS_PHYSICAL_VERIFY_ATTEMPTS } from "./IosAppInstaller";
-
-interface AndroidInstallAttempt {
-  success: boolean;
-  output: string;
-  /** Only the command's own stdout/stderr; never the echoed command line or APK path. */
-  diagnostics: string;
-  threw: boolean;
-  /** The adb call hit its step budget: the device-side install may still commit. */
-  timedOut?: boolean;
-  error?: unknown;
-}
-
-interface AndroidInstallStepOptions {
-  signal?: AbortSignal;
-  /** False refuses the uninstall-and-reinstall downgrade recovery. Default true. */
-  allowDestructiveRecovery?: boolean;
-}
-
-function installStepOptions(
-  guard: InstallGuardOptions | undefined,
-  signal: AbortSignal | undefined,
-): AndroidInstallStepOptions {
-  return { signal, allowDestructiveRecovery: guard?.allowDestructiveRecovery !== false };
-}
-
-interface AndroidInstallRecovery {
-  installAttempt: AndroidInstallAttempt;
-  warning?: string;
-  /** Downgrade recovery uninstalled the old copy, so the reinstall is effectively fresh. */
-  removedPriorCopy?: boolean;
-}
-
-interface AndroidPackageUsers {
-  installedUserIds: number[];
-  warnings: string[];
-}
-
-interface AndroidRestoreProgress {
-  restoredUserIds: number[];
-  unconfirmedUserIds: number[];
-  warnings: string[];
-}
-
-export interface DeviceAppInstaller {
-  installApp(deviceUdid: string, artifactPath: string): Promise<void>;
-}
-
-export interface InstallAppOptions {
-  hostExecutor?: HostCommandExecutor;
-  buildToolsLocator?: AndroidBuildToolsLocator;
-  performanceTrackerFactory?: () => PerformanceTracker;
-  simctl?: Pick<SimCtlClient, "installApp" | "listAppsOrThrow" | "terminateApp" | "uninstallApp">;
-  deviceAppInstaller?: DeviceAppInstaller;
-  plist?: PlistReader;
-  installedAppsRepository?: InstalledAppsStore;
-  physicalAppLister?: IosPhysicalAppLister;
-  timer?: Timer;
-  iosInstallBackendResolver?: typeof resolveIosInstallBackend;
-  iosDowngradeRecoveryBackendResolver?: typeof resolveIosDowngradeRecoveryBackend;
-  cacheInvalidator?: DeviceWindowCacheInvalidator;
-  signingInspector?: PackageSigningInspector;
-}
-
-/** Call context for {@link InstallApp.execute}: the target user and install guard ride beside the signal. */
-export interface InstallAppCall extends ActionCall {
-  userId?: number;
-  guard?: InstallGuardOptions;
-}
-
-/** Opt-in Android guards; omitting them keeps the historical install behavior. */
-export interface InstallGuardOptions {
-  /**
-   * Complete signer set (SHA-256 digests) an already installed copy must have before it is
-   * replaced. An installed copy with any other signers, or one whose signers cannot be read,
-   * refuses the install before it starts. A package that is not installed is not replaced, so
-   * it passes.
-   */
-  expectedSigningSha256?: string[];
-  /**
-   * False refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE;
-   * the downgrade then fails and the existing package stays installed. Default true.
-   */
-  allowDestructiveRecovery?: boolean;
-}
 
 export class InstallApp {
   private readonly timer?: Timer;
@@ -1058,81 +987,26 @@ export class InstallApp {
     return output.includes(InstallApp.ANDROID_DOWNGRADE_MARKER);
   }
 
-  /**
-   * Fully uninstall an Android package so a lower-versioned artifact can be
-   * installed over a newer one. The uninstall is package-wide (not per-user)
-   * because the installed APK version is shared across users.
-   */
+  private packageTools(): AndroidInstallPackageTools {
+    return new AndroidInstallPackageTools(this.adb, this.buildToolsLocator, this.hostExecutor);
+  }
+
   private async uninstallAndroidForDowngrade(
     packageName: string,
     userId: number,
     signal?: AbortSignal,
   ): Promise<void> {
-    try {
-      await this.adb.executeCommand(
-        `shell am force-stop --user ${userId} ${shellQuote(packageName)}`,
-        { noRetry: true, signal },
-      );
-    } catch (error) {
-      // Force-stop is best-effort; uninstall can still remove a package that is not running.
-      logger.debug(
-        `[InstallApp] Could not stop package before downgrade: ${errorMessage(error)}`,
-        error,
-      );
-    }
-    await this.adb.executeCommand(`uninstall ${packageName}`, {
-      timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
-      signal,
-    });
+    return this.packageTools().uninstallAndroidForDowngrade(packageName, userId, signal);
   }
 
   private async extractPackageName(
     apkPath: string,
     signal?: AbortSignal,
   ): Promise<{ packageName?: string; warning?: string }> {
-    if (signal?.aborted) {
-      throw new Error(OPERATION_CANCELLED_MESSAGE);
-    }
-
-    const tool = await this.buildToolsLocator.findAaptTool();
-    if (!tool) {
-      return {
-        warning:
-          "aapt2 was not found. Install Android SDK build-tools (aapt2) for reliable package detection.",
-      };
-    }
-
-    const result = await this.hostExecutor.executeCommand(tool.path, ["dump", "badging", apkPath]);
-    const output = `${result.stdout}\n${result.stderr}`;
-    const match = output.match(/^package:\s+name='([^']+)'(?:\s|$)/m);
-    if (!match) {
-      throw new Error(`Failed to extract package name from ${tool.tool} output.`);
-    }
-
-    return { packageName: match[1] };
+    return this.packageTools().extractPackageName(apkPath, signal);
   }
 
   private async listPackagesForUser(userId: number, signal?: AbortSignal): Promise<Set<string>> {
-    if (signal?.aborted) {
-      throw new Error(OPERATION_CANCELLED_MESSAGE);
-    }
-
-    const result = await this.adb.executeCommand(`shell pm list packages --user ${userId}`, {
-      noRetry: true,
-      signal,
-    });
-    const packages = new Set<string>();
-    for (const line of result.stdout.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("package:")) {
-        continue;
-      }
-      const packageName = trimmed.slice("package:".length).trim();
-      if (packageName) {
-        packages.add(packageName);
-      }
-    }
-
-    return packages;
+    return this.packageTools().listPackagesForUser(userId, signal);
   }
 }

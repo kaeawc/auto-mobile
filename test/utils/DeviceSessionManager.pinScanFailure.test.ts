@@ -82,7 +82,7 @@ describe("DeviceSessionManager platform scan status", () => {
     try {
       const scan = await manager.detectConnectedPlatformsWithStatus();
       expect(scan.scanned.android).toBe(false);
-      expect(scan.scannedSources.android).toBe(false);
+      expect(scan.scannedSources?.android).toBe(false);
       await expect(manager.ensureDeviceReady("android", "absent-device")).rejects.toThrow(
         "not found",
       );

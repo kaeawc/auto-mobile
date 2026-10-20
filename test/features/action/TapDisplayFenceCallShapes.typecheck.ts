@@ -131,15 +131,17 @@ void call3(...args3, { assertCurrent: 1 });
 declare const call4: TapOnElement["executeAndroidTapWithAccessibility"];
 declare const args4: Parameters<typeof call4>;
 void call4(...args4);
-void call4({ ...args4[0], options: { action: "tap", displayFence: fence } });
+const options4 = call4.bind(undefined, args4[0], args4[1], args4[2], args4[3], args4[4]);
+void options4(args4[5], args4[6]);
+void options4({ action: "tap", displayFence: fence }, args4[6]);
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void call4({ ...args4[0], options: { action: "tap", displayFence: [] } });
+void options4({ action: "tap", displayFence: [] }, args4[6]);
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void call4({ ...args4[0], options: { action: "tap", displayFence: {} } });
+void options4({ action: "tap", displayFence: {} }, args4[6]);
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void call4({ ...args4[0], options: { action: "tap", displayFence: { assertCurrent: 1 } } });
+void options4({ action: "tap", displayFence: { assertCurrent: 1 } }, args4[6]);
 // @ts-expect-error Arrays are not dispatch options.
-void call4([]);
+void options4([], args4[6]);
 // @ts-expect-error Extra positional slots never carry a fence.
 void call4(...args4, []);
 // @ts-expect-error Extra positional slots never carry a fence.

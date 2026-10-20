@@ -1989,7 +1989,7 @@ describe("Simctl", function () {
         const reason = new Error(`${method} request cancelled`);
 
         try {
-          const result = runWithAbortSignal(controller.signal, () =>
+          const result = runWithAbortSignal(controller.signal, async () =>
             method === "getBootedSimulators"
               ? simctl.getBootedSimulators()
               : simctl.getDeviceInfo("some-udid"),

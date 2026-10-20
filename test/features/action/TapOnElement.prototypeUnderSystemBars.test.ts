@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
@@ -100,8 +101,8 @@ function createCommand(scenario: Scenario) {
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
-  spyOn(command, "observedInteraction").mockImplementation(async (block) =>
-    block(recordObservationRead(observation)),
+  spyOn(command, "observedInteraction").mockImplementation(
+    runBlockWith(() => recordObservationRead(observation)),
   );
   return { command, service };
 }

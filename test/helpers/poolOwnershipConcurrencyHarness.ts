@@ -314,17 +314,9 @@ export interface RunResult {
  * its acquired sets), read without side effects. Private state, read only here.
  */
 function autolockConnections(pool: DevicePool): Set<string> {
-  const manager: unknown = Reflect.get(pool, "autolockManager");
-  const routes: unknown = manager ? Reflect.get(manager, "mcpSessionAutolockMap") : undefined;
-  const acquired: unknown = manager
-    ? Reflect.get(manager, "mcpSessionAcquiredAutolocks")
-    : undefined;
-  if (!(routes instanceof Map) || !(acquired instanceof Map)) {
-    throw new Error("DeviceAutolockManager no longer keeps its MCP route maps; update the harness");
-  }
-  return new Set(
-    [...routes.keys(), ...acquired.keys()].filter((c): c is string => typeof c === "string"),
-  );
+  const { mcpSessionAutolockMap, mcpSessionAcquiredAutolocks } =
+    pool.testHooks.autolockManager.testHooks;
+  return new Set([...mcpSessionAutolockMap.keys(), ...mcpSessionAcquiredAutolocks.keys()]);
 }
 
 /**
@@ -346,7 +338,7 @@ export function isExpectedRefusal(error: unknown): boolean {
  * getSession() and so can start a lazy-expiry release mid-check. Private state, read only here.
  */
 function connectionOwnership(pool: DevicePool): ReadonlyMap<string, ReadonlySet<string>> {
-  const raw: unknown = Reflect.get(pool, "mcpSessionAcquiredDeviceSessions");
+  const raw: unknown = pool.testHooks.mcpSessionAcquiredDeviceSessions;
   if (!(raw instanceof Map)) {
     throw new Error(
       "DevicePool no longer keeps mcpSessionAcquiredDeviceSessions; update the harness",

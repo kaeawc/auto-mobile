@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../../helpers/observedInteractionStub";
 import { spyOn } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
@@ -151,11 +152,15 @@ export function harness({
     const previous =
       options.previousObservation ??
       (observationFor ? await observe.execute({ display: options.display }) : frame());
-    const result = await run(previous);
+    const result = await runBlockWith(previous)(run, options);
     const observation = await (options.postActionObserveScreen ?? observe).execute({
       display: options.display,
     });
-    return { ...result, observation, effect: "changed" };
+    return {
+      ...result,
+      observation,
+      effect: { screenChanged: true, basis: "viewHierarchy changed" },
+    };
   };
   const dispatched = () => {
     swipes++;

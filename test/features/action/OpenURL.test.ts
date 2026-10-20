@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -477,7 +478,7 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
   // platform dispatch we want to observe, and it is the only part under test.
   const stubObservedInteraction = () => {
     const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
-      async (block) => block(observeResultStub),
+      runBlockWith(observeResultStub),
     );
     restores.push(() => spy.mockRestore());
   };

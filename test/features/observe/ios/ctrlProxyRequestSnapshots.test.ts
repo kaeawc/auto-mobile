@@ -1,3 +1,5 @@
+import { CtrlProxySdkCapabilities } from "../../../../src/features/observe/ios/CtrlProxySdkCapabilities";
+import { CtrlProxyNetworkSync } from "../../../../src/features/observe/ios/CtrlProxyNetworkSync";
 import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 /**
  * Field-name wire-parity backstop for the iOS control-proxy TS client ↔ Swift runner
@@ -137,6 +139,17 @@ const HOST_NEVER_SENDS = new Set([
   "set_network_fault_rules",
 ]);
 
+function snapshotSdkCapabilities(h: Harness): CtrlProxySdkCapabilities {
+  return new CtrlProxySdkCapabilities({
+    timer: h.context.timer,
+    getSupportedCommands: () => null,
+    isCommandSupported: () => true,
+    createDelegateContext: () => h.context,
+    syncNetworkMockRulesToDevice: () => {},
+    syncNetworkErrorSimulationToDevice: () => {},
+  });
+}
+
 async function withClient(
   h: Harness,
   invoke: (client: IOSCtrlProxyClient) => unknown,
@@ -149,7 +162,6 @@ async function withClient(
     },
     h.context.timer,
   );
-  const context = spyOn(client, "createDelegateContext").mockReturnValue(h.context);
   const gate = spyOn(client.getSdkCapabilityTestHooks(), "sdkCapabilityGate").mockResolvedValue(
     null,
   );
@@ -160,7 +172,6 @@ async function withClient(
   try {
     return await invoke(client);
   } finally {
-    context.mockRestore();
     gate.mockRestore();
     send.mockRestore();
   }
@@ -169,9 +180,8 @@ async function withClient(
 const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "get_sdk_capabilities",
-    builder: "IOSCtrlProxyClient.requestSdkCapabilities",
-    invoke: (h) =>
-      withClient(h, (client) => client.getSdkCapabilityTestHooks().requestSdkCapabilities(-1)),
+    builder: "CtrlProxySdkCapabilities.requestSdkCapabilities",
+    invoke: (h) => snapshotSdkCapabilities(h).requestSdkCapabilities(-1),
   },
   {
     name: "request_activate_accessibility_link",
@@ -206,17 +216,30 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   },
   {
     name: "set_network_error_simulation",
-    builder: "IOSCtrlProxyClient.setNetworkErrorSimulation",
+    builder: "CtrlProxyNetworkSync.setNetworkErrorSimulation",
     invoke: (h) =>
-      withClient(h, (client) =>
-        client.setNetworkErrorSimulation({
-          enabled: true,
-          errorType: "timeout",
-          limit: 3,
-          expiresAtEpochMs: 1700000000000,
-          remainingMs: 2500,
-        }),
-      ),
+      new CtrlProxyNetworkSync({
+        getDevice: () => ({ deviceId: "snapshot-device", platform: "ios", name: "fixture" }),
+        requestManager: h.requestManager,
+        sdkCapability: {
+          hasSdkCapability: () => true,
+          isLegacySdkCommandSupported: () => true,
+          ensureSdkCapability: async () => true,
+          sdkCapabilityGate: async () => null,
+        },
+        sendMessage: (data) => {
+          h.sent.push(data);
+          return true;
+        },
+        isCommandSupported: () => true,
+        createDelegateContext: () => h.context,
+      }).setNetworkErrorSimulation({
+        enabled: true,
+        errorType: "timeout",
+        limit: 3,
+        expiresAtEpochMs: 1700000000000,
+        remainingMs: 2500,
+      }),
   },
   {
     name: "set_voiceover_state",
@@ -804,7 +827,7 @@ describe("iOS integer millisecond request boundary", () => {
         invoke: (h) =>
           new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
             "Row",
-            "longPress",
+            "long_press",
             5000,
             undefined,
             { duration: 250.5 },

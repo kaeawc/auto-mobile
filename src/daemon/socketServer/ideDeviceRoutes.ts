@@ -1,3 +1,4 @@
+import { getUnavailableAuxiliarySockets } from "../auxiliarySocketAvailability";
 import { IDE_ROUTE_PARSERS } from "../ideRoutes";
 import type { IdeMutationCall } from "./ideMutationCall";
 import { runWithAbortSignal } from "../../utils/AbortContext";
@@ -207,6 +208,7 @@ export class IdeDeviceRoutes {
       reportedPidFilePath: this.ports.identityPidFilePath(),
       reportedSocketPath: this.ports.socketPath(),
       reportedSockets: this.ports.identitySockets(),
+      unavailableSockets: getUnavailableAuxiliarySockets(),
       effectiveDebug: isDebugModeEnabled(),
       options: this.ports.startupOptions(),
       ...processGenerationRecordFields(this.ports.processGenerationToken()),

@@ -41,6 +41,7 @@ export interface DaemonLaunchHost {
     signal?: AbortSignal,
     shouldContinueWaiting?: () => boolean,
     maxProbeDurationMs?: number,
+    launchedProcess?: { pid: number | undefined },
   ): Promise<boolean>;
   isLaunchedProcessReady(
     pid: number | undefined,
@@ -96,6 +97,7 @@ export class DaemonLaunch {
       }
       try {
         this.host.throwIfRecoveryCancelled(recoverySignal);
+        let launchedPid: number | undefined;
         await this.host.launcher.launchAndWait({
           command: autoMobileCmd,
           args,
@@ -109,9 +111,15 @@ export class DaemonLaunch {
             ],
             env: childEnv,
           },
-          onSpawn: logSink === "stderr" || logSink === "both" ? relayDaemonStderr : undefined,
+          onSpawn: (child) => {
+            launchedPid = child.pid;
+            if (logSink === "stderr" || logSink === "both") {
+              relayDaemonStderr(child);
+            }
+          },
           timeoutMs: attemptBudget,
-          waitForReady: (timeoutMs, signal) => this.host.waitForReady(timeoutMs, signal),
+          waitForReady: (timeoutMs, signal) =>
+            this.host.waitForReady(timeoutMs, signal, undefined, undefined, { pid: launchedPid }),
           isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
             this.host.isLaunchedProcessReady(pid, timeoutMs, signal),
           formatFailure: (summary) => this.createDaemonStartupFailure(summary, logPath),

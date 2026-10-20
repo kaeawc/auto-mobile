@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  mkdirSync,
+  writeFileSync,
+} from "node:fs";
+import * as asyncFiles from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { useScratchRoot } from "../helpers/scratchRoot";
@@ -591,6 +600,53 @@ describe("daemon file cleanup", () => {
       } satisfies PidFileData),
     );
     return { dir, socketPath, pidFilePath };
+  }
+
+  test("handoff: successor PID written during awaited aux unlink survives", async () => {
+    const { dir, socketPath, pidFilePath } = createTempFiles();
+    const auxPath = join(dir, "aux.sock");
+    writeFileSync(auxPath, "");
+    const unlink = asyncFiles.unlink;
+    const remove = spyOn(asyncFiles, "unlink").mockImplementation(async (path) => {
+      await unlink(path);
+      if (path === auxPath) {
+        writeFileSync(pidFilePath, JSON.stringify({ pid: 67890 }));
+      }
+    });
+    try {
+      await cleanupDaemonFiles({
+        pidFilePath,
+        socketPaths: [socketPath, auxPath],
+        expectedPid: 12345,
+      });
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(JSON.parse(readFileSync(pidFilePath, "utf-8")).pid).toBe(67890);
+    } finally {
+      remove.mockRestore();
+    }
+  });
+
+  for (const sync of [false, true]) {
+    test(`handoff: failed control unlink retains PID (sync=${sync})`, async () => {
+      const { dir, pidFilePath } = createTempFiles();
+      const controlSocketPath = join(dir, "blocked.sock");
+      // An isolated directory deterministically fails unlink without opening a socket.
+      mkdirSync(controlSocketPath);
+      const { dev, ino } = statSync(controlSocketPath);
+      const options = {
+        pidFilePath,
+        controlSocketPath,
+        socketPaths: [controlSocketPath],
+        expectedPid: 12345,
+        socketFileIdentities: new Map([[controlSocketPath, { dev, ino }]]),
+      };
+      if (sync) {
+        cleanupDaemonFilesSync(options);
+      } else {
+        await cleanupDaemonFiles(options);
+      }
+      expect(existsSync(pidFilePath)).toBe(true);
+    });
   }
 
   test("cleanupDaemonFiles removes configured socket and PID paths", async () => {

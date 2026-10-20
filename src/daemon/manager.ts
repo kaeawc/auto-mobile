@@ -675,12 +675,14 @@ export class DaemonManager implements DaemonManagerLike {
     signal?: AbortSignal,
     shouldContinueWaiting: () => boolean = () => true,
     maxProbeDurationMs?: number,
+    launchedProcess?: { pid: number | undefined },
   ): Promise<boolean> {
     return this.collaborators.daemonReadiness.waitForReady(
       timeout,
       signal,
       shouldContinueWaiting,
       maxProbeDurationMs,
+      launchedProcess,
     );
   }
 
@@ -866,7 +868,8 @@ export class DaemonManager implements DaemonManagerLike {
       releaseLock: (...args) => this.releaseLock(...args),
       createLockHolderStartupFailure: (...args) => this.createLockHolderStartupFailure(...args),
       readSettledStartupLockHolder: (...args) => this.readSettledStartupLockHolder(...args),
-      waitForReady: (...args) => this.waitForReady(...args),
+      waitForReady: (...args: Parameters<DaemonManager["waitForReady"]>) =>
+        this.waitForReady(...args),
       sleepUnlessAborted: (...args) => this.sleepUnlessAborted(...args),
       socketPathObservable: (...args) => this.socketPathObservable(...args),
       verifyDaemonConnection: (...args) => this.verifyDaemonConnection(...args),

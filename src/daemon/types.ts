@@ -1,3 +1,4 @@
+import type { AuxiliarySocketWarning } from "./auxiliarySocketAvailability";
 import { z } from "zod";
 import {
   idleReleaseField,
@@ -493,6 +494,7 @@ export type DaemonSocketPaths = Record<DaemonSocketName, string>;
  * Daemon status information
  */
 export interface DaemonStatus {
+  unavailableSockets?: AuxiliarySocketWarning[];
   reportedPidFilePath?: string;
   reportedSocketPath?: string;
   reportedSockets?: Record<string, string>;

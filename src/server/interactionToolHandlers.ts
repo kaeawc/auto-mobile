@@ -38,7 +38,7 @@ import type {
   OpenLinkWaitOutcome,
   SendKeysRunnerCommandSourceFactory,
   SystemAlertTap,
-} from "./interactionTools";
+} from "./interactionTools/dependencies";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { SendKeys } from "../features/action/SendKeys";

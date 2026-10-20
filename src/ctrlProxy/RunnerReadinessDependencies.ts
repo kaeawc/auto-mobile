@@ -1,3 +1,4 @@
+import type { CtrlProxyIosSetupResult } from "./ios/IosCtrlProxyContracts";
 import type { BootedDevice, DeviceLockState } from "../models";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
@@ -50,7 +51,7 @@ export interface ReadinessIosManager {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     minimumHealthPollDurationMs?: number,
-  ): Promise<ProxySetupResult>;
+  ): Promise<CtrlProxyIosSetupResult>;
   getServicePort(): number;
 }
 
@@ -128,6 +129,8 @@ export interface AndroidFrameworkReadinessResult {
 
 export interface RunnerReadinessDependencies {
   timer: Timer;
+  /** Maximum iOS transient startup attempts, including the initial setup. */
+  iosSetupMaxAttempts?: number;
   getAndroidFrameworkReadiness?(
     device: BootedDevice,
     signal: AbortSignal,

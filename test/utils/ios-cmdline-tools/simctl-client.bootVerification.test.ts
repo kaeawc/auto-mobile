@@ -1,3 +1,8 @@
+import { SimCtlBoot } from "../../../src/utils/ios-cmdline-tools/SimCtlBoot";
+import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
+import { DeviceBootTimeoutError } from "../../../src/devices/DeviceBootTimeoutError";
+import { toProvisionDeviceError } from "../../../src/server/provisioning/provisioningErrors";
+import { runPhaseWithSettlement } from "../../../src/utils/runPhaseWithSettlement";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   SimCtlClient,
@@ -1895,5 +1900,162 @@ describe("SimCtlClient boot self-verification", () => {
     expect(await harness.timer.resolvePromise(outcome)).toBeInstanceOf(Error);
     expect(harness.timer.now()).toBe(1000);
     expect(harness.timer.getSleepHistory().every((delay) => delay > 0)).toBe(true);
+  });
+});
+
+// #13807: contextual readiness errors must retain machine-readable deadline evidence.
+describe("boot readiness provisioning classification", () => {
+  const args = {
+    device: {
+      platform: "ios",
+      name: "iPhone",
+      spec: {
+        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      },
+    },
+    boot: true,
+    readiness: "automation",
+  } as const;
+
+  test.each([
+    new DeviceBootTimeoutError("provisionDevice", "boot readiness", 20, 20, UDID),
+    new SimctlCommandTimeoutError("simctl list timed out"),
+    new DOMException("caller aborted readiness", "AbortError"),
+    new DOMException("caller deadline expired", "TimeoutError"),
+  ])("preserves readiness cause and retryable timeout for %s", async (failure) => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 1 });
+    harness.failListDevicesWith(failure);
+    const error = await harness.simctl
+      .waitForSimulatorReady(UDID, 100, { assumeBooted: true })
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+    expect(error).toBeInstanceOf(ActionableError);
+    if (!(error instanceof Error)) {
+      throw new Error("Expected contextual readiness error");
+    }
+    expect(error.cause).toBe(failure);
+    expect(error.message).toBe(
+      `Simulator with UDID ${UDID} failed to become ready: ${failure.message}`,
+    );
+    expect(toProvisionDeviceError(args, error)).toMatchObject({ code: "timeout", retryable: true });
+  });
+
+  test("preserves non-timeout readiness message and terminal classification", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 1 });
+    harness.failListDevicesWith(new Error("genuine platform failure"));
+    const error = await harness.simctl
+      .waitForSimulatorReady(UDID, 100, { assumeBooted: true })
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+    expect(toProvisionDeviceError(args, error)).toMatchObject({
+      code: "platform_command_failed",
+      retryable: false,
+      message: `Failed to provision ios device 'iPhone': Simulator with UDID ${UDID} failed to become ready: genuine platform failure`,
+    });
+  });
+
+  function leaseHarness(timer: FakeTimer): SimCtlBoot {
+    return new SimCtlBoot({
+      timer,
+      simulatorBoots: new Map(),
+      bootPresentationGenerations: new Map(),
+      idGenerator: { next: () => UDID },
+      observationSequence: { next: () => 1 },
+      bootOptions: { maxAttempts: 1, retryBackoffMs: 1 },
+      getBootedSimulatorsChecked: async () => [],
+      shutdownAfterFailedStart: async () => {},
+      presentSimulatorAfterStart: async () => {},
+      simulatorAppPresenter: { presentAfterStart: async () => {} },
+      shutdownSimulatorCoordinated: async () => {},
+      executeCommandArgs: async () => createExecResult("", ""),
+      listSimulatorImages: async () => [],
+      listSimulators: async () => ({ devices: {} }),
+    });
+  }
+
+  test("lease wait exhaustion retains a typed cause and maps to timeout", async () => {
+    const timer = new FakeTimer();
+    const boot = leaseHarness(timer);
+    const owner = await boot.acquireSimulatorBoot(UDID, 100, undefined);
+    try {
+      const waiting = boot.waitForSimulatorReady(UDID, 10, { assumeBooted: true }).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      timer.advanceTime(10);
+      const error = await waiting;
+      expect(error).toBeInstanceOf(ActionableError);
+      if (!(error instanceof Error)) {
+        throw new Error("Expected lease timeout");
+      }
+      expect(error.cause).toMatchObject({ name: "TimeoutError" });
+      expect(error.message).toBe(
+        `Simulator with UDID ${UDID} failed to become ready: Timed out waiting to start iOS simulator ${UDID}`,
+      );
+      expect(toProvisionDeviceError(args, error)).toMatchObject({
+        code: "timeout",
+        retryable: true,
+      });
+    } finally {
+      owner.release();
+    }
+  });
+
+  test("operation failure preferred during phase settlement still maps to timeout", async () => {
+    const timer = new FakeTimer();
+    const boot = leaseHarness(timer);
+    const deadline = new DeviceBootTimeoutError("provisionDevice", "readiness", 10, 10);
+    const pending = runPhaseWithSettlement(
+      {
+        timer,
+        timeoutMs: 10,
+        graceMs: 0,
+        label: "readiness",
+        timeoutError: () => deadline,
+        preferOperationFailureOnTimeout: true,
+      },
+      (signal) =>
+        new Promise<never>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(boot.classifyBootReadinessError(UDID, signal.reason)),
+            { once: true },
+          );
+        }),
+    ).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    timer.advanceTime(10);
+    const error = await pending;
+    expect(error).not.toBe(deadline);
+    expect(toProvisionDeviceError(args, error)).toMatchObject({ code: "timeout", retryable: true });
+  });
+
+  test("deadline exhaustion between recovery steps maps to timeout", () => {
+    const boot = leaseHarness(new FakeTimer());
+    let error: unknown;
+    try {
+      boot.remainingBootTimeoutMs(UDID, 0);
+    } catch (failure) {
+      error = boot.classifyBootReadinessError(UDID, failure);
+    }
+    expect(toProvisionDeviceError(args, error)).toMatchObject({ code: "timeout", retryable: true });
+  });
+
+  test("cause traversal is bounded for deep and cyclic errors", () => {
+    const cyclic = new Error("cycle");
+    cyclic.cause = cyclic;
+    expect(toProvisionDeviceError(args, cyclic).code).toBe("platform_command_failed");
+    let deep: Error = new SimctlCommandTimeoutError("buried timeout");
+    for (let depth = 0; depth < 8; depth += 1) {
+      deep = new Error("wrapper", { cause: deep });
+    }
+    expect(toProvisionDeviceError(args, deep).code).toBe("platform_command_failed");
   });
 });

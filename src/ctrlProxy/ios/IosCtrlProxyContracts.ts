@@ -58,6 +58,8 @@ export const FORCE_RESTART_DRAIN_POLL_INTERVAL_MS = 50;
  */
 export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
+  /** Only runner exit during startup or an exhausted launch window permits setup retry. */
+  retryableStartupFailure?: boolean;
   /** Startup was cancelled while another recovery path may still be active. */
   recoveryInterrupted?: boolean;
 }

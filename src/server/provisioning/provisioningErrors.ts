@@ -24,6 +24,7 @@ import {
 import { getCurrentBuildIdentity } from "../../daemon/buildIdentity";
 import { DAEMON_VERSION } from "../../daemon/constants";
 import { DaemonHandoffInterruptionError } from "../../daemon/daemonHandoffInterruption";
+import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { DeviceBootTimeoutError } from "../../devices/deviceBootService";
 import { AdbDeviceOfflineError } from "../../utils/android-cmdline-tools/AdbDeviceHealth";
 import { RunnerReadinessError } from "../../ctrlProxy/RunnerReadinessError";
@@ -251,13 +252,34 @@ export function toProvisionDeviceError(
   // A readiness phase that ran out of budget is a purely time-based failure:
   // report it as `timeout` so a controller that retries timeouts but treats
   // `platform_command_failed` as terminal does not give up on it.
-  const isDeadlineFailure =
-    error instanceof DeviceBootTimeoutError ||
-    (error instanceof RunnerReadinessError && error.deadlineExhausted);
+  const deadlineFailure = isDeadlineFailure(error);
   return new ProvisionDeviceError(
-    isDeadlineFailure ? "timeout" : "platform_command_failed",
+    deadlineFailure ? "timeout" : "platform_command_failed",
     `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
   );
+}
+
+// Bound traversal even for cyclic/foreign Error.cause graphs.
+const MAX_DEADLINE_CAUSE_DEPTH = 8;
+
+function isDeadlineFailure(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < MAX_DEADLINE_CAUSE_DEPTH; depth += 1) {
+    if (
+      current instanceof DeviceBootTimeoutError ||
+      current instanceof SimctlCommandTimeoutError ||
+      (current instanceof RunnerReadinessError && current.deadlineExhausted) ||
+      (current instanceof DOMException &&
+        (current.name === "AbortError" || current.name === "TimeoutError"))
+    ) {
+      return true;
+    }
+    if (!(current instanceof Error)) {
+      return false;
+    }
+    current = current.cause;
+  }
+  return false;
 }
 
 export function provisionDeviceLifecycleReason(error: ProvisionDeviceError) {

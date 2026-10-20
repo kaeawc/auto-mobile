@@ -1,3 +1,4 @@
+import { recoverOfflineDisconnectCandidates } from "./offlineDisconnectRecovery";
 import { holderOf } from "./deviceBinding";
 import { wireSessionLifecycle } from "./daemonSessionLifecycleWiring";
 import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegistry";
@@ -510,6 +511,14 @@ export interface DaemonStartHost {
   /** Navigation retention, forwarding-lease idle release, the orphan watchdog and broker reclaim. */
   startMaintenanceMonitors(): void;
 }
+
+type DisconnectMonitorDeviceManager = Pick<
+  MultiPlatformDeviceManager,
+  | "getBootedDevicesDetailed"
+  | "getAndroidOfflineDeviceIds"
+  | "getAndroidListedDeviceStates"
+  | "recoverAndroidOfflineDevices"
+>;
 
 interface CapturedDisconnectRecoveryOptions {
   deviceId: string;
@@ -2409,13 +2418,7 @@ export class Daemon {
   }
 
   protected startDeviceDisconnectMonitor(
-    deviceManager: Pick<
-      MultiPlatformDeviceManager,
-      | "getBootedDevicesDetailed"
-      | "getAndroidOfflineDeviceIds"
-      | "getAndroidListedDeviceStates"
-      | "recoverAndroidOfflineDevices"
-    > = new MultiPlatformDeviceManager(),
+    deviceManager: DisconnectMonitorDeviceManager = new MultiPlatformDeviceManager(),
     listRecordings: typeof listActiveVideoRecordings = listActiveVideoRecordings,
     transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
   ): void {
@@ -2446,50 +2449,41 @@ export class Daemon {
           let discovery = await this.discoverAndReconcile(deviceManager, {
             planActive,
           });
-          let succeededPlatforms = discovery.succeededPlatforms;
-          let bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
+          const initialBootedDeviceIds = new Set(
+            discovery.devices.map((device) => device.deviceId),
+          );
           const activeRecordings = planActive ? [] : await listRecordings();
 
           const missingByDevice = new Map<string, string[]>();
-          const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
-            this.collectDisconnectCandidates(activeRecordings);
+          const candidates = this.collectDisconnectCandidates(activeRecordings);
+          const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } = candidates;
           const listed = await probeListedAndroidStates(
             this.devicePool,
             deviceManager,
             planActive,
             candidateDeviceIds,
-            bootedDeviceIds,
+            initialBootedDeviceIds,
             candidatePlatforms,
           );
-          if (!planActive) {
-            const { dispatchTargets } = this.prepareOfflineRecovery(
-              candidateDeviceIds,
-              listed.offlineDeviceIds,
-              candidateIncarnations,
-            );
-            if (dispatchTargets.length > 0) {
-              logger.warn(
-                `[DisconnectMonitor] In-session device(s) ADB-offline (${dispatchTargets.join(", ")}); attempting bounded 'adb -s <serial> reconnect' recovery before miss-counting`,
-              );
-              // Serial-scoped reconnects for the dispatch targets, one
-              // shot per offline episode; failures are logged and swallowed
-              // inside recoverAndroidOfflineDevices so a probe or recovery
-              // hiccup here never blocks the miss-count/disconnect path below.
-              const offlineTransportIds = dispatchTargets.flatMap((deviceId) => {
-                const transports = listed.offlineTransportIds?.get(deviceId);
-                return transports?.size ? [...transports] : [deviceId];
-              });
-              await deviceManager.recoverAndroidOfflineDevices(offlineTransportIds);
-              // Reconnect may restore the transport during this await. Never use
-              // the pre-recovery absence for miss counting or ADB-reset detection.
-              discovery = await this.discoverAndReconcile(deviceManager, {
+          discovery = await recoverOfflineDisconnectCandidates({
+            deviceManager,
+            planActive,
+            listed,
+            discovery,
+            prepareRecovery: () =>
+              this.prepareOfflineRecovery(
+                candidateDeviceIds,
+                listed.offlineDeviceIds,
+                candidateIncarnations,
+              ),
+            rediscover: () =>
+              this.discoverAndReconcile(deviceManager, {
                 planActive,
                 bypassAndroidDeviceListCache: true,
-              });
-              succeededPlatforms = discovery.succeededPlatforms;
-              bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
-            }
-          }
+              }),
+          });
+          const succeededPlatforms = discovery.succeededPlatforms;
+          const bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
 
           const disconnectResult = evaluateDeviceDisconnects({
             deviceDisconnectMisses: this.deviceDisconnectMisses,

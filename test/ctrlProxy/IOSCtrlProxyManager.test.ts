@@ -216,12 +216,11 @@ describe("IOSCtrlProxyManager", function () {
       installHealthFakes({
         8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 }),
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBe(8765);
     });

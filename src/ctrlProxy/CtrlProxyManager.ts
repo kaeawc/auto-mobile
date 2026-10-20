@@ -1,3 +1,8 @@
+import { CtrlProxyApkInstallError } from "./CtrlProxyApkInstallError";
+export { CtrlProxyApkInstallError } from "./CtrlProxyApkInstallError";
+import { CtrlProxyApkStageError } from "./CtrlProxyApkStageError";
+import { CtrlProxyInspectionError } from "./CtrlProxyInspectionError";
+export { CtrlProxyInspectionError } from "./CtrlProxyInspectionError";
 import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
@@ -91,8 +96,7 @@ interface RebindPlan {
   withCtrlProxy: string;
 }
 type AccessibilityServiceState = "bound" | "binding" | "crashed" | "absent" | "unbound";
-/** A rebind inspection failed before any accessibility setting was written. */
-export class CtrlProxyInspectionError extends ActionableError {}
+
 type ApkOverrideChecksumEntry = {
   mtimeMs: number;
   size: number;
@@ -100,18 +104,6 @@ type ApkOverrideChecksumEntry = {
 };
 const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
-class CtrlProxyApkStageError extends ActionableError {}
-
-/** `adb install` failed in a way that an uninstall+reinstall cannot fix (e.g. USER_RESTRICTED). */
-export class CtrlProxyApkInstallError extends ActionableError {
-  constructor(
-    message: string,
-    readonly failureCode: string | undefined,
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
-  }
-}
 
 // Install failures that an in-place `install -r -d` cannot fix but a fresh uninstall + reinstall can.
 // VERSION_DOWNGRADE: `-d` only permits downgrades of debuggable apps/builds, so a user-build device

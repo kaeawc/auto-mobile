@@ -1,3 +1,16 @@
+import {
+  resolveUnixSocketServerOptions,
+  positionalUnixSocketServerOptions,
+  type UnixSocketServerOptions,
+  type UnixSocketServerArguments,
+  type UnixSocketServerLegacyDependencies,
+  type SocketDaemonStateAccess,
+} from "./unixSocketServerOptions";
+export type { UnixSocketServerOptions } from "./unixSocketServerOptions";
+import { ReleasedBoundSessionError } from "./ReleasedBoundSessionError";
+import { DaemonSocketQueueOverflowError } from "./DaemonSocketQueueOverflowError";
+export { DaemonSocketQueueOverflowError } from "./DaemonSocketQueueOverflowError";
+import { ClientRequestCancellation } from "./ClientRequestCancellation";
 import { IdeDeviceRoutes } from "./socketServer/ideDeviceRoutes";
 import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
 import {
@@ -69,7 +82,6 @@ import {
   RESOURCE_UNSUBSCRIBE_METHOD,
   SessionContext,
   type BoundSessionLoss,
-  boundSessionLossMessage,
   type DaemonRequestFailureCause,
   type DaemonOptions,
 } from "./types";
@@ -134,13 +146,12 @@ import {
 import { InputText, type AppendKeyEventValidator } from "../features/action/InputText";
 import { imeActionFailedAfterTextEntered } from "../features/action/imeActionFailedAfterTextEntered";
 import { getCurrentBuildIdentity } from "./buildIdentity";
-import { defaultDaemonContext } from "./daemonContext";
 import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { isDaemonRequestEnvelope } from "./daemonRequestEnvelope";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
-import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { Timer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES } from "./outboundWriteGuard";
 import { ControlConnection } from "./socketServer/ControlConnection";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -153,7 +164,7 @@ import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSe
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { deviceAlreadyAssignedToAnotherSessionError } from "./inputDeviceOwnership";
 import { daemonToolRegistry } from "./toolRegistryPort";
-import { type CanonicalFrameDiscovery, type FrameDeviceIdentityPool } from "./frameDeviceIdentity";
+import { type CanonicalFrameDiscovery } from "./frameDeviceIdentity";
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../features/deviceLifecycle/deviceLifecycleCore";
 
@@ -253,8 +264,6 @@ function socketRequestId(parsed: unknown): string | null {
   return typeof id === "string" ? id : null;
 }
 
-class ClientRequestCancellation extends ActionableError {}
-
 function isClientForwardCancellation(
   signal: AbortSignal | undefined,
   cause: DaemonRequestFailureCause | undefined,
@@ -290,24 +299,6 @@ const DEVICE_ACQUISITION_TOOL_NAMES = new Set([
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
-export class DaemonSocketQueueOverflowError extends Error {
-  readonly reason = "queue_overflow";
-
-  constructor(
-    readonly queuedBytes: number,
-    readonly limitBytes: number,
-  ) {
-    super(`Daemon RPC socket queued bytes exceeded ${limitBytes}`);
-    this.name = "DaemonSocketQueueOverflowError";
-  }
-}
-
-class ReleasedBoundSessionError extends Error {
-  constructor(readonly failure: BoundSessionLoss) {
-    super(boundSessionLossMessage(failure));
-    this.name = "ReleasedBoundSessionError";
-  }
-}
 
 /**
  * Bound on the observation-only liveness probe a LOCK-LESS bind runs against an
@@ -529,30 +520,6 @@ type McpForwardAttempt<T> =
   | { kind: "done"; value: T }
   | { kind: "reroute"; route: McpForwardRoute };
 
-/** Recovery lookup is optional only for older socket-state fakes. */
-interface SocketDaemonStateAccess extends DaemonStateAccess {
-  getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
-    ownershipSessionUuid?(sessionId: string): string;
-    isReleasedSessionInRestartRecoveryWindow?(sessionId: string): Promise<boolean>;
-    getExpiredReleaseSnapshot?(sessionId: string): Promise<BoundSessionLoss["release"]>;
-  };
-  getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> &
-    FrameDeviceIdentityPool & {
-      getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
-      resolveOwnedDeviceSessionForMcpSession?(
-        mcpSessionId: string | undefined,
-        deviceId: string,
-      ): string | undefined;
-      isSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
-      assertNotClaimedByForeignDaemon?(
-        deviceId: string,
-        platform: "android" | "ios",
-        remedy?: string,
-        maxAgeMs?: number,
-      ): Promise<void>;
-    };
-}
-
 /** Classifies one tools/call argument set as a device read (`deviceReadOnly`). */
 export type DeviceReadToolCallClassifier = (toolName: string, args: unknown) => boolean;
 
@@ -666,6 +633,17 @@ type IdeServerRouteHandler = (
   socketSessionId: string | undefined,
   ideMutation: IdeMutationCall | undefined,
 ) => Promise<any | undefined> | any;
+
+interface QueuedSocketRequestOptions {
+  request: DaemonRequest;
+  sessionId: string;
+  ownerSocket: Socket;
+  receivedAtMs: number;
+  context: RequestContext;
+  signal: AbortSignal;
+  onActiveSignal: (signal: AbortSignal) => void;
+  onInputDispatch: () => void;
+}
 
 export class UnixSocketServer {
   protected server: NetServer | null = null;
@@ -818,38 +796,26 @@ export class UnixSocketServer {
     cancelGesture: (targetDevice, gestureId) => this.cancelGestureOnDevice(targetDevice, gestureId),
   });
 
+  constructor(options: UnixSocketServerOptions);
+  constructor(...args: UnixSocketServerArguments);
   constructor(
-    socketPath: string = SOCKET_PATH,
-    daemonState: SocketDaemonStateAccess = defaultDaemonContext.daemonState(),
-    timer: Timer = defaultTimer,
-    featureFlagService: FeatureFlagAdmin | null = null,
-    handshakeConfig: {
-      identity?: DaemonSelfIdentity;
-      identityStartedAt?: number;
-      processGenerationToken?: string;
-      startupOptions?: DaemonOptions;
-      enforce?: boolean;
-      onRepublishIdentity?: () => Promise<boolean>;
-      dbPath?: string;
-      pidFilePath?: string;
-      startupCompletion?: Promise<void>;
-      sockets?: Record<string, string>;
-      processStartedAt?: number;
-      onRestartAccepted?: () => void;
-      liveAcceptanceStartupSecret?: string;
-      acceptanceDiscoveryCapability?: string;
-      sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
-      onFrameTrace?: (event: SocketFrameTraceEvent) => void;
-      /**
-       * Runs forwards in process (#11820). The daemon passes its own, so shutdown can close the
-       * forwards still running; without one the server builds a default over the shared state.
-       */
-      mcpDispatcher?: Pick<InProcessMcpDispatcher, "connect">;
-    } = {},
-    idGenerator: IdGenerator = defaultIdGenerator,
-    bindGuard: SocketBindGuardOptions = {},
-    adbClientFactory: AdbClientFactory = defaultAdbClientFactory,
+    optionsOrPath: UnixSocketServerOptions | string = SOCKET_PATH,
+    ...legacy: UnixSocketServerLegacyDependencies
   ) {
+    const options =
+      typeof optionsOrPath === "string"
+        ? positionalUnixSocketServerOptions(optionsOrPath, legacy)
+        : optionsOrPath;
+    const {
+      socketPath,
+      daemonState,
+      timer,
+      featureFlagService,
+      handshakeConfig,
+      idGenerator,
+      bindGuard,
+      adbClientFactory,
+    } = resolveUnixSocketServerOptions(options);
     this.socketPath = socketPath;
     this.daemonState = daemonState;
     this.timer = timer;
@@ -1693,147 +1659,18 @@ export class UnixSocketServer {
     let onInputDispatch: (() => void) | undefined;
     const handler = async (): Promise<DaemonResponse | undefined> => {
       try {
-        if (request.method.startsWith("daemon/")) {
-          // The socket's cancellation reaches long daemon methods (broker binding acquisition).
-          const daemonResponse = await handleDaemonRequest(
-            request,
-            this.daemonState,
-            undefined,
-            cancellation.signal,
-            { socketSessionId: sessionId },
-          );
-          return {
-            id: request.id,
-            type: "mcp_response",
-            ...daemonResponse,
-          };
-        }
-
-        // Status and ping are local probes used while the daemon is starting.
-        if (!STARTUP_PROBE_METHODS.has(request.method)) {
-          activeRequestSignal = cancellation.signal;
-          await this.waitForStartup(request, deadline, cancellation.signal);
-        }
-
-        const localResult = await this.runLocalSocketRequest(
+        return await this.executeQueuedSocketRequest({
           request,
           sessionId,
           ownerSocket,
-          cancellation.signal,
           receivedAtMs,
-          {
-            onOwnerSignal: (signal) => {
-              activeRequestSignal = signal;
-            },
-            onInputDispatch: () => onInputDispatch?.(),
+          context,
+          signal: cancellation.signal,
+          onActiveSignal: (signal) => {
+            activeRequestSignal = signal;
           },
-        );
-        if (localResult !== undefined) {
-          return {
-            id: request.id,
-            type: "mcp_response",
-            success: true,
-            result: localResult,
-          };
-        }
-
-        let endOwnerCall: (() => void) | undefined;
-        let disposeMcpRequest = () => {};
-        try {
-          if (request.method === "tools/call") {
-            await this.restoreSelectorSessions(request.params?.arguments, sessionId);
-            endOwnerCall = this.beginMcpSessionOwnerCall(
-              request.params?.arguments,
-              sessionId,
-              cancellation.signal,
-            );
-          }
-          const routeOrPending = this.getMcpForwardRoute(request, sessionId);
-          const initialRoute =
-            routeOrPending instanceof Promise ? await routeOrPending : routeOrPending;
-          const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, cancellation.signal);
-          disposeMcpRequest = mcpRequest.dispose;
-          activeRequestSignal = mcpRequest.signal;
-          const result = await this.runMcpForwardForCurrentRoute(
-            initialRoute,
-            request,
-            sessionId,
-            async (route) => {
-              const remainingTimeoutMs = this.requireRemainingMcpForwardBudget(
-                request,
-                totalTimeoutMs,
-                deadline,
-                "waiting in queue",
-              );
-              const queueWaitMs = Math.max(0, totalTimeoutMs - remainingTimeoutMs);
-              const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
-              logger.debug(
-                `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
-              );
-
-              const forwardStartMs = this.timer.now();
-              try {
-                const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
-                const response = await this.forwardMcpRequest({
-                  request,
-                  route,
-                  socketSessionId: sessionId,
-                  signal: mcpRequest.signal,
-                  totalTimeoutMs,
-                  deadline,
-                });
-                if (this.isMcpRequestOwnerCurrent(sessionId, mcpRequest.signal)) {
-                  this.recordBoundMcpClientKey(
-                    request,
-                    sessionId,
-                    route,
-                    sessionWasActiveBeforeForward,
-                    response,
-                  );
-                }
-                return response;
-              } finally {
-                logger.debug(
-                  `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
-                );
-              }
-            },
-            {
-              remainingMs: () => this.remainingMcpForwardBudget({ deadline }),
-              timeoutError: (executionKey) =>
-                new McpTimeoutError({
-                  toolName:
-                    request.method === "tools/call"
-                      ? (request.params?.name ?? request.method)
-                      : request.method,
-                  timeoutMs: totalTimeoutMs,
-                  origin: "UnixSocketServer.handleRequest",
-                  detail: `spent ${totalTimeoutMs - this.remainingMcpForwardBudget({ deadline })}ms waiting in queue for ${executionKey}`,
-                  code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
-                }),
-            },
-          );
-
-          if (isDaemonShuttingDownToolResult(result)) {
-            return {
-              id: request.id,
-              type: "mcp_response",
-              success: false,
-              error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-              ...daemonShuttingDownFrameFields(daemonShuttingDownFailureFromToolResult(result)),
-            };
-          }
-
-          return {
-            id: request.id,
-            type: "mcp_response",
-            success: true,
-            result,
-          };
-        } finally {
-          endOwnerCall?.();
-          disposeMcpRequest();
-        }
+          onInputDispatch: () => onInputDispatch?.(),
+        });
       } catch (error) {
         const failure = this.mcpForwardFailureResponse({
           error,
@@ -1920,6 +1757,172 @@ export class UnixSocketServer {
         admissionCancellation.dispose();
         cancellation.dispose();
       });
+  }
+
+  /** Dispatch admitted daemon/local work before falling through to MCP forwarding. */
+  private async executeQueuedSocketRequest(
+    options: QueuedSocketRequestOptions,
+  ): Promise<DaemonResponse | undefined> {
+    const {
+      request,
+      sessionId,
+      ownerSocket,
+      receivedAtMs,
+      context: { deadline },
+      signal,
+      onActiveSignal,
+      onInputDispatch,
+    } = options;
+    if (request.method.startsWith("daemon/")) {
+      // The socket's cancellation reaches long daemon methods (broker binding acquisition).
+      const daemonResponse = await handleDaemonRequest(
+        request,
+        this.daemonState,
+        undefined,
+        signal,
+        { socketSessionId: sessionId },
+      );
+      return {
+        id: request.id,
+        type: "mcp_response",
+        ...daemonResponse,
+      };
+    }
+
+    // Status and ping are local probes used while the daemon is starting.
+    if (!STARTUP_PROBE_METHODS.has(request.method)) {
+      onActiveSignal(signal);
+      await this.waitForStartup(request, deadline, signal);
+    }
+
+    const localResult = await this.runLocalSocketRequest(
+      request,
+      sessionId,
+      ownerSocket,
+      signal,
+      receivedAtMs,
+      {
+        onOwnerSignal: onActiveSignal,
+        onInputDispatch,
+      },
+    );
+    if (localResult !== undefined) {
+      return {
+        id: request.id,
+        type: "mcp_response",
+        success: true,
+        result: localResult,
+      };
+    }
+
+    return this.forwardQueuedMcpRequest(options);
+  }
+
+  /** Hold the owner call and MCP connection only for the lifetime of this forward. */
+  private async forwardQueuedMcpRequest(
+    options: QueuedSocketRequestOptions,
+  ): Promise<DaemonResponse> {
+    const {
+      request,
+      sessionId,
+      ownerSocket,
+      context: { totalTimeoutMs, deadline },
+      signal,
+      onActiveSignal,
+    } = options;
+    let endOwnerCall: (() => void) | undefined;
+    let disposeMcpRequest = () => {};
+    try {
+      if (request.method === "tools/call") {
+        await this.restoreSelectorSessions(request.params?.arguments, sessionId);
+        endOwnerCall = this.beginMcpSessionOwnerCall(request.params?.arguments, sessionId, signal);
+      }
+      const routeOrPending = this.getMcpForwardRoute(request, sessionId);
+      const initialRoute =
+        routeOrPending instanceof Promise ? await routeOrPending : routeOrPending;
+      const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, signal);
+      disposeMcpRequest = mcpRequest.dispose;
+      onActiveSignal(mcpRequest.signal);
+      const result = await this.runMcpForwardForCurrentRoute(
+        initialRoute,
+        request,
+        sessionId,
+        async (route) => {
+          const remainingTimeoutMs = this.requireRemainingMcpForwardBudget(
+            request,
+            totalTimeoutMs,
+            deadline,
+            "waiting in queue",
+          );
+          const queueWaitMs = Math.max(0, totalTimeoutMs - remainingTimeoutMs);
+          const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
+          logger.debug(
+            `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
+          );
+
+          const forwardStartMs = this.timer.now();
+          try {
+            const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
+            const response = await this.forwardMcpRequest({
+              request,
+              route,
+              socketSessionId: sessionId,
+              signal: mcpRequest.signal,
+              totalTimeoutMs,
+              deadline,
+            });
+            if (this.isMcpRequestOwnerCurrent(sessionId, mcpRequest.signal)) {
+              this.recordBoundMcpClientKey(
+                request,
+                sessionId,
+                route,
+                sessionWasActiveBeforeForward,
+                response,
+              );
+            }
+            return response;
+          } finally {
+            logger.debug(
+              `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
+            );
+          }
+        },
+        {
+          remainingMs: () => this.remainingMcpForwardBudget({ deadline }),
+          timeoutError: (executionKey) =>
+            new McpTimeoutError({
+              toolName:
+                request.method === "tools/call"
+                  ? (request.params?.name ?? request.method)
+                  : request.method,
+              timeoutMs: totalTimeoutMs,
+              origin: "UnixSocketServer.handleRequest",
+              detail: `spent ${totalTimeoutMs - this.remainingMcpForwardBudget({ deadline })}ms waiting in queue for ${executionKey}`,
+              code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
+            }),
+        },
+      );
+
+      if (isDaemonShuttingDownToolResult(result)) {
+        return {
+          id: request.id,
+          type: "mcp_response",
+          success: false,
+          error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+          ...daemonShuttingDownFrameFields(daemonShuttingDownFailureFromToolResult(result)),
+        };
+      }
+
+      return {
+        id: request.id,
+        type: "mcp_response",
+        success: true,
+        result,
+      };
+    } finally {
+      endOwnerCall?.();
+      disposeMcpRequest();
+    }
   }
 
   /** A request answered without waiting in the socket's admission queue, if this is one. */

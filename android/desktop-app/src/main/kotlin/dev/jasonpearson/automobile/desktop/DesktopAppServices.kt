@@ -15,6 +15,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionOptions
 import dev.jasonpearson.automobile.desktop.core.daemon.InputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
@@ -54,10 +55,12 @@ internal fun rememberAppDaemonSession(
     remember(usesUnixSocket) { if (usesUnixSocket) DaemonSocketPaths.socketPath() else null }
   val desktopSessionState =
     rememberDesktopDaemonSession(
-      desktopSocketPath,
-      desktopSessionPanes,
-      hostVisible = windowVisible,
-      onDaemonRecovered = { refreshAfterDaemonRecovery.value() },
+      DesktopDaemonSessionOptions(
+        desktopSocketPath,
+        desktopSessionPanes,
+        hostVisible = windowVisible,
+        onDaemonRecovered = { refreshAfterDaemonRecovery.value() },
+      ),
     )
   return AppDaemonSession(desktopSessionState, desktopSessionPanes, refreshAfterDaemonRecovery)
 }

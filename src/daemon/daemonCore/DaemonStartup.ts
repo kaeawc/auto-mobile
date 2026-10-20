@@ -67,8 +67,8 @@ import type { DaemonStreams } from "./DaemonStreams";
 import type { DaemonMaintenance } from "./DaemonMaintenance";
 import type { DaemonDisconnect } from "./DaemonDisconnect";
 import type { DaemonShutdown } from "./DaemonShutdown";
-import type { DaemonRecordingHost, DaemonStartHost } from "../daemon";
-import { findAvailableDaemonPort } from "../daemon";
+import type { DaemonRecordingHost, DaemonStartHost } from "../daemonStartHost";
+import { findAvailableDaemonPort } from "../daemonPort";
 
 export interface DaemonStartupHost extends Pick<
   DaemonRecordingHost,

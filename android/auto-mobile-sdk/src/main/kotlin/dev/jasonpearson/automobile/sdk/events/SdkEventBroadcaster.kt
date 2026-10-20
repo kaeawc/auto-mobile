@@ -208,14 +208,16 @@ object SdkEventBroadcaster {
       }
     try {
       sendBatchIntent(
-        context,
-        json,
-        batchId = chunkId,
-        generation = completion.generation,
-        requireAck = completion.requireAck,
-      ) { outcome ->
-        completion.completeChunk(chunk, chunkId, outcome)
-      }
+        BatchSend(
+          context,
+          json,
+          batchId = chunkId,
+          generation = completion.generation,
+          requireAck = completion.requireAck,
+        ) { outcome ->
+          completion.completeChunk(chunk, chunkId, outcome)
+        },
+      )
     } catch (error: Exception) {
       // Preserve legacy and first-chunk fallbacks; earlier ack sends still own their outcomes.
       if (!completion.requireAck || index == 0) throw error
@@ -343,22 +345,14 @@ object SdkEventBroadcaster {
   // A null outcome marks an aborted attempt that owns a retry, not a completed delivery.
   private class AttemptResolution(val outcome: BatchDeliveryOutcome?)
 
-  private fun sendBatchIntent(
-    context: Context,
-    batchJson: String,
-    batchId: String?,
-    attempt: Int = 0,
-    generation: Long,
-    requireAck: Boolean,
-    onResult: (BatchDeliveryOutcome) -> Unit,
-  ) {
-    if (generation != deliveryGeneration.get()) return
+  private fun sendBatchIntent(send: BatchSend) {
+    if (send.generation != deliveryGeneration.get()) return
     val resolution = AtomicReference<AttemptResolution?>()
     val dispatched = AtomicBoolean(false)
-    val scheduler = if (requireAck) scheduler() else null
+    val scheduler = if (send.requireAck) scheduler() else null
     val state =
       BatchAttempt(
-        BatchSend(context, batchJson, batchId, attempt, generation, requireAck, onResult),
+        send,
         resolution,
         dispatched,
         scheduler,
@@ -396,7 +390,7 @@ object SdkEventBroadcaster {
     val context: Context,
     val batchJson: String,
     val batchId: String?,
-    val attempt: Int,
+    val attempt: Int = 0,
     val generation: Long,
     val requireAck: Boolean,
     val onResult: (BatchDeliveryOutcome) -> Unit,
@@ -452,13 +446,7 @@ object SdkEventBroadcaster {
     if (send.attempt < retryPolicy.maxRetries) {
       val retry = Runnable {
         sendBatchIntent(
-          send.context,
-          send.batchJson,
-          send.batchId,
-          send.attempt + 1,
-          send.generation,
-          send.requireAck,
-          send.onResult,
+          send.copy(attempt = send.attempt + 1),
         )
       }
       if (!send.requireAck) {

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -393,7 +394,7 @@ fun AudioPlayerComponentPreview() {
     AudioPlayerComponent(
       audioResource =
         VideoResource.UriVideo(
-          android.net.Uri.parse("https://www.soundjay.com/misc/sounds/bell-ringing-05.wav"),
+          "https://www.soundjay.com/misc/sounds/bell-ringing-05.wav".toUri(),
         ),
     )
   }

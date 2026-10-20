@@ -151,30 +151,41 @@ internal class TextInputController(
     dismissKeyboard: Boolean = false,
   ) {
     rememberedInsert = null
-    val startTime = timeProvider.currentTimeMillis()
-    // Never log the text: the target may be a password field.
-    Log.d(TAG, "performSetText: ${text.length} chars resourceId=$resourceId")
-    perfProvider.serial("performSetText")
+    SetTextOperation(requestId, text, resourceId, dismissKeyboard).run()
+  }
 
-    try {
-      perfProvider.startOperation("findNode")
-      val root = host.activeWindowRoot()
-      var foundTargetNode: android.view.accessibility.AccessibilityNodeInfo? = null
+  private inner class SetTextOperation(
+    private val requestId: String?,
+    private val text: String,
+    private val resourceId: String?,
+    private val dismissKeyboard: Boolean,
+  ) {
+    private val startTime = timeProvider.currentTimeMillis()
+
+    // Never log the text: the target may be a password field.
+    init {
+      Log.d(TAG, "performSetText: ${text.length} chars resourceId=$resourceId")
+      perfProvider.serial("performSetText")
+    }
+
+    suspend fun run() {
       try {
-        foundTargetNode =
-          if (resourceId != null) {
-            // Find node by resource-id
-            findNodeByResourceIdOnRootDisplay(root, resourceId, host::screenDimensions)
-          } else {
-            // Find currently focused input node
-            findFocusedEditableNode(root)
-          }
-      } finally {
-        if (root !== foundTargetNode) {
-          root?.recycle()
-        }
+        perform()
+      } catch (e: CancellationException) {
+        perfProvider.end()
+        throw e
+      } catch (e: IllegalArgumentException) {
+        reportFailure(e)
+      } catch (e: IllegalStateException) {
+        reportFailure(e)
+      } catch (e: SecurityException) {
+        reportFailure(e)
       }
-      val targetNode = foundTargetNode
+    }
+
+    private suspend fun perform() {
+      perfProvider.startOperation("findNode")
+      val targetNode = findSetTextTarget(host, resourceId)
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
@@ -194,22 +205,7 @@ internal class TextInputController(
       }
 
       perfProvider.startOperation("setText")
-      val arguments =
-        android.os.Bundle().apply {
-          putCharSequence(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            text,
-          )
-        }
-      val success =
-        try {
-          targetNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
-            arguments,
-          )
-        } finally {
-          targetNode.recycle()
-        }
+      val success = applySetText(targetNode, text)
       perfProvider.endOperation("setText")
       perfProvider.end()
 
@@ -237,20 +233,9 @@ internal class TextInputController(
       )
 
       if (success) refreshHierarchyAfterTextInput()
-    } catch (e: CancellationException) {
-      perfProvider.end()
-      throw e
-    } catch (e: IllegalArgumentException) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing set text", e)
-      broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
-    } catch (e: IllegalStateException) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing set text", e)
-      broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
-    } catch (e: SecurityException) {
+    }
+
+    private suspend fun reportFailure(e: Exception) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing set text", e)
@@ -834,15 +819,15 @@ internal class TextInputController(
         focusImeNeighbor(findNextFocusableNode(root, checkNotNull(focusedNode)), "next")
       ImeActionStep.PREVIOUS ->
         focusImeNeighbor(findPreviousFocusableNode(root, checkNotNull(focusedNode)), "previous")
-      ImeActionStep.IME_ENTER -> {
-        // API 30+: Use ACTION_IME_ENTER for proper IME action handling
-        @Suppress("NewApi")
-        val actionId =
-          android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
-        val imeResult = checkNotNull(focusedNode).performAction(actionId)
-        Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
-        imeResult
-      }
+      ImeActionStep.IME_ENTER ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+          // API 30+: Use ACTION_IME_ENTER for proper IME action handling
+          val actionId =
+            android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
+          val imeResult = checkNotNull(focusedNode).performAction(actionId)
+          Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
+          imeResult
+        } else sendImeEnter()
       ImeActionStep.KEYCODE_ENTER -> {
         sendImeEnter()
       }
@@ -892,21 +877,58 @@ internal class TextInputController(
    */
   suspend fun performImeAction(requestId: String?, action: String) {
     rememberedInsert = null
-    val startTime = timeProvider.currentTimeMillis()
-    Log.d(TAG, "performImeAction: action='$action'")
-    // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
-    val imePerf = MutablePerfEntry("performImeAction", startTime)
-    fun finishPerf() {
+    ImeActionOperation(requestId, action).run()
+  }
+
+  private inner class ImeActionOperation(
+    private val requestId: String?,
+    private val action: String,
+  ) {
+    private val startTime = timeProvider.currentTimeMillis()
+
+    init {
+      Log.d(TAG, "performImeAction: action='$action'")
+      // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
+    }
+
+    private val imePerf = MutablePerfEntry("performImeAction", startTime)
+
+    private fun finishPerf() {
       if (imePerf.endTime == null) {
         imePerf.endTime = timeProvider.currentTimeMillis()
         perfProvider.complete(imePerf)
       }
     }
 
-    var root: android.view.accessibility.AccessibilityNodeInfo? = null
-    var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
-    var approximated: Boolean? = null
-    try {
+    private var root: android.view.accessibility.AccessibilityNodeInfo? = null
+    private var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
+    private var approximated: Boolean? = null
+
+    suspend fun run() {
+      try {
+        perform()
+      } catch (e: CancellationException) {
+        finishPerf()
+        throw e
+      } catch (e: java.io.IOException) {
+        reportFailure(e)
+      } catch (e: InterruptedException) {
+        reportFailure(e)
+      } catch (e: IllegalArgumentException) {
+        reportFailure(e)
+      } catch (e: IllegalStateException) {
+        reportFailure(e)
+      } catch (e: SecurityException) {
+        reportFailure(e)
+      } finally {
+        if (focusedNode !== root) {
+          focusedNode?.recycle()
+        }
+        root?.recycle()
+      }
+    }
+
+    private suspend fun perform() {
       val findFocusedNodePerf =
         MutablePerfEntry("findFocusedNode", timeProvider.currentTimeMillis())
       imePerf.children.add(findFocusedNodePerf)
@@ -944,6 +966,26 @@ internal class TextInputController(
         return
       }
 
+      complete(step, editorActionResult)
+    }
+
+    private suspend fun reportFailure(e: Exception) {
+      finishPerf()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing IME action", e)
+      broadcastImeActionResult(
+        ImeActionFrameResult(
+          requestId = requestId,
+          action = action,
+          success = false,
+          error = e.message,
+          totalTimeMs = errorTime - startTime,
+          approximated = approximated,
+        ),
+      )
+    }
+
+    private suspend fun complete(step: ImeActionStep, editorActionResult: Boolean?) {
       val executeActionPerf = MutablePerfEntry("executeAction", timeProvider.currentTimeMillis())
       imePerf.children.add(executeActionPerf)
       val success = executeImeStep(step, root, focusedNode, editorActionResult, action)
@@ -971,84 +1013,6 @@ internal class TextInputController(
           approximated = approximated,
         ),
       )
-    } catch (e: CancellationException) {
-      finishPerf()
-      throw e
-    } catch (e: java.io.IOException) {
-      finishPerf()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing IME action", e)
-      broadcastImeActionResult(
-        ImeActionFrameResult(
-          requestId = requestId,
-          action = action,
-          success = false,
-          error = e.message,
-          totalTimeMs = errorTime - startTime,
-          approximated = approximated,
-        ),
-      )
-    } catch (e: InterruptedException) {
-      finishPerf()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing IME action", e)
-      broadcastImeActionResult(
-        ImeActionFrameResult(
-          requestId = requestId,
-          action = action,
-          success = false,
-          error = e.message,
-          totalTimeMs = errorTime - startTime,
-          approximated = approximated,
-        ),
-      )
-    } catch (e: IllegalArgumentException) {
-      finishPerf()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing IME action", e)
-      broadcastImeActionResult(
-        ImeActionFrameResult(
-          requestId = requestId,
-          action = action,
-          success = false,
-          error = e.message,
-          totalTimeMs = errorTime - startTime,
-          approximated = approximated,
-        ),
-      )
-    } catch (e: IllegalStateException) {
-      finishPerf()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing IME action", e)
-      broadcastImeActionResult(
-        ImeActionFrameResult(
-          requestId = requestId,
-          action = action,
-          success = false,
-          error = e.message,
-          totalTimeMs = errorTime - startTime,
-          approximated = approximated,
-        ),
-      )
-    } catch (e: SecurityException) {
-      finishPerf()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing IME action", e)
-      broadcastImeActionResult(
-        ImeActionFrameResult(
-          requestId = requestId,
-          action = action,
-          success = false,
-          error = e.message,
-          totalTimeMs = errorTime - startTime,
-          approximated = approximated,
-        ),
-      )
-    } finally {
-      if (focusedNode !== root) {
-        focusedNode?.recycle()
-      }
-      root?.recycle()
     }
   }
 
@@ -1058,11 +1022,34 @@ internal class TextInputController(
    */
   suspend fun performSelectAll(requestId: String?) {
     rememberedInsert = null
-    val startTime = timeProvider.currentTimeMillis()
-    Log.d(TAG, "performSelectAll")
-    perfProvider.serial("performSelectAll")
+    SelectAllOperation(requestId).run()
+  }
 
-    try {
+  private inner class SelectAllOperation(
+    private val requestId: String?,
+  ) {
+    private val startTime = timeProvider.currentTimeMillis()
+
+    init {
+      Log.d(TAG, "performSelectAll")
+      perfProvider.serial("performSelectAll")
+    }
+
+    suspend fun run() {
+      try {
+        perform()
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: IllegalArgumentException) {
+        reportFailure(e)
+      } catch (e: IllegalStateException) {
+        reportFailure(e)
+      } catch (e: SecurityException) {
+        reportFailure(e)
+      }
+    }
+
+    private suspend fun perform() {
       perfProvider.startOperation("findFocusedNode")
       val focusedNode = findFocusedEditableNode(host.activeWindowRoot())
       perfProvider.endOperation("findFocusedNode")
@@ -1088,39 +1075,7 @@ internal class TextInputController(
         )
       val textLength = plan.textLength
 
-      val outcome =
-        if (plan.shouldPerformAction) {
-          // Use ACTION_SET_SELECTION with start=0 and end=textLength to select all
-          val arguments =
-            android.os.Bundle().apply {
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo
-                  .ACTION_ARGUMENT_SELECTION_START_INT,
-                0,
-              )
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                textLength,
-              )
-            }
-          val actionSucceeded =
-            focusedNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-              arguments,
-            )
-          val selectionRefreshed = !actionSucceeded && focusedNode.refresh()
-          selectAllOutcome(
-            textLength,
-            actionSucceeded,
-            selectionRefreshed,
-            if (selectionRefreshed) focusedNode.textSelectionStart else -1,
-            if (selectionRefreshed) focusedNode.textSelectionEnd else -1,
-          )
-        } else {
-          // No text to select, or all text is already selected
-          if (textLength == 0) Log.d(TAG, "No text in focused node to select")
-          SelectAllOutcome(true, null)
-        }
+      val outcome = applySelectAll(focusedNode, plan)
       val success = outcome.success
 
       focusedNode.recycle()
@@ -1138,19 +1093,9 @@ internal class TextInputController(
         outcome.error,
         totalTime,
       )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: IllegalArgumentException) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing select all", e)
-      broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
-    } catch (e: IllegalStateException) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing select all", e)
-      broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
-    } catch (e: SecurityException) {
+    }
+
+    private suspend fun reportFailure(e: Exception) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing select all", e)
@@ -1251,4 +1196,83 @@ private fun placeInsertCaret(
     android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
     selectionArguments,
   )
+}
+
+private fun findSetTextTarget(
+  host: TextInputController.Host,
+  resourceId: String?,
+): AccessibilityNodeInfo? {
+  val root = host.activeWindowRoot()
+  var foundTargetNode: android.view.accessibility.AccessibilityNodeInfo? = null
+  try {
+    foundTargetNode =
+      if (resourceId != null) {
+        // Find node by resource-id
+        findNodeByResourceIdOnRootDisplay(root, resourceId, host::screenDimensions)
+      } else {
+        // Find currently focused input node
+        findFocusedEditableNode(root)
+      }
+  } finally {
+    if (root !== foundTargetNode) {
+      root?.recycle()
+    }
+  }
+  return foundTargetNode
+}
+
+private fun applySetText(targetNode: AccessibilityNodeInfo, text: String): Boolean {
+  val arguments =
+    android.os.Bundle().apply {
+      putCharSequence(
+        android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+        text,
+      )
+    }
+  return try {
+    targetNode.performAction(
+      android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
+      arguments,
+    )
+  } finally {
+    targetNode.recycle()
+  }
+}
+
+private fun applySelectAll(
+  focusedNode: AccessibilityNodeInfo,
+  plan: SelectAllPlan,
+): SelectAllOutcome {
+  val textLength = plan.textLength
+  return if (plan.shouldPerformAction) {
+    // Use ACTION_SET_SELECTION with start=0 and end=textLength to select all
+    val arguments =
+      android.os.Bundle().apply {
+        putInt(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT,
+          0,
+        )
+        putInt(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
+          textLength,
+        )
+      }
+    val actionSucceeded =
+      focusedNode.performAction(
+        android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
+        arguments,
+      )
+    val selectionRefreshed = !actionSucceeded && focusedNode.refresh()
+    selectAllOutcome(
+      textLength,
+      actionSucceeded,
+      selectionRefreshed,
+      if (selectionRefreshed) focusedNode.textSelectionStart else -1,
+      if (selectionRefreshed) focusedNode.textSelectionEnd else -1,
+    )
+  } else {
+    // No text to select, or all text is already selected
+    if (textLength == 0) Log.d("CtrlProxy", "No text in focused node to select")
+    SelectAllOutcome(true, null)
+  }
 }

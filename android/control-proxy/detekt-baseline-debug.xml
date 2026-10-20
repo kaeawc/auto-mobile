@@ -26,31 +26,11 @@
     <ID>LargeClass:TextInputController.kt:TextInputController</ID>
     <ID>LargeClass:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>
     <ID>LargeClass:WebSocketServer.kt:WebSocketServer</ID>
-    <ID>LongMethod:CaCertificateController.kt:CaCertificateController$suspend fun performRemoveCaCertificate</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
-    <ID>LongMethod:CtrlProxyIme.kt:CtrlProxyIme$private fun awaitInputConnection</ID>
-    <ID>LongMethod:CtrlProxyMessageHandler.kt:CtrlProxyMessageHandler$override suspend fun handleMessage: WebSocketResponse?</ID>
-    <ID>LongMethod:GestureController.kt:GestureController$fun performDrag</ID>
-    <ID>LongMethod:GestureController.kt:GestureController$fun performPinch</ID>
-    <ID>LongMethod:GestureController.kt:GestureController$fun performTwoFingerSwipe</ID>
-    <ID>LongMethod:HierarchyController.kt:HierarchyController$internal fun extractHierarchy: ViewHierarchy?</ID>
-    <ID>LongMethod:HierarchyController.kt:HierarchyController$internal suspend fun extractHierarchyNow</ID>
-    <ID>LongMethod:HierarchyController.kt:HierarchyController$private fun extractHierarchyDirect: ViewHierarchy?</ID>
-    <ID>LongMethod:HierarchyDebouncer.kt:HierarchyDebouncer$private suspend fun extractAndCompare: ViewHierarchy?</ID>
-    <ID>LongMethod:ImeController.kt:ImeController$suspend fun requestCommitText</ID>
-    <ID>LongMethod:KeyboardScreen.kt:@Composable private fun KeyCap</ID>
-    <ID>LongMethod:NodeActionController.kt:NodeActionController$suspend fun performNodeAction</ID>
-    <ID>LongMethod:PackageController.kt:PackageController$suspend fun performInstalledPackages</ID>
-    <ID>LongMethod:PackageController.kt:PackageController$suspend fun performPackageInfo</ID>
     <ID>LongMethod:PrototypeController.kt:PrototypeController$private suspend fun display: Surface</ID>
     <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
     <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
-    <ID>LongMethod:ScreenshotController.kt:ScreenshotController$suspend fun takeScreenshotAsync: ScreenshotCaptureOutcome</ID>
-    <ID>LongMethod:SettingsController.kt:SettingsController$suspend fun performSettingsWrite</ID>
-    <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performImeAction</ID>
-    <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSelectAll</ID>
-    <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSetText</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastActionResult</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
@@ -109,8 +89,6 @@
     <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:e: NullPointerException</ID>
     <ID>TooGenericExceptionCaught:WebSocketServer.kt:WebSocketServer$e: Exception</ID>
-    <ID>TooManyFunctions:CaCertificateController.kt:CaCertificateController</ID>
-    <ID>TooManyFunctions:ConfigurableTypingPolicy.kt:ConfigurableTypingPolicy : TypingPolicy</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy$&lt;no name provided&gt; : Host</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:dev.jasonpearson.automobile.ctrlproxy.CtrlProxy.kt</ID>
@@ -122,16 +100,11 @@
     <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitDriver$CommitSequence</ID>
     <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitSink</ID>
     <ID>TooManyFunctions:ImeConnection.kt:ImeConnection</ID>
-    <ID>TooManyFunctions:ImeGraphemes.kt:ImeGraphemes</ID>
     <ID>TooManyFunctions:InputConnectionAdapter.kt:InputConnectionAdapter : ImeConnection</ID>
-    <ID>TooManyFunctions:KeyboardController.kt:KeyboardController</ID>
-    <ID>TooManyFunctions:OverlayDrawer.kt:OverlayDrawer</ID>
-    <ID>TooManyFunctions:PerfProvider.kt:PerfProvider</ID>
     <ID>TooManyFunctions:PrototypeController.kt:PrototypeController</ID>
     <ID>TooManyFunctions:PrototypeHost.kt:DefaultPrototypeHost : PrototypeHost</ID>
     <ID>TooManyFunctions:PrototypeHost.kt:dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHost.kt</ID>
     <ID>TooManyFunctions:PrototypeResultBroadcaster.kt:PrototypeResultBroadcaster : PrototypeResultSink</ID>
-    <ID>TooManyFunctions:ResultFrames.kt:dev.jasonpearson.automobile.ctrlproxy.ResultFrames.kt</ID>
     <ID>TooManyFunctions:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore : SavedPrototypeStore</ID>
     <ID>TooManyFunctions:StorageController.kt:StorageController</ID>
     <ID>TooManyFunctions:StorageSubscriptionManager.kt:StorageSubscriptionManager</ID>

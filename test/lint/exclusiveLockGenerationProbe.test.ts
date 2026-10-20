@@ -121,7 +121,7 @@ describe("production exclusive locks always supply a generation probe", () => {
   beforeAll(() => {
     calls = typeScriptFiles(path.join(ROOT, "src")).flatMap((file) => {
       const relative = relativePosix(ROOT, file);
-      return relative === "src/utils/fileLock.ts"
+      return relative === "src/utils/fileLock.ts" || relative.startsWith("src/utils/fileLock/")
         ? []
         : scanExclusiveLockGenerationProbe(relative, readFileSync(file, "utf8")).map((finding) => ({
             file: relative,

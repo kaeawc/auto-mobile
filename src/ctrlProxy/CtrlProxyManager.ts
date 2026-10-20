@@ -1,36 +1,17 @@
-import { AndroidCtrlProxyAccessibility } from "./AndroidCtrlProxyAccessibility";
-import { AndroidCtrlProxyRebind } from "./AndroidCtrlProxyRebind";
-import { AndroidCtrlProxyCompatibility } from "./AndroidCtrlProxyCompatibility";
-import { AndroidCtrlProxyApkInstaller } from "./AndroidCtrlProxyApkInstaller";
-import type {
-  AccessibilityVersionCheckResult,
-  AccessibilityVersionCheckOptions,
-  ToggleCapabilities,
-  InstalledApkSha256Result,
-} from "./AndroidCtrlProxyManagerTypes";
-import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
-import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
-import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyManagerHost";
-import type { SavedPrototypeRestoreReport } from "../models/SavedPrototypeRestoreReport";
-import { getAbortSignal } from "../utils/AbortContext";
-import { errorMessage } from "../utils/describeUnknownError";
-import { DeviceLostError } from "../models/DeviceLostError";
-import { classifySetupError } from "./classifySetupError";
-import {
-  AdbDeviceOfflineError,
-  isAdbDeviceOfflineError,
-  isAdbMissingDeviceError,
-} from "../utils/android-cmdline-tools/AdbDeviceHealth";
-import {
-  AdbClientFactory,
-  defaultAdbClientFactory,
-} from "../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { logger } from "../utils/logger";
-import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
+export {
+  CtrlProxyApkInstallError,
+  CtrlProxyInspectionError,
+  MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
+  REBIND_BIND_WAIT_BUDGET_MS,
+  REBIND_MUTATION_COMMAND_TIMEOUT_MS,
+  STALE_PREFETCH_SWEEP_DEADLINE_MS,
+  type CtrlProxyCompatibilityInspection,
+  type CtrlProxyManager,
+  type CtrlProxySetupResult,
+} from "./CtrlProxyManagerContracts";
 import * as fs from "fs/promises";
-import { ActionableError, BootedDevice, ExecResult } from "../models";
-import { requireBootedDevice } from "../devices/requireBootedDevice";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { ENV, readEnvRaw } from "../config/env";
 import {
   isExplicitPin,
   isPinnedVersionKnown,
@@ -38,94 +19,60 @@ import {
   resolveApkUrl,
   resolvePinnedVersion,
 } from "../constants/release";
-import { accessibilityDetector } from "./accessibility/AccessibilityDetector";
-import type { AccessibilityDetector } from "./accessibility/interfaces/AccessibilityDetector";
+import { requireBootedDevice } from "../devices/requireBootedDevice";
+import { ActionableError, BootedDevice, ExecResult } from "../models";
+import { CtrlProxyForwardOwnershipUnreadableError } from "../models/CtrlProxyForwardOwnershipUnreadableError";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
+import { DeviceLostError } from "../models/DeviceLostError";
+import type { ForeignCtrlProxyForwardEvidence } from "../models/ForeignCtrlProxyForwardEvidence";
+import { getAbortSignal } from "../utils/AbortContext";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbDeviceOfflineError,
+  isAdbDeviceOfflineError,
+  isAdbMissingDeviceError,
+} from "../utils/android-cmdline-tools/AdbDeviceHealth";
+import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { DefaultAndroidPrerequisiteDetector } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { DefaultChecksumCalculator, type ChecksumCalculator } from "../utils/ChecksumCalculator";
+import { errorMessage } from "../utils/describeUnknownError";
+import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
+import { DefaultFileDownloader, type FileDownloader } from "../utils/FileDownloader";
+import { logger } from "../utils/logger";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { type FileDownloader, DefaultFileDownloader } from "../utils/FileDownloader";
-import { type ChecksumCalculator, DefaultChecksumCalculator } from "../utils/ChecksumCalculator";
-import type { ProxyManager, ProxySetupResult } from "../utils/interfaces/ProxyManager";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
-import { DefaultAndroidPrerequisiteDetector } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
+import { accessibilityDetector } from "./accessibility/AccessibilityDetector";
+import type { AccessibilityDetector } from "./accessibility/interfaces/AccessibilityDetector";
+import { AndroidCtrlProxyAccessibility } from "./AndroidCtrlProxyAccessibility";
+import { AndroidCtrlProxyApkInstaller } from "./AndroidCtrlProxyApkInstaller";
+import { AndroidCtrlProxyCompatibility } from "./AndroidCtrlProxyCompatibility";
+import type {
+  AccessibilityVersionCheckOptions,
+  AccessibilityVersionCheckResult,
+  InstalledApkSha256Result,
+  ToggleCapabilities,
+} from "./AndroidCtrlProxyManagerTypes";
+import { AndroidCtrlProxyRebind } from "./AndroidCtrlProxyRebind";
+import { classifySetupError } from "./classifySetupError";
 import { CTRL_PROXY_PACKAGE } from "./constants";
 import {
   DefaultCtrlProxyApkPrefetcher,
   type CtrlProxyApkPrefetcher,
   type CtrlProxyApkPrefetcherDeps,
 } from "./CtrlProxyApkPrefetcher";
-import { AsyncLocalStorage } from "node:async_hooks";
-import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
-import { CtrlProxyForwardOwnershipUnreadableError } from "../models/CtrlProxyForwardOwnershipUnreadableError";
-import type { ForeignCtrlProxyForwardEvidence } from "../models/ForeignCtrlProxyForwardEvidence";
-import { ENV, readEnvRaw } from "../config/env";
-
-export { CtrlProxyInspectionError } from "./CtrlProxyInspectionError";
-export { CtrlProxyApkInstallError } from "./CtrlProxyApkInstallError";
-
-export {
-  REBIND_BIND_WAIT_BUDGET_MS,
-  REBIND_MUTATION_COMMAND_TIMEOUT_MS,
-} from "./AndroidCtrlProxyRebind";
-
-export {
-  MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
-  STALE_PREFETCH_SWEEP_DEADLINE_MS,
-} from "./CtrlProxyApkPrefetcher";
-export interface CtrlProxySetupResult extends ProxySetupResult {
-  savedPrototypeRestore?: SavedPrototypeRestoreReport;
-}
-type ApkOverrideChecksumEntry = {
-  mtimeMs: number;
-  size: number;
-  checksumPromise: Promise<string>;
-};
-
-/**
- * Android-specific accessibility-service lifecycle, extending the
- * platform-agnostic {@link ProxyManager}.
- */
-export interface CtrlProxyManager extends ProxyManager {
-  assertNotDrivenByOtherDaemon?(signal?: AbortSignal): Promise<void>;
-  setup(force?: boolean, perf?: PerformanceTracker): Promise<CtrlProxySetupResult>;
-  isEnabled(): Promise<boolean>;
-  /**
-   * Re-toggle CtrlProxy's accessibility-service entry when dumpsys shows it is
-   * crashed or unbound. Returns whether a rebind was attempted.
-   */
-  rebindIfUnhealthy(): Promise<boolean>;
-  /**
-   * Force-stop and re-add CtrlProxy's accessibility-service entry
-   * unconditionally, even when {@link isAccessibilityServiceHealthy} already
-   * reports it bound. This is the Android counterpart of iOS's
-   * `forceRestart`: a service whose binding is healthy but which still cannot
-   * produce a hierarchy never trips {@link rebindIfUnhealthy}'s health gate
-   * (issue #7533). Returns whether a restart was attempted — false when the
-   * device is offline or missing (mirroring `AndroidCtrlProxyClient`'s
-   * pre-recovery device-presence check, issue #7532), so a caller cannot spin
-   * this into a restart loop against a device that has disappeared.
-   */
-  forceRestartProcess(): Promise<boolean>;
-  isEnabledForUser(userId: number): Promise<boolean>;
-  getInstalledApkSha256(): Promise<string | null>;
-  isVersionCompatible(): Promise<boolean>;
-  ensureCompatibleVersion(
-    options?: AccessibilityVersionCheckOptions,
-  ): Promise<AccessibilityVersionCheckResult>;
-  downloadApk(): Promise<string>;
-  install(apkPath: string): Promise<void>;
-  enable(): Promise<void>;
-  enableForUser(userId: number): Promise<void>;
-  cleanupApk(apkPath: string): Promise<void>;
-}
-
-export interface CtrlProxyCompatibilityInspection {
-  status: "not_installed" | "compatible" | "mismatch" | "unverifiable" | "skipped";
-  expectedSha256: string;
-  installedSha256: string | null;
-  installedShaSource: "device" | "host" | "none";
-  /** A known explicit release pin cannot be verified against this installed APK. */
-  knownPinMismatch: boolean;
-}
+import {
+  type ApkOverrideChecksumEntry,
+  type CtrlProxyCompatibilityInspection,
+  type CtrlProxyManager,
+  type CtrlProxySetupResult,
+} from "./CtrlProxyManagerContracts";
+import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyManagerHost";
+import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
 
 export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Kept on the manager for the observe availability-invalidation test seam.

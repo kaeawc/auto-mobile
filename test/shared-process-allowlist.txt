@@ -75,7 +75,6 @@ test/daemon/appearanceSyncOff.test.ts
 test/daemon/appearanceSyncSchedulerResilience.test.ts
 test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
-test/daemon/auxiliarySocketDegradation.test.ts
 test/daemon/boundSessionLossMessage.test.ts
 test/daemon/canonicalPixels.property.test.ts
 test/daemon/canonicalPixels.test.ts
@@ -198,6 +197,7 @@ test/daemon/deviceTable.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-offlineRecovery.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-sourceUnavailable.test.ts
 test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
@@ -226,6 +226,7 @@ test/daemon/heldSessionsLateRehydration.test.ts
 test/daemon/hierarchyStreamDiff.property.test.ts
 test/daemon/hierarchyStreamDiff.test.ts
 test/daemon/holderReleaseRemaining.test.ts
+test/daemon/hostInventoryForwardRoute.test.ts
 test/daemon/hostStarvationConnectedOwnerScenario.test.ts
 test/daemon/ideMutationAfterOwnerLeft.test.ts
 test/daemon/ideRouteModule.test.ts
@@ -351,8 +352,10 @@ test/daemon/releaseCallerOrderingRecovery.test.ts
 test/daemon/releaseCallerOrderingUnknownSession.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
+test/daemon/requestBudgetNotification.test.ts
 test/daemon/requestTimeoutOnce.test.ts
 test/daemon/restartAdmission.test.ts
+test/daemon/restartAdmissionTimeout.test.ts
 test/daemon/runDaemonCommandStrayArgs.test.ts
 test/daemon/runDaemonLivenessRelease.test.ts
 test/daemon/runDaemonSessionCommandArgs.test.ts
@@ -382,6 +385,7 @@ test/daemon/sessionBroker/provisioning/bindingsPlatformChangeSqliteJournal.test.
 test/daemon/sessionBroker/provisioning/bindingsRegistryAbsentThenUnreadable.test.ts
 test/daemon/sessionBroker/provisioning/bindingsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/sessionBroker/provisioning/capacityExternalDevices.test.ts
+test/daemon/sessionBroker/provisioning/capacityHeldDevices.test.ts
 test/daemon/sessionBroker/provisioning/daemonBindingBudgetWiring.test.ts
 test/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.ownDevice.test.ts
 test/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.redrive.test.ts
@@ -585,6 +589,7 @@ test/fakes/FakeIOSCtrlProxy.test.ts
 test/fakes/FakeImageBackend.test.ts
 test/fakes/FakeIosVoiceOverDetector.test.ts
 test/fakes/FakeNavigationGraphManager.test.ts
+test/fakes/FakePrototypeAgentClient.test.ts
 test/fakes/FakeSystemConfigurationAdapter.test.ts
 test/fakes/FakeTimer.test.ts
 test/fakes/adbStdout.test.ts
@@ -970,6 +975,7 @@ test/features/observe/ios/CtrlProxyKeyboardTimeout.test.ts
 test/features/observe/ios/CtrlProxyMagicTap.test.ts
 test/features/observe/ios/CtrlProxyMultiFingerFence.test.ts
 test/features/observe/ios/CtrlProxyPressDispatch.test.ts
+test/features/observe/ios/CtrlProxySdkCapabilities.test.ts
 test/features/observe/ios/CtrlProxySdkTrigger.test.ts
 test/features/observe/ios/CtrlProxyStructure.test.ts
 test/features/observe/ios/CtrlProxySwipeDispatch.test.ts
@@ -1973,6 +1979,7 @@ test/utils/ios-cmdline-tools/simctl-client.runtimeResolution.test.ts
 test/utils/ios-cmdline-tools/simctl-client.uninstallBound.test.ts
 test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
 test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
+test/utils/ios-cmdline-tools/simctlCommandBounds.test.ts
 test/utils/ios-cmdline-tools/simctlRuntimes.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
 test/utils/ios-cmdline-tools/simulatorLaunchHandle.test.ts

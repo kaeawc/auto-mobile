@@ -17,6 +17,11 @@ import {
   type ReadinessIosManager,
 } from "../../src/ctrlProxy/RunnerReadinessService";
 import {
+  IOS_POST_SETUP_FIRST_PROBE_TIMEOUT_MS,
+  IOS_POST_SETUP_RESTART_MIN_FAILED_PROBES,
+} from "../../src/ctrlProxy/RunnerReadinessPolicy";
+import { READINESS_PROBE_TIMEOUT_MS } from "../../src/ctrlProxy/ReadinessPhaseRunner";
+import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,
 } from "../../src/utils/deviceReadinessLock";
@@ -60,6 +65,8 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
   healthResults: boolean[] = [true];
   connectionResults: boolean[] = [true];
   healthCalls = 0;
+  healthTimeouts: Array<number | undefined> = [];
+  onHealth?: (timeoutMs?: number) => Promise<void>;
   connectionCalls = 0;
   resetConnectionBudgetCalls = 0;
   accessibilityHierarchies: Array<ViewHierarchyResult | null> = [];
@@ -93,8 +100,14 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
     return await this.waitForConnection();
   }
 
-  async verifyServiceReady(): Promise<boolean> {
+  async verifyServiceReady(
+    _attempts?: number,
+    _delayMs?: number,
+    timeoutMs?: number,
+  ): Promise<boolean> {
     this.healthCalls++;
+    this.healthTimeouts.push(timeoutMs);
+    await this.onHealth?.(timeoutMs);
     return this.healthResults.shift() ?? false;
   }
 
@@ -188,6 +201,25 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 }
 
 class FakeIosManager implements ReadinessIosManager {
+  endpointHealth: Awaited<ReturnType<NonNullable<ReadinessIosManager["checkRunningWithReason"]>>> =
+    {
+      ok: true,
+    };
+  endpointHealthCalls = 0;
+  runnerChild: ReturnType<NonNullable<ReadinessIosManager["runnerSnapshot"]>>["xcTestProcess"] = {
+    exitCode: null,
+    signalCode: null,
+  };
+
+  async checkRunningWithReason() {
+    this.endpointHealthCalls++;
+    return this.endpointHealth;
+  }
+
+  runnerSnapshot() {
+    return { xcTestProcess: this.runnerChild };
+  }
+
   installed = true;
   servicePort = 8765;
   setupResult: Awaited<ReturnType<ReadinessIosManager["setup"]>> = {
@@ -275,6 +307,7 @@ function createService(
     getAndroidClient?: (device: BootedDevice) => FakeReadinessClient;
     getIosClient?: (device: BootedDevice, port: number) => FakeReadinessClient;
     autoAdvance?: boolean;
+    iosPostSetupRestartMinFailedProbes?: number;
     awaitIosStartupMaintenance?: () => Promise<void>;
     getAndroidFrameworkReadiness?: (
       device: BootedDevice,
@@ -308,6 +341,7 @@ function createService(
     iosClient,
     service: new RunnerReadinessService({
       timer,
+      iosPostSetupRestartMinFailedProbes: options.iosPostSetupRestartMinFailedProbes,
       getAndroidFrameworkReadiness: options.getAndroidFrameworkReadiness,
       getAndroidManager: () => androidManager,
       getAndroidClient: options.getAndroidClient ?? (() => androidClient),
@@ -1456,6 +1490,202 @@ describe("RunnerReadinessService", () => {
 
     expect(iosManager.setupMinimumHealthPollDurationMs).toBe(110_000);
     expect(iosManager.setupSignal).toBeDefined();
+  });
+
+  for (const skipCtrlProxyDownload of [false, true]) {
+    test(`post-setup slow first iOS probe retries without restart (${skipCtrlProxyDownload ? "cached start" : "setup"})`, async () => {
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [false, true];
+      const { service, timer, iosManager } = createService({ iosClient });
+      iosClient.onHealth = async (timeoutMs) => {
+        if (iosClient.healthCalls === 1) {
+          await timer.sleep(timeoutMs ?? 0);
+        }
+      };
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup slow snapshot",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload,
+      });
+
+      expect(iosManager.forceRestartCalls).toBe(0);
+      expect(iosClient.healthCalls).toBe(2);
+      expect(iosClient.healthTimeouts).toEqual([
+        IOS_POST_SETUP_FIRST_PROBE_TIMEOUT_MS,
+        READINESS_PROBE_TIMEOUT_MS,
+      ]);
+      expect(timer.now()).toBe(8_250);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+  }
+
+  test.each([undefined, 2])(
+    "post-setup restarts once after the failure threshold %s",
+    async (threshold) => {
+      const failures = threshold ?? IOS_POST_SETUP_RESTART_MIN_FAILED_PROBES;
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [...Array.from({ length: failures }, () => false), true];
+      const { service, iosManager } = createService({
+        iosClient,
+        iosPostSetupRestartMinFailedProbes: threshold,
+      });
+      let callsBeforeRestart = 0;
+      iosManager.onForceRestart = async () => {
+        callsBeforeRestart = iosClient.healthCalls;
+      };
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup unresponsive hierarchy",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+      });
+
+      expect(callsBeforeRestart).toBe(failures);
+      expect(iosManager.forceRestartCalls).toBe(1);
+      expect(iosClient.healthCalls).toBe(failures + 1);
+    },
+  );
+
+  test.each(["refused", "exit", "signal", "exit-during-probe"] as const)(
+    "post-setup restarts immediately on %s evidence",
+    async (evidence) => {
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [false, true];
+      const { service, iosManager, timer } = createService({ iosClient, autoAdvance: false });
+      if (evidence === "refused") {
+        iosManager.endpointHealth = { ok: false, reason: "refused" };
+        iosClient.connectionResults = [false, true];
+        iosClient.healthResults = [true];
+      } else if (evidence === "exit-during-probe") {
+        const child: { exitCode: number | null; signalCode: NodeJS.Signals | null } = {
+          exitCode: null,
+          signalCode: null,
+        };
+        iosManager.runnerChild = child;
+        iosClient.onHealth = async () => {
+          if (iosClient.healthCalls === 1) {
+            child.exitCode = 65;
+            iosManager.runnerChild = null;
+          }
+        };
+      } else {
+        iosManager.runnerChild = {
+          exitCode: evidence === "exit" ? 65 : null,
+          signalCode: evidence === "signal" ? "SIGTERM" : null,
+        };
+      }
+      let probesBeforeRestart = 0;
+      iosManager.onForceRestart = async () => {
+        probesBeforeRestart = iosClient.healthCalls;
+      };
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup dead runner",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+      });
+
+      expect(iosManager.forceRestartCalls).toBe(1);
+      expect(probesBeforeRestart).toBe(evidence === "refused" ? 0 : 1);
+      expect(timer.now()).toBe(0);
+    },
+  );
+
+  test.each(["timeout", "reset", "unhealthy", "unknown"] as const)(
+    "post-setup tolerates one %s health result and an untracked child",
+    async (reason) => {
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosClient.healthResults = [false, true];
+      const { service, iosManager } = createService({ iosClient });
+      iosManager.endpointHealth = { ok: false, reason };
+      iosManager.runnerChild = null;
+
+      await service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup inconclusive liveness",
+        totalDeadlineMs: 180_000,
+        readinessTimeoutMs: 30_000,
+      });
+
+      expect(iosManager.forceRestartCalls).toBe(0);
+      expect(iosClient.healthCalls).toBe(2);
+    },
+  );
+
+  test("post-setup cold restart takes 95 seconds and receives a fresh health window", async () => {
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.healthResults = [false, false, true];
+    const { service, timer, iosManager } = createService({ iosClient });
+    iosManager.endpointHealth = { ok: false, reason: "refused" };
+    iosManager.onForceRestart = async () => {
+      await timer.sleep(95_000);
+    };
+    iosClient.onHealth = async (timeoutMs) => {
+      if (iosClient.healthCalls !== 3) {
+        await timer.sleep(timeoutMs ?? 0);
+      }
+    };
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "post-setup cold restart",
+      totalDeadlineMs: 180_000,
+      readinessTimeoutMs: 30_000,
+    });
+
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosManager.forceRestartOptions?.minimumHealthPollDurationMs).toBe(172_000);
+    expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(false);
+    expect(iosClient.healthCalls).toBe(3);
+    expect(timer.now()).toBe(105_250);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("post-setup restart is aborted at the runner-setup deadline", async () => {
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosClient.healthResults = [false];
+    const { service, timer, iosManager } = createService({ iosClient });
+    iosManager.endpointHealth = { ok: false, reason: "refused" };
+    iosManager.onForceRestart = async (options) =>
+      await new Promise<void>((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+          once: true,
+        });
+      });
+
+    const error = await service
+      .ensureReady({
+        device: iosDevice,
+        requestedIdentity: "post-setup bounded restart",
+        totalDeadlineMs: 90_000,
+        readinessTimeoutMs: 30_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    if (!(error instanceof RunnerReadinessError)) {
+      throw new Error("Expected a runner readiness deadline failure");
+    }
+    expect(error.phase).toBe("runner-setup");
+    expect(error.deadlineExhausted).toBe(true);
+    expect(error.code).toBe("timeout");
+    expect(error.retryable).toBe(true);
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosManager.forceRestartOptions?.minimumHealthPollDurationMs).toBe(90_000);
+    expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
+    expect(timer.now()).toBe(90_000);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("force-restarts an iOS runner whose live launcher has no listening endpoint", async () => {

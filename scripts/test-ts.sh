@@ -86,6 +86,135 @@ validate_positive_integer() {
   fi
 }
 
+# shellcheck source=scripts/lib/host-slots.sh
+source "$ROOT/scripts/lib/host-slots.sh"
+export AUTOMOBILE_TEST_TS_PARENT_PID="$$"
+cleanup_pids=()
+cleanup_command_groups=()
+cleanup_pgid_prefixes=()
+exit_report_dir=""
+randomized_summary=0
+
+cleanup_test_processes() {
+  local prefix record cmd watcher _ pid signal group managed active=0
+  local groups=(${cleanup_command_groups[@]+"${cleanup_command_groups[@]}"})
+  # Stop shard launchers first so no new command can escape the recorded set.
+  for pid in ${cleanup_pids[@]+"${cleanup_pids[@]}"}; do
+    managed=0
+    for group in ${cleanup_command_groups[@]+"${cleanup_command_groups[@]}"}; do
+      if [[ "$pid" == "$group" ]]; then managed=1; break; fi
+    done
+    # Group-managed shells receive TERM once, below. A second TERM during
+    # entry to their EXIT trap can interrupt cleanup before traps are ignored.
+    if [[ "$managed" -eq 1 ]]; then continue; fi
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -TERM "$pid" 2>/dev/null || true
+      active=1
+    fi
+  done
+  for prefix in ${cleanup_pgid_prefixes[@]+"${cleanup_pgid_prefixes[@]}"}; do
+    for record in "$prefix".*; do
+      [[ -f "$record" ]] || continue
+      read -r cmd watcher _ < "$record" || continue
+      for pid in "$cmd" "$watcher"; do
+        if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then groups+=("$pid"); fi
+      done
+    done
+  done
+  for signal in TERM KILL; do
+    for pid in ${groups[@]+"${groups[@]}"}; do
+      if kill -0 -- "-$pid" 2>/dev/null; then
+        kill -"$signal" -- "-$pid" 2>/dev/null || true
+        active=1
+      fi
+    done
+    if [[ "$signal" == TERM && "$active" -eq 1 ]]; then
+      sleep "${AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS:-2}"
+      # Nested lanes need their own grace interval before releasing host slots.
+      # Give their EXIT traps time to finish before escalating the outer group.
+      if [[ "$mode" == all ]]; then sleep 1; fi
+    fi
+  done
+  for pid in ${cleanup_pids[@]+"${cleanup_pids[@]}"}; do
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  cleanup_pids=()
+  cleanup_command_groups=()
+}
+
+forget_cleanup_pid() {
+  local reaped="$1" pid remaining=()
+  for pid in ${cleanup_pids[@]+"${cleanup_pids[@]}"}; do
+    if [[ "$pid" != "$reaped" ]]; then remaining+=("$pid"); fi
+  done
+  cleanup_pids=(${remaining[@]+"${remaining[@]}"})
+  remaining=()
+  for pid in ${cleanup_command_groups[@]+"${cleanup_command_groups[@]}"}; do
+    if [[ "$pid" != "$reaped" ]]; then remaining+=("$pid"); fi
+  done
+  cleanup_command_groups=(${remaining[@]+"${remaining[@]}"})
+}
+
+# A shell waiting on a foreground executable defers traps. Background jobs plus
+# wait are interruptible; monitor mode gives cleanup a group for descendants.
+run_managed_command() {
+  local pid status=0 had_monitor=0
+  case "$-" in *m*) had_monitor=1 ;; esac
+  set -m
+  "$@" 3>&- &
+  pid=$!
+  cleanup_pids+=("$pid")
+  cleanup_command_groups+=("$pid")
+  if [[ "$had_monitor" -eq 0 ]]; then set +m; fi
+  wait "$pid" || status=$?
+  forget_cleanup_pid "$pid"
+  return "$status"
+}
+
+test_ts_exit() {
+  local status="$?"
+  trap - EXIT
+  trap '' INT TERM HUP
+  set +e
+  cleanup_test_processes
+  host_slots_release
+  if [[ "$randomized_summary" -eq 1 ]]; then randomized_failure_summary "$status"; fi
+  if [[ -n "$exit_report_dir" ]]; then rm -rf "$exit_report_dir"; fi
+  exit "$status"
+}
+trap test_ts_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+cap_unit_workers() {
+  local demand="$1"
+  run_capture_status host_slots_acquire "$demand" "$cores"
+  if [[ "$RUN_STATUS" -ne 0 ]]; then return "$RUN_STATUS"; fi
+  capped_workers="$host_slots_acquired"
+  if [[ "$capped_workers" -lt 1 ]]; then capped_workers=1; fi
+  if [[ "$capped_workers" -gt "$demand" ]]; then capped_workers="$demand"; fi
+  printf 'test-ts: host slots demand=%s acquired=%s workers=%s\n' \
+    "$demand" "$host_slots_acquired" "$capped_workers" >&2
+}
+
+host_load_exceeds_cores() {
+  local load=""
+  if [[ -n "${AUTOMOBILE_TEST_LOADAVG_FILE:-}" ]]; then
+    read -r load _ < "$AUTOMOBILE_TEST_LOADAVG_FILE" || true
+  elif [[ -r /proc/loadavg ]]; then
+    read -r load _ < /proc/loadavg || true
+  else
+    load="$(sysctl -n vm.loadavg 2>/dev/null | awk '{gsub(/[{}]/, ""); print $1}')"
+  fi
+  if [[ "$load" =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v load="$load" -v cores="$cores" 'BEGIN {exit !(load > cores)}'; then
+    printf 'test-ts: not retrying unit shard %d: host load %s > cores %s\n' "$1" "$load" "$cores" >&2
+    return 0
+  fi
+  return 1
+}
+
 validate_positive_integer "AUTOMOBILE_UNIT_TEST_WORKERS" "$unit_workers"
 if [[ "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES+x}" == x ]]; then
   validate_positive_integer "AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES"
@@ -132,7 +261,24 @@ run_test_command() {
     start_seconds="$(date +%s)"
     # run_with_timeout's 124 status is expected here when the deadline fires.
     set +e
-    run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
+    local native_timeout=1
+    if [[ ( "$mode" == unit || "$mode" == changed ) && "$runner_os" != Windows ]] ||
+      [[ -n "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}${AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE:-}" || -r "${AUTOMOBILE_WATCHDOG_TIMING_LOG:-}" ]]; then
+      native_timeout=0
+    fi
+    if [[ "$native_timeout" -eq 1 ]] && command -v timeout >/dev/null 2>&1; then
+      run_managed_command timeout -k 2 "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
+    elif [[ "$native_timeout" -eq 1 ]] && command -v gtimeout >/dev/null 2>&1; then
+      run_managed_command gtimeout -k 2 "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
+    else
+      local pgid_prefix
+      mkdir -p "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}"
+      pgid_prefix="$(mktemp "${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-pgid.XXXXXX")"
+      rm -f "$pgid_prefix"
+      cleanup_pgid_prefixes+=("$pgid_prefix")
+      AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$pgid_prefix" \
+        run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
+    fi
     status=$?
     if [[ "$caller_options" == *e* ]]; then set -e; fi
     elapsed_seconds=$(($(date +%s) - start_seconds))
@@ -148,7 +294,7 @@ run_test_command() {
     return "$status"
   fi
 
-  "$@"
+  run_managed_command "$@"
 }
 
 lane_for_test_path() {
@@ -309,7 +455,7 @@ discover_unit_test_files() {
 
 # Markdown backticks are literal formatting, not shell substitutions.
 randomized_failure_summary() {
-  local status="$?"
+  local status="$1"
   if [[ "$status" -ne 0 && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       printf '### Randomized unit lane failed (exit %s)\n\n' "$status"
@@ -332,7 +478,7 @@ run_randomized_unit() {
     exit 2
   fi
   printf 'test-ts: randomized unit lane seed=%s\n' "$seed"
-  trap randomized_failure_summary EXIT
+  randomized_summary=1
   if [[ "$has_test_targets" -ne 0 || "${#passthrough_args[@]}" -ne 0 ]]; then
     echo "Randomized unit lane requires the complete unit file list and no extra arguments." >&2
     exit 2
@@ -491,9 +637,11 @@ launch_unit_shard() {
   AUTOMOBILE_WATCHDOG_TIMING_LOG="$shard_root/timing-shard-${shard}.ndjson" \
   AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt" \
   AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}" \
+  AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$shard_root/shard-${shard}.pgid" \
   AUTOMOBILE_FORCE_PORTABLE_TIMEOUT="${shard_portable_timeout}" \
     run_unit_shard_attempt > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
   pids[shard]=$!
+  cleanup_pids+=("$!")
 }
 
 # Runs in the background shell launched above; reads the launcher's dynamic locals.
@@ -662,6 +810,8 @@ unit_shard_should_retry() {
     return 1
   fi
   if [[ "$status" -eq 124 ]]; then
+    run_capture_status host_load_exceeds_cores "$shard"
+    if [[ "$RUN_STATUS" -eq 0 ]]; then return 1; fi
     run_capture_status unit_shard_is_contended "$shard"
     if [[ "$RUN_STATUS" -eq 0 ]]; then return 1; fi
   fi
@@ -788,8 +938,15 @@ launch_windows_test_process() {
   labels[index]="$label"
   log_names[index]="$name"
   starts[index]="$(date +%s)"
+  local had_monitor=0
+  case "$-" in *m*) had_monitor=1 ;; esac
+  set -m
   "$@" > "$shard_root/$name.log" 2>&1 &
   pids[index]=$!
+  cleanup_pids+=("$!")
+  printf '%s %s\n' "$!" "$!" > "$shard_root/$name.pgid.$!"
+  cleanup_pgid_prefixes+=("$shard_root/$name.pgid")
+  if [[ "$had_monitor" -eq 0 ]]; then set +m; fi
 }
 
 reap_windows_test_processes() {
@@ -797,12 +954,15 @@ reap_windows_test_processes() {
   for ((index = 0; index < ${#pids[@]}; index += 1)); do
     status=0
     wait "${pids[$index]}" || status=$?
+    forget_cleanup_pid "${pids[$index]}"
+    rm -f "$shard_root/${log_names[$index]}.pgid.${pids[$index]}"
     printf 'test-ts: %s wall=%ss status=%s\n' \
       "${labels[$index]}" "$(($(date +%s) - starts[index]))" "$status"
     if [[ "$rc" -eq 0 && "$status" -ne 0 ]]; then
       rc="$status"
     fi
   done
+  cleanup_pids=()
   for ((index = 0; index < ${#pids[@]}; index += 1)); do
     printf '\n==> %s\n' "${labels[$index]}"
     cat "$shard_root/${log_names[$index]}.log"
@@ -961,7 +1121,8 @@ run_unit_shards() {
       "$shared_total" "${#isolated_files[@]}" >&2
   fi
 
-  worker_count="$unit_workers"
+  cap_unit_workers "$unit_workers"
+  worker_count="$capped_workers"
   if [[ "$shard_mode" == coverage ]]; then worker_count="$coverage_shards"; fi
   if [[ "$worker_count" -gt "${#test_files[@]}" ]]; then
     worker_count="${#test_files[@]}"
@@ -987,6 +1148,7 @@ run_unit_shards() {
   fi
 
   for ((shard = shard_start; shard < shard_end; shard += 1)); do
+    cleanup_pgid_prefixes+=("$shard_root/shard-${shard}.pgid")
     shard_attempts[shard]=1
     shard_starts[shard]="$(date +%s)"
     launch_unit_shard "$shard" 1
@@ -1018,6 +1180,7 @@ run_unit_shards() {
       reaped_any=1
       shard_status=0
       wait "${pids[$index]}" || shard_status=$?
+      forget_cleanup_pid "${pids[$index]}"
       if [[ "$shard_mode" != changed && "$shard_status" -eq 124 ]]; then
         run_capture_status unit_shard_is_contended "$index"
         report_unit_timeout_summary "$index"
@@ -1064,10 +1227,20 @@ run_unit_shards() {
     printf '\n==> TypeScript %s shard %d/%d\n' "$shard_mode" "$((shard - shard_start + 1))" "$worker_count"
     command cat "$shard_root/shard-${shard}.log"
   done
+  cleanup_pids=()
   return "$rc"
 }
 
 parallel_workers="$unit_workers"
+if [[ ( "$mode" == unit || "$mode" == changed ) && "$runner_os" != Windows &&
+      ( "${#unit_test_paths[@]}" -gt 0 || "${#passthrough_args[@]}" -gt 0 ) ]]; then
+  target_demand="$unit_workers"
+  if [[ "${#unit_test_paths[@]}" -gt 0 && "$target_demand" -gt "${#unit_test_paths[@]}" ]]; then
+    target_demand="${#unit_test_paths[@]}"
+  fi
+  cap_unit_workers "$target_demand"
+  parallel_workers="$capped_workers"
+fi
 if [[ "$mode" == "coverage" ]]; then
   # Keep Bun's in-process parallelism off for the coverage reporter and Linux
   # epoll-backed streams. Coverage shards use separate processes and log files.
@@ -1238,7 +1411,7 @@ case "$mode" in
         done
         if [[ -n "$report_outfile" ]]; then
           report_dir="$(mktemp -d)"
-          trap 'rm -rf "$report_dir"' EXIT
+          exit_report_dir="$report_dir"
           transport_args[report_arg_index]="${report_arg_prefix}$report_dir/transport.xml"
           main_args[report_arg_index]="${report_arg_prefix}$report_dir/main.xml"
         fi
@@ -1488,13 +1661,13 @@ case "$mode" in
     ;;
   all)
     if [[ "$has_test_targets" -eq 0 || "${#unit_test_paths[@]}" -gt 0 ]]; then
-      "$0" unit "${unit_test_paths[@]+"${unit_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
+      run_managed_command "$0" unit "${unit_test_paths[@]+"${unit_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
     fi
     if [[ "$has_test_targets" -eq 0 || "${#integration_test_paths[@]}" -gt 0 ]]; then
-      "$0" integration "${integration_test_paths[@]+"${integration_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
+      run_managed_command "$0" integration "${integration_test_paths[@]+"${integration_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
     fi
     if [[ "$has_test_targets" -eq 0 || "${#stress_test_paths[@]}" -gt 0 ]]; then
-      "$0" stress "${stress_test_paths[@]+"${stress_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
+      run_managed_command "$0" stress "${stress_test_paths[@]+"${stress_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
     fi
     ;;
   *)

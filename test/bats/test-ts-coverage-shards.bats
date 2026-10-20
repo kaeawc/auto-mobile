@@ -21,6 +21,7 @@ EOF
 
 setup() {
   export AUTOMOBILE_RUNNER_CALIBRATION=0
+  unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -261,14 +262,19 @@ EOF
 
 @test "a timed-out shard retains the 720 second guard and names its index" {
   stub_find 12
-  cat > "$STUB_BIN/timeout" <<'EOF'
+  cat > "$STUB_BIN/bun" <<'EOF'
 #!/usr/bin/env bash
+case "$1" in
+  scripts/lib/write-coverage-bunfig.ts | */test-file-timings.ts) exec "$REAL_BUN" "$@" ;;
+esac
+printf '%s\n' "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" >> "$BATS_TEST_TMPDIR/budgets"
 exit 124
 EOF
-  chmod +x "$STUB_BIN/timeout"
+  chmod +x "$STUB_BIN/bun"
   run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
   printf '%s\n' "$output"
   [ "$status" -eq 124 ]
+  [ "$(sort -u "$BATS_TEST_TMPDIR/budgets")" = 720 ]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget (shard 1/2)"* ]]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget (shard 2/2)"* ]]
   [ ! -f coverage/lcov.info ]

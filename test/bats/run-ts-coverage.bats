@@ -96,14 +96,22 @@ EOF
 }
 
 @test "re-emits the coverage wall budget annotation after a timed-out run's tail" {
-  cat > "$STUB_DIR/timeout" <<'EOF'
+  cat > "$STUB_DIR/find" <<'EOF'
 #!/usr/bin/env bash
+for ((i = 0; i < 6; i += 1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+EOF
+  chmod +x "$STUB_DIR/find"
+  cat > "$STUB_DIR/bun" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "$@" ;;
+esac
 for ((i = 0; i < 260; i++)); do
   printf 'shard test output %s\n' "$i"
 done
 exit 124
 EOF
-  chmod +x "$STUB_DIR/timeout"
+  chmod +x "$STUB_DIR/bun"
 
   run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_DIR:$PATH" \
     RUNNER_OS=Linux bash "$SCRIPT" "$WORK_DIR/out.log"
@@ -113,16 +121,19 @@ EOF
 }
 
 @test "annotates every shard's WATCHDOG line, not only the last shard's" {
-  # The stubbed watchdog writes each shard's timing log (as the probe would),
-  # then reports a timeout, so run_with_timeout prints one WATCHDOG line per shard.
-  cat > "$STUB_DIR/timeout" <<'EOF'
+  # The stub command writes each shard's timing log (as the probe would),
+  # then exits 124, so the portable watchdog prints one line per shard.
+  cat > "$STUB_DIR/bun" <<'EOF'
 #!/usr/bin/env bash
+case "$1" in
+  scripts/lib/*.ts | */test-file-timings.ts) exec "$REAL_BUN" "$@" ;;
+esac
 printf '{"event":"start","file":"test/stuck%s.test.ts","t":1}\n' "${AUTOMOBILE_WATCHDOG_LABEL##* }" \
   > "$AUTOMOBILE_WATCHDOG_TIMING_LOG"
 for ((i = 0; i < 260; i++)); do printf 'filler output %s\n' "$i"; done
 exit 124
 EOF
-  chmod +x "$STUB_DIR/timeout"
+  chmod +x "$STUB_DIR/bun"
   cat > "$STUB_DIR/find" <<'EOF'
 #!/usr/bin/env bash
 for ((i = 0; i < 6; i += 1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done

@@ -138,6 +138,7 @@ enum class PrototypeRequestErrorCode(val wireValue: String) {
   INVALID_URL("invalid_url"),
   INVALID_REQUEST("invalid_request"),
   NETWORK("network"),
+  BLOCKED_DESTINATION("blocked_destination"),
   TOO_MANY_IN_FLIGHT("too_many_in_flight"),
 
   /** A response with a non-2xx status. */

@@ -1856,301 +1856,137 @@
   "secure": false
  },
  "layoutWarnings": {
-  "scope": "full",
-  "warnings": [
-   {
-    "type": "interaction-in-system-gesture-region",
-    "severity": "info",
-    "element": {
-     "viewId": "s2-178a27a83e9cbea9",
-     "bounds": [
-      0,
-      0,
-      1080,
-      136
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemGestures",
-     "mandatorySystemGestures"
-    ],
-    "sides": [
-     "top",
-     "right",
-     "left"
-    ],
-    "overflowPx": {
-     "top": 168,
-     "right": 78,
-     "left": 78
-    },
-    "insetPx": {
-     "top": 168,
-     "right": 78,
-     "left": 78
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "important-content-under-inset",
-    "severity": "warning",
-    "element": {
-     "viewId": "s2-425d6fb4840881ab",
-     "contentDesc": "Security & privacy notification: ",
-     "bounds": [
-      151,
-      1,
-      209,
-      136
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemBars",
-     "displayCutout"
-    ],
-    "sides": [
-     "top"
-    ],
-    "overflowPx": {
-     "top": 135
-    },
-    "insetPx": {
-     "top": 136
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "interaction-in-system-gesture-region",
-    "severity": "info",
-    "element": {
-     "viewId": "s2-425d6fb4840881ab",
-     "contentDesc": "Security & privacy notification: ",
-     "bounds": [
-      151,
-      1,
-      209,
-      136
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemGestures",
-     "mandatorySystemGestures"
-    ],
-    "sides": [
-     "top"
-    ],
-    "overflowPx": {
-     "top": 167
-    },
-    "insetPx": {
-     "top": 168
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "important-content-under-inset",
-    "severity": "warning",
-    "element": {
-     "viewId": "s2-59c2c43e07860ca2",
-     "contentDesc": "Android System notification: ",
-     "bounds": [
-      209,
-      1,
-      267,
-      136
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemBars",
-     "displayCutout"
-    ],
-    "sides": [
-     "top"
-    ],
-    "overflowPx": {
-     "top": 135
-    },
-    "insetPx": {
-     "top": 136
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "interaction-in-system-gesture-region",
-    "severity": "info",
-    "element": {
-     "viewId": "s2-59c2c43e07860ca2",
-     "contentDesc": "Android System notification: ",
-     "bounds": [
-      209,
-      1,
-      267,
-      136
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemGestures",
-     "mandatorySystemGestures"
-    ],
-    "sides": [
-     "top"
-    ],
-    "overflowPx": {
-     "top": 167
-    },
-    "insetPx": {
-     "top": 168
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "important-content-under-inset",
-    "severity": "warning",
-    "element": {
-     "viewId": "s2-d7f4ecf2ac0deda7",
-     "bounds": [
-      930,
-      48,
-      969,
-      87
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemBars",
-     "displayCutout"
-    ],
-    "sides": [
-     "top"
-    ],
-    "overflowPx": {
-     "top": 88
-    },
-    "insetPx": {
-     "top": 136
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "interaction-in-system-gesture-region",
-    "severity": "info",
-    "element": {
-     "viewId": "s2-d7f4ecf2ac0deda7",
-     "bounds": [
-      930,
-      48,
-      969,
-      87
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemGestures",
-     "mandatorySystemGestures"
-    ],
-    "sides": [
-     "top"
-    ],
-    "overflowPx": {
-     "top": 120
-    },
-    "insetPx": {
-     "top": 168
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "important-content-under-inset",
-    "severity": "warning",
-    "element": {
-     "viewId": "s2-fd6a03b7d39498d6",
-     "bounds": [
-      985,
-      51,
-      1005,
-      85
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemBars",
-     "displayCutout"
-    ],
-    "sides": [
-     "top"
-    ],
-    "overflowPx": {
-     "top": 85
-    },
-    "insetPx": {
-     "top": 136
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   },
-   {
-    "type": "interaction-in-system-gesture-region",
-    "severity": "info",
-    "element": {
-     "viewId": "s2-fd6a03b7d39498d6",
-     "bounds": [
-      985,
-      51,
-      1005,
-      85
-     ]
-    },
-    "categories": [
-     "interaction"
-    ],
-    "insetTypes": [
-     "systemGestures",
-     "mandatorySystemGestures"
-    ],
-    "sides": [
-     "top",
-     "right"
-    ],
-    "overflowPx": {
-     "top": 117,
-     "right": 3
-    },
-    "insetPx": {
-     "top": 168,
-     "right": 78
-    },
-    "overlapPercent": 100,
-    "confidence": "medium"
-   }
-  ]
+   "scope": "full",
+   "warnings": [
+     {
+       "type": "important-content-under-inset",
+       "severity": "warning",
+       "element": {
+         "viewId": "s2-425d6fb4840881ab",
+         "contentDesc": "Security & privacy notification: ",
+         "bounds": [
+           151,
+           1,
+           209,
+           136
+         ]
+       },
+       "categories": [
+         "interaction"
+       ],
+       "insetTypes": [
+         "systemBars",
+         "displayCutout"
+       ],
+       "sides": [
+         "top"
+       ],
+       "overflowPx": {
+         "top": 135
+       },
+       "insetPx": {
+         "top": 136
+       },
+       "overlapPercent": 100,
+       "confidence": "medium"
+     },
+     {
+       "type": "interaction-in-system-gesture-region",
+       "severity": "info",
+       "element": {
+         "viewId": "s2-425d6fb4840881ab",
+         "contentDesc": "Security & privacy notification: ",
+         "bounds": [
+           151,
+           1,
+           209,
+           136
+         ]
+       },
+       "categories": [
+         "interaction"
+       ],
+       "insetTypes": [
+         "systemGestures",
+         "mandatorySystemGestures"
+       ],
+       "sides": [
+         "top"
+       ],
+       "overflowPx": {
+         "top": 167
+       },
+       "insetPx": {
+         "top": 168
+       },
+       "overlapPercent": 100,
+       "confidence": "medium"
+     },
+     {
+       "type": "important-content-under-inset",
+       "severity": "warning",
+       "element": {
+         "viewId": "s2-59c2c43e07860ca2",
+         "contentDesc": "Android System notification: ",
+         "bounds": [
+           209,
+           1,
+           267,
+           136
+         ]
+       },
+       "categories": [
+         "interaction"
+       ],
+       "insetTypes": [
+         "systemBars",
+         "displayCutout"
+       ],
+       "sides": [
+         "top"
+       ],
+       "overflowPx": {
+         "top": 135
+       },
+       "insetPx": {
+         "top": 136
+       },
+       "overlapPercent": 100,
+       "confidence": "medium"
+     },
+     {
+       "type": "interaction-in-system-gesture-region",
+       "severity": "info",
+       "element": {
+         "viewId": "s2-59c2c43e07860ca2",
+         "contentDesc": "Android System notification: ",
+         "bounds": [
+           209,
+           1,
+           267,
+           136
+         ]
+       },
+       "categories": [
+         "interaction"
+       ],
+       "insetTypes": [
+         "systemGestures",
+         "mandatorySystemGestures"
+       ],
+       "sides": [
+         "top"
+       ],
+       "overflowPx": {
+         "top": 167
+       },
+       "insetPx": {
+         "top": 168
+       },
+       "overlapPercent": 100,
+       "confidence": "medium"
+     }
+   ]
  },
  "accessibilityState": {
   "enabled": false,

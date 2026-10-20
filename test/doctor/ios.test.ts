@@ -110,6 +110,7 @@ const baseDependencies: IosDoctorDependencies = {
     killSimulator: async () => {},
     waitForSimulatorReady: async () => ({ name: "sim", platform: "ios", deviceId: "123" }),
     listSimulatorImages: async () => [],
+    readSimulatorTarget: async () => undefined,
     getBootedSimulators: async () => [],
     getBootedSimulatorsChecked: async () => [],
     getDeviceInfo: async () => null,

@@ -1,6 +1,5 @@
 import { createExecResult } from "../../../../src/utils/execResult";
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
   type AndroidServiceRecoveryManager,
@@ -28,21 +27,12 @@ import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlPr
  * checks the accessibility service's health through an injected manager seam,
  * rebinding (#7470) or running full setup only when it is actually unhealthy.
  */
-let restoreDeviceToolProviders: () => void;
-beforeEach(() => {
-  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
-});
-afterEach(() => {
-  restoreDeviceToolProviders();
-});
-
 describe("AndroidCtrlProxyClient - connection-failure escalation to service recovery", function () {
   maskRealCtrlProxyWebSocketOptIn();
 
   const testDevice: BootedDevice = {
     deviceId: "test-device-recovery",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
 
@@ -175,14 +165,12 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     fakeTimer.enableAutoAdvance();
     const fakeAdb = buildFakeAdb();
 
-    let releaseHealthCheck: (() => void) | null = null;
+    const healthCheck = Promise.withResolvers<void>();
     let healthCheckCallCount = 0;
     const manager: AndroidServiceRecoveryManager = {
       async isAccessibilityServiceHealthy(): Promise<boolean> {
         healthCheckCallCount++;
-        await new Promise<void>((resolve) => {
-          releaseHealthCheck = resolve;
-        });
+        await healthCheck.promise;
         return false;
       },
       async rebindIfUnhealthy(): Promise<boolean> {
@@ -214,7 +202,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     // No second recovery attempt started: the health probe was not called again.
     expect(healthCheckCallCount).toBe(1);
 
-    releaseHealthCheck?.();
+    healthCheck.resolve();
     await flushMicrotasks();
   });
 

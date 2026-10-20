@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
+# shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.

@@ -6,7 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # Node, Android, and iOS child scripts record their own attestations. Invoke
 # each selected lane once; this dispatcher must never record an attestation.
 # shellcheck source=scripts/lib/vcs-diff.sh
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
 source "${SCRIPT_DIR}/lib/vcs-diff.sh"
 
 BASE="origin/main"
@@ -79,7 +78,8 @@ else
   if [[ -n "${PREPUSH_CHANGED_FILES_FILE:-}" ]]; then
     paths="$(cat "$PREPUSH_CHANGED_FILES_FILE")"
   else
-    paths="$( { vcs_changed_files_since_merge_base "$BASE"; vcs_touched_files; } | sort -u )"
+    path_filters=()
+    paths="$( { vcs_changed_files_since_merge_base "$BASE"; vcs_touched_files ${path_filters[@]+"${path_filters[@]}"}; } | sort -u )"
   fi
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue

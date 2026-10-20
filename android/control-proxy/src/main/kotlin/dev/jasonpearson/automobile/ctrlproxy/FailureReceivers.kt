@@ -61,12 +61,14 @@ internal class HandledExceptionReceiver(
       return
     }
 
-    try {
-      val report = parse(intent) ?: return
-      scope.launch { host.onHandledException(report) }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error handling handled exception broadcast", e)
-    }
+    val report =
+      try {
+        parse(intent) ?: return
+      } catch (e: Exception) {
+        Log.e(TAG, "Error handling handled exception broadcast", e)
+        return
+      }
+    scope.launch { host.onHandledException(report) }
   }
 
   private fun parse(intent: Intent): HandledExceptionReport? {
@@ -130,12 +132,14 @@ internal class CrashReceiver(
       return
     }
 
-    try {
-      val report = parse(intent) ?: return
-      scope.launch { host.onCrash(report) }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error handling crash broadcast", e)
-    }
+    val report =
+      try {
+        parse(intent) ?: return
+      } catch (e: Exception) {
+        Log.e(TAG, "Error handling crash broadcast", e)
+        return
+      }
+    scope.launch { host.onCrash(report) }
   }
 
   private fun parse(intent: Intent): CrashReport? {
@@ -165,6 +169,10 @@ internal class CrashReceiver(
       }
     }
 
+    return parseLegacyCrash(intent)
+  }
+
+  private fun parseLegacyCrash(intent: Intent): CrashReport? {
     // Fallback to legacy extras for backward compatibility
     val exceptionClass =
       intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_CLASS) ?: return null

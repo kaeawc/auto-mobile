@@ -1,3 +1,4 @@
+import { bindDevice } from "../../src/daemon/deviceBinding";
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -12,7 +13,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -327,7 +328,7 @@ describe.each([
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each(table.map((row) => [row] as const))(
         name,
         async (row: T) => {
           await arrangeHarness();
@@ -1045,8 +1046,7 @@ describe.each([
         cancelAfterRebind(() => {
           // Another session takes the freed device before the cancelled call can move back.
           const freed = pool.getDevice(SIM_UDID)!;
-          freed.sessionId = "other-session";
-          freed.status = "busy";
+          bindDevice(freed, "other-session");
           controller.abort(new Error("client cancelled"));
         });
 

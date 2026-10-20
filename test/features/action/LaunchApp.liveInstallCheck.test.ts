@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { LaunchApp, amStartReportedFailure } from "../../../src/features/action/LaunchApp";
@@ -17,6 +18,7 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 
 // #9976: a "not installed" verdict read from the installed-apps cache is confirmed
 // with one live `pm list packages --user N` before launchApp fails.
@@ -30,13 +32,14 @@ describe("LaunchApp live install confirmation (#9976)", () => {
   let staleStore: FakeInstalledAppsRepository;
   let staled: string[];
 
-  const observeResult = (appId: string): ObserveResult => ({
-    updatedAt: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-    activeWindow: { appId, activityName: "MainActivity", layoutSeqSum: 1 },
-  });
+  const observeResult = (appId: string): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
+      activeWindow: { appId, activityName: "MainActivity", layoutSeqSum: 1 },
+    });
 
   const createLaunchApp = (cachedApps: string[], appId: string = packageName): LaunchApp => {
     const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
@@ -138,6 +141,31 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       }),
     ).rejects.toThrow(`Could not determine whether ${packageName} is installed`);
     expect(hasAmStart()).toBe(false);
+  });
+
+  test("preserves a transport refusal during live install confirmation", async () => {
+    const error = new AdbDeviceTransportUnavailableError(deviceId, new Error("offline"));
+    fakeAdb.setCommandError(listCommand, error);
+
+    await expect(
+      createLaunchApp([]).execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).rejects.toBe(error);
+    expect(hasAmStart()).toBe(false);
+  });
+
+  test("preserves a transport refusal when confirming install after a launch failure", async () => {
+    fakeAdb.setCommandResponse(
+      "shell am start --user 0",
+      createExecResult("Error: Activity not started, unable to resolve Intent", ""),
+    );
+    const error = new AdbDeviceTransportUnavailableError(deviceId, new Error("offline"));
+    fakeAdb.setCommandError(listCommand, error);
+
+    await expect(
+      createLaunchApp([packageName]).execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).rejects.toBe(error);
+    expect(listCommandCount()).toBe(1);
+    expect(fakeAdb.getExecutedCommands().some((cmd) => cmd.includes("shell monkey"))).toBe(false);
   });
 
   // #10192: the mirror of the case above. The cache still lists an app that was removed

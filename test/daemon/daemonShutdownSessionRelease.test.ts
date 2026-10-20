@@ -1,3 +1,4 @@
+import { FakeDaemonHttpTokenStore } from "../../src/daemon/daemonHttpToken";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
@@ -32,7 +33,7 @@ import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): void {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [...devices];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
 }
 
 describe("Daemon shutdown session release (issue #5303)", () => {
@@ -98,7 +99,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     // One allocation attempt proves another session cannot claim the busy device.
-    Object.assign(pool, { DEVICE_WAIT_TIMEOUT_MS: 1000 });
+    pool.testHooks.DEVICE_WAIT_TIMEOUT_MS = 1000;
     const device: BootedDevice = {
       name: "Physical Android",
       deviceId: "release-device",
@@ -117,15 +118,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       stubPoolDiscovery(pool, [device]);
       await pool.initializeWithDevices([device]);
       await pool.assignDeviceToSession("release-session", "android");
-      retry = (
-        pool as unknown as {
-          releaseDisconnectedRecoverySessionWithRetry(
-            id: string,
-            device: string,
-            reason: string,
-          ): Promise<void>;
-        }
-      ).releaseDisconnectedRecoverySessionWithRetry(
+      retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
         "release-session",
         device.deviceId,
         "device-restart:Physical Android",
@@ -191,15 +184,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       stubPoolDiscovery(pool, [device]);
       await pool.initializeWithDevices([device]);
       await pool.assignDeviceToSession("release-session", "android");
-      const retry = (
-        pool as unknown as {
-          releaseDisconnectedRecoverySessionWithRetry(
-            id: string,
-            device: string,
-            reason: string,
-          ): Promise<void>;
-        }
-      ).releaseDisconnectedRecoverySessionWithRetry(
+      const retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
         "release-session",
         device.deviceId,
         "device-restart:Physical Android",
@@ -267,15 +252,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         stubPoolDiscovery(pool, [device]);
         await pool.initializeWithDevices([device]);
         await pool.assignDeviceToSession("release-session", "android");
-        const retry = (
-          pool as unknown as {
-            releaseDisconnectedRecoverySessionWithRetry(
-              id: string,
-              device: string,
-              reason: string,
-            ): Promise<void>;
-          }
-        ).releaseDisconnectedRecoverySessionWithRetry(
+        const retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
           "release-session",
           device.deviceId,
           "device-restart:Physical Android",
@@ -511,7 +488,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       expect(manager.hasSession("release-session")).toBe(false);
       // Model a replacement publishing after removal without waiting on the
       // old incarnation's in-flight release promise from createSession().
-      (manager as unknown as { sessions: Map<string, Session> }).sessions.set("release-session", {
+      manager.testHooks.sessions.set("release-session", {
         ...original,
       });
       throw new Error("old incarnation persistence failed");
@@ -1315,14 +1292,21 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("cleans up daemon pid/socket files only after the logger has flushed and closed (issue #6194)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
+    const tokenStore = new FakeDaemonHttpTokenStore();
+    tokenStore.write("stale-token");
     const daemon = new Daemon(
       {},
       {
+        httpTokenStore: tokenStore,
         installedAppsRepository: new FakeInstalledAppsRepository(),
         timer,
         deviceSessionRepository: repository,
       },
     );
+    daemon.testHooks.prepareHttpToken();
+    daemon.testHooks.publishHttpToken();
+    expect(tokenStore.read()).toBeDefined();
+    expect(tokenStore.read()).not.toBe("stale-token");
     const events: string[] = [];
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
       events.push("closeDatabase");
@@ -1339,6 +1323,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
 
     try {
       await daemon.stop();
+      expect(tokenStore.read()).toBeUndefined();
 
       // The pid record is this daemon's ONLY externally-observable liveness
       // signal, and the process keeps holding its inherited launch-log fd

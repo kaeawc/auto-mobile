@@ -1,3 +1,9 @@
+import {
+  BootReservationScope,
+  type BootCapacityReserver,
+  type BootReservationOptions,
+  type BootSlotReservation,
+} from "../../devices/bootAdmission/BootSlotReservation";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -14,6 +20,7 @@ import {
   type BootCapacityReporter,
   type BootCapacitySnapshot,
   type LedgerSampleWindow,
+  type LedgerAdmission,
   type RefusedCapacityDecision,
 } from "../bootAdmission/BootAdmissionGate";
 import { occupyingUdids, type FleetCostSource } from "./FleetCostCollector";
@@ -55,7 +62,7 @@ export interface CapacityAdmitOptions {
  * ask whether an AutoMobile-owned simulator may be booted now. Read-only: it
  * never boots, shuts down or reconfigures anything.
  */
-export interface SimulatorCapacityGate {
+export interface SimulatorCapacityGate extends BootCapacityReserver {
   evaluateBoot(request?: WarmDeviceRequest): Promise<CapacityDecision>;
   admitBoot(
     request: WarmDeviceRequest | undefined,
@@ -63,7 +70,16 @@ export interface SimulatorCapacityGate {
   ): Promise<CapacityAdmission>;
 }
 
+/** Read-only ownership view; refresh is lazy and decisions use its synchronous snapshot. */
+export interface IosSimulatorOwnershipReader {
+  refresh(): Promise<void>;
+  isAutoMobileOwned(udid: string): boolean;
+}
+
+type OwnershipFleetReport = FleetCostReport & { ownershipReadFailed?: boolean };
+
 export interface CapacityGateOptions {
+  ownership?: IosSimulatorOwnershipReader;
   env?: NodeJS.ProcessEnv;
   retryAfterMs?: number;
   /** Consecutive pressured samples before `describeCapacity` reports sustained host pressure. */
@@ -75,8 +91,9 @@ export interface CapacityGateOptions {
 const CAPACITY_LABEL = "iOS simulator capacity";
 
 export class IosSimCapacityGate
-  implements SimulatorCapacityGate, BootCapacityReporter, BootCapacityChecker
+  implements SimulatorCapacityGate, BootCapacityReporter, BootCapacityChecker, BootCapacityReserver
 {
+  private readonly optionsOwnership: IosSimulatorOwnershipReader | undefined;
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly sustainedSamples: number;
@@ -84,7 +101,7 @@ export class IosSimCapacityGate
   private warnedLimit: string | undefined;
   private warnedHostUnreadable = false;
   private latestReport: FleetCostReport | undefined;
-  /** UDIDs this process admitted a boot for; any other occupying simulator is external. */
+  /** UDIDs this process admitted a boot for, supplementing durable/session ownership. */
   private readonly startedUdids = new Set<string>();
   /** Started UDIDs a sample has shown occupying a slot: only these can be seen leaving. */
   private readonly seenStartedUdids = new Set<string>();
@@ -92,12 +109,14 @@ export class IosSimCapacityGate
   private readonly bootsByUdid = new Map<string, { unreleased: number; succeeded: boolean }>();
   /** Boots admitted by `admitBoot` and not yet released. */
   private readonly admittedBoots: BootAdmissionLedger;
+  private readonly reservations = new BootReservationScope<CapacityAdmission>();
 
   constructor(
     private readonly fleet: FleetCostSource,
     private readonly timer: Timer,
     options: CapacityGateOptions = {},
   ) {
+    this.optionsOwnership = options.ownership;
     this.env = options.env ?? process.env;
     this.retryAfterMs = options.retryAfterMs ?? DEFAULT_ADMISSION_RETRY_AFTER_MS;
     this.sustainedSamples = options.sustainedSamples ?? DEFAULT_SUSTAINED_SAMPLES;
@@ -106,7 +125,11 @@ export class IosSimCapacityGate
 
   /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
   async refresh(options: { fresh?: boolean } = {}): Promise<FleetCostReport> {
-    const report = await (options.fresh ? this.fleet.collectFresh() : this.fleet.collect());
+    // A fresh run is bounded at the sample budget so one abandoned by a lost race cannot
+    // outlive it and stack under retries (#13801).
+    const report = await (options.fresh
+      ? this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS })
+      : this.fleet.collect());
     this.foldIntoPressureHistory(report);
     return report;
   }
@@ -123,6 +146,20 @@ export class IosSimCapacityGate
     return this.decide(await this.refresh(), request, "substitute");
   }
 
+  /** Labels are best effort; the reader retains its last good snapshot when refresh fails. */
+  private async refreshOwnership(report: FleetCostReport): Promise<OwnershipFleetReport> {
+    try {
+      await this.optionsOwnership?.refresh();
+      return report;
+    } catch (error) {
+      logger.warn(
+        "[BootAdmission] iOS ownership could not be read; using retained ownership labels",
+        error,
+      );
+      return { ...report, ownershipReadFailed: true };
+    }
+  }
+
   /**
    * Synchronous so a waiter can decide and record its admission without an interleaving.
    *
@@ -133,30 +170,45 @@ export class IosSimCapacityGate
    * `maxBooted` (#11100).
    */
   private decide(
-    report: FleetCostReport,
+    report: OwnershipFleetReport,
     request: WarmDeviceRequest | undefined,
     warmMatch: "substitute" | "hint",
     bootUdid?: string,
     window?: LedgerSampleWindow,
   ): CapacityDecision {
     this.assertCountKnown(report);
-    const warm = findWarmCompatibleDevices(report, request ?? {})[0];
+    const heldUdids = report.simulators
+      .filter((sim) => this.optionsOwnership?.isAutoMobileOwned(sim.udid))
+      .map((sim) => sim.udid);
+    const warmRequest =
+      warmMatch === "hint"
+        ? { ...request, excludeUdids: [...(request?.excludeUdids ?? []), ...heldUdids] }
+        : (request ?? {});
+    const warm = findWarmCompatibleDevices(report, warmRequest)[0];
     if (warm && warmMatch === "substitute") {
       return { outcome: "reuse-warm", udid: warm.udid };
     }
-    const limits = this.limitsFor(report);
+    const limits = this.limitsFor(report, window);
     // The boot's own target (already Booting or Booted) needs no new slot.
     const occupied = occupyingUdids(report, bootUdid);
     this.forgetExitedStarted(report);
     const bootedCount = occupied.length + this.inFlightBootCount(report, bootUdid, window);
+    const owned = new Set([...this.startedUdids, ...heldUdids]);
     const refused = atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
       noun: "simulator",
       envName: IOS_SIM_MAX_BOOTED_ENV,
-      externalDevices: occupied.filter((udid) => !this.startedUdids.has(udid)),
+      externalDevices: occupied.filter((udid) => !owned.has(udid)),
+      heldDevices: occupied.filter((udid) => owned.has(udid)),
+      ownershipUnknown: report.ownershipReadFailed,
     });
     // Owner decision (#11209): host pressure is reported, never a reason to refuse a boot.
     if (refused) {
-      return refused;
+      return report.ownershipReadFailed
+        ? {
+            ...refused,
+            message: `${refused.message} Ownership could not be read; labels use the last good snapshot and current in-memory ownership, so external devices may also be held by AutoMobile.`,
+          }
+        : refused;
     }
     return warm
       ? { outcome: "reuse-warm", udid: warm.udid }
@@ -167,20 +219,63 @@ export class IosSimCapacityGate
     request: WarmDeviceRequest | undefined,
     options: CapacityAdmitOptions,
   ): Promise<CapacityAdmission> {
+    options.signal?.throwIfAborted();
+    const reserved = this.reservations.take(options.bootUdid);
+    if (reserved) {
+      return reserved;
+    }
     return await admitBootNow<FleetCostReport, CapacityDecision>({
       timer: this.timer,
       platform: "ios",
       signal: options.signal,
       label: CAPACITY_LABEL,
       // Fresh: the listing must start after the ledger window opened (see FleetCostSource).
-      sample: () => this.refresh({ fresh: true }),
+      sample: async () => {
+        return this.refreshOwnership(await this.refresh({ fresh: true }));
+      },
       ledger: this.admittedBoots,
       decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
       admit: () => this.recordAdmission(options.bootUdid),
     });
   }
 
-  private recordAdmission(udid?: string): NonNullable<CapacityAdmission["releaseAdmission"]> {
+  async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
+    let admission: LedgerAdmission | undefined;
+    const result = await admitBootNow<FleetCostReport, CapacityDecision>({
+      timer: this.timer,
+      platform: "ios",
+      signal: options.signal,
+      sampleTimeoutMs: Math.min(options.timeoutMs, DEFAULT_SAMPLE_TIMEOUT_MS),
+      label: CAPACITY_LABEL,
+      sample: async () => {
+        return this.refreshOwnership(await this.refresh({ fresh: true }));
+      },
+      ledger: this.admittedBoots,
+      decide: (report, window) =>
+        this.decide(report, undefined, "hint", options.replacingDeviceId, window),
+      admit: () => {
+        admission = this.admittedBoots.admit(options.replacingDeviceId, true);
+        return admission.release;
+      },
+    });
+    assertCapacityGranted(result);
+    const held = admission!;
+    let release: NonNullable<CapacityAdmission["releaseAdmission"]> = held.release;
+    return this.reservations.hold(
+      (udid) => {
+        held.bind(udid);
+        release = this.recordAdmission(udid, held);
+        return { decision: result.decision, releaseAdmission: release };
+      },
+      () => release({ bootFailed: true }),
+      () => held.bind(),
+    );
+  }
+
+  private recordAdmission(
+    udid?: string,
+    reserved?: LedgerAdmission,
+  ): NonNullable<CapacityAdmission["releaseAdmission"]> {
     const boots = udid
       ? (this.bootsByUdid.get(udid) ?? { unreleased: 0, succeeded: false })
       : undefined;
@@ -189,7 +284,7 @@ export class IosSimCapacityGate
       boots.unreleased += 1;
       this.bootsByUdid.set(udid, boots);
     }
-    const admission = this.admittedBoots.admit(udid);
+    const admission = reserved ?? this.admittedBoots.admit(udid);
     let released = false;
     return (outcome) => {
       if (released) {
@@ -215,7 +310,11 @@ export class IosSimCapacityGate
    * A warm simulator is not a substitute here: the caller boots its own device.
    */
   async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
-    return this.sampleInWindow(options, (report, window) => {
+    options.signal?.throwIfAborted();
+    if (this.reservations.hasPending()) {
+      return;
+    }
+    return this.sampleInWindow({ ...options, ownership: true }, (report, window) => {
       assertCapacityGranted({
         decision: this.decide(report, undefined, "hint", undefined, window),
       });
@@ -229,7 +328,7 @@ export class IosSimCapacityGate
     return this.sampleInWindow(options, (report, window) => {
       this.assertCountKnown(report);
       return {
-        limit: this.limitsFor(report).maxBooted,
+        limit: this.limitsFor(report, window).maxBooted,
         booted: occupyingUdids(report).length,
         inFlight: this.inFlightBootCount(report, undefined, window),
         hostPressure: {
@@ -253,25 +352,32 @@ export class IosSimCapacityGate
    * sustained-pressure streak.
    */
   private async sampleInWindow<T>(
-    options: { signal?: AbortSignal },
-    judge: (report: FleetCostReport, window: LedgerSampleWindow) => T,
+    options: { signal?: AbortSignal; ownership?: boolean },
+    judge: (report: OwnershipFleetReport, window: LedgerSampleWindow) => T,
   ): Promise<T> {
     options.signal?.throwIfAborted();
     const window = this.admittedBoots.beginSample();
     try {
-      // The collector's run is shared with other callers, so losing the race never cancels it.
-      const report = await raceWithDeadline(() => this.fleet.collectFresh(), {
-        timer: this.timer,
-        timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
-        signal: options.signal,
-        label: `Collecting ${CAPACITY_LABEL}`,
-        timeoutError: () =>
-          new BootedDeviceDiscoveryIncompleteError("ios", {
-            code: "timeout",
-            message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
-            retryable: true,
-          }),
-      });
+      // The collector's run is shared with other callers, so losing the race never cancels it;
+      // the run's own commands carry the same budget so an abandoned one ends too (#13801).
+      const report = await raceWithDeadline(
+        async () => {
+          const report = await this.fleet.collectFresh({ timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS });
+          return options.ownership ? this.refreshOwnership(report) : report;
+        },
+        {
+          timer: this.timer,
+          timeoutMs: DEFAULT_SAMPLE_TIMEOUT_MS,
+          signal: options.signal,
+          label: `Collecting ${CAPACITY_LABEL}`,
+          timeoutError: () =>
+            new BootedDeviceDiscoveryIncompleteError("ios", {
+              code: "timeout",
+              message: `timed out after ${DEFAULT_SAMPLE_TIMEOUT_MS}ms collecting ${CAPACITY_LABEL}`,
+              retryable: true,
+            }),
+        },
+      );
       options.signal?.throwIfAborted();
       return judge(report, window);
     } finally {
@@ -329,7 +435,7 @@ export class IosSimCapacityGate
     return this.admittedBoots.inFlightCount(new Set(occupyingUdids(report)), bootUdid, window);
   }
 
-  private limitsFor(report: FleetCostReport): CapacityLimits {
+  private limitsFor(report: FleetCostReport, window?: LedgerSampleWindow): CapacityLimits {
     if (!report.host) {
       // Without host numbers we cannot derive a limit; fall back to a single concurrent boot.
       // A failed `ps` no longer lands here: its snapshot still carries the os totals (#11389).
@@ -341,8 +447,11 @@ export class IosSimCapacityGate
         resolveCapacityLimits(this.env, { totalMemoryBytes: 0, cpuCount: 0 }),
       );
     }
+    // Sizing keeps even Booted admissions until release: a listing can see a simulator before
+    // its boot finishes. Slot counting still excludes devices already visible in that listing.
+    const { boots } = this.admittedBoots.inFlightView(new Set(), undefined, window);
     return this.warnOnUnusableLimit(
-      resolveCapacityLimits(this.env, report.host, estimatePerSimulatorBytes(report)),
+      resolveCapacityLimits(this.env, report.host, estimatePerSimulatorBytes(report, boots)),
     );
   }
 

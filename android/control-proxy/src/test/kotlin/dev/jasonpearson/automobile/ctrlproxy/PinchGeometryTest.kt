@@ -126,68 +126,69 @@ class PinchGeometryTest {
    * (change math + golden on one platform only) — the parity guard fails. Edit the JSON and both
    * platform tables together. See issues #2911 / #2979 / #2997.
    */
+  private data class Vector(
+    val centerX: Double,
+    val centerY: Double,
+    val distanceStart: Double,
+    val distanceEnd: Double,
+    val rotationDegrees: Float,
+    val expected: List<Pair<Float, Float>>,
+  )
+
+  private val vectors =
+    listOf(
+      Vector(
+        100.0,
+        200.0,
+        80.0,
+        300.0,
+        0f,
+        listOf(60f to 200f, 140f to 200f, -50f to 200f, 250f to 200f),
+      ),
+      Vector(
+        540.0,
+        960.0,
+        100.0,
+        300.0,
+        45f,
+        listOf(
+          490f to 960f,
+          590f to 960f,
+          433.933983f to 853.933983f,
+          646.066017f to 1066.066017f,
+        ),
+      ),
+      Vector(
+        200.0,
+        400.0,
+        100.0,
+        100.0,
+        -30f,
+        listOf(150f to 400f, 250f to 400f, 156.698730f to 425f, 243.301270f to 375f),
+      ),
+      // A second asymmetric negative angle so drop-rotation-sign / sin-cos-swap detection is not
+      // a single point of failure on the -30 row (the +45 / rot-0 rows are blind to a dropped
+      // sign). distanceStart != distanceEnd also exercises unequal radii.
+      Vector(
+        300.0,
+        500.0,
+        200.0,
+        80.0,
+        -60f,
+        listOf(200f to 500f, 400f to 500f, 280f to 534.641016f, 320f to 465.358984f),
+      ),
+      Vector(
+        0.0,
+        0.0,
+        200.0,
+        200.0,
+        0f,
+        listOf(-100f to 0f, 100f to 0f, -100f to 0f, 100f to 0f),
+      ),
+    )
+
   @Test
   fun `golden vectors match iOS parity`() {
-    data class Vector(
-      val centerX: Double,
-      val centerY: Double,
-      val distanceStart: Double,
-      val distanceEnd: Double,
-      val rotationDegrees: Float,
-      val expected: List<Pair<Float, Float>>,
-    )
-    val vectors =
-      listOf(
-        Vector(
-          100.0,
-          200.0,
-          80.0,
-          300.0,
-          0f,
-          listOf(60f to 200f, 140f to 200f, -50f to 200f, 250f to 200f),
-        ),
-        Vector(
-          540.0,
-          960.0,
-          100.0,
-          300.0,
-          45f,
-          listOf(
-            490f to 960f,
-            590f to 960f,
-            433.933983f to 853.933983f,
-            646.066017f to 1066.066017f,
-          ),
-        ),
-        Vector(
-          200.0,
-          400.0,
-          100.0,
-          100.0,
-          -30f,
-          listOf(150f to 400f, 250f to 400f, 156.698730f to 425f, 243.301270f to 375f),
-        ),
-        // A second asymmetric negative angle so drop-rotation-sign / sin-cos-swap detection is not
-        // a single point of failure on the -30 row (the +45 / rot-0 rows are blind to a dropped
-        // sign). distanceStart != distanceEnd also exercises unequal radii.
-        Vector(
-          300.0,
-          500.0,
-          200.0,
-          80.0,
-          -60f,
-          listOf(200f to 500f, 400f to 500f, 280f to 534.641016f, 320f to 465.358984f),
-        ),
-        Vector(
-          0.0,
-          0.0,
-          200.0,
-          200.0,
-          0f,
-          listOf(-100f to 0f, 100f to 0f, -100f to 0f, 100f to 0f),
-        ),
-      )
-
     for (v in vectors) {
       val p =
         computePinchPoints(v.centerX, v.centerY, v.distanceStart, v.distanceEnd, v.rotationDegrees)
@@ -285,8 +286,16 @@ class PinchGeometryTest {
   @Test
   fun `path fractions zero and one equal the endpoint geometry`() {
     val p = computePinchPoints(540.0, 960.0, 100.0, 300.0, 45f)
-    val start = computePinchFingerPositions(540.0, 960.0, 100.0, 300.0, 45f, 0.0)
-    val end = computePinchFingerPositions(540.0, 960.0, 100.0, 300.0, 45f, 1.0)
+    val start =
+      computePinchFingerPositions(
+        PinchStrokeGeometry(540.0, 960.0, 100.0, 300.0, 45f),
+        fraction = 0.0,
+      )
+    val end =
+      computePinchFingerPositions(
+        PinchStrokeGeometry(540.0, 960.0, 100.0, 300.0, 45f),
+        fraction = 1.0,
+      )
     assertEquals(p.startX1, start.x1, delta)
     assertEquals(p.startY1, start.y1, delta)
     assertEquals(p.startX2, start.x2, delta)
@@ -304,76 +313,79 @@ class PinchGeometryTest {
    * Each row is (centerX, centerY, distanceStart, distanceEnd, rotationDegrees, fraction) followed
    * by the expected *unordered* pair of finger positions at that fraction of the gesture.
    */
+  private data class PathVector(
+    val centerX: Double,
+    val centerY: Double,
+    val distanceStart: Double,
+    val distanceEnd: Double,
+    val rotationDegrees: Float,
+    val fraction: Double,
+    val expected: List<Pair<Float, Float>>,
+  )
+
+  private val pathVectors =
+    listOf(
+      PathVector(
+        200.0,
+        400.0,
+        100.0,
+        100.0,
+        90f,
+        0.5,
+        listOf(235.355339f to 435.355339f, 164.644661f to 364.644661f),
+      ),
+      PathVector(
+        200.0,
+        400.0,
+        100.0,
+        100.0,
+        90f,
+        0.25,
+        listOf(246.193977f to 419.134172f, 153.806023f to 380.865828f),
+      ),
+      PathVector(
+        300.0,
+        500.0,
+        200.0,
+        80.0,
+        -60f,
+        0.5,
+        listOf(360.621778f to 465f, 239.378222f to 535f),
+      ),
+      PathVector(0.0, 0.0, 200.0, 200.0, 0f, 0.5, listOf(100f to 0f, -100f to 0f)),
+      PathVector(
+        540.0,
+        960.0,
+        100.0,
+        300.0,
+        45f,
+        1.0,
+        listOf(646.066017f to 1066.066017f, 433.933983f to 853.933983f),
+      ),
+      PathVector(
+        540.0,
+        960.0,
+        100.0,
+        300.0,
+        45f,
+        0.5,
+        listOf(632.387953f to 998.268343f, 447.612047f to 921.731657f),
+      ),
+    )
+
   @Test
   fun `path golden vectors match iOS parity`() {
-    data class PathVector(
-      val centerX: Double,
-      val centerY: Double,
-      val distanceStart: Double,
-      val distanceEnd: Double,
-      val rotationDegrees: Float,
-      val fraction: Double,
-      val expected: List<Pair<Float, Float>>,
-    )
-    val pathVectors =
-      listOf(
-        PathVector(
-          200.0,
-          400.0,
-          100.0,
-          100.0,
-          90f,
-          0.5,
-          listOf(235.355339f to 435.355339f, 164.644661f to 364.644661f),
-        ),
-        PathVector(
-          200.0,
-          400.0,
-          100.0,
-          100.0,
-          90f,
-          0.25,
-          listOf(246.193977f to 419.134172f, 153.806023f to 380.865828f),
-        ),
-        PathVector(
-          300.0,
-          500.0,
-          200.0,
-          80.0,
-          -60f,
-          0.5,
-          listOf(360.621778f to 465f, 239.378222f to 535f),
-        ),
-        PathVector(0.0, 0.0, 200.0, 200.0, 0f, 0.5, listOf(100f to 0f, -100f to 0f)),
-        PathVector(
-          540.0,
-          960.0,
-          100.0,
-          300.0,
-          45f,
-          1.0,
-          listOf(646.066017f to 1066.066017f, 433.933983f to 853.933983f),
-        ),
-        PathVector(
-          540.0,
-          960.0,
-          100.0,
-          300.0,
-          45f,
-          0.5,
-          listOf(632.387953f to 998.268343f, 447.612047f to 921.731657f),
-        ),
-      )
-
     for (v in pathVectors) {
       val p =
         computePinchFingerPositions(
-          v.centerX,
-          v.centerY,
-          v.distanceStart,
-          v.distanceEnd,
-          v.rotationDegrees,
-          v.fraction,
+          PinchStrokeGeometry(
+            v.centerX,
+            v.centerY,
+            v.distanceStart,
+            v.distanceEnd,
+            v.rotationDegrees,
+          ),
+          fraction = v.fraction,
         )
       val actual = sortedPoints(listOf(p.x1 to p.y1, p.x2 to p.y2))
       val expected = sortedPoints(v.expected)

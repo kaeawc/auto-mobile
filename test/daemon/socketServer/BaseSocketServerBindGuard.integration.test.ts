@@ -8,6 +8,7 @@ import {
   BaseSocketServer,
 } from "../../../src/daemon/socketServer/BaseSocketServer";
 import type { DaemonSocketReachabilityLike } from "../../../src/daemon/daemonSocketReachability";
+import { AuxiliarySocketBindConflict } from "../../../src/daemon/auxiliarySocketAvailability";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../src/daemon/daemonFiles";
@@ -82,7 +83,7 @@ describe("BaseSocketServer bind guard", () => {
     server = new TestServer(contestedPath, { isReachable: async () => true });
 
     const start = server.start();
-    await expect(start).rejects.toBeInstanceOf(ActionableError);
+    await expect(start).rejects.toBeInstanceOf(AuxiliarySocketBindConflict);
     await expect(start).rejects.toThrow("BindGuardTest");
     await expect(start).rejects.toThrow(peerSocketPath);
     await expect(start).rejects.toThrow("--daemon restart");

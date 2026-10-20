@@ -1,7 +1,8 @@
+import { runBlockWithEnvelope } from "../../../helpers/observedInteractionStub";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../../src/features/action/TapOnElement";
 import { recordObservationRead } from "../../../../src/features/observe/observationReadScope";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -98,8 +99,7 @@ async function tapOn(text: string) {
     },
   );
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => capture.viewHierarchy!;
@@ -115,18 +115,14 @@ async function tapOn(text: string) {
   tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   // The immutable capture is projected once at module scope, like the collector.
-  const project = SearchableHierarchy.prototype.project;
-  const projection = spyOn(SearchableHierarchy.prototype, "project").mockImplementation(function (
-    this: SearchableHierarchy,
-    hierarchy,
-  ) {
-    return hierarchy === capture.viewHierarchy ? nodes : project.call(this, hierarchy);
+  projection.mockImplementation(function (this: SearchableHierarchy, hierarchy) {
+    return hierarchy === capture.viewHierarchy ? nodes : originalProject.call(this, hierarchy);
   });
   try {
     const result = await tap.execute({ action: "tap", text, searchUntil: { duration: 100 } });
     return { result, points };
   } finally {
-    projection.mockRestore();
+    projection.mockImplementation(originalProject);
   }
 }
 
@@ -357,3 +353,13 @@ test.each([
     expect(context?.occluded).toBe(true);
   },
 );
+
+let originalProject: typeof SearchableHierarchy.prototype.project;
+let projection: ReturnType<typeof spyOn<typeof SearchableHierarchy.prototype, "project">>;
+beforeEach(() => {
+  originalProject = SearchableHierarchy.prototype.project;
+  projection = spyOn(SearchableHierarchy.prototype, "project");
+});
+afterEach(() => {
+  projection.mockRestore();
+});

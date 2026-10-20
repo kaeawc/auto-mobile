@@ -1,5 +1,5 @@
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
@@ -789,4 +789,8 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     expect(refusals[0]).toEqual(refusals[1]);
     expect(forwarded.length).toBe(before);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

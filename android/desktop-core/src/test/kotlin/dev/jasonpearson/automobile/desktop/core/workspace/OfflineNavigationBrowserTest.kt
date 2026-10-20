@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.navigation.FakeScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
@@ -260,40 +261,7 @@ class OfflineNavigationBrowserTest {
     runComposeUiTest {
       // Distinct graph per appId so a stale render is detectable by screen name.
       val loaderAppIds = mutableListOf<String>()
-      val provider: (String?) -> NavigationDataSource = { appId ->
-        when (appId) {
-          null ->
-            SuppliedDataSource(
-              apps = {
-                Result.Success(
-                  listOf(appSummary("com.example.a", "AppA"), appSummary("com.example.b", "AppB")),
-                )
-              },
-            )
-          "com.example.a" ->
-            SuppliedDataSource(
-              graph = {
-                Result.Success(
-                  NavigationGraph(
-                    listOf(screen("Alpha").copy(screenshotUri = "shot?appId=com.example.a")),
-                    emptyList(),
-                  ),
-                )
-              },
-            )
-          else ->
-            SuppliedDataSource(
-              graph = {
-                Result.Success(
-                  NavigationGraph(
-                    listOf(screen("Beta").copy(screenshotUri = "shot?appId=com.example.b")),
-                    emptyList(),
-                  ),
-                )
-              },
-            )
-        }
-      }
+      val provider = appSwitchDataSourceProvider()
       setContent {
         CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
           MaterialTheme {
@@ -411,8 +379,11 @@ class OfflineNavigationBrowserTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
           NavigationDashboard(
-            providedGraph = NavigationGraph(listOf(screen("Alpha")), emptyList()),
-            readOnly = false,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = NavigationGraph(listOf(screen("Alpha")), emptyList()),
+                readOnly = false,
+              ),
           )
         }
       }
@@ -427,5 +398,40 @@ class OfflineNavigationBrowserTest {
         .fetchSemanticsNodes()
         .isEmpty(),
     )
+  }
+
+  private fun appSwitchDataSourceProvider(): (String?) -> NavigationDataSource = { appId ->
+    when (appId) {
+      null ->
+        SuppliedDataSource(
+          apps = {
+            Result.Success(
+              listOf(appSummary("com.example.a", "AppA"), appSummary("com.example.b", "AppB")),
+            )
+          },
+        )
+      "com.example.a" ->
+        SuppliedDataSource(
+          graph = {
+            Result.Success(
+              NavigationGraph(
+                listOf(screen("Alpha").copy(screenshotUri = "shot?appId=com.example.a")),
+                emptyList(),
+              ),
+            )
+          },
+        )
+      else ->
+        SuppliedDataSource(
+          graph = {
+            Result.Success(
+              NavigationGraph(
+                listOf(screen("Beta").copy(screenshotUri = "shot?appId=com.example.b")),
+                emptyList(),
+              ),
+            )
+          },
+        )
+    }
   }
 }

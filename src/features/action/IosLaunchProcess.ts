@@ -8,7 +8,7 @@ import {
 } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -270,7 +270,7 @@ export class IosLaunchProcess {
     bundleId: string;
     clearAppData: boolean;
     isSystemBundleId: boolean;
-    ctrlProxyClient: IOSCtrlProxy;
+    ctrlProxyClient: IosCtrlProxy;
     perf: PerformanceTracker;
     signal?: AbortSignal;
   }): Promise<LaunchAppResult | undefined> {
@@ -356,7 +356,7 @@ export class IosLaunchProcess {
   }
 
   private requestIosLaunchRetarget(
-    ctrlProxyClient: IOSCtrlProxy,
+    ctrlProxyClient: IosCtrlProxy,
     bundleId: string,
     perf: PerformanceTracker,
   ) {

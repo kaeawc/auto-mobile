@@ -1,3 +1,7 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
+import { runBlockWithEnvelope, isolatedTapStrategy } from "../../helpers/observedInteractionStub";
+import { FakeElementSelector } from "../../fakes/FakeElementSelector";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type {
   Element,
@@ -30,6 +34,9 @@ function makeHierarchy(marker: string): ViewHierarchyResult {
 
 function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
   return {
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     ...overrides,
@@ -39,7 +46,10 @@ function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
 function createTapOnElement(
   platform: "android" | "ios" = "android",
   waitForCondition?: WaitForCondition,
-  extraOptions: Pick<TapOnElementDependencies, "selectionStateTracker"> = {},
+  extraOptions: Pick<
+    TapOnElementDependencies,
+    "selectionStateTracker" | "elementSelector" | "tapStrategy"
+  > = {},
 ): { tap: TapOnElement; timer: FakeTimer } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -80,16 +90,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(tapCallCount).toBe(0);
   });
@@ -107,16 +112,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(tapCallCount).toBe(1);
   });
@@ -134,16 +134,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(tapCallCount).toBe(0);
   });
@@ -164,16 +159,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(sleepDurations).toEqual([300, 100]);
   });
@@ -235,6 +225,8 @@ describe("deriveTapEffect", () => {
   test("captures terminal evidence after effect polling selects the destination observation", async () => {
     const finalizeEffects: unknown[] = [];
     const { tap } = createTapOnElement("android", undefined, {
+      elementSelector: new FakeElementSelector(makeElement()),
+      tapStrategy: isolatedTapStrategy(),
       selectionStateTracker: {
         prepare: async () => null,
         finalize: async (request) => {
@@ -259,9 +251,18 @@ describe("deriveTapEffect", () => {
     });
     const captured: ObserveResult[] = [];
 
-    tap.observedInteraction = async (_interaction, options) => {
+    source.viewHierarchy = makeHierarchy("source");
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(source);
+    tap.observeScreen = screen;
+    tap.executeAndroidTap = async () => undefined;
+    tap.prepareSelectionCapture = async () => null;
+    tap.observedInteraction = async (interaction, options) => {
       expect(options.deferPostActionScreenshot).toBe(true);
-      return { success: true, action: "tap", element: makeElement(), observation: source };
+      return runBlockWithEnvelope(() => recordObservationRead(source), { observation: source })(
+        interaction,
+        options,
+      );
     };
     tap.deriveTapEffectAfterPostTapObservation = async () => ({
       effect: { screenChanged: true, basis: "activeWindow changed" },
@@ -451,25 +452,18 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
         _y: number,
         _dur: number,
         _el: Element,
-        _signal: unknown,
-        _opts: unknown,
-        isTalkBack: boolean,
+        context,
       ) => {
-        capturedIsTalkBackEnabled = isTalkBack;
+        capturedIsTalkBackEnabled = context?.isTalkBackEnabled;
       };
 
       const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-      await tap.retryTapIfNoChange(
-        preTapHash,
-        { x: 60, y: 45 },
-        "tap",
-        0,
-        makeElement(),
-        { action: "tap" },
-        talkBackEnabled,
-        { width: 1080, height: 1920 },
-      );
+      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+        options: { action: "tap" },
+        isTalkBackEnabled: talkBackEnabled,
+        screenSize: { width: 1080, height: 1920 },
+      });
 
       expect(capturedIsTalkBackEnabled).toBe(talkBackEnabled);
     });

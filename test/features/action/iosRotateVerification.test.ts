@@ -26,7 +26,7 @@ describe("iOS rotation verification vocabulary (#8778)", () => {
       ["face_up", "unknown"],
       [undefined, "unknown"],
     ]) {
-      expect(normalizeIosOrientation(raw)).toBe(expected);
+      expect<unknown>(normalizeIosOrientation(raw)).toBe(expected);
     }
   });
   test("prefers cardinal observation rotation even when dimensions disagree", () => {

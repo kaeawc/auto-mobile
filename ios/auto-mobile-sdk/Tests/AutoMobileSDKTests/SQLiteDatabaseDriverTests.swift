@@ -13,11 +13,17 @@ final class SQLiteDatabaseDriverTests: XCTestCase {
             .appendingPathExtension("db")
         driver = SQLiteDatabaseDriver()
 
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(databaseURL.path, &db), SQLITE_OK)
-        defer { sqlite3_close(db) }
-        sqlite3_exec(db, "CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)", nil, nil, nil)
-        sqlite3_exec(db, "INSERT INTO notes (body) VALUES ('alpha'), ('beta'), ('gamma')", nil, nil, nil)
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        defer { sqlite3_close(database) }
+        sqlite3_exec(
+            database,
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)",
+            nil,
+            nil,
+            nil
+        )
+        sqlite3_exec(database, "INSERT INTO notes (body) VALUES ('alpha'), ('beta'), ('gamma')", nil, nil, nil)
     }
 
     override func tearDownWithError() throws {
@@ -230,6 +236,46 @@ final class SQLiteDatabaseDriverTests: XCTestCase {
         }
     }
 
+    func testSyntaxFallbackSkipsQuotedAndCommentedKeywords() {
+        let missingPath = databaseURL.appendingPathExtension("missing").path
+        let readQueries = [
+            "WITH c AS (SELECT 'it''s ) INSERT') SELECT 1",
+            #"WITH "c"" ) INSERT" AS (SELECT 1) SELECT 1"#,
+            "WITH `c ) INSERT` AS (SELECT 1) SELECT 1",
+            "WITH [c ) INSERT] AS (SELECT 1) SELECT 1",
+            "WITH -- ) INSERT\nc AS (SELECT 1) SELECT 1",
+            "WITH /* ) INSERT */ c AS (SELECT 1) SELECT 1",
+        ]
+        for query in readQueries {
+            let classification = SQLiteDatabaseDriver.classifySQL(
+                databasePath: missingPath, query: query, allowSyntaxFallback: true
+            )
+            XCTAssertTrue(classification.readOnly, query)
+            XCTAssertTrue(classification.returnsRows, query)
+        }
+
+        let mutations = [
+            "UPDATE notes SET body = 'it''s RETURNING'",
+            #"UPDATE notes SET "body"" RETURNING" = 1"#,
+            "UPDATE notes SET `body RETURNING` = 1",
+            "UPDATE notes SET [body RETURNING] = 1",
+            "UPDATE notes SET body = 1 -- RETURNING\n",
+            "UPDATE notes SET body = 1 /* RETURNING */",
+        ]
+        for query in mutations {
+            let withoutRows = SQLiteDatabaseDriver.classifySQL(
+                databasePath: missingPath, query: query, allowSyntaxFallback: true
+            )
+            XCTAssertFalse(withoutRows.readOnly, query)
+            XCTAssertFalse(withoutRows.returnsRows, query)
+            let withRows = SQLiteDatabaseDriver.classifySQL(
+                databasePath: missingPath, query: query + " RETURNING id", allowSyntaxFallback: true
+            )
+            XCTAssertFalse(withRows.readOnly, query)
+            XCTAssertTrue(withRows.returnsRows, query)
+        }
+    }
+
     func testReturningInsideStringLiteralDoesNotMakeMutationReturnRows() {
         let result = driver.executeSQL(
             databasePath: databaseURL.path,
@@ -298,11 +344,11 @@ final class SQLiteDatabaseDriverTests: XCTestCase {
     }
 
     func testTriggerRowsAreNotCounted() {
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(databaseURL.path, &db), SQLITE_OK)
-        defer { sqlite3_close(db) }
-        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE audit(n)", nil, nil, nil), SQLITE_OK)
-        XCTAssertEqual(sqlite3_exec(db, """
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        defer { sqlite3_close(database) }
+        XCTAssertEqual(sqlite3_exec(database, "CREATE TABLE audit(n)", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(database, """
         CREATE TRIGGER notes_audit AFTER INSERT ON notes BEGIN INSERT INTO audit(n) VALUES (NEW.id); END
         """, nil, nil, nil), SQLITE_OK)
         let result = driver.executeSQL(

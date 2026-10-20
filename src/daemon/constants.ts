@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { platform } from "node:os";
+import { platform, tmpdir } from "node:os";
+import { win32 } from "node:path";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
@@ -9,6 +10,7 @@ import {
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
 } from "./sessionLivenessWindows";
 import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
+export const DAEMON_LAUNCH_NONCE_ENV = "AUTOMOBILE_DAEMON_LAUNCH_NONCE";
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
 /**
@@ -28,7 +30,7 @@ function getUserId(): string {
 const uid = getUserId();
 
 /**
- * Isolation namespace suffix for the daemon's /tmp state files (socket, pid, lock).
+ * Isolation namespace suffix for the daemon's state files (socket, pid, lock, token).
  *
  * A private daemon started with `AUTOMOBILE_AUX_SOCKET_DIR` must not share the
  * resident daemon's `/tmp/auto-mobile-daemon-<uid>.*` files, or it would bind (or
@@ -39,26 +41,51 @@ const uid = getUserId();
  * per-file `AUTOMOBILE_DAEMON_*_PATH` override still wins. Unset/blank aux dir
  * yields "" (the resident, unsuffixed names).
  */
-export function resolveDaemonIsolationSuffix(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveDaemonIsolationSuffix(
+  env: NodeJS.ProcessEnv = process.env,
+  targetPlatform: NodeJS.Platform = process.platform,
+): string {
   const auxDir = readEnvRaw(ENV.AUX_SOCKET_DIR, env)?.trim();
   if (!auxDir) {
     return "";
   }
-  const resolved = resolvePathFromDaemonLaunchWorkingDirectory(auxDir, env);
+  const resolved = resolveDaemonPath(auxDir, env, targetPlatform);
   return `-${createHash("sha256").update(resolved).digest("hex").slice(0, 10)}`;
 }
 
-/** Default `/tmp` state-file path for this uid, isolated per `AUTOMOBILE_AUX_SOCKET_DIR`. */
+function resolveDaemonPath(
+  filePath: string,
+  env: NodeJS.ProcessEnv,
+  targetPlatform: NodeJS.Platform,
+): string {
+  if (targetPlatform !== "win32") {
+    return resolvePathFromDaemonLaunchWorkingDirectory(filePath, env);
+  }
+  return win32.isAbsolute(filePath)
+    ? filePath
+    : win32.resolve(readEnvRaw(ENV.DAEMON_LAUNCH_CWD, env)?.trim() || process.cwd(), filePath);
+}
+
+/** Default state-file path, isolated per `AUTOMOBILE_AUX_SOCKET_DIR`. */
 export function resolveIsolatedDaemonStatePath(
-  extension: "sock" | "pid" | "lock",
+  extension: "sock" | "pid" | "lock" | "token",
   env: NodeJS.ProcessEnv = process.env,
   userId: string = uid,
+  targetPlatform: NodeJS.Platform = process.platform,
 ): string {
-  return `/tmp/auto-mobile-daemon-${userId}${resolveDaemonIsolationSuffix(env)}.${extension}`;
+  const suffix = resolveDaemonIsolationSuffix(env, targetPlatform);
+  if (extension === "token" && targetPlatform === "win32") {
+    return win32.join(
+      readEnvRaw(AMBIENT_ENV.LOCALAPPDATA, env) ?? tmpdir(),
+      "auto-mobile",
+      `daemon${suffix}.token`,
+    );
+  }
+  return `/tmp/auto-mobile-daemon-${userId}${suffix}.${extension}`;
 }
 
 function readDaemonStatePathOverride(
-  extension: "sock" | "pid" | "lock",
+  extension: "sock" | "pid" | "lock" | "token",
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   switch (extension) {
@@ -68,25 +95,29 @@ function readDaemonStatePathOverride(
       return readEnvRaw(ENV.DAEMON_PID_FILE_PATH, env);
     case "lock":
       return readEnvRaw(ENV.DAEMON_LOCK_FILE_PATH, env);
+    case "token":
+      return readEnvRaw(ENV.DAEMON_TOKEN_FILE_PATH, env);
   }
 }
 
 /**
  * Effective daemon state-file path: an explicit `AUTOMOBILE_DAEMON_*_PATH` override
  * (resolved against the daemon launch directory) first, then the
- * `AUTOMOBILE_AUX_SOCKET_DIR`-isolated `/tmp` default. The JUnit runner, desktop
+ * `AUTOMOBILE_AUX_SOCKET_DIR`-isolated default (per-user on Windows for tokens,
+ * `/tmp` otherwise). The JUnit runner, desktop
  * app and XCTestRunner port this rule; `test/fixtures/daemon-isolation-paths.json`
  * holds the shared vectors all of them are tested against (#10906).
  */
 export function resolveDaemonStatePath(
-  extension: "sock" | "pid" | "lock",
+  extension: "sock" | "pid" | "lock" | "token",
   env: NodeJS.ProcessEnv = process.env,
   userId: string = uid,
+  targetPlatform: NodeJS.Platform = process.platform,
 ): string {
   const override = readDaemonStatePathOverride(extension, env);
   return override
-    ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
-    : resolveIsolatedDaemonStatePath(extension, env, userId);
+    ? resolveDaemonPath(override, env, targetPlatform)
+    : resolveIsolatedDaemonStatePath(extension, env, userId, targetPlatform);
 }
 
 /**

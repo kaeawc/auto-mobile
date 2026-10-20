@@ -19,6 +19,7 @@ import type { ExecResult } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+import { registerDeviceResourceInvalidation } from "../../src/daemon/deviceResourceInvalidation";
 
 const deviceId = "emulator-5554";
 
@@ -168,6 +169,29 @@ function emptyRefresh(h: ReturnType<typeof harness>) {
 }
 
 describe("MissingDeviceLiveness", () => {
+  test("fresh presence invalidates both resource caches through the daemon port", async () => {
+    const resets: string[] = [];
+    const restore = registerDeviceResourceInvalidation({
+      resetBootedDevicesResourceCache: () => {
+        resets.push("booted");
+      },
+      resetAndroidDeviceImageResourceCache: () => {
+        resets.push("images");
+      },
+    });
+    try {
+      const h = harness();
+      h.port.getDeviceManager = () =>
+        new ScriptedDiscoveryManager(() => {
+          expect(resets).toEqual(["booted", "images"]);
+          return { devices: [], succeededPlatforms: new Set(["android"]) };
+        });
+      await h.liveness.takeFreshPresenceDiscovery("android");
+      expect(resets).toEqual(["booted", "images"]);
+    } finally {
+      restore();
+    }
+  });
   test("fresh presence bypasses only its own adb read while a concurrent caller keeps the cached list", async () => {
     resetAdbClientCaches();
     const h = harness();
@@ -238,7 +262,7 @@ describe("MissingDeviceLiveness", () => {
     }
   });
 
-  test("refresh and monitor share one consecutive-miss streak", async () => {
+  test("refresh and monitor share one missing-observation streak", async () => {
     const h = harness();
     h.devices.set(deviceId, pooled());
     expect(await emptyRefresh(h)).toBe(0);
@@ -296,13 +320,9 @@ describe("MissingDeviceLiveness", () => {
       }
       expect(evaluate(false).disconnected).toEqual([]);
       expect(await refresh(false)).toBe(0);
-      expect(monitorMisses.has(deviceId)).toBe(false);
-      expect(h.misses.has(deviceId)).toBe(false);
-      for (let miss = 1; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {
-        h.timer.advanceTime(5_000);
-        expect(evaluate(true).disconnected).toEqual([]);
-        expect(await refresh(true)).toBe(0);
-      }
+      // Unknown discovery is not evidence of presence, for Android or pool refresh either.
+      expect(monitorMisses.get(deviceId)).toBe(2);
+      expect(h.misses.get(deviceId)).toBe(2);
       h.timer.advanceTime(5_000);
       expect(evaluate(true).disconnected).toEqual([deviceId]);
       expect(await refresh(true)).toBe(1);

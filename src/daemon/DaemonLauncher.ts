@@ -28,6 +28,8 @@ import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "./constants";
 export interface DaemonLaunchCommand {
   command: string;
   args: string[];
+  /** The spawned child wraps a daemon descendant rather than running the entry script. */
+  packageRunner?: boolean;
 }
 
 function normalizeEntryScriptPath(entryScript: string): string {
@@ -219,8 +221,8 @@ export interface DaemonLaunchRequest {
   timeoutMs: number;
   waitForReady: (timeoutMs: number, signal: AbortSignal) => Promise<boolean>;
   /**
-   * Rechecks that the exact spawned PID is now the reachable daemon before the
-   * launcher terminates it for a readiness timeout.
+   * Rechecks that the spawned launch owns the reachable daemon before timeout
+   * cleanup: exact PID for a direct launch, per-launch nonce for a package runner.
    */
   isReadyForLaunchedProcess?: (
     pid: number | undefined,
@@ -318,12 +320,14 @@ export class DaemonLauncher {
     const bunx = resolveBunxPath(this.environment, this.platform, this.executableExists);
     if (bunx) {
       return {
+        packageRunner: true,
         command: bunx,
         args: ["-y", resolvePackageSpecifier(this.version), "--daemon-mode"],
       };
     }
     return {
       command: this.processExecPath,
+      packageRunner: true,
       args: ["x", "-y", resolvePackageSpecifier(this.version), "--daemon-mode"],
     };
   }
@@ -483,11 +487,10 @@ export class DaemonLauncher {
       deadlineHandle = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
     });
     try {
-      // oxlint-disable-next-line auto-mobile/no-raw-promise-race -- Reuse the group grace deadline; another timer would change its expiry.
-      const wrapperExited = await Promise.race([
-        exitPromise.then(() => true),
-        deadline.then(() => false),
-      ]);
+      const wrapperExited = await raceWithDeadline(
+        [exitPromise.then(() => true), deadline.then(() => false)],
+        { timer: this.timer, label: "Daemon process group grace deadline" },
+      );
 
       // A `bunx`/`bun x` wrapper can exit while its daemon remains in the same
       // detached group. Keep the grace timer alive when that group still exists.

@@ -263,10 +263,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 0
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest :build-logic:test"
+          gradle-tasks: "detektMain detektTest :build-logic:test lintDebug"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332), matching
@@ -280,6 +281,25 @@ jobs:
           # test/bats/detekt-config-cache-disabled.bats.
           reuse-configuration-cache: false
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      # origin/main already contains this push. Compare against the previous
+      # main tip; manual dispatch falls back to the first parent.
+      - name: "Check Android lint baselines only shrink"
+        if: success() || failure()
+        env:
+          LINT_BASE_REF: ${{ github.event.before || 'HEAD^' }}
+        run: bash scripts/android/check-lint-baseline-shrink.sh --base-ref "$LINT_BASE_REF"
+
+      - name: "Upload Android Lint Reports"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-lint-reports
+          path: |
+            android/**/build/reports/lint-results-*.html
+            android/**/build/reports/lint-results-*.sarif
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: "Upload Detekt Reports"
         if: failure()

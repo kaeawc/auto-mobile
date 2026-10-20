@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
+import { keyboardSchema } from "../../src/server/interactionTools";
 import {
-  keyboardSchema,
   listKeyboardProfilesForTool,
   setKeyboardProfileForTool,
-} from "../../src/server/interactionTools";
+} from "../../src/server/interactionToolHandlers";
 
 const androidDevice = { deviceId: "device", platform: "android", name: "Device" } as BootedDevice;
 const iosDevice = { deviceId: "simulator", platform: "ios", name: "Simulator" } as BootedDevice;

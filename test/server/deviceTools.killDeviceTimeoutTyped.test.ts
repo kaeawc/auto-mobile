@@ -10,7 +10,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";

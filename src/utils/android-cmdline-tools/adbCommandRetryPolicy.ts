@@ -1,3 +1,5 @@
+import { isAdbMissingDeviceError, isAdbDeviceOfflineError } from "./AdbDeviceHealth";
+
 export function isSafeToRetryCommand(commandArgs: string[], hasDispatchGuard: boolean): boolean {
   if (commandArgs[0] === "shell") {
     const payload = commandArgs.slice(1).join(" ").trim();
@@ -70,4 +72,42 @@ export function isPreDispatchError(error: Error): boolean {
   return ["cannot connect to adb", "cannot connect to daemon", "cannot connect to the daemon"].some(
     (pattern) => message.startsWith(pattern),
   );
+}
+
+/** Auth, syntax and unmatched transport refusals must never enter the general retry loop. */
+export function isNonRetryableAdbError(error: Error, hasDevice: boolean): boolean {
+  const underlying = error.cause instanceof Error ? error.cause : error;
+  const stderr = (underlying as Error & { stderr?: string | Buffer }).stderr;
+  const message = (
+    stderr
+      ? Buffer.isBuffer(stderr)
+        ? stderr.toString()
+        : stderr
+      : underlying.message.startsWith("Command failed:")
+        ? ""
+        : underlying.message
+  ).toLowerCase();
+  if (isAdbMissingDeviceError(underlying)) {
+    return true;
+  }
+  if (!hasDevice && isAdbDeviceOfflineError(message)) {
+    return true;
+  }
+  const nonRetryablePatterns = [
+    "operation cancelled",
+    "unauthorized",
+    "authentication failed",
+    "permission denied",
+    "unknown command",
+    "invalid argument",
+    "syntax error",
+    "device not found",
+    "no devices",
+    "install_failed_version_downgrade",
+    "install_failed_update_incompatible",
+    "install_parse_failed_no_certificates",
+    "install_parse_failed_inconsistent_certificates",
+    "install_parse_failed_unexpected_exception",
+  ];
+  return nonRetryablePatterns.some((pattern) => message.includes(pattern));
 }

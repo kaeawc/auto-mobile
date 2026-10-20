@@ -20,6 +20,7 @@ import {
 import type { RetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { registerDeviceResourceInvalidation } from "../../src/daemon/deviceResourceInvalidation";
 
 function pooledDevice(incarnation = 1): MutablePooledDevice {
   return {
@@ -137,6 +138,32 @@ function harness() {
 }
 
 describe("DeviceDisconnectHandler", () => {
+  test("stale disconnect verification invalidates both resource caches through the daemon port", async () => {
+    const resets: string[] = [];
+    const restore = registerDeviceResourceInvalidation({
+      resetBootedDevicesResourceCache: () => {
+        resets.push("booted");
+      },
+      resetAndroidDeviceImageResourceCache: () => {
+        resets.push("images");
+      },
+    });
+    try {
+      const h = harness();
+      h.enableRecovery();
+      h.setManager({
+        getBootedDevicesDetailed: async () => {
+          expect(resets).toEqual(["booted", "images"]);
+          return discovery(["Pixel"]);
+        },
+      });
+      await h.handler.removeDisconnectedDevice(h.device.id, true, "incident");
+      expect(resets).toEqual(["booted", "images"]);
+      expect(h.devices.get(h.device.id)).toBe(h.device);
+    } finally {
+      restore();
+    }
+  });
   test("finishes a missing or mismatched incarnation without cleanup", async () => {
     const h = harness();
     await h.handler.removeDisconnectedDevice(h.device.id, false, "incident", pooledDevice(2));

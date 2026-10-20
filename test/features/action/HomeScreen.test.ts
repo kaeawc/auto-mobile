@@ -196,6 +196,9 @@ describe("HomeScreen", () => {
         if (platform === "android") {
           observation.viewHierarchy = launcherObservation("home", 5600).viewHierarchy;
           const launcherPackage = observation.viewHierarchy.packageName;
+          if (!launcherPackage) {
+            throw new Error("launcher observation has no package");
+          }
           fakeWindow.configureActiveWindow({
             appId: launcherPackage,
             activityName: "NexusLauncherActivity",

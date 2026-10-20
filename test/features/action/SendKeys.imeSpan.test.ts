@@ -1,5 +1,5 @@
 import { createExecResult } from "../../../src/utils/execResult";
-import { expect, mock, spyOn, test } from "bun:test";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import {
   DefaultSendKeysCommandExecutor,
   SendKeys,
@@ -24,7 +24,11 @@ import { android, createSendKeysHarness, focused, observer } from "./SendKeysTes
 const priorIme = "com.example.keyboard/.Ime";
 const activate = `shell ime set ${AUTO_MOBILE_IME_ID}`;
 const restore = `shell ime set ${priorIme}`;
-const type = (text: string): SendKeysCommand => ({ action: "type", text, mode: "ime" });
+const type = (text: string): Extract<SendKeysCommand, { action: "type" }> => ({
+  action: "type",
+  text,
+  mode: "ime",
+});
 let serial = 0;
 
 function harness(observe: SendKeysObserver = observer, initialIme = priorIme) {
@@ -536,9 +540,12 @@ test.each([true, false])(
   async (supported) => {
     const h = fieldHarness("hunter2", { password: "true" });
     h.client.supportsImeClearField = async () => supported;
-    const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
-      spyOn(logger, level),
-    );
+    const spies = [
+      spyOn(logger, "debug"),
+      spyOn(logger, "info"),
+      spyOn(logger, "warn"),
+      spyOn(logger, "error"),
+    ];
     try {
       const result = await h.action.execute([{ action: "clear" }]);
       expect(result.success).toBe(true);
@@ -853,9 +860,9 @@ test("multi-command restore failure reports original-keyboard recovery guidance"
   }
 });
 
-test.each([["a"], ["a", "b"]])(
+test.each([{ texts: ["a"] }, { texts: ["a", "b"] }])(
   "restore failure belongs to the last IME type rather than a trailing enter key (%j)",
-  async (...texts) => {
+  async ({ texts }) => {
     const h = harness();
     h.adb.setCommandError(restore, new Error("restore rejected"));
     try {
@@ -1245,4 +1252,8 @@ test("IME commit of a marked-up string stays verified when the field shows the h
   const h = harness(read);
   const result = await h.action.execute([type("*bold*")]);
   expect(result.success).toBe(true);
+});
+
+afterEach(() => {
+  mock.restore();
 });

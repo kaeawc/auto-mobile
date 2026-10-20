@@ -13,11 +13,11 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { executionTracker } from "../../src/daemon/executionTracker";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";
-import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
+import { defaultRecordingSessionCleanupDeps } from "../../src/daemon/recordingSessionCleanup";
 import {
   KEEPER_INTERVAL_MS,
   LivenessScenario,
@@ -211,7 +211,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     await s.loseDevice(label, DEVICE);
     expect(manager.getSession(base)).not.toBeNull();
     expect(manager.getSession(label)).toBeNull();
-    expect(manager.ownershipSessionUuid(label, false)).toBe(base);
+    expect(manager.ownershipSessionUuid(label)).toBe(base);
     expect(manager.getBaseSessionOfDerivedLabel(label)).toBe(base);
     expect(reservations(s).get(label)?.ownerLivenessToken).toBe(OWNER_TOKEN);
     return { s, base, label, connection, otherLabel, siblingLabel };
@@ -420,7 +420,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
       OWNER_TOKEN,
     );
     try {
-      await drainMicrotasks();
+      await drainMicrotasks(256);
       expect(reservations(s).get(label)).toEqual(before);
       pool.releaseMcpSessionBindings("closed-label-restore");
     } finally {

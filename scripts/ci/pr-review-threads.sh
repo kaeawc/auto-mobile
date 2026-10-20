@@ -52,15 +52,17 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 PAGES_FILE="${TEMP_DIR}/pages.json"
 THREADS_FILE="${TEMP_DIR}/threads.json"
 
-# shellcheck disable=SC2016 # GraphQL variables must reach gh literally.
-if ! gh api graphql --paginate --slurp -f query='
+if ! gh api graphql --paginate --slurp -f query="$(cat <<'LITERAL_PROGRAM'
+
 query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$pr){
       reviewThreads(first:100, after:$endCursor){
         pageInfo{ hasNextPage endCursor }
         nodes{ id isResolved isOutdated path line originalLine diffSide
-          comments(first:20){ nodes{ author{login} body url createdAt } } } } } } }' \
+          comments(first:20){ nodes{ author{login} body url createdAt } } } } } } }
+LITERAL_PROGRAM
+)" \
   -F owner="${REPO%%/*}" -F repo="${REPO##*/}" -F pr="$PR_NUMBER" >"$PAGES_FILE"; then
   echo "Could not collect review threads for PR #${PR_NUMBER}." >&2
   exit 1

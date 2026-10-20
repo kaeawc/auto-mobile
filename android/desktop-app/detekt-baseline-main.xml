@@ -2,14 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:AutoMobileDesktopApp.kt:!showOnboarding &amp;&amp; !pickerOpen &amp;&amp; !showSettings &amp;&amp; !showAbout &amp;&amp; workspaceState is WorkspaceUiState.Content</ID>
-    <ID>ComplexCondition:AutoMobileDesktopApp.kt:openPaletteRequest &gt; 0 &amp;&amp; !showOnboarding &amp;&amp; !pickerOpen &amp;&amp; !showSettings &amp;&amp; !showAbout &amp;&amp; workspaceState is WorkspaceUiState.Content</ID>
-    <ID>CyclomaticComplexMethod:AutoMobileDesktopApp.kt:@Composable fun AutoMobileDesktopApp</ID>
-    <ID>InjectDispatcher:AutoMobileDesktopApp.kt:IO</ID>
-    <ID>InjectDispatcher:Main.kt:IO</ID>
-    <ID>InjectDispatcher:SystemTray.kt:IO</ID>
-    <ID>LongMethod:AutoMobileDesktopApp.kt:@Composable fun AutoMobileDesktopApp</ID>
-    <ID>LongMethod:Main.kt:@OptIn(ExperimentalComposeUiApi::class) fun main</ID>
-    <ID>TooGenericExceptionCaught:AutoMobileDesktopApp.kt:error: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>

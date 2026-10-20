@@ -53,6 +53,8 @@ function device(postures: Posture[] = ["closed", "opened"]): BootedDevice {
 
 function observation(key: string): ObserveResult {
   return buildObserveResult({
+    updatedAt: 0,
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     display: {
       key,
       role: key === cover ? "cover" : "inner",
@@ -95,6 +97,10 @@ const pinRemedy =
 
 class FakeTapClient implements CoordinateTapClient {
   calls = 0;
+  async requestDoubleTapCoordinates(): Promise<{ success: boolean }> {
+    this.calls++;
+    return { success: true };
+  }
   async requestTapCoordinates(): Promise<{ success: boolean }> {
     this.calls++;
     return { success: true };
@@ -363,9 +369,9 @@ describe("disconnected action panel pinnedDisplay details", () => {
     const error = await pinnedRejection(h);
     expect(error).toBeInstanceOf(DisplaySelectionError);
     const result = runWithSelectedDisplayPin(pinned(h), () =>
-      withStaleDisplay({ success: false }, error),
+      withStaleDisplay<BaseActionResult>({ success: false }, error),
     );
-    expect(result).toEqual({
+    expect<unknown>(result).toEqual({
       success: false,
       error: foldedMessage + pinRemedy,
       pinnedDisplay: { pin: "inner", availablePanels: [{ key: cover, role: "cover" }] },
@@ -415,7 +421,7 @@ describe("disconnected action panel pinnedDisplay details", () => {
     );
     const error = await pinnedRejection(h);
     const result = runWithSelectedDisplayPin(pinned(h), () =>
-      withStaleDisplay({ success: false }, error),
+      withStaleDisplay<BaseActionResult>({ success: false }, error),
     );
     expect(result.pinnedDisplay).toEqual({
       pin: "inner",

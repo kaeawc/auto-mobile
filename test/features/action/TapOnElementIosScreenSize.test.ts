@@ -1,7 +1,8 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { ObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { RealObserveScreen as ObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { DefaultHierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
 import {
   normalizeIosHierarchy,
@@ -57,9 +58,10 @@ function replace(tap: TapOnElement, hierarchy: ViewHierarchyResult): ObserveResu
   const observation: ObserveResult = buildObserveResult({
     observationId: "fixture-observation",
     updatedAt: 1,
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     screenSize: { width: 669, height: 951 },
   });
-  tap["replaceObservationHierarchy"](observation, hierarchy, false);
+  tap.testHooks.replaceObservationHierarchy(observation, hierarchy, false);
   return observation;
 }
 
@@ -229,16 +231,17 @@ describe("tapOn iOS multi-panel screen size", () => {
     });
     const observation = replace(tap, hierarchy);
     const points: Array<{ x: number; y: number }> = [];
-    tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
-    tap.executeiOSTap = async (_action, x, y) => {
+    tap.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
+    tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
       points.push({ x, y });
-    };
+    });
     tap.prepareSelectionCapture = async () => null;
     tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+      effect: undefined,
       observation: current,
     });
-    tap.captureTerminalObservationScreenshot = async () => {};
-    tap.recordDeferredPredictionOutcome = async () => {};
+    tap.testHooks.setTerminalScreenshotCapture(async () => {});
+    tap.testHooks.setDeferredPredictionRecorder(async () => {});
     tap.enforceFreshnessConsistencyWithEffect = () => {};
     const result = await tap.execute({ text: navigation.text, action: "tap" });
     expect(result.success).toBe(true);

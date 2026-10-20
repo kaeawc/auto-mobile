@@ -19,7 +19,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { logger } from "../../src/utils/logger";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
@@ -107,7 +107,7 @@ export function restartStopHarness() {
       deviceId: platform === "android" ? "emulator-5554" : "restart-sim",
     };
     manager.setBootedDevices(platform, [device]);
-    manager.setDeviceImages(platform, [device]);
+    manager.setDeviceImages(platform, [{ ...device, isRunning: true }]);
     const persistence = new FakeDeviceSessionPersistence();
     const sessions = new SessionManager(timer, persistence, {
       barrier: () => new FakeDbWriteBarrier(),

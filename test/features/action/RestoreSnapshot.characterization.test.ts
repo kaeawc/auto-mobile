@@ -84,7 +84,7 @@ describe("RestoreSnapshot settings command ordering", () => {
         ]);
         expect(result.failures).toEqual([
           {
-            kind: "android_setting",
+            kind: "android_setting" as const,
             namespace: "global",
             key: "invalid key",
             reason: "invalid settings key",
@@ -93,8 +93,8 @@ describe("RestoreSnapshot settings command ordering", () => {
             ? []
             : [
                 {
-                  kind: "android_setting",
-                  namespace: "secure",
+                  kind: "android_setting" as const,
+                  namespace: "secure" as const,
                   key: "android_id",
                   reason: "device rejected setting",
                 },

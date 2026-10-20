@@ -20,6 +20,7 @@ import {
 import {
   evaluateDeviceDisconnects,
   recordingCandidateIncarnations,
+  type DisconnectCandidateIncarnation,
 } from "../../src/daemon/disconnectMonitor";
 import { notifyAdbMissingDevice } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -126,7 +127,6 @@ function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
   pool.removeDisconnectedDevice = async (id: string) => {
     actions.push(`remove:${id}`);
     pooled = false;
-    return true;
   };
   const sessions = daemon.getSessionManager();
   sessions.getAllSessions = () => (sessionActive ? [session] : []);
@@ -630,8 +630,8 @@ describe("disconnect monitor miss counting", () => {
     candidateDeviceIds: Set<string>,
     succeededPlatforms: Set<DiscoveryPlatform> = new Set(),
     candidatePlatforms: Map<string, DiscoveryPlatform> = new Map(),
-    candidateIncarnations: Map<string, number> = new Map(),
-    deviceDisconnectMissIncarnations: Map<string, number> = new Map(),
+    candidateIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map(),
+    deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map(),
   ): { disconnected: string[]; skippedAllDiscoveryFailed: boolean } => {
     return evaluateDeviceDisconnects({
       deviceDisconnectMisses,
@@ -770,7 +770,7 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.get("sim-1")).toBe(1);
   });
 
-  test("retains candidates without misses when all platform discovery fails", () => {
+  test("holds candidate misses when all platform discovery fails", () => {
     const misses = new Map<string, number>([["device-1", 2]]);
 
     const result = runDisconnectPoll(
@@ -783,7 +783,7 @@ describe("disconnect monitor miss counting", () => {
 
     expect(result.skippedAllDiscoveryFailed).toBe(true);
     expect(result.disconnected).toEqual([]);
-    expect(misses.has("device-1")).toBe(false);
+    expect(misses.get("device-1")).toBe(2);
   });
 
   test("miss-counts only candidates whose platform discovery succeeds", () => {
@@ -811,9 +811,9 @@ describe("disconnect monitor miss counting", () => {
     const forced = new Set(["emulator-5554"]);
     const input = {
       deviceDisconnectMisses: misses,
-      confirmedDisconnectedDeviceIds: new Set(),
+      confirmedDisconnectedDeviceIds: new Set<string>(),
       forceDisconnectedDeviceIds: forced,
-      bootedDeviceIds: new Set(),
+      bootedDeviceIds: new Set<string>(),
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map(),
@@ -847,7 +847,7 @@ describe("disconnect monitor miss counting", () => {
     expect(result.skippedAllDiscoveryFailed).toBe(true);
     expect(result.disconnected).toEqual([]);
     expect(result.missed).toEqual([]);
-    expect(misses.has("emulator-5554")).toBe(false);
+    expect(misses.get("emulator-5554")).toBe(1);
   });
 
   test("fresh booted scan clears a stale forced missing flag", () => {
@@ -918,6 +918,8 @@ describe("disconnect monitor miss counting", () => {
           expect(confirmation.disconnected).toEqual([]);
         }
         return {
+          observationId: `observation-${index}`,
+          display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
           updatedAt: timer.now() + 1,
           screenSize: { width: 200, height: 200 },
           systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -1016,7 +1018,7 @@ describe("disconnect monitor miss counting", () => {
 
     expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(result.disconnected).toEqual([]);
-    expect(misses.has("sim-1")).toBe(false);
+    expect(misses.get("sim-1")).toBe(2);
   });
 
   test("miss-counts a device once its platform discovery succeeds", () => {

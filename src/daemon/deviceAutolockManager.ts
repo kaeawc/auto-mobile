@@ -8,7 +8,6 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
-import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
@@ -56,6 +55,8 @@ interface AutolockAcquisitionOptions {
   collectCancellationSettlement?: (settlement: Promise<void>) => void;
   /** Records the session this acquisition minted (never a reused one) once it is committed. */
   receipt: AcquisitionReceipt;
+  /** The caller's cancel signal, threaded explicitly (#11817); DevicePool supplies it. */
+  signal?: AbortSignal;
 }
 
 export interface DeviceAutolockPoolPort {
@@ -175,7 +176,7 @@ export class DeviceAutolockManager {
       verifiedAndroidAvdIdentity?: DeviceInfo,
       achievedReadiness?: DeviceReadinessLevel,
       collectCancellationSettlement?: (settlement: Promise<void>) => void,
-      policy?: { autolockEnabled?: boolean; receipt?: AcquisitionReceipt },
+      policy?: { autolockEnabled?: boolean; receipt?: AcquisitionReceipt; signal?: AbortSignal },
     ]
   ): Promise<string | undefined> {
     if (!(policy.autolockEnabled ?? captureAutolockPolicy(this.env))) {
@@ -213,6 +214,7 @@ export class DeviceAutolockManager {
           achievedReadiness,
           collectCancellationSettlement,
           receipt,
+          signal: policy.signal,
         }),
     });
     if (sessionId) {
@@ -240,14 +242,16 @@ export class DeviceAutolockManager {
     achievedReadiness,
     collectCancellationSettlement,
     receipt,
+    signal,
   }: AutolockAcquisitionOptions): Promise<string | undefined> {
-    throwIfRequestAborted();
+    const throwIfAborted = () => signal?.throwIfAborted();
+    throwIfAborted();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
     // The shared discovery pass has added a freshly booted target under the lock.
     const alreadyPooled = snapshot.capturedEntry !== undefined;
     // Assign the device to the generated session
-    throwIfRequestAborted();
+    throwIfAborted();
     let device = this.pool.getDevice(deviceId);
     if (!device) {
       throw new ActionableError(this.unavailableMessage(deviceId));
@@ -293,11 +297,12 @@ export class DeviceAutolockManager {
     }
     device = validatedDevice;
 
-    throwIfRequestAborted();
+    throwIfAborted();
     const reusedSessionId = await this.reuseOwnedAutolockSession(
       device,
       mcpSessionId,
       achievedReadiness,
+      signal,
     );
     if (reusedSessionId) {
       return reusedSessionId;
@@ -329,7 +334,7 @@ export class DeviceAutolockManager {
       this.pool.getSessionManager().createSession(sessionId, deviceId, platform, {
         timeoutMs,
         stableDeviceId: this.pool.stableDeviceIdFor(device),
-        signal: getAbortSignal(),
+        signal,
       }),
     );
     // #6227 (round 9): record the achieved readiness BEFORE publishing the
@@ -360,6 +365,7 @@ export class DeviceAutolockManager {
       assignmentSnapshot,
       owner,
       collectCancellationSettlement,
+      signal,
     );
     receipt.minted = mintedSession(session, deviceId);
     this.noteStateChanged(device);
@@ -391,8 +397,8 @@ export class DeviceAutolockManager {
     snapshot: SessionAssignmentSnapshot,
     mcpSessionId?: string,
     collectCancellationSettlement?: (settlement: Promise<void>) => void,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const signal = getAbortSignal();
     const cancelPublishedSession = async () => {
       // Only this newly minted session may be compensated; never a replacement.
       await this.pool
@@ -485,6 +491,7 @@ export class DeviceAutolockManager {
     device: PooledDevice,
     mcpSessionId: string | undefined,
     achievedReadiness: DeviceReadinessLevel,
+    signal?: AbortSignal,
   ): Promise<string | undefined> {
     const session = this.getOwnedAutolockSession(device, { mcpSessionId });
     if (!session) {
@@ -496,7 +503,7 @@ export class DeviceAutolockManager {
       .getSessionManager()
       .getOrCreateSession(session.sessionId, undefined, undefined, undefined, false, {
         callerExecutionId: getToolSelectionContext()?.execution?.executionId,
-        signal: getAbortSignal(),
+        signal,
       });
     // Release can finish while activity persistence yields, even under the
     // assignment mutex. Do not report success for a retired ownership identity.
@@ -1012,5 +1019,16 @@ export class DeviceAutolockManager {
   releaseMcpSessionBindings(mcpSessionId: string): void {
     this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
     this.mcpSessionAutolockMap.delete(mcpSessionId);
+  }
+
+  /** @internal Read-only state used by deterministic ownership tests. */
+  get testHooks() {
+    return {
+      mcpSessionAutolockMap: this.mcpSessionAutolockMap as ReadonlyMap<string, string>,
+      mcpSessionAcquiredAutolocks: this.mcpSessionAcquiredAutolocks as ReadonlyMap<
+        string,
+        ReadonlySet<string>
+      >,
+    };
   }
 }

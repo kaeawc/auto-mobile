@@ -9,13 +9,16 @@ import {
   type AppFileFileSystem,
   type AppFileStats,
   createAppFileServiceForTesting,
-  executeAndroidAppFileCommand,
-  resolveAndroidTarget,
-  type AppFileProvider,
+  type AppFileListProvider,
+  type AppFileReadProvider,
   type AppFileWriteProvider,
-  IosSimulatorAppFileProvider,
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
+import { IosSimulatorAppFileProvider } from "../../src/server/IosSimulatorAppFileProvider";
+import {
+  executeAndroidAppFileCommand,
+  resolveAndroidTarget,
+} from "../../src/server/appFileSupport";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   APP_FILE_RESOURCE_TEMPLATES,
@@ -3414,7 +3417,9 @@ describe("Android app-file running candidates", () => {
     for (const userId of [0, 10]) {
       adb.setCommandResponse(
         `shell pm list packages --user ${userId}`,
-        execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+        execResult(
+          scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+        ),
       );
     }
     const foreground = new FakeForegroundAppLookup();
@@ -3459,7 +3464,9 @@ for (const operation of ["put", "list", "read"] as const) {
           // Constructed, not captured from a device: exact package-list entry or empty listing.
           adb.setCommandResponse(
             `shell pm list packages --user ${userId}`,
-            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+            execResult(
+              scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+            ),
           );
         }
         if (scenario.current !== undefined) {
@@ -3613,11 +3620,15 @@ describe("Android app-file resource user round trips", () => {
       test.each(scenarios)(`${operation} ${container}: $name URI round trip`, async (scenario) => {
         const adb = new AppFileUserAdb();
         const users = scenario.users ?? [0, 10];
-        adb.setUsers(users.map((userId) => ({ userId, name: `User ${userId}` })));
+        adb.setUsers(
+          users.map((userId) => ({ userId, name: `User ${userId}`, running: false, flags: 0 })),
+        );
         for (const userId of users) {
           adb.setCommandResponse(
             `shell pm list packages --user ${userId}`,
-            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+            execResult(
+              scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+            ),
           );
         }
         adb.setCommandResponse(
@@ -3714,8 +3725,8 @@ describe("Android app-file profile details", () => {
   test("default foreground lookup delegates to the operation's adb client", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: work app resumed, parent remains current.
     adb.setForegroundApp({ packageName: "com.example.app", userId: 10 });
@@ -3734,8 +3745,8 @@ describe("Android app-file profile details", () => {
   test("foreground lookup abort propagates without current-user fallback", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: both users have the package.
     adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
@@ -3783,8 +3794,8 @@ describe("Android app-file profile details", () => {
   test("putFiles batch resolves once even when foreground state could change", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: both users have the package, current user changes.
     adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
@@ -3907,7 +3918,9 @@ describe("Android app-file profile details", () => {
   });
 });
 
-class RecordingAppFileProvider implements AppFileProvider {
+class RecordingAppFileProvider
+  implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
+{
   readonly putRequests: PutAppFileProviderRequest[] = [];
   readonly domain = "app_containers" as const;
 

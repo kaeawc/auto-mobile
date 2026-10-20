@@ -136,6 +136,7 @@ describe("AppPermissions", () => {
       "com.example.app",
       {
         ...input,
+        permissions: [...input.permissions],
         action: "reset",
         notificationsEnabled: true,
         notificationPolicyAccess: true,
@@ -647,6 +648,9 @@ describe("AppPermissions", () => {
     expect(setResult.operations[0]).not.toHaveProperty("error");
     expect(setResult.operations[0].result).not.toHaveProperty("error");
     expect(setResult.operations[0].warning).toContain("Photos grant was dispatched via simctl");
+    if (typeof setResult.operations[0].warning !== "string") {
+      throw new Error("Expected warning");
+    }
     expect(setResult.warnings).toEqual([setResult.operations[0].warning]);
     expect(setResult.operations[0].result).toHaveProperty(
       "warning",
@@ -712,6 +716,9 @@ describe("AppPermissions", () => {
     expect(result.operations[0].result).not.toHaveProperty("error");
     expect(result.operations[0].warning).toContain("Photos grant was dispatched via simctl");
     expect(result.operations[0].result).not.toHaveProperty("evidence");
+    if (typeof result.operations[0].warning !== "string") {
+      throw new Error("Expected warning");
+    }
     expect(result.warnings).toEqual([result.operations[0].warning]);
     expect(result.operations[0].result).toHaveProperty("warning", result.operations[0].warning);
   });

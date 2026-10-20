@@ -6,7 +6,7 @@ import {
 } from "./inputDeviceOwnership";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
-import { noActiveDeviceSessionPayload } from "../server/proxyServer";
+import { noActiveDeviceSessionPayload } from "./deviceSessionResult";
 
 /** Preserve the typed holder refusal on the recording socket's response boundary. */
 export function deviceGestureRecordingStartOwnershipRefusal(

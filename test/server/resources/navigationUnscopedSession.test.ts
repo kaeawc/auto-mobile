@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { fakeServerContext } from "../../helpers/fakeServerContext";
 import {
   afterAll,
@@ -19,7 +20,7 @@ import {
   type ResourceContent,
   type ResourceReadContext,
 } from "../../../src/server/resourceRegistry";
-import { ResourceUpdatedBroadcaster } from "../../../src/server/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../../src/daemon/listChangedBroadcast";
 import {
   registerNavigationResources,
   setNavigationGraphProvider,
@@ -306,7 +307,9 @@ describe("navigation resource session resolution", () => {
     await a.setCurrentApp("app.a.sole-update");
     await timer.advanceTimeAsync(1000);
     expect(
-      server.server.notifications.map((notification) => notification.params?.uri).sort(),
+      server.server.notifications
+        .map((notification) => z.object({ uri: z.string() }).parse(notification.params).uri)
+        .sort(),
     ).toEqual([graphUri, "automobile:navigation/history", "automobile:navigation/apps"].sort());
     server.server.notifications.length = 0;
     sessions.sessionIds = ["A", "B"];

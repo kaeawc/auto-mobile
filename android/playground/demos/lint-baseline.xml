@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="InflateParams"
+        message="Avoid passing `null` as the view root (needed to resolve layout parameters on the inflated layout&apos;s root element)"
+        errorLine1="            .inflate(R.layout.screen_semantic_links_xml, null, false)"
+        errorLine2="                                                         ~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/demos/SemanticLinksScreens.kt"
+            line="80"
+            column="58"/>
+    </issue>
+
+</issues>

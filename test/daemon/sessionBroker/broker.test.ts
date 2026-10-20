@@ -2,7 +2,10 @@ import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/dev
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
+import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   openSqliteBindingRegistry,
@@ -512,6 +515,36 @@ describe("session-only broker lifecycle", () => {
     await ready("next");
   });
 
+  test("reset capacity refusal returns cleanup_pending and preserves the device until recovery", async () => {
+    broker = new SessionBroker({ ...options, reuseCleanDevices: true });
+    const first = await ready("first");
+    const refusal = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 5_000 },
+      "iOS simulator capacity exhausted",
+    );
+    devices.resetError = refusal;
+
+    expect(await broker.release(first)).toEqual({ sessionUuid: first, outcome: "cleanup_pending" });
+    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
+    expect((await options.store.listResources())[0].state).toBe("resetting");
+    expect(devices.destroyed).toEqual([]);
+    expect(await broker.status("first")).toMatchObject({ cleanupPending: true });
+    await broker.recover();
+    expect(devices.resetResources).toHaveLength(2);
+    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
+    expect((await options.store.listResources())[0].state).toBe("resetting");
+    expect(devices.destroyed).toEqual([]);
+
+    devices.resetError = undefined;
+    await broker.recover();
+    expect(devices.resetResources).toHaveLength(3);
+    expect((await options.store.listResources())[0].state).toBe("idle");
+    expect(await broker.release(first)).toMatchObject({ outcome: "released" });
+    await ready("second");
+    expect(devices.prepared[1]).toBe(devices.prepared[0]);
+    expect(devices.destroyed).toEqual([]);
+  });
+
   test("reset exception retires the device instead of reusing contaminated state", async () => {
     broker = new SessionBroker({ ...options, reuseCleanDevices: true });
     const first = await ready("first");
@@ -646,6 +679,220 @@ describe("session-only broker lifecycle", () => {
       sessionUuid: first,
       cleanupPending: false,
     });
+  });
+
+  test("service stop commits every active handoff before a blocked recovery release settles", async () => {
+    options.limits = { totalDeviceCap: 3, sessionCap: 3 };
+    const expired = await ready("a-expired");
+    const live = await ready("b-live");
+    const otherLive = await ready("c-live");
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    devices.releaseHook = async () => {
+      entered.resolve();
+      await complete.promise;
+    };
+    options.sessionDisposition = (sessionId) => (sessionId === expired ? "gone" : "live");
+    const timer = new FakeTimer();
+    let lockReleased = false;
+    const service = new SessionBrokerService(
+      broker,
+      "test-scope",
+      {
+        acquire: () => {},
+        release: () => {
+          lockReleased = true;
+        },
+      },
+      timer,
+    );
+    const marked: string[] = [];
+    const relinquish = options.store.relinquishForRestart.bind(options.store);
+    const mark = spyOn(options.store, "relinquishForRestart").mockImplementation(
+      async (id, owner) => {
+        const result = await relinquish(id, owner);
+        marked.push(id);
+        return result;
+      },
+    );
+    service.start();
+    timer.advanceTime(5_000);
+    await entered.promise;
+    const closing = service.close();
+    try {
+      await drainUntil(() => marked.length === 2, { description: "committed active handoffs" });
+      for (const id of ["b-live", "c-live"]) {
+        expect(await options.store.getRequest(id)).toMatchObject({
+          state: "active",
+          restartHandoff: true,
+        });
+      }
+      expect((await options.store.getRequest("a-expired"))?.restartHandoff).toBeUndefined();
+      expect(devices.released).toEqual([expired]);
+      expect(devices.sessions.has(live)).toBe(true);
+      expect(devices.sessions.has(otherLive)).toBe(true);
+      expect(lockReleased).toBe(false);
+    } finally {
+      complete.resolve();
+      await closing;
+      mark.mockRestore();
+    }
+    expect(lockReleased).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("shutdown marks active handoffs before an aborted preparation settles", async () => {
+    options.limits = { totalDeviceCap: 2, sessionCap: 2 };
+    await ready("active-before-prepare");
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    const aborted = Promise.withResolvers<void>();
+    devices.prepareHook = async ({ signal }) => {
+      signal?.addEventListener("abort", () => aborted.resolve(), { once: true });
+      entered.resolve();
+      await complete.promise;
+    };
+    const pending = broker.prepare(config("blocked-prepare"), "owner-token");
+    await entered.promise;
+    let marked = false;
+    const relinquish = options.store.relinquishForRestart.bind(options.store);
+    const mark = spyOn(options.store, "relinquishForRestart").mockImplementation(
+      async (id, owner) => {
+        const result = await relinquish(id, owner);
+        marked = true;
+        return result;
+      },
+    );
+    let closed = false;
+    const closing = broker.close().then(() => {
+      closed = true;
+    });
+    try {
+      await aborted.promise;
+      await drainUntil(() => marked, { description: "handoff before preparation joins" });
+      expect(await options.store.getRequest("active-before-prepare")).toMatchObject({
+        state: "active",
+        restartHandoff: true,
+      });
+      expect((await options.store.getRequest("blocked-prepare"))?.restartHandoff).toBeUndefined();
+      expect(closed).toBe(false);
+    } finally {
+      complete.resolve();
+      await pending;
+      await closing;
+      mark.mockRestore();
+    }
+    expect(await broker.status("blocked-prepare")).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+    });
+  });
+
+  test("a stale shutdown snapshot cannot mark a request that becomes terminal", async () => {
+    const session = await ready("terminal-during-mark");
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    const relinquish = options.store.relinquishForRestart.bind(options.store);
+    const mark = spyOn(options.store, "relinquishForRestart").mockImplementation(
+      async (id, owner) => {
+        entered.resolve();
+        await complete.promise;
+        return relinquish(id, owner);
+      },
+    );
+    const closing = broker.close();
+    await entered.promise;
+    try {
+      await broker.release(session);
+      expect((await options.store.getRequest("terminal-during-mark"))?.state).toBe("released");
+    } finally {
+      complete.resolve();
+      await closing;
+      mark.mockRestore();
+    }
+    expect(
+      (await options.store.getRequest("terminal-during-mark"))?.restartHandoff,
+    ).toBeUndefined();
+  });
+
+  test("service stop ends recovery between requests and skips retention", async () => {
+    options.limits = { totalDeviceCap: 2, sessionCap: 2 };
+    const first = await ready("a-expired");
+    const second = await ready("b-expired");
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    devices.releaseHook = async () => {
+      entered.resolve();
+      await complete.promise;
+    };
+    const dispositions: string[] = [];
+    options.sessionDisposition = (id) => {
+      dispositions.push(id);
+      return "gone";
+    };
+    const prune = spyOn(broker, "pruneReceipts");
+    const timer = new FakeTimer();
+    const service = new SessionBrokerService(
+      broker,
+      "test-scope",
+      { acquire: () => {}, release: () => {} },
+      timer,
+    );
+    service.start();
+    timer.advanceTime(5_000);
+    await entered.promise;
+    const closing = service.close();
+    try {
+      complete.resolve();
+      await closing;
+      expect(dispositions).toEqual([first]);
+      expect(devices.released).toEqual([first]);
+      expect(devices.sessions.has(second)).toBe(true);
+      expect(prune).not.toHaveBeenCalled();
+    } finally {
+      prune.mockRestore();
+    }
+  });
+
+  test("shutdown stops the resource recovery sweep between destruction attempts", async () => {
+    options.limits = { totalDeviceCap: 2, sessionCap: 2 };
+    const first = await ready("a-failed");
+    const second = await ready("b-failed");
+    await options.store.fail("a-failed", OWNER, "failed session");
+    await options.store.fail("b-failed", OWNER, "failed session");
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    devices.releaseHook = async () => {
+      entered.resolve();
+      await complete.promise;
+    };
+    const recovering = broker.recover();
+    await entered.promise;
+    const closing = broker.close();
+    complete.resolve();
+    await Promise.all([recovering, closing]);
+    expect(devices.released).toEqual([first]);
+    expect(devices.sessions.has(second)).toBe(true);
+    expect(
+      (await options.store.listResources()).filter((resource) => resource.state === "destroying"),
+    ).toHaveLength(1);
+  });
+
+  test("repeated shutdown marking is idempotent and preserves the active grant", async () => {
+    const session = await ready("double-handoff");
+    await broker.markRestartHandoff();
+    const once = await options.store.getRequest("double-handoff");
+    await broker.markRestartHandoff();
+    await broker.close();
+    expect(await options.store.getRequest("double-handoff")).toEqual(once);
+    expect(once).toMatchObject({
+      state: "active",
+      restartHandoff: true,
+      sessionId: session,
+      owner: OWNER,
+    });
+    expect(devices.released).toEqual([]);
+    expect(devices.destroyed).toEqual([]);
   });
 
   describe("provider restart (#12451)", () => {

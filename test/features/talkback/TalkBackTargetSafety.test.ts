@@ -1,6 +1,6 @@
 import { buildElement } from "../../helpers/elementBuilder";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNavigationExecutor";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -11,6 +11,10 @@ import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector
 import { HierarchyTalkBackDriver } from "./HierarchyTalkBackDriver";
 import { notificationHierarchy, notificationRows } from "./capturedNotificationTargets";
 import type { Element } from "../../../src/models/Element";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const device = { name: "test-device", platform: "android" as const, deviceId: "emulator-5554" };
 
@@ -70,9 +74,11 @@ describe("TalkBack selected target safety", () => {
       const result =
         caller === "strategy"
           ? strategy.executeTap(device.deviceId, target, driver)
-          : tap.executeAndroidTap("tap", 50, 450, 500, target, undefined, {
-              action: "tap",
-              screenReaderNavigation: true,
+          : tap.executeAndroidTap("tap", 50, 450, 500, target, {
+              options: {
+                action: "tap",
+                screenReaderNavigation: true,
+              },
             });
       await expect(result).rejects.toThrow("The screen changed while moving the TalkBack cursor");
       expect(driver.getFocusRequestCount()).toBe(1);
@@ -143,9 +149,11 @@ describe("TalkBack selected target safety", () => {
         0,
       );
     await expect(
-      tap.executeAndroidTap("tap", 50, 450, 500, target, undefined, {
-        action: "tap",
-        screenReaderNavigation: true,
+      tap.executeAndroidTap("tap", 50, 450, 500, target, {
+        options: {
+          action: "tap",
+          screenReaderNavigation: true,
+        },
       }),
     ).rejects.toThrow("The screen changed while moving the TalkBack cursor");
     expect(driver.tapHistory).toEqual([]);
@@ -288,11 +296,12 @@ describe("TalkBack selected target safety", () => {
       const { driver, executor, strategy } = harness();
       const rows = notificationRows.slice(1, 3);
       driver.setElements(rows, 1);
+      const traversal = spyOn(driver, "requestTraversalOrder");
       spyOn(executor, "navigateToElement").mockImplementation(
         async (_device, _selector, options) => {
           options?.onFocusObserved?.(rows[1], rows);
           if (failure === "throw") {
-            spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("unavailable"));
+            traversal.mockRejectedValue(new Error("unavailable"));
           } else {
             driver.queueTraversalResult({
               elements: [],
@@ -319,12 +328,13 @@ describe("TalkBack selected target safety", () => {
       const rows = notificationRows.slice(2, 3);
       const live = shiftedRows()[1];
       driver.setElements(rows, 0);
+      const traversal = spyOn(driver, "requestTraversalOrder");
       spyOn(executor, "navigateToElement").mockImplementation(
         async (_device, _selector, options) => {
           driver.setElements([live], 0);
           options?.onFocusObserved?.(live, rows);
           if (failure === "throw") {
-            spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("unavailable"));
+            traversal.mockRejectedValue(new Error("unavailable"));
           } else {
             driver.queueTraversalResult({
               elements: [],
@@ -402,9 +412,11 @@ describe("TalkBack selected target safety", () => {
       0,
     );
     const navigation = spyOn(strategy, "executeTap");
-    await tap.executeAndroidTap("tap", 50, 250, 500, target, undefined, {
-      action: "tap",
-      screenReaderNavigation: true,
+    await tap.executeAndroidTap("tap", 50, 250, 500, target, {
+      options: {
+        action: "tap",
+        screenReaderNavigation: true,
+      },
     });
     const result = await navigation.mock.results[0].value;
     expect(result).toMatchObject({
@@ -485,7 +497,7 @@ describe("TalkBack newer full hierarchy contradicts selected target", () => {
         },
       ]);
       await expect(
-        tap.executeAndroidTap(action, 150, 1550, 500, selected, undefined, { action }),
+        tap.executeAndroidTap(action, 150, 1550, 500, selected, { options: { action } }),
       ).rejects.toThrow("Selected element moved or is gone");
       expect(driver.tapHistory).toEqual([]);
       expect(driver.doubleTapHistory).toEqual([]);
@@ -532,10 +544,12 @@ describe("TalkBack re-resolution before native dispatch", () => {
         bounds: { ...old.bounds!, top: old.bounds!.top + 1, bottom: old.bounds!.bottom + 1 },
       };
       driver.setElements([notificationRows[1], live]);
-      const result = await tap.executeAndroidTap(action, 1, 1, 500, old, undefined, {
-        elementId: old["resource-id"],
-        index: 1,
-        action,
+      const result = await tap.executeAndroidTap(action, 1, 1, 500, old, {
+        options: {
+          elementId: old["resource-id"],
+          index: 1,
+          action,
+        },
       });
       expect(result).toBeUndefined();
       expect(driver.actionHistory).toEqual([]);
@@ -552,10 +566,12 @@ describe("TalkBack re-resolution before native dispatch", () => {
     const old = { ...notificationRows[2], text: "Selected notification" };
     driver.setElements([old, { ...notificationRows[1], text: "Another notification" }]);
     await expect(
-      tap.executeAndroidTap("longPress", 1, 1, 500, old, undefined, {
-        elementId: old["resource-id"],
-        index: 1,
-        action: "longPress",
+      tap.executeAndroidTap("longPress", 1, 1, 500, old, {
+        options: {
+          elementId: old["resource-id"],
+          index: 1,
+          action: "longPress",
+        },
       }),
     ).rejects.toThrow("selector now resolves to a different element");
     expect(driver.actionHistory).toEqual([]);
@@ -597,12 +613,14 @@ describe("TalkBack resolved result and fallback coordinates", () => {
       });
       let reported: Element | undefined;
       let reportedMatches: number | undefined;
-      await tap.executeAndroidTap("tap", 150, 350, 500, selected, undefined, {
-        action: "tap",
-        text: "Apps",
-        onResolvedElement: (current, selection) => {
-          reported = current;
-          reportedMatches = selection?.totalMatches;
+      await tap.executeAndroidTap("tap", 150, 350, 500, selected, {
+        options: {
+          action: "tap",
+          text: "Apps",
+          onResolvedElement: (current, selection) => {
+            reported = current;
+            reportedMatches = selection?.totalMatches;
+          },
         },
       });
       expect(reported?.bounds).toEqual(moved.bounds);

@@ -2,7 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -11,6 +12,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class HierarchyDebouncerErrorEmitTest {
 
   @Test
@@ -18,7 +20,10 @@ class HierarchyDebouncerErrorEmitTest {
     val debouncer =
       HierarchyDebouncer(
         scope = backgroundScope,
-        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null },
+          ),
       )
 
     assertNull(debouncer.extractImmediately(skipFlowEmit = true))
@@ -34,8 +39,13 @@ class HierarchyDebouncerErrorEmitTest {
   fun `extraction failure emits an Error on the flow`() = runTest {
     val debouncer =
       HierarchyDebouncer(
-        scope = CoroutineScope(Dispatchers.Unconfined),
-        extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null as ViewHierarchy? },
+        scope = CoroutineScope(UnconfinedTestDispatcher()),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions ->
+              null as ViewHierarchy?
+            },
+          ),
       )
 
     debouncer.extractImmediately()

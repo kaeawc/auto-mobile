@@ -1,10 +1,5 @@
-import {
-  parseSync,
-  Visitor,
-  type Expression,
-  type ObjectExpression,
-  type Property,
-} from "oxc-parser";
+import { type Expression, type ObjectExpression, type ObjectProperty } from "oxc-parser";
+import { parseGuardSource, guardTextMayMatch, GuardVisitor as Visitor } from "./astGuard";
 
 export interface ReleaseReasonSerialisation {
   file: string;
@@ -15,18 +10,18 @@ export interface ReleaseReasonSerialisation {
 }
 
 export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
-  "src/server/proxyServer.ts#noActiveDeviceSessionPayload",
+  "src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload",
   "src/server/proxyServer.ts#brokerSessionEndedPayload",
-  "src/server/planExecutionOrchestrator.ts#planBaseEndFields",
-  "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
-  "src/server/deviceSessionResult.ts#recoveryIdentityLossDetails",
+  "src/server/planExecutionRecords.ts#planBaseEndFields",
+  "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
+  "src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails",
   "src/daemon/types.ts#releasedSessionNotFoundFields",
   "src/daemon/types.ts#sanitizeBoundSessionLoss",
   "src/daemon/socketServer/errorFrames.ts#sessionAdmissionRefusalFields",
   "src/daemon/socketServer/notificationFanOut.ts#broadcastSessionReleased",
-  "src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession",
+  "src/daemon/socketServerParts/McpBindings.ts#McpBindings.admitReleasedBoundSession",
   "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
-  "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
+  "src/daemon/daemonRequestHandlersParts/registration.ts#terminalSessionRegistrationRefusal",
 ];
 export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, string]> = [
   [
@@ -34,23 +29,20 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Passes the bound-session error reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
   [
-    "src/server/deviceSessionResult.ts#recoveryIdentityLoss",
+    "src/daemon/deviceSessionResult.ts#recoveryIdentityLoss",
     "Parses a typed upstream recovery-identity error into in-memory evidence consumed by the guarded loss builders.",
   ],
   [
-    "src/server/deviceSessionResult.ts#recoveryIdentityLossPayload",
+    "src/daemon/deviceSessionResult.ts#recoveryIdentityLossPayload",
     "Passes recovery loss evidence into sessionOwnershipLostPayload and recoveryIdentityLossDetails, which build the wire fields.",
   ],
-  [
-    "src/daemon/socketServer.ts#UnixSocketServer.rejectOnHandshakeMismatch",
-    "Serializes a client version/build handshake mismatch reason, not a session release reason.",
-  ],
+
   [
     "src/server/pipeline/ingress/shapeResult.ts#shapeCallFailure",
     "Passes the release reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
   [
-    "src/server/deviceSessionResult.ts#sessionReleasedDuringCallPayload",
+    "src/daemon/deviceSessionResult.ts#sessionReleasedDuringCallPayload",
     "Passes the typed call-release reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
   [
@@ -58,7 +50,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Parses the nested incoming release snapshot; its idle flag belongs to the containing refusal.",
   ],
   [
-    "src/daemon/daemonRequestHandlers.ts#persistedTerminalRelease",
+    "src/daemon/daemonRequestHandlersParts/registration.ts#persistedTerminalRelease",
     "Returns an in-memory persisted-release lookup for registration admission, not a wire answer.",
   ],
   [
@@ -66,7 +58,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Returns an in-memory heartbeat not-found decision used to update proxy binding state.",
   ],
   [
-    "src/daemon/daemonMcpProxy.ts#DaemonMcpProxy.classifyRecoveryAttemptError",
+    "src/daemon/mcpProxy/ProxyLiveness.ts#ProxyLiveness.classifyRecoveryAttemptError",
     "Classifies a typed upstream refusal for the in-memory liveness recovery state machine.",
   ],
   [
@@ -82,8 +74,32 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Redacts the owner token from a typed upstream error while preserving its existing releaseReason and idle fields for the CLI serializer.",
   ],
   [
-    "src/daemon/sessionManager.ts",
+    "src/daemon/sessionManager/creationGuard.ts",
     "In-memory session state and persistence rows; wire builders serialize its release snapshots.",
+  ],
+  [
+    "src/daemon/sessionManager/admission.ts",
+    "In-memory admission refusals and release snapshots moved from SessionManager.",
+  ],
+  [
+    "src/daemon/sessionManager/releaseWrite.ts",
+    "Persists release snapshots moved from SessionManager; wire builders serialize them.",
+  ],
+  [
+    "src/daemon/sessionManager/releaseCommit.ts",
+    "Builds in-memory release snapshots moved from SessionManager.",
+  ],
+  [
+    "src/daemon/sessionManager/recoveryPublication.ts",
+    "Recovery outcomes and in-memory release snapshots moved from SessionManager.",
+  ],
+  [
+    "src/daemon/sessionManager/forcedStuckRelease.ts",
+    "In-memory release snapshots moved from SessionManager; wire builders serialize them.",
+  ],
+  [
+    "src/daemon/sessionManager/recoveredTerminalReleaseIntents.ts",
+    "Recovered in-memory release state moved from SessionManager; wire builders serialize its snapshots.",
   ],
   [
     "src/daemon/planLabelRegistry.ts#PlanLabelRegistry.takeDerivedLabelSessions",
@@ -103,7 +119,7 @@ function unwrap(expression: Expression): Expression {
   }
 }
 
-function keyName(property: Property): string | undefined {
+function keyName(property: Pick<ObjectProperty, "key" | "computed">): string | undefined {
   if (!property.computed && property.key.type === "Identifier") {
     return property.key.name;
   }
@@ -169,9 +185,14 @@ export function scanReleaseReasonSerialisations(
   source: string,
   options: { hostsWireBuilder: boolean } = { hostsWireBuilder: false },
 ): ReleaseReasonSerialisation[] {
-  const { program, errors } = parseSync(file, source);
-  if (errors.length > 0) {
-    throw new Error(`${file}: ${errors[0].message}`);
+  // Serializations name a reason property; the remaining finding is an idleReleaseField call.
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(source, /reason|idleReleaseField/i),
+  );
+  if (!program) {
+    return [];
   }
   const imports = new Set<string>();
   const classes: { start: number; end: number; name: string }[] = [];
@@ -301,7 +322,7 @@ export function scanReleaseReasonSerialisations(
           ? [element]
           : branchObjects.flatMap((branch) =>
               branch.properties.filter(
-                (property): property is Property => property.type === "Property",
+                (property): property is ObjectProperty => property.type === "Property",
               ),
             );
       for (const property of properties) {

@@ -197,23 +197,26 @@
             case "CANCEL":
                 result = .cancel
             case "ERROR":
-                let code: Int
-                switch payload["errorCode"] {
-                case nil:
-                    code = -1
-                case let value as NSNumber
-                    where Self.isInteger(value) && value.doubleValue >= Double(Int32.min)
-                    && value.doubleValue <= Double(Int32.max):
-                    code = value.intValue
-                default:
-                    return .invalidPayload("invalid_error_code")
-                }
+                guard let code = Self.overrideErrorCode(payload) else { return .invalidPayload("invalid_error_code") }
                 result = .error(code: code, message: payload["errorMessage"] as? String ?? "")
             default:
                 return .invalidPayload("unknown_result")
             }
             override(result, ttlMs)
             return .handled
+        }
+
+        private static func overrideErrorCode(_ payload: [String: Any]) -> Int? {
+            switch payload["errorCode"] {
+            case nil:
+                return -1
+            case let value as NSNumber
+                where Self.isInteger(value) && value.doubleValue >= Double(Int32.min)
+                && value.doubleValue <= Double(Int32.max):
+                return value.intValue
+            default:
+                return nil
+            }
         }
 
         /// JSON booleans and fractions decode as `NSNumber` too; only whole numbers are accepted.

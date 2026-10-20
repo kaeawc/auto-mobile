@@ -801,11 +801,11 @@ describe("Idle - Unit Tests", function () {
         timer.setCurrentTime(493);
         const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-          stdout,
-          stderr: "",
-        });
-        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND, { stdout, stderr: "" });
+        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult(stdout, ""));
+        adb.setCommandResponse(
+          WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+          createExecResult(stdout, ""),
+        );
         const executeCommand = adb.executeCommand.bind(adb);
         adb.executeCommand = async (...args) => {
           const result = await executeCommand(...args);

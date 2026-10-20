@@ -87,9 +87,25 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     fakeWindow.configureCachedActiveWindow(null);
 
     const iosModule = await import("../../../src/features/observe/ios");
-    getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosClient,
+    const client = iosModule.IOSCtrlProxyClient.createForTesting(
+      IOS_DEVICE,
+      8766,
+      () => {
+        throw new Error("Unexpected live iOS socket");
+      },
+      fakeTimer,
     );
+    client.requestTapCoordinates = (...args) => fakeIosClient.requestTapCoordinates(...args);
+    client.requestDoubleTapCoordinates = (...args) =>
+      fakeIosClient.requestDoubleTapCoordinates(...args);
+    client.requestVoiceOverActivate = (...args) => fakeIosClient.requestVoiceOverActivate(...args);
+    client.requestVoiceOverState = (...args) => fakeIosClient.requestVoiceOverState(...args);
+    client.requestAction = (...args) => fakeIosClient.requestAction(...args);
+    client.requestHierarchySync = (...args) => fakeIosClient.requestHierarchySync(...args);
+    client.requestHierarchySyncForTapRevalidation = (...args) =>
+      fakeIosClient.requestHierarchySyncForTapRevalidation(...args);
+    client.invalidateCache = (...args) => fakeIosClient.invalidateCache(...args);
+    getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
 
     displayLookup = mock(() => undefined);
     tapAny = new TapAnyElement(IOS_DEVICE, new FakeAdbClient(), {
@@ -241,7 +257,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "activate",
@@ -273,7 +289,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "activate",
@@ -290,7 +306,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration: 1500 });
 
     expect(result.success).toBe(true);
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "long_press",
@@ -313,7 +329,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("no such label");
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "activate",

@@ -13,10 +13,10 @@ import {
 } from "../../../src/daemon/toolCallActivity";
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { BootedDevice } from "../../../src/models";
-import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../../src/daemon/deviceSessionResult";
 import { executionTracker } from "../../../src/daemon/executionTracker";
 import { createSetActiveDeviceHandler } from "../../../src/server/setActiveDevice";
-import { shapeToolCallError } from "../../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../../src/daemon/shapeToolCallError";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";

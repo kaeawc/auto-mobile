@@ -1,3 +1,9 @@
+import type {
+  ObservedActionResult,
+  ObservedChangeOptions,
+  ObservedEnvelope,
+} from "../../../src/features/action/observedInteractionTypes";
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, it, spyOn } from "bun:test";
@@ -274,10 +280,12 @@ async function pinch(scenario: Scenario): Promise<Outcome> {
     });
     return {
       ...result,
-      gestures: dispatch.mock.calls.map(([x, y]: Parameters<typeof client.requestPinch>) => ({
-        x,
-        y,
-      })),
+      gestures: dispatch.mock.calls.map(
+        ([{ centerX: x, centerY: y }]: Parameters<typeof client.requestPinch>) => ({
+          x,
+          y,
+        }),
+      ),
     };
   } finally {
     dispatch.mockRestore();
@@ -333,15 +341,25 @@ async function swipe(scenario: Scenario, lookFor: boolean, reveal = false): Prom
   observe.setObserveResult(() => frame);
   const runner = new FakeTalkBackSwipeExecutor();
   class BoundarySwipe extends SwipeOn {
-    override async observedInteraction<T>(
-      run: (current: ObserveResult) => Promise<T>,
-    ): Promise<T & { observation: ObserveResult }> {
-      const result = await run(frame);
-      clock.advanceTime(200);
-      if (reveal) {
-        frame = observation(capture);
-      }
-      return { ...result, observation: frame };
+    override observedInteraction<R extends ObservedActionResult>(
+      run: (current: ObserveResult) => Promise<R | ObservedActionResult>,
+      options: ObservedChangeOptions,
+    ): Promise<R & ObservedEnvelope> {
+      const initial = frame;
+      return runBlockWithEnvelope(
+        initial,
+        {
+          get observation() {
+            return frame;
+          },
+        },
+        () => {
+          clock.advanceTime(200);
+          if (reveal) {
+            frame = observation(capture);
+          }
+        },
+      )<R>(run, options);
     }
   }
   const action = new BoundarySwipe(ios, null, {
@@ -534,6 +552,9 @@ it("property: scoped resolution never selects a node outside its structural scop
         return;
       }
       expect(result.chosen).not.toBeNull();
+      if (result.chosen === null) {
+        throw new Error("Expected a chosen candidate");
+      }
       expect(result.candidates).toContain(result.chosen);
       expect(result.scope).toBeDefined();
       for (const candidate of result.candidates) {

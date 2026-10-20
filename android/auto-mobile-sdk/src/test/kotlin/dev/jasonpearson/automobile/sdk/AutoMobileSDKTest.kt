@@ -109,7 +109,7 @@ class AutoMobileSDKTest {
   @Test
   fun `notifyNavigationEvent should handle listener exceptions gracefully`() {
     var successfulCallCount = 0
-    val throwingListener = NavigationListener { throw RuntimeException("Test exception") }
+    val throwingListener = NavigationListener { throw TestFailureException("Test exception") }
     val workingListener = NavigationListener { successfulCallCount++ }
 
     AutoMobileSDK.addNavigationListener(throwingListener)

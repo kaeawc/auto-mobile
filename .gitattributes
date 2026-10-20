@@ -3,6 +3,7 @@ test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
 test/fixtures/ci-time-to-green/*.json text eol=lf
+test/fixtures/prototype-capabilities/*.json text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
@@ -135,6 +136,7 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 # Shared prototype specs: preserve byte limits and path parity on Windows.
 test/fixtures/prototype-spec/**/*.json text eol=lf
 test/fixtures/prototype-saved-layout/**/*.json text eol=lf
+test/fixtures/prototype-embedded-routing/*.json text eol=lf
 test/bats/fixtures/compose-compiler-report/**/*.txt text eol=lf
 test/bats/fixtures/compose-compiler-report/**/*.json text eol=lf
 schemas/prototype-spec-contract.json text eol=lf

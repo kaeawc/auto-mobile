@@ -138,12 +138,14 @@ class SdkEventBatchProcessorTest {
     processor.start()
     assertTrue(
       processor.enqueueNavigationEvent(
-        destination = "legacy",
-        source = "legacy",
-        arguments = emptyMap(),
-        metadata = emptyMap(),
-        applicationId = null,
-        timestamp = 0L,
+        NavigationEventInput(
+          destination = "legacy",
+          source = "legacy",
+          arguments = emptyMap(),
+          metadata = emptyMap(),
+          applicationId = null,
+          timestamp = 0L,
+        ),
       ),
     )
     legacyBroadcastStarted.await()

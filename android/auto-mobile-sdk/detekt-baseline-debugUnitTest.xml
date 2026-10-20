@@ -2,35 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>EmptyFunctionBlock:AutoMobileWebSocketListenerTest.kt:AutoMobileWebSocketListenerTest.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:EventBatchReplayTest.kt:EventBatchReplayTest.FakePersistence${}</ID>
-    <ID>EmptyFunctionBlock:EventPersistenceTest.kt:EventPersistenceTest.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:EventPersistenceTest.kt:EventPersistenceTest.ReplayPersistence${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventAcknowledgedDeliveryTest.kt:SdkEventAcknowledgedDeliveryTest.FakeStore${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBroadcasterTest.kt:SdkEventBroadcasterTest.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBroadcasterTest.kt:SdkEventBroadcasterTest.RecordingPersistence${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBufferTest.kt:SdkEventBufferTest.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBufferTest.kt:SdkEventBufferTest.CountingPersistence${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBufferTest.kt:SdkEventBufferTest.ThrowingPersistence${}</ID>
-    <ID>InjectDispatcher:CircuitNavigationEventListenerTest.kt:CircuitNavigationEventListenerTest.TestComposition$Unconfined</ID>
-    <ID>LargeClass:AutoMobileNetworkInterceptorTest.kt:AutoMobileNetworkInterceptorTest</ID>
-    <ID>LargeClass:EventPersistenceTest.kt:EventPersistenceTest</ID>
-    <ID>LargeClass:SdkEventAcknowledgedDeliveryTest.kt:SdkEventAcknowledgedDeliveryTest</ID>
-    <ID>LargeClass:SdkEventBufferTest.kt:SdkEventBufferTest</ID>
-    <ID>LongParameterList:AutoMobileNetworkInterceptorTest.kt:AutoMobileNetworkInterceptorTest$private fun fakeChain: Interceptor.Chain</ID>
-    <ID>LongParameterList:AutoMobileNetworkInterceptorTest.kt:AutoMobileNetworkInterceptorTest.FakeInterceptorChain</ID>
-    <ID>LongParameterList:NetworkMockRuleStoreTest.kt:NetworkMockRuleStoreTest$private fun rule</ID>
-    <ID>TooGenericExceptionThrown:AutoMobileCrashesTest.kt:AutoMobileCrashesTest$throw RuntimeException("boom")</ID>
-    <ID>TooGenericExceptionThrown:AutoMobileSDKTest.kt:AutoMobileSDKTest$throw RuntimeException("Test exception")</ID>
-    <ID>TooGenericExceptionThrown:DropCounterTest.kt:DropCounterTest$throw RuntimeException("boom")</ID>
-    <ID>TooGenericExceptionThrown:IntegrationTest.kt:IntegrationTest$throw RuntimeException("Test exception")</ID>
-    <ID>TooGenericExceptionThrown:NavigationListenerTest.kt:NavigationListenerTest$throw RuntimeException("Test exception")</ID>
-    <ID>TooGenericExceptionThrown:SdkEventBufferTest.kt:SdkEventBufferTest$throw RuntimeException("delivery failed")</ID>
-    <ID>TooGenericExceptionThrown:SdkEventBufferTest.kt:SdkEventBufferTest$throw RuntimeException("fail")</ID>
-    <ID>TooGenericExceptionThrown:SdkEventBufferTest.kt:SdkEventBufferTest$throw RuntimeException("processor failed")</ID>
-    <ID>TooGenericExceptionThrown:SdkEventBufferTest.kt:SdkEventBufferTest$throw RuntimeException("test error")</ID>
-    <ID>TooGenericExceptionThrown:SdkEventBufferTest.kt:SdkEventBufferTest.ThrowingPersistence$throw RuntimeException("boom")</ID>
-    <ID>TooManyFunctions:DatabaseInspectorProviderTest.kt:DatabaseInspectorProviderTest</ID>
-    <ID>TooManyFunctions:KeystoreStateHandlerTest.kt:KeystoreStateHandlerTest</ID>
   </CurrentIssues>
 </SmellBaseline>

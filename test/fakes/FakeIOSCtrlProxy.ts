@@ -1,6 +1,7 @@
+import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type { IosActivateAccessibilityLinkRequest } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
-import { IOSCtrlProxy } from "../../src/features/observe/ios";
+import { IosCtrlProxy } from "../../src/features/observe/ios";
 import { convertIosHierarchy } from "../helpers/iosHierarchyConverter";
 import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
@@ -55,11 +56,11 @@ import {
 } from "../../src/features/observe/hierarchyReadArgs";
 
 /**
- * Fake implementation of IOSCtrlProxy for testing
+ * Fake implementation of IosCtrlProxy for testing
  * Allows configuring responses for hierarchy, screenshots, and gesture operations
  * Tracks method calls for test assertions
  */
-export class FakeIOSCtrlProxy implements IOSCtrlProxy {
+export class FakeIOSCtrlProxy implements IosCtrlProxy {
   supportedCommands: string[] | null = null;
 
   async getSupportedCommands(): Promise<string[] | null> {
@@ -638,7 +639,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     }
   }
 
-  // MARK: - IOSCtrlProxy Implementation
+  // MARK: - IosCtrlProxy Implementation
 
   async connectWithoutSetup(signal?: AbortSignal): Promise<boolean> {
     this.connectWithoutSetupHistory.push({ signalProvided: signal !== undefined });
@@ -743,28 +744,28 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]> {
+  ): ReturnType<IosCtrlProxy["requestHierarchySync"]> {
     return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, {
       forceCapture: true,
     });
   }
 
   requestHierarchySyncWithoutObservationStreamPush(
-    ...args: Parameters<IOSCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]>
-  ): ReturnType<IOSCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]> {
+    ...args: Parameters<IosCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]>
+  ): ReturnType<IosCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]> {
     return this.requestHierarchySync(...args);
   }
 
   requestAddHighlight(
-    ...args: Parameters<IOSCtrlProxy["requestAddHighlight"]>
-  ): ReturnType<IOSCtrlProxy["requestAddHighlight"]> {
+    ...args: Parameters<IosCtrlProxy["requestAddHighlight"]>
+  ): ReturnType<IosCtrlProxy["requestAddHighlight"]> {
     void args;
     return Promise.resolve({ success: true });
   }
 
   setNetworkErrorSimulation(
-    ...args: Parameters<IOSCtrlProxy["setNetworkErrorSimulation"]>
-  ): ReturnType<IOSCtrlProxy["setNetworkErrorSimulation"]> {
+    ...args: Parameters<IosCtrlProxy["setNetworkErrorSimulation"]>
+  ): ReturnType<IosCtrlProxy["setNetworkErrorSimulation"]> {
     void args;
     return Promise.resolve({ success: true, totalTimeMs: 0 });
   }
@@ -872,17 +873,20 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    request: PinchRequest,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      signal,
+    } = request;
+
     signal?.throwIfAborted();
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
@@ -950,8 +954,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   requestAppendText(
-    ...args: Parameters<IOSCtrlProxy["requestAppendText"]>
-  ): ReturnType<IOSCtrlProxy["requestAppendText"]> {
+    ...args: Parameters<IosCtrlProxy["requestAppendText"]>
+  ): ReturnType<IosCtrlProxy["requestAppendText"]> {
     const [text, timeoutMs, perf, frameContext] = args;
     return this.requestSetText(text, { timeoutMs, perf, frameContext });
   }
@@ -1195,8 +1199,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   requestResetPermissions(
-    ...args: Parameters<IOSCtrlProxy["requestResetPermissions"]>
-  ): ReturnType<IOSCtrlProxy["requestResetPermissions"]> {
+    ...args: Parameters<IosCtrlProxy["requestResetPermissions"]>
+  ): ReturnType<IosCtrlProxy["requestResetPermissions"]> {
     void args;
     return Promise.resolve({ success: true, totalTimeMs: 0 });
   }
@@ -1234,8 +1238,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   requestScreenshotWithoutObservationStreamPush(
-    ...args: Parameters<IOSCtrlProxy["requestScreenshotWithoutObservationStreamPush"]>
-  ): ReturnType<IOSCtrlProxy["requestScreenshotWithoutObservationStreamPush"]> {
+    ...args: Parameters<IosCtrlProxy["requestScreenshotWithoutObservationStreamPush"]>
+  ): ReturnType<IosCtrlProxy["requestScreenshotWithoutObservationStreamPush"]> {
     return this.requestScreenshot(...args);
   }
 

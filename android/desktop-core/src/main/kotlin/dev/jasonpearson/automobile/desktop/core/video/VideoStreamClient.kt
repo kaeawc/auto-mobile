@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
@@ -197,40 +196,53 @@ interface VideoStreamSessionRunner {
  * both. Steady-state the pipeline allocates no JVM-heap frame buffers: the decoder reuses its BGRA
  * buffer and the only per-frame cost is the native raster copy inside [toImageBitmap].
  */
-class VideoStreamClient(
-  private val socketPathValue: String = AutoMobileSocketPaths.socketPath(VIDEO_STREAM_SOCKET_FILE),
-  private val json: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-    // `action` is a default on the request class but required on the wire; without this the
-    // daemon receives no action and rejects the subscribe.
-    encodeDefaults = true
-  },
-  private val decoderFactory: () -> H264Decoder = { H264Decoder() },
-  /**
-   * Supplies the daemon session UUID that authenticates the `subscribe` request against the
-   * stream-socket session guard (issue #4751). Resolved at connect time so a session established
-   * after construction is still used. Null (the default) omits the `sessionUuid` field via
-   * [explicitNulls] = false, so the daemon rejects the subscribe unless it was started with
-   * `AUTOMOBILE_DAEMON_STREAM_AUTH=0`. The desktop host supplies a provider from
-   * `DesktopDaemonSession` for Unix-daemon connections.
-   */
-  private val sessionUuidProvider: () -> String? = { null },
-  /** Resolution/bitrate preset hint sent on subscribe; null keeps the capture's default. */
-  private val quality: VideoStreamQuality? = null,
-  /** Capture frame-rate hint sent on subscribe; null keeps the relay's pinned default. */
-  private val fps: Int? = null,
-  /** Encoder bitrate hint (kbps) sent on subscribe; null keeps the preset's default. */
-  private val bitrateKbps: Int? = null,
-  /**
-   * Monotonic clock stamping [LiveVideoFrame.receivedAtMs]. Must share a time base with the
-   * consumer-side freshness checks (`MONOTONIC_NOW_MS`, issue #3348), hence the same
-   * `System.nanoTime()` source by default; injectable for deterministic tests.
-   */
-  private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
-  private val sessionRunner: VideoStreamSessionRunner? = null,
-  readerCoroutineDispatcher: CoroutineDispatcher? = null,
-) : VideoStreamSource {
+class VideoStreamClient(options: Options = Options()) : VideoStreamSource {
+  data class Options(
+    val socketPathValue: String = AutoMobileSocketPaths.socketPath(VIDEO_STREAM_SOCKET_FILE),
+    val json: Json = Json {
+      ignoreUnknownKeys = true
+      explicitNulls = false
+      // `action` is a default on the request class but required on the wire; without this the
+      // daemon receives no action and rejects the subscribe.
+      encodeDefaults = true
+    },
+    val decoderFactory: () -> H264Decoder = { H264Decoder() },
+    /**
+     * Supplies the daemon session UUID that authenticates the `subscribe` request against the
+     * stream-socket session guard (issue #4751). Resolved at connect time so a session established
+     * after construction is still used. Null (the default) omits the `sessionUuid` field via
+     * [explicitNulls] = false, so the daemon rejects the subscribe unless it was started with
+     * `AUTOMOBILE_DAEMON_STREAM_AUTH=0`. The desktop host supplies a provider from
+     * `DesktopDaemonSession` for Unix-daemon connections.
+     */
+    val sessionUuidProvider: () -> String? = { null },
+    /** Resolution/bitrate preset hint sent on subscribe; null keeps the capture's default. */
+    val quality: VideoStreamQuality? = null,
+    /** Capture frame-rate hint sent on subscribe; null keeps the relay's pinned default. */
+    val fps: Int? = null,
+    /** Encoder bitrate hint (kbps) sent on subscribe; null keeps the preset's default. */
+    val bitrateKbps: Int? = null,
+    /**
+     * Monotonic clock stamping [LiveVideoFrame.receivedAtMs]. Must share a time base with the
+     * consumer-side freshness checks (`MONOTONIC_NOW_MS`, issue #3348), hence the same
+     * `System.nanoTime()` source by default; injectable for deterministic tests.
+     */
+    val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
+    val sessionRunner: VideoStreamSessionRunner? = null,
+    val readerCoroutineDispatcher: CoroutineDispatcher? = null,
+  )
+
+  private val socketPathValue = options.socketPathValue
+  private val json = options.json
+  private val decoderFactory = options.decoderFactory
+  private val sessionUuidProvider = options.sessionUuidProvider
+  private val quality = options.quality
+  private val fps = options.fps
+  private val bitrateKbps = options.bitrateKbps
+  private val nowMs = options.nowMs
+  private val sessionRunner = options.sessionRunner
+  private val readerCoroutineDispatcher = options.readerCoroutineDispatcher
+
   internal fun subscribeRequest(deviceId: String?) =
     VideoStreamRequest(
       id = UUID.randomUUID().toString(),
@@ -317,7 +329,7 @@ class VideoStreamClient(
         // apart in a thread dump.
         if (sessionRunner == null) {
           Thread.currentThread().name = "video-stream-reader-${deviceId ?: "default"}"
-          runSession(deviceId, sessionId)
+          Session(deviceId, sessionId).run()
         } else {
           sessionRunner.run(deviceId) { state -> publish(sessionId, state) }
         }
@@ -350,98 +362,107 @@ class VideoStreamClient(
     }
   }
 
-  private fun runSession(deviceId: String?, sessionId: Long) {
-    // Only the current session may touch shared state; a reader superseded by a reconnect (or a
-    // disconnect) publishes nothing, so its late teardown can't clobber the live session.
-    fun isCurrent() = sessionId == activeSessionId
-    fun publish(state: VideoStreamState) = publish(sessionId, state)
-    // Reset per-session so a stale value from a prior connect (a different daemon, or a refused
-    // subscribe) never survives into this attempt (issue #7549).
-    if (isCurrent()) {
-      _heartbeatMs.value = null
-      _lastActivityMs.value = 0L
-    }
+  private inner class Session(private val deviceId: String?, private val sessionId: Long) {
+    private fun isCurrent() = sessionId == activeSessionId
 
-    val decoder =
-      try {
-        decoderFactory()
-      } catch (e: Exception) {
-        LOG.warn("Could not create the H.264 decoder: ${e.message}", e)
-        publish(VideoStreamState.Unavailable(e.message ?: "No H.264 decoder available"))
+    fun run() {
+      // A superseded reader must never overwrite its replacement's state.
+      if (isCurrent()) {
+        _heartbeatMs.value = null
+        _lastActivityMs.value = 0L
+      }
+      val decoder = createDecoder() ?: return
+      if (!isCurrent()) {
+        decoder.close()
         return
       }
-
-    if (!isCurrent()) {
-      decoder.close()
-      return
+      try {
+        SocketChannel.open(UnixDomainSocketAddress.of(socketPathValue)).use { socket ->
+          runConnected(socket, decoder)
+        }
+      } catch (error: java.io.IOException) {
+        publishFailure(error)
+      } catch (error: H264DecodeException) {
+        publishFailure(error)
+      } catch (error: VideoStreamFormatException) {
+        publishFailure(error)
+      } catch (error: IllegalArgumentException) {
+        publishFailure(error)
+      } catch (error: IllegalStateException) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        publishFailure(error)
+      } finally {
+        decoder.close()
+        if (isCurrent()) channel = null
+      }
     }
 
-    try {
-      SocketChannel.open(UnixDomainSocketAddress.of(socketPathValue)).use { socket ->
-        synchronized(sessionLock) {
-          if (!isCurrent()) return
-          channel = socket
-        }
-        val input = Channels.newInputStream(socket)
-        val writer =
-          BufferedWriter(
-            OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8),
-          )
-
-        synchronized(sessionLock) {
-          if (!isCurrent()) return
-          writer.write(
-            json.encodeToString(
-              serializer<VideoStreamRequest>(),
-              subscribeRequest(deviceId),
-            ),
-          )
-          writer.newLine()
-          writer.flush()
-        }
-
-        val ackLine = readAckLine(input)
-        val ack = json.decodeFromString(serializer<VideoStreamResponse>(), ackLine)
-        if (!ack.success) {
-          publish(
-            ack.permission.toPermissionState()
-              ?: VideoStreamState.Unavailable(
-                ack.error ?: "Live mirroring was refused",
-                subscribeFailureCause(ack.error),
-              ),
-          )
-          return
-        }
-        // Null on a daemon that predates this field; callers must treat that as "no relay-attested
-        // liveness available", not "definitely heartbeat-less" (issue #7549).
-        synchronized(sessionLock) {
-          if (isCurrent()) {
-            _heartbeatMs.value = ack.heartbeatMs
-            // Registration-only desktop sessions can subscribe as viewers to unowned devices
-            // where input still works. Only an explicit downgrade revokes desktop control.
-            _subscriptionKind.value = VideoStreamSubscriptionKind.fromWire(ack.subscriptionKind)
-          }
-        }
-
-        val endReason = pumpFrames(input, decoder, sessionId)
+    private fun createDecoder(): H264Decoder? =
+      try {
+        decoderFactory()
+      } catch (error: H264DecodeException) {
+        LOG.warn("Could not create the H.264 decoder: ${error.message}", error)
         publish(
-          endReason?.let { VideoStreamState.Ended(it) }
-            ?: VideoStreamState.Unavailable("Live mirroring stopped"),
+          sessionId,
+          VideoStreamState.Unavailable(error.message ?: "No H.264 decoder available"),
         )
+        null
       }
-    } catch (e: Exception) {
-      // Cancellation (from disconnect / a watchdog reconnect) supersedes this session, so publish()
-      // drops the terminal state; a genuine read error on the still-current session surfaces it.
+
+    private fun runConnected(socket: SocketChannel, decoder: H264Decoder) {
+      synchronized(sessionLock) {
+        if (!isCurrent()) return
+        channel = socket
+      }
+      val input = Channels.newInputStream(socket)
+      val ack = subscribe(socket, input) ?: return
+      if (!ack.success) {
+        publish(
+          sessionId,
+          ack.permission.toPermissionState()
+            ?: VideoStreamState.Unavailable(
+              ack.error ?: "Live mirroring was refused",
+              subscribeFailureCause(ack.error),
+            ),
+        )
+        return
+      }
+      synchronized(sessionLock) {
+        if (isCurrent()) {
+          _heartbeatMs.value = ack.heartbeatMs
+          // Only an explicit downgrade revokes desktop control.
+          _subscriptionKind.value = VideoStreamSubscriptionKind.fromWire(ack.subscriptionKind)
+        }
+      }
+      val endReason = FramePump(decoder, sessionId).pump(input)
+      publish(
+        sessionId,
+        endReason?.let { VideoStreamState.Ended(it) }
+          ?: VideoStreamState.Unavailable("Live mirroring stopped"),
+      )
+    }
+
+    private fun subscribe(socket: SocketChannel, input: java.io.InputStream): VideoStreamResponse? {
+      val writer =
+        BufferedWriter(OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8))
+      synchronized(sessionLock) {
+        if (!isCurrent()) return null
+        writer.write(
+          json.encodeToString(serializer<VideoStreamRequest>(), subscribeRequest(deviceId)),
+        )
+        writer.newLine()
+        writer.flush()
+      }
+      return json.decodeFromString(serializer<VideoStreamResponse>(), readAckLine(input))
+    }
+
+    private fun publishFailure(error: Exception) {
       if (isCurrent()) {
-        LOG.warn("Live mirroring stopped: ${e.message}", e)
-        publish(VideoStreamState.Unavailable(e.message ?: "Live mirroring stopped"))
+        LOG.warn("Live mirroring stopped: ${error.message}", error)
+        publish(sessionId, VideoStreamState.Unavailable(error.message ?: "Live mirroring stopped"))
       } else {
-        // A cancelled reader may fail while its socket closes; the replacement owns visible state.
-        LOG.debug("Superseded video stream reader stopped: ${e.message}")
+        LOG.debug("Superseded video stream reader stopped: ${error.message}")
       }
-    } finally {
-      decoder.close()
-      if (isCurrent()) channel = null
     }
   }
 
@@ -461,98 +482,83 @@ class VideoStreamClient(
     }
   }
 
-  private fun pumpFrames(
-    input: java.io.InputStream,
-    decoder: H264Decoder,
-    sessionId: Long,
-  ): VideoStreamEndReason? {
-    val parser = VideoStreamParser()
-    val buffer = ByteArray(64 * 1024)
-    // Latest attested rotation, updated by each config packet that carries it (issue #4786). A
-    // config packet precedes the IDR it configures, so a decoded frame is stamped with the rotation
-    // the current SPS/PPS attested. Stays null until the first attested config packet, so an
-    // unattested stream (screenrecord/iOS relay) leaves the control gate to fail closed.
-    var currentRotation: Int? = null
-    var endReason: VideoStreamEndReason? = null
+  private inner class FramePump(private val decoder: H264Decoder, private val sessionId: Long) {
+    // The most recent config attests rotation for subsequently decoded frames.
+    private var currentRotation: Int? = null
+    private var endReason: VideoStreamEndReason? = null
 
-    while (true) {
-      val read = input.read(buffer)
-      if (read <= 0) return null
-
-      parser.onBytes(
-        buffer,
-        read,
-        onHeader = { header ->
-          LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
-        },
-        onNotice = { notice ->
-          when (notice) {
-            VideoStreamNotice.Downgraded ->
-              synchronized(sessionLock) {
-                if (sessionId == activeSessionId) {
-                  _subscriptionKind.value = VideoStreamSubscriptionKind.Viewer
-                  _readOnly.value = true
-                }
-              }
-            is VideoStreamNotice.Ended -> endReason = notice.reason
-            is VideoStreamNotice.Unknown ->
-              LOG.warn("Ignoring unknown video subscription notice ${notice.code}")
-          }
-        },
-        onPacket = { packet ->
-          if (packet.heartbeat) {
-            // Relay-attested liveness with no frame of its own (issue #7549): count as progress for
-            // the Streaming-stall watchdog without touching the decoder or rotation state.
-            if (sessionId == activeSessionId) _lastActivityMs.value = nowMs()
-            return@onBytes
-          }
-          packet.droppedFrames?.let {
-            // Encoder-drop telemetry also proves the relay/source pipeline is alive, same as a
-            // heartbeat (issue #7549).
-            if (sessionId == activeSessionId) _lastActivityMs.value = nowMs()
-            _droppedFrames.tryEmit(it)
-            return@onBytes
-          }
-          if (packet.isConfig && packet.rotation != null) {
-            currentRotation = packet.rotation
-          }
-          decoder.decode(packet.payload) { frame ->
-            // A reader superseded by a reconnect must not publish frames or Streaming onto the new
-            // session's state; drop this frame once we are no longer the current session.
-            if (sessionId != activeSessionId) return@decode
-            val current = _state.value
-            if (
-              current !is VideoStreamState.Streaming ||
-                current.width != frame.width ||
-                current.height != frame.height
-            ) {
-              // The real size comes from the SPS, not the advertised header, and changes on
-              // device rotation.
-              publish(sessionId, VideoStreamState.Streaming(frame.width, frame.height))
-            }
-            // Present here, on the reader thread, while the decoder's reused buffer is valid:
-            // the immutable raster produced by toImageBitmap is the only per-frame copy, and
-            // consumers receive a ready-to-draw frame with no conversion (or allocation) of
-            // their own.
-            val sequence = frameSequence.incrementAndGet()
-            _frames.tryEmit(
-              LiveVideoFrame(
-                bitmap = frame.toImageBitmap(),
-                sequence = sequence,
-                receivedAtMs = nowMs(),
-                // The stream's config packets attest the display rotation; carrying it here
-                // lets DeviceControlSession re-prove orientation from the live frame alone
-                // (issue #4786).
-                rotation = currentRotation,
-              ),
-            )
-            _emittedFrameSequence.value = sequence
-          }
-        },
-      )
-      if (parser.hasEnded) {
-        return readTerminalReason(input, parser.trailingBytes) ?: endReason
+    fun pump(input: java.io.InputStream): VideoStreamEndReason? {
+      val parser = VideoStreamParser()
+      val buffer = ByteArray(64 * 1024)
+      while (true) {
+        val read = input.read(buffer)
+        if (read <= 0) return null
+        parser.onBytes(
+          buffer,
+          read,
+          onHeader = { header ->
+            LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
+          },
+          onNotice = ::onNotice,
+          onPacket = ::onPacket,
+        )
+        if (parser.hasEnded) return readTerminalReason(input, parser.trailingBytes) ?: endReason
       }
+    }
+
+    private fun onNotice(notice: VideoStreamNotice) {
+      when (notice) {
+        VideoStreamNotice.Downgraded ->
+          synchronized(sessionLock) {
+            if (sessionId == activeSessionId) {
+              _subscriptionKind.value = VideoStreamSubscriptionKind.Viewer
+              _readOnly.value = true
+            }
+          }
+        is VideoStreamNotice.Ended -> endReason = notice.reason
+        is VideoStreamNotice.Unknown ->
+          LOG.warn("Ignoring unknown video subscription notice ${notice.code}")
+      }
+    }
+
+    private fun onPacket(packet: VideoPacket) {
+      if (packet.heartbeat) {
+        recordActivity()
+        return
+      }
+      packet.droppedFrames?.let {
+        recordActivity()
+        _droppedFrames.tryEmit(it)
+        return
+      }
+      if (packet.isConfig && packet.rotation != null) currentRotation = packet.rotation
+      decoder.decode(packet.payload, ::emitFrame)
+    }
+
+    private fun recordActivity() {
+      if (sessionId == activeSessionId) _lastActivityMs.value = nowMs()
+    }
+
+    private fun emitFrame(frame: DecodedFrame) {
+      if (sessionId != activeSessionId) return
+      val current = _state.value
+      val dimensionsChanged =
+        current !is VideoStreamState.Streaming ||
+          current.width != frame.width ||
+          current.height != frame.height
+      if (dimensionsChanged)
+        publish(sessionId, VideoStreamState.Streaming(frame.width, frame.height))
+      val sequence = frameSequence.incrementAndGet()
+      // Convert while the decoder's reused buffer is still valid, on the reader thread.
+      _frames.tryEmit(
+        LiveVideoFrame(
+          bitmap = frame.toImageBitmap(),
+          sequence = sequence,
+          receivedAtMs = nowMs(),
+          rotation = currentRotation,
+        ),
+      )
+      _emittedFrameSequence.value = sequence
     }
   }
 
@@ -580,9 +586,12 @@ class VideoStreamClient(
       if (text.isBlank()) return null
       val terminal = json.decodeFromString(serializer<VideoStreamResponse>(), text)
       return VideoStreamEndReason.fromWire(terminal.reason)
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
       // The typed end notice is sufficient even when an old/closing relay omits a valid line.
       LOG.debug("Video terminal line unavailable; using the end notice: ${e.message}")
+      return null
+    } catch (e: IllegalArgumentException) {
+      LOG.debug("Video terminal line invalid; using the end notice: ${e.message}")
       return null
     }
   }
@@ -590,7 +599,7 @@ class VideoStreamClient(
   private fun closeChannel() {
     try {
       channel?.close()
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
       LOG.debug("Closing the video stream socket failed: ${e.message}")
     }
     channel = null
@@ -667,176 +676,3 @@ internal fun isStreamAuthFailure(reason: String): Boolean {
 internal fun subscribeFailureCause(error: String?): VideoStreamState.UnavailableCause =
   if (error != null && isStreamAuthFailure(error)) VideoStreamState.UnavailableCause.REFUSED
   else VideoStreamState.UnavailableCause.OTHER
-
-/** In-memory [VideoStreamSource] for previews and tests. */
-class FakeVideoStreamSource(
-  private val available: Boolean = true,
-  private val refuseWith: String? = null,
-  private var screenRecordingRequired: Boolean = false,
-  private val screenRecordingApprovalTarget: String = "AutoMobile",
-  private val nowMs: () -> Long = { 0L },
-  /**
-   * When true, [connect] stays in [VideoStreamState.Connecting] (never reaches Streaming) — for
-   * exercising the first-frame-deadline watchdog.
-   */
-  private val holdConnecting: Boolean = false,
-  private val connectThenRefuse: Boolean = false,
-  private val refusalScope: CoroutineScope? = null,
-) : VideoStreamSource {
-  private val fakeSequence = java.util.concurrent.atomic.AtomicLong(0L)
-
-  private val _frames =
-    MutableSharedFlow<LiveVideoFrame>(
-      replay = 1,
-      extraBufferCapacity = 2,
-      onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-  override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
-  private val _emittedFrameSequence = MutableStateFlow(0L)
-  override val emittedFrameSequence: StateFlow<Long> = _emittedFrameSequence.asStateFlow()
-  private val _droppedFrames = MutableSharedFlow<Long>(replay = 1, extraBufferCapacity = 1)
-  override val droppedFrames: SharedFlow<Long> = _droppedFrames.asSharedFlow()
-
-  private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
-  override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
-
-  private val _subscriptionKind = MutableStateFlow<VideoStreamSubscriptionKind?>(null)
-  override val subscriptionKind: StateFlow<VideoStreamSubscriptionKind?> =
-    _subscriptionKind.asStateFlow()
-  private val _readOnly = MutableStateFlow(false)
-  override val readOnly: StateFlow<Boolean> = _readOnly.asStateFlow()
-
-  private val _heartbeatMs = MutableStateFlow<Long?>(null)
-  override val heartbeatMs: StateFlow<Long?> = _heartbeatMs.asStateFlow()
-  private val _lastActivityMs = MutableStateFlow(0L)
-  override val lastActivityMs: StateFlow<Long> = _lastActivityMs.asStateFlow()
-
-  var connectedDeviceId: String? = null
-    private set
-
-  var connectCalls: Int = 0
-    private set
-
-  override fun isAvailable(): Boolean = available
-
-  override fun connect(deviceId: String?) {
-    _subscriptionKind.value = null
-    _readOnly.value = false
-    connectCalls++
-    connectedDeviceId = deviceId
-    if (connectThenRefuse && refuseWith != null) {
-      _state.value = VideoStreamState.Connecting
-      if (refusalScope != null) {
-        refusalScope.launch {
-          yield()
-          _state.value = VideoStreamState.Unavailable(refuseWith)
-        }
-      } else {
-        _state.value = VideoStreamState.Unavailable(refuseWith)
-      }
-      return
-    }
-    _state.value =
-      when {
-        !available -> VideoStreamState.Unavailable("Live mirroring is unavailable on this daemon")
-        screenRecordingRequired ->
-          VideoStreamState.PermissionRequired(
-            VideoStreamPermission.ScreenRecordingNeedsApproval,
-            screenRecordingApprovalTarget,
-          )
-        refuseWith != null -> VideoStreamState.Unavailable(refuseWith)
-        holdConnecting -> VideoStreamState.Connecting
-        else -> VideoStreamState.Streaming(1080, 2400)
-      }
-  }
-
-  override fun disconnect() {
-    connectedDeviceId = null
-    _state.value = VideoStreamState.Idle
-  }
-
-  override fun dispose() {
-    disconnect()
-  }
-
-  fun becomeDowngraded() {
-    _subscriptionKind.value = VideoStreamSubscriptionKind.Viewer
-    _readOnly.value = true
-  }
-
-  fun setSubscriptionKind(kind: VideoStreamSubscriptionKind?) {
-    _subscriptionKind.value = kind
-  }
-
-  fun endWith(reason: VideoStreamEndReason) {
-    _state.value = VideoStreamState.Ended(reason)
-  }
-
-  /** Simulates an unavailable relay after a stream has started. */
-  fun becomeUnavailable(reason: String = "Live mirroring is unavailable on this daemon") {
-    _state.value = VideoStreamState.Unavailable(reason)
-  }
-
-  /**
-   * Forces the Streaming state directly, independent of [connect] (which a `refuseWith` fake keeps
-   * routing to Unavailable) — used to stage a retained-frame-then-drop scenario.
-   */
-  fun becomeStreaming(width: Int = 1080, height: Int = 2400) {
-    _state.value = VideoStreamState.Streaming(width, height)
-  }
-
-  /** Simulates granting the macOS permission after the Settings flow. */
-  fun grantScreenRecording() {
-    screenRecordingRequired = false
-  }
-
-  /** Publishes a ready-to-draw frame to collectors, as the real client would. */
-  fun emitFrame(
-    width: Int = 1080,
-    height: Int = 2400,
-    rotation: Int? = null,
-  ) {
-    val sequence = fakeSequence.incrementAndGet()
-    _frames.tryEmit(
-      LiveVideoFrame(
-        bitmap = ImageBitmap(width, height),
-        sequence = sequence,
-        receivedAtMs = nowMs(),
-        rotation = rotation,
-      ),
-    )
-    _emittedFrameSequence.value = sequence
-  }
-
-  /** Records a decoded frame without allocating a native bitmap in virtual-time policy tests. */
-  fun recordFrameEmission() {
-    _emittedFrameSequence.value = fakeSequence.incrementAndGet()
-  }
-
-  /** Publishes source-side encoder-drop telemetry for quality-controller tests. */
-  fun emitDroppedFrames(droppedFrames: Long) {
-    _droppedFrames.tryEmit(droppedFrames)
-  }
-
-  /**
-   * Sets the advertised heartbeat cadence, as a real ack would report after connect (issue #7549).
-   * Null (the default) models a daemon that predates the field.
-   */
-  fun setHeartbeatMs(heartbeatMs: Long?) {
-    _heartbeatMs.value = heartbeatMs
-  }
-
-  /**
-   * Simulates a relay heartbeat: bumps [lastActivityMs] with no accompanying frame, so a test can
-   * drive the Streaming-stall watchdog's heartbeat-progress path for a source with no idle frames
-   * of its own (issue #7549).
-   */
-  fun emitHeartbeat() {
-    _lastActivityMs.value = nowMs()
-  }
-
-  /** Models the real reader's per-session activity reset during a reconnect. */
-  fun resetActivity() {
-    _lastActivityMs.value = 0L
-  }
-}

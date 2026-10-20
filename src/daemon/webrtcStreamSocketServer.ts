@@ -34,7 +34,7 @@ import type {
   reconcileWebRtcStreamsForDeviceOwnership,
   stopAllWebRtcStreams,
   waitForWebRtcStreamReadiness,
-} from "../server/webrtcStreamManager";
+} from "./webrtcStreamManager";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
@@ -110,7 +110,7 @@ const WEBRTC_STREAM_PURPOSE = "to start a WebRTC stream";
  * actually arrives, so the daemon does not load the heavy WebRTC stack at boot.
  */
 function loadManager() {
-  return import("../server/webrtcStreamManager");
+  return import("./webrtcStreamManager");
 }
 
 function defaultOwnershipChanges(): DeviceOwnershipChanges | null {

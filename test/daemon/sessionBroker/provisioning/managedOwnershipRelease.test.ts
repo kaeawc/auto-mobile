@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { timedHold } from "../../../helpers/timedReleaseHold";
 import { SessionManager, TerminalSessionError } from "../../../../src/daemon/sessionManager";
 import { deliverDaemonHeartbeat } from "../../../helpers/daemonHeartbeatHandler";
@@ -18,7 +27,7 @@ import { REGISTRY_RETRY_MAX_DELAY_MS } from "../../../../src/daemon/sessionBroke
 import { fixedBackoff } from "../../../../src/utils/Backoff";
 import { SUSPECT_GRACE_MS } from "../../../../src/daemon/livenessOwnerLease";
 import { logger } from "../../../../src/utils/logger";
-import { sessionOwnershipLostPayload } from "../../../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../../../src/daemon/deviceSessionResult";
 import { FakeDbWriteBarrier } from "../../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -152,7 +161,6 @@ async function harness() {
     },
   });
   manager.setReleaseDeviceHold((id) => reowner.releaseDeviceHold(id));
-  const force = spyOn(manager, "forceStuckRelease");
   const releasedDevices: string[] = [];
   const drain = new BrokerExecutionRelease({
     registry: async () => faulty,
@@ -189,7 +197,6 @@ async function harness() {
     await reowner.whenIdle();
     await drain.whenIdle();
     manager.stopCleanupTimer();
-    force.mockRestore();
     timer.reset();
     await registry.releaseExecution(key, SESSION);
   });
@@ -717,4 +724,12 @@ describe("managed ownership release", () => {
     await drainUntil(() => h.confirmed.length === 2, { description: "second ownership episode" });
     expect(h.reowner.automationRefusal(SESSION)).toBeUndefined();
   });
+});
+
+let force: ReturnType<typeof spyOn<typeof SessionManager.prototype, "forceStuckRelease">>;
+beforeEach(() => {
+  force = spyOn(SessionManager.prototype, "forceStuckRelease");
+});
+afterEach(() => {
+  force.mockRestore();
 });

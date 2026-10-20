@@ -323,6 +323,10 @@ private object SchemaSampleGenerator {
       return enumValues.first()
     }
 
+    return generateType(schema, root)
+  }
+
+  private fun generateType(schema: JsonObject, root: JsonObject): JsonElement {
     return when (resolveType(schema)) {
       "object" -> generateObject(schema, root)
       "array" -> generateArray(schema, root)

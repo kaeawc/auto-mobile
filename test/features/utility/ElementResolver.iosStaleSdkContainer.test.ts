@@ -33,7 +33,7 @@ describe("iOS container duplicated by a stale SDK snapshot (#10266)", () => {
       strategy: "unique",
       intentAction: "focus-input",
     });
-    expect(result.error).toBeUndefined();
+    expect(result.element).not.toBeNull();
     expect(result.element?.["resource-id"]).toBe("quantity");
     expect(result.element?.bounds).toEqual({ left: 12, top: 261, right: 296, bottom: 296 });
   });

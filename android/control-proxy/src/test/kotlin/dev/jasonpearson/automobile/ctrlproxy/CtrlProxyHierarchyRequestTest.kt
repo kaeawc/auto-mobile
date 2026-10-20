@@ -51,14 +51,23 @@ class CtrlProxyHierarchyRequestTest {
           checkNotNull(oldScope.coroutineContext[kotlinx.coroutines.CoroutineExceptionHandler]),
       )
     val debouncer =
-      HierarchyDebouncer(scope = scope, extractHierarchy = { _, options -> extract(options) })
+      HierarchyDebouncer(
+        scope = scope,
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, options -> extract(options) },
+          ),
+      )
     private val handler =
       proxy.queuedMessageHandler(CtrlProxyMessageHandler(proxy), scope, dispatcher)
     val server =
       WebSocketServer(
         scope = scope,
-        messageHandler = handler,
-        onClientDisconnected = handler::disconnect,
+        options =
+          WebSocketServerOptions(
+            messageHandler = handler,
+            onClientDisconnected = handler::disconnect,
+          ),
       )
     val requester = RecordingTransport()
     val peer = RecordingTransport()

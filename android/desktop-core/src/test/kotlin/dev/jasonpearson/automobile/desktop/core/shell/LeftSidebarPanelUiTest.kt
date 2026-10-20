@@ -45,35 +45,40 @@ class LeftSidebarPanelUiTest {
       )
       .map { it.toSidebarDeviceInfo() }
 
+  private data class SidebarSpec(
+    val mode: DataSourceMode = DataSourceMode.Real,
+    val process: McpProcess? = null,
+    val onModeChanged: (DataSourceMode) -> Unit = {},
+    val onRetry: () -> Unit = {},
+    val onSelect: (String, String?) -> Unit = { _, _ -> },
+    val onKill: (String) -> Unit = {},
+    val onSettings: () -> Unit = {},
+    val onApp: (String?) -> Unit = {},
+  )
+
   @Composable
-  private fun Sidebar(
-    mode: DataSourceMode = DataSourceMode.Real,
-    process: McpProcess? = null,
-    onModeChanged: (DataSourceMode) -> Unit = {},
-    onRetry: () -> Unit = {},
-    onSelect: (String, String?) -> Unit = { _, _ -> },
-    onKill: (String) -> Unit = {},
-    onSettings: () -> Unit = {},
-    onApp: (String?) -> Unit = {},
-  ) {
+  private fun Sidebar(spec: SidebarSpec = SidebarSpec()) {
+    val (mode, process, onModeChanged, onRetry, onSelect, onKill, onSettings, onApp) = spec
     MaterialTheme {
       LeftSidebarPanel(
-        dataSourceMode = mode,
-        onDataSourceModeChanged = onModeChanged,
-        onDeviceSelected = onSelect,
-        onProcessConnected = { error("Host-owned connection must not be overwritten") },
-        connectedProcess = process,
-        activeDeviceId = "pixel-runtime",
-        suppressAutoSelect = true,
-        bootedDevices = devices,
-        onRetryDetection = onRetry,
-        onKillDevice = onKill,
-        onOpenSettings = onSettings,
-        installedApps = listOf(InstalledApp("dev.example.app", "Example", false)),
-        selectedAppId = "dev.example.app",
-        onAppSelected = onApp,
-        daemonStatusProvider = { null },
-        modifier = Modifier.width(320.dp),
+        LeftSidebarOptions(
+          dataSourceMode = mode,
+          onDataSourceModeChanged = onModeChanged,
+          onDeviceSelected = onSelect,
+          onProcessConnected = { error("Host-owned connection must not be overwritten") },
+          connectedProcess = process,
+          activeDeviceId = "pixel-runtime",
+          suppressAutoSelect = true,
+          bootedDevices = devices,
+          onRetryDetection = onRetry,
+          onKillDevice = onKill,
+          onOpenSettings = onSettings,
+          installedApps = listOf(InstalledApp("dev.example.app", "Example", false)),
+          selectedAppId = "dev.example.app",
+          onAppSelected = onApp,
+          daemonStatusProvider = { null },
+          modifier = Modifier.width(320.dp),
+        ),
       )
     }
   }
@@ -81,7 +86,7 @@ class LeftSidebarPanelUiTest {
   @Test
   fun `panel renders its sections and Settings`() = runComposeUiTest {
     var settings = 0
-    setContent { Sidebar(onSettings = { settings++ }) }
+    setContent { Sidebar(SidebarSpec(onSettings = { settings++ })) }
     onNodeWithText("MCP Connection").assertIsDisplayed()
     onNodeWithText("Daemon Status").assertIsDisplayed()
     onNodeWithText("Devices").performScrollTo().assertIsDisplayed()
@@ -97,12 +102,14 @@ class LeftSidebarPanelUiTest {
     var retries = 0
     setContent {
       Sidebar(
-        mode = mode.value,
-        onModeChanged = {
-          changes += it
-          mode.value = it
-        },
-        onRetry = { retries++ },
+        SidebarSpec(
+          mode = mode.value,
+          onModeChanged = {
+            changes += it
+            mode.value = it
+          },
+          onRetry = { retries++ },
+        ),
       )
     }
     onNodeWithText("Not connected").assertIsDisplayed()
@@ -117,7 +124,9 @@ class LeftSidebarPanelUiTest {
 
   @Test
   fun `host connection name and PID render without detection or retry`() = runComposeUiTest {
-    setContent { Sidebar(process = McpProcess(1234, "Host daemon", McpConnectionType.UnixSocket)) }
+    setContent {
+      Sidebar(SidebarSpec(process = McpProcess(1234, "Host daemon", McpConnectionType.UnixSocket)))
+    }
     onNodeWithText("Connected: Host daemon").assertIsDisplayed()
     onNodeWithText("PID: 1234").assertIsDisplayed()
     onNodeWithText("Not connected").assertDoesNotExist()
@@ -129,7 +138,9 @@ class LeftSidebarPanelUiTest {
     var selected: Pair<String, String?>? = null
     var killed: String? = null
     setContent {
-      Sidebar(onSelect = { id, name -> selected = id to name }, onKill = { killed = it })
+      Sidebar(
+        SidebarSpec(onSelect = { id, name -> selected = id to name }, onKill = { killed = it }),
+      )
     }
     onNodeWithText("Pixel").performScrollTo().assertIsSelected()
     onNodeWithText("iPhone").performScrollTo().assertIsNotSelected().performClick()
@@ -141,7 +152,7 @@ class LeftSidebarPanelUiTest {
   @Test
   fun `app filter selection and clearing remain reachable`() = runComposeUiTest {
     val selectedApps = mutableListOf<String?>()
-    setContent { Sidebar(onApp = { selectedApps += it }) }
+    setContent { Sidebar(SidebarSpec(onApp = { selectedApps += it })) }
     onNodeWithText("Example").performScrollTo().performClick()
     onNodeWithText("Clear selection").performScrollTo().performClick()
     assertEquals(listOf("dev.example.app", null), selectedApps)

@@ -79,6 +79,10 @@ public func jsonNormalized(_ value: Any) -> Any {
     if let string = value as? String {
         return string
     }
+    return jsonNormalizedContainer(value, mirror: mirror)
+}
+
+private func jsonNormalizedContainer(_ value: Any, mirror: Mirror) -> Any {
     switch mirror.displayStyle {
     case .collection:
         return mirror.children.map { jsonNormalized($0.value) }

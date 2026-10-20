@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readGuardFile } from "./astGuard";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+
 import { join } from "node:path";
 import { parseSync } from "oxc-parser";
 
@@ -20,7 +21,7 @@ function stringLiteralValue(value: unknown): string | undefined {
   return typeof value.value === "string" ? value.value : undefined;
 }
 
-function relativeImports(source: AstNode): string[] {
+function relativeImports(source: unknown): string[] {
   const imports: string[] = [];
   const seen = new WeakSet<object>();
   const visit = (value: unknown): void => {
@@ -69,9 +70,15 @@ describe("deviceTools.killDevice import casing (issue #6060)", () => {
   // Reading and parsing the suite (the parser's first use in the process) is setup, not the
   // casing check: do it once here.
   let pollutingSuite: AstNode;
+  afterAll(() => {
+    pollutingSuite = { type: "Program" };
+  });
   beforeAll(() => {
-    pollutingSuite = parseSync(POLLUTING_SUITE, readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"))
-      .program as unknown as AstNode;
+    const { program } = parseSync(POLLUTING_SUITE, readGuardFile(join(ROOT, POLLUTING_SUITE)));
+    if (!isAstNode(program)) {
+      throw new TypeError("Parser did not return an AST program");
+    }
+    pollutingSuite = program;
   });
 
   test("uses the repository filename's exact casing", () => {

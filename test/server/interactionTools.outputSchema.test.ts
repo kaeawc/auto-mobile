@@ -245,6 +245,7 @@ interface SourceIndex {
   source: ts.SourceFile;
   bindings: Map<string, ts.Node>;
   imports: Map<string, { file: string; name: string }>;
+  reexports: string[];
   registrations: Array<{ name: string; handler: ts.Expression; nonDeviceHandler?: ts.Expression }>;
 }
 const serverDirectory = path.resolve(import.meta.dir, "../../src/server");
@@ -281,6 +282,7 @@ function indexSource(
     source: ast,
     bindings: new Map(),
     imports: new Map(),
+    reexports: [],
     registrations: [],
   };
   const lateBound = new Map<string, string>();
@@ -326,6 +328,28 @@ function indexSource(
             file: target,
             name: element.propertyName?.text ?? element.name.text,
           });
+        }
+      }
+    }
+    if (
+      ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      const target = pathApi.resolve(pathApi.dirname(file), `${node.moduleSpecifier.text}.ts`);
+      if (isInside(directory, target, pathApi)) {
+        if (!node.exportClause) {
+          index.reexports.push(target);
+        } else if (ts.isNamedExports(node.exportClause)) {
+          for (const element of node.exportClause.elements) {
+            if (!element.isTypeOnly) {
+              index.imports.set(element.name.text, {
+                file: target,
+                name: element.propertyName?.text ?? element.name.text,
+              });
+            }
+          }
         }
       }
     }
@@ -422,6 +446,27 @@ function auditHandler(
   const visited = new Set<ts.Node>();
   const offenders: string[] = [];
   let structured = false;
+  const visitedBindings = new Set<string>();
+  function visitBinding(file: string, name: string): void {
+    const key = `${sourceKey(file, pathApi)}#${name}`;
+    const index = indexes.get(sourceKey(file, pathApi));
+    if (!index || visitedBindings.has(key)) {
+      return;
+    }
+    visitedBindings.add(key);
+    const binding = index.bindings.get(name);
+    if (binding) {
+      visit(file, binding);
+      return;
+    }
+    const imported = index.imports.get(name);
+    if (imported) {
+      visitBinding(imported.file, imported.name);
+    }
+    for (const target of index.reexports) {
+      visitBinding(target, name);
+    }
+  }
   function visit(currentFile: string, node: ts.Node): void {
     if (visited.has(node)) {
       return;
@@ -460,16 +505,7 @@ function auditHandler(
           ts.isObjectLiteralExpression(node.parent.parent) &&
           ts.isReturnStatement(node.parent.parent.parent)))
     ) {
-      const binding = index.bindings.get(node.text);
-      if (binding) {
-        visit(currentFile, binding);
-      }
-      const imported = index.imports.get(node.text);
-      const importedBinding =
-        imported && indexes.get(sourceKey(imported.file, pathApi))?.bindings.get(imported.name);
-      if (imported && importedBinding) {
-        visit(imported.file, importedBinding);
-      }
+      visitBinding(currentFile, node.text);
     }
     if (
       ts.isObjectLiteralExpression(node) &&
@@ -653,6 +689,44 @@ test("source paths use Windows containment and canonical keys", () => {
   expect(sourceKey(String.raw`/repo/server/a\b.ts`, path.posix)).toBe(
     String.raw`/repo/server/a\b.ts`,
   );
+});
+
+test("source guard follows named and star re-exports, including cyclic barrels", () => {
+  const files = new Map([
+    [
+      "registration.ts",
+      `import { good, bad } from "./barrel";
+ToolRegistry.register("good", "", schema, good, { outputSchema: schema });
+ToolRegistry.register("bad", "", schema, bad, { outputSchema: schema });`,
+    ],
+    ["barrel.ts", `export * from "./responses"; export * from "./cycle";`],
+    ["cycle.ts", `export * from "./barrel";`],
+    ["responses.ts", `export { structured as good, text as bad } from "./builders";`],
+    [
+      "builders.ts",
+      `export function structured() { return createStructuredToolResponse({}); }
+export function text() { return createJSONToolResponse({}); }`,
+    ],
+  ]);
+  const indexes = new Map(
+    [...files].map(([name, source]) => {
+      const file = path.join(serverDirectory, name);
+      return [sourceKey(file), indexSource(file, source)];
+    }),
+  );
+  const file = path.join(serverDirectory, "registration.ts");
+  const results = indexes.get(sourceKey(file))!.registrations.map(({ name, handler }) => ({
+    name,
+    ...auditHandler(indexes, file, handler),
+  }));
+  expect(results).toEqual([
+    { name: "good", structured: true, offenders: [] },
+    {
+      name: "bad",
+      structured: false,
+      offenders: [`${path.join(serverDirectory, "builders.ts")}:2`],
+    },
+  ]);
 });
 
 test("source guard follows Windows cross-file handlers and rejects text-only builders", () => {

@@ -14,7 +14,9 @@ import {
   installListeningProcessFakes,
 } from "../helpers/iosCtrlProxyManagerHarness";
 
-type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+type RemoteRunner = NonNullable<
+  Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[0]["remoteRunner"]
+>;
 
 /** A host-control runner that reports itself enabled, with `overrides` replacing individual calls. */
 function physicalRemoteRunner(overrides: Partial<RemoteRunner> = {}): RemoteRunner {
@@ -112,12 +114,12 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
           ignoreTerm,
         }));
         installListeningProcessFakes(executor, processes);
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          createFakeBuilder(),
-          executor,
-        );
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+          device: testDevice,
+          timer: fakeTimer,
+          builder: createFakeBuilder(),
+          processExecutor: executor,
+        });
         manager.testHooks.setState({ xcTestProcessId: 42 });
         manager.testHooks.register();
         let settled = false;
@@ -182,7 +184,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
       const firstStop = spyOn(first, "stop").mockImplementation(async () => {
         await new Promise<void>(() => {});
       });
-      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(() => {});
+      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(async () => {});
       const secondStop = spyOn(second, "stop").mockResolvedValue();
       const shutdown = IOSCtrlProxyManager.shutdownAll(timer);
 
@@ -226,6 +228,9 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
               return remoteStart.promise;
             },
             stop: async ({ pid }: { pid: number }) => {
+              if (pid === undefined) {
+                throw new Error("Expected a runner PID");
+              }
               stoppedPids.push(pid);
               if (stoppedPids.length === 1) {
                 if (firstStopFailure === "rejects") {
@@ -241,16 +246,16 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
             deviceKind === "physical device"
               ? { ...testDevice, deviceId: "00008030-001E28C11E" }
               : testDevice;
-          const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          const manager = IOSCtrlProxyManager.createForTestingWithDeps({
             device,
-            fakeTimer,
-            createFakeBuilder(),
-            new FakeProcessExecutor(),
-            undefined,
-            undefined,
+            timer: fakeTimer,
+            builder: createFakeBuilder(),
+            processExecutor: new FakeProcessExecutor(),
+            signingManager: undefined,
+            deviceAppManager: undefined,
             remoteRunner,
-            { isAvailable: async () => true },
-          ).testHooks.register();
+            hostPortAvailabilityChecker: { isAvailable: async () => true },
+          }).testHooks.register();
           spyOn(manager, "isRunning").mockResolvedValue(false);
 
           const startup = manager.start();
@@ -288,21 +293,24 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
           return remoteStart.promise;
         },
         stop: async ({ pid }) => {
+          if (pid === undefined) {
+            throw new Error("Expected a runner PID");
+          }
           stoppedPids.push(pid);
           // Admission cleanup (the first stop) never settles; the shutdown force-stop does.
           return stoppedPids.length === 1 ? new Promise<never>(() => {}) : { success: true };
         },
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        { ...testDevice, deviceId: "00008030-001E28C11E" },
-        fakeTimer,
-        createFakeBuilder(),
-        new FakeProcessExecutor(),
-        undefined,
-        undefined,
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: { ...testDevice, deviceId: "00008030-001E28C11E" },
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: new FakeProcessExecutor(),
+        signingManager: undefined,
+        deviceAppManager: undefined,
         remoteRunner,
-        { isAvailable: async () => true },
-      );
+        hostPortAvailabilityChecker: { isAvailable: async () => true },
+      });
       // The startup is cancelled by stop() below and its settlement is not asserted here.
       void manager.start().catch(() => {});
       await startCalled.promise;

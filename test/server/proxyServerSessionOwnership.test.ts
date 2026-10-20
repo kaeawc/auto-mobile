@@ -10,7 +10,7 @@ import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionRe
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { appendHeartbeatExpiryMessage } from "../../src/server/deviceSessionResult";
+import { appendHeartbeatExpiryMessage } from "../../src/daemon/deviceSessionResult";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 

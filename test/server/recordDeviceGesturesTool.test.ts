@@ -1,3 +1,4 @@
+import { toolJson, toolIsError } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -17,7 +18,7 @@ import type { BootedDevice } from "../../src/models";
 import { registerPlanTools } from "../../src/server/planTools";
 import * as realDeviceGestureRecordingManager from "../../src/daemon/deviceGestureRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { z } from "zod/v4";
 import { getRemovedToolHint } from "../../src/utils/removedTools";
 import { executionTracker } from "../../src/daemon/executionTracker";
@@ -86,7 +87,7 @@ describe("recordDeviceGestures tool", () => {
     expect(tool!.deviceAwareHandler).toBeDefined();
 
     const response = await tool!.deviceAwareHandler!(mockDevice, {});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
     expect(payload.recordingId).toBe("rec-123");
@@ -113,7 +114,7 @@ describe("recordDeviceGestures tool", () => {
     expect(tool).toBeDefined();
 
     const response = await tool!.deviceAwareHandler!(mockDevice, {});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
     expect(payload.recordingId).toBe("existing-456");
@@ -133,7 +134,7 @@ describe("recordDeviceGestures tool", () => {
     expect(tool).toBeDefined();
 
     const response = await tool!.deviceAwareHandler!(mockDevice, {});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(false);
     expect(payload.error).toContain("Unable to connect to accessibility service");
@@ -170,7 +171,7 @@ describe("recordDeviceGestures tool", () => {
     expect(tool).toBeDefined();
 
     const response = await tool!.deviceAwareHandler!(differentDevice, {});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(false);
     expect(payload.error).toContain("Recording already active on device emulator-5554");
@@ -317,8 +318,8 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     );
     expect(isTypedToolRefusal(refusal)).toBe(true);
     const result = shapeToolCallError(refusal, { toolName: "recordDeviceGestures", source: "MCP" });
-    expect(result.isError).toBe(true);
-    expect(JSON.parse(result.content[0].text)).toMatchObject({
+    expect(toolIsError(result)).toBe(true);
+    expect(toolJson(result)).toMatchObject({
       success: false,
       error: expect.any(String),
       ...unheldRefusal,
@@ -357,7 +358,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
         hasReceivedHeartbeat: false,
       });
       readiness.mockImplementationOnce(
-        async (sessionId, _manager, _pool, _options, _execution, admitted) => {
+        async (sessionId, _manager, _pool, _options, { admittedSession: admitted } = {}) => {
           expect(admitted).toBeUndefined();
           await pool.bindOrReuseDeviceSession({
             sessionId: sessionId!,

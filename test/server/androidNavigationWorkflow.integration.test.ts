@@ -34,6 +34,7 @@ import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
+import { toolJson } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -227,7 +228,7 @@ describe("Android navigation graph workflow (#4459)", () => {
         observationSpy.mockRestore();
       }
     })();
-    const graph = JSON.parse(graphResponse.content[0].text);
+    const graph = toolJson(graphResponse);
     expect(graph).toMatchObject({
       currentScreen: "Settings",
       nodeCount: 2,
@@ -235,10 +236,7 @@ describe("Android navigation graph workflow (#4459)", () => {
       knownEdges: 1,
       unknownEdges: 0,
     });
-    expect(graph.screens.map((screen: { name: string }) => screen.name)).toEqual([
-      "Home",
-      "Settings",
-    ]);
+    expect(graph.screens).toMatchObject([{ name: "Home" }, { name: "Settings" }]);
     expect(graph.transitions).toContainEqual(
       expect.objectContaining({
         from: "Home",
@@ -269,7 +267,7 @@ describe("Android navigation graph workflow (#4459)", () => {
       platform: "android",
       sessionUuid,
     });
-    const result = JSON.parse(response.content[0].text);
+    const result = toolJson(response);
     expect(result).toMatchObject({
       success: true,
       currentScreen: "Settings",

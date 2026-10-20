@@ -24,8 +24,8 @@ import dev.jasonpearson.automobile.slides.model.PresentationEmoji
 @Composable
 fun EmojiSlideItem(
   emoji: PresentationEmoji,
-  caption: String? = null,
   modifier: Modifier = Modifier,
+  caption: String? = null,
   captionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
   Column(

@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { describe, expect, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
@@ -28,10 +29,10 @@ describe("refreshAndroidViewHierarchy", () => {
     fakeCtrlProxy.setHierarchyData({
       updatedAt: Date.now(),
       packageName: "com.test.app",
-      hierarchy: { $: { class: "android.widget.FrameLayout" } },
+      hierarchy: { className: "android.widget.FrameLayout" },
     });
     const completeResult: ViewHierarchyResult = {
-      hierarchy: { node: [] },
+      hierarchy: { node: createFlatNodeForTest({ node: [] }) },
       packageName: "com.test.app",
       updatedAt: Date.now(),
       ctrlProxyIncomplete: false,
@@ -48,11 +49,11 @@ describe("refreshAndroidViewHierarchy", () => {
     fakeCtrlProxy.setHierarchyData({
       updatedAt: Date.now(),
       packageName: "com.test.app",
-      hierarchy: { $: {} },
+      hierarchy: {},
       ctrlProxyIncomplete: true,
     });
     const incompleteResult: ViewHierarchyResult = {
-      hierarchy: { node: [] },
+      hierarchy: { node: createFlatNodeForTest({ node: [] }) },
       packageName: "com.test.app",
       updatedAt: Date.now(),
       ctrlProxyIncomplete: true,
@@ -85,7 +86,7 @@ describe("refreshAndroidViewHierarchy", () => {
     fakeCtrlProxy.setHierarchyData({
       updatedAt: Date.now(),
       packageName: "com.test.app",
-      hierarchy: { $: {} },
+      hierarchy: {},
     });
 
     await refreshAndroidViewHierarchy(fakeCtrlProxy, 1000);
@@ -106,9 +107,9 @@ describe("refresh fallback budget", () => {
       }
     }
     const client = new SyncClient();
-    client.setHierarchyData({ packageName: "com.test", hierarchy: { $: {} } });
+    client.setHierarchyData({ updatedAt: timer.now(), packageName: "com.test", hierarchy: {} });
     client.setViewHierarchyResult({
-      hierarchy: { node: { $: {} } },
+      hierarchy: { node: createFlatNodeForTest({ $: {} }) },
       packageName: "com.test",
       ctrlProxyIncomplete: incomplete,
     });

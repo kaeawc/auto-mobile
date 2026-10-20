@@ -1,4 +1,5 @@
 import { basename, dirname } from "node:path";
+import { compareCodeUnits } from "../../src/utils/io";
 import type { LockFileSystem } from "../../src/utils/lockFileSystem";
 
 interface FileNode {
@@ -129,7 +130,8 @@ export class FakeLockFileSystem implements LockFileSystem {
     }
     return [...new Set([...this.files.keys(), ...this.directories])]
       .filter((path) => path !== directory && dirname(path) === directory)
-      .map((path) => basename(path));
+      .map((path) => basename(path))
+      .sort(compareCodeUnits); // Like nodeLockFileSystem.list: entry order is deterministic.
   }
 
   openExclusive(path: string): number {
@@ -155,7 +157,8 @@ export class FakeLockFileSystem implements LockFileSystem {
     if (!node) {
       throw this.error("EBADF", String(fd));
     }
-    node.raw = content;
+    // A descriptor keeps its file offset, so successive writes append like fs.writeFileSync(fd).
+    node.raw += content;
     node.mtimeMs = this.now();
   }
 

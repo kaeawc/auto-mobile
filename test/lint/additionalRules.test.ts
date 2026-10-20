@@ -19,6 +19,18 @@ describe("auto-mobile/no-unknown-cast", () => {
   });
 });
 
+describe("auto-mobile/no-as-any", () => {
+  test("flags an `as any` assertion", () => {
+    expect(fires("no-as-any", "const x = (a as any);")).toBe(true);
+  });
+  test("flags an angle-bracket `<any>` assertion", () => {
+    expect(fires("no-as-any", "const x = <any>a;")).toBe(true);
+  });
+  test("does not flag other assertions or an `any` annotation", () => {
+    expect(fires("no-as-any", "const x = (a as string); let y: any;")).toBe(false);
+  });
+});
+
 describe("auto-mobile/no-extension-import", () => {
   test("flags a .js extension in a relative import", () => {
     expect(fires("no-extension-import", 'import x from "./foo.js";')).toBe(true);

@@ -557,7 +557,7 @@ export class FakeSimctl implements SimCtl {
   async installApp(
     appPath: string,
     deviceId?: string,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; signal?: AbortSignal },
   ): Promise<void> {
     this.recordCall("installApp", { appPath, deviceId, options });
   }

@@ -9,7 +9,6 @@ describe("VisualHighlight", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   const iosDevice: BootedDevice = {
@@ -86,14 +85,14 @@ describe("VisualHighlight", () => {
     {
       dimension: "width",
       invalidShape: {
-        type: "box" as const,
+        type: "circle" as const,
         bounds: { x: 10, y: 20, width: 0, height: 80 },
       },
     },
     {
       dimension: "height",
       invalidShape: {
-        type: "box" as const,
+        type: "circle" as const,
         bounds: { x: 10, y: 20, width: 100, height: 0 },
       },
     },
@@ -136,7 +135,6 @@ describe("VisualHighlightClient", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   const iosDevice: BootedDevice = {

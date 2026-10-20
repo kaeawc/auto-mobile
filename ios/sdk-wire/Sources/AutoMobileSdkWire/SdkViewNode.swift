@@ -94,28 +94,30 @@ public struct SdkViewNode: Codable, Sendable {
     }
 
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        className = try c.decode(String.self, forKey: .className)
-        bounds = try c.decode(SdkBounds.self, forKey: .bounds)
-        accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
-        accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
-        isAccessibilityElement = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
-        isAccessibilityFocused = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityFocused) ?? false
-        accessibilityElementsHidden = try c.decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
-        accessibilityTraits = try c.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
-        accessibilityCustomActions = try c.decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []
-        gestureRecognizers = try c.decodeIfPresent([SdkGestureInfo].self, forKey: .gestureRecognizers) ?? []
-        alpha = try c.decodeIfPresent(Float.self, forKey: .alpha) ?? 1.0
-        backgroundColor = try c.decodeIfPresent(String.self, forKey: .backgroundColor)
-        cornerRadius = try c.decodeIfPresent(Float.self, forKey: .cornerRadius) ?? 0
-        borderColor = try c.decodeIfPresent(String.self, forKey: .borderColor)
-        borderWidth = try c.decodeIfPresent(Float.self, forKey: .borderWidth) ?? 0
-        isLayerNode = try c.decodeIfPresent(Bool.self, forKey: .isLayerNode) ?? false
-        isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
-        isUserInteractionEnabled = try c.decodeIfPresent(Bool.self, forKey: .isUserInteractionEnabled) ?? true
-        hasTapTarget = try c.decodeIfPresent(Bool.self, forKey: .hasTapTarget) ?? false
-        isOccluded = try c.decodeIfPresent(Bool.self, forKey: .isOccluded) ?? false
-        semanticLinks = try c.decodeIfPresent([SdkSemanticLink].self, forKey: .semanticLinks)
-        children = try c.decodeIfPresent([SdkViewNode].self, forKey: .children)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        className = try container.decode(String.self, forKey: .className)
+        bounds = try container.decode(SdkBounds.self, forKey: .bounds)
+        accessibilityLabel = try container.decodeIfPresent(String.self, forKey: .accessibilityLabel)
+        accessibilityIdentifier = try container.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
+        isAccessibilityElement = try container.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
+        isAccessibilityFocused = try container.decodeIfPresent(Bool.self, forKey: .isAccessibilityFocused) ?? false
+        accessibilityElementsHidden = try container
+            .decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
+        accessibilityTraits = try container.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
+        accessibilityCustomActions = try container
+            .decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []
+        gestureRecognizers = try container.decodeIfPresent([SdkGestureInfo].self, forKey: .gestureRecognizers) ?? []
+        alpha = try container.decodeIfPresent(Float.self, forKey: .alpha) ?? 1.0
+        backgroundColor = try container.decodeIfPresent(String.self, forKey: .backgroundColor)
+        cornerRadius = try container.decodeIfPresent(Float.self, forKey: .cornerRadius) ?? 0
+        borderColor = try container.decodeIfPresent(String.self, forKey: .borderColor)
+        borderWidth = try container.decodeIfPresent(Float.self, forKey: .borderWidth) ?? 0
+        isLayerNode = try container.decodeIfPresent(Bool.self, forKey: .isLayerNode) ?? false
+        isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        isUserInteractionEnabled = try container.decodeIfPresent(Bool.self, forKey: .isUserInteractionEnabled) ?? true
+        hasTapTarget = try container.decodeIfPresent(Bool.self, forKey: .hasTapTarget) ?? false
+        isOccluded = try container.decodeIfPresent(Bool.self, forKey: .isOccluded) ?? false
+        semanticLinks = try container.decodeIfPresent([SdkSemanticLink].self, forKey: .semanticLinks)
+        children = try container.decodeIfPresent([SdkViewNode].self, forKey: .children)
     }
 }

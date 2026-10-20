@@ -100,7 +100,7 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       // Device-reported prototype entries parsed from an inspect reply are not tool
       // arguments, so there is no transport metadata to strip.
       if (
-        file === "prototypeTools.ts" &&
+        file === "prototypeTools/inspection.ts" &&
         receiver.type === "Identifier" &&
         receiver.name === "devicePrototypeEntrySchema" &&
         first?.type === "Identifier" &&
@@ -110,7 +110,7 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       }
       // The injected iOS agent's status reply, likewise not a tool argument.
       if (
-        file === "prototypeTools.ts" &&
+        file === "prototypeTools/inspection.ts" &&
         receiver.type === "Identifier" &&
         receiver.name === "iosAgentStatusSchema" &&
         first?.type === "MemberExpression"
@@ -129,7 +129,9 @@ describe("handler internal metadata regression guard", () => {
   let offenders: string[];
   beforeAll(() => {
     const server = join(import.meta.dir, "../../src/server");
-    const files = Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: server }));
+    const files = Array.from(new Bun.Glob("**/*.ts").scanSync({ cwd: server }), (file) =>
+      file.replaceAll("\\", "/"),
+    );
     expect(files.length).toBeGreaterThan(0);
     offenders = files.flatMap((file) =>
       unsafeSchemaParses(file, readFileSync(join(server, file), "utf8")),

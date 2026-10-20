@@ -76,11 +76,11 @@ internal fun buildStorageChangedMessage(
  */
 private fun encodeTypedValue(value: String?, type: String?, json: Json): String {
   if (value == null) return "null"
-  return if (
+  val requiresQuotedValue =
     type == "STRING" ||
       type == "LONG" ||
       (type == "FLOAT" && value.toDoubleOrNull()?.isFinite() != true)
-  ) {
+  return if (requiresQuotedValue) {
     json.encodeToString(value)
   } else {
     value

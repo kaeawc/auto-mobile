@@ -1,3 +1,5 @@
+import type { ResolvedDeviceIdentity } from "../../src/daemon/readiness/DeviceReadiness";
+import { z } from "zod/v4";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -326,7 +328,7 @@ beforeAll(async () => {
           h!.handlerSignals.push(getAbortSignal());
           h!.runs.push({
             deviceId: device.deviceId,
-            sessionUuid: args.sessionUuid,
+            sessionUuid: z.object({ sessionUuid: z.string().optional() }).parse(args).sessionUuid,
             readPath: isSessionlessDeviceRead(),
           });
           return { success: true };
@@ -754,6 +756,11 @@ for (const platform of ["android", "ios"] as const) {
                       sessionUuid: "restart-owner",
                       owned: true,
                       restartHandoff: true,
+                      target: {
+                        platform,
+                        stableDeviceId: h!.device.deviceId,
+                        deviceId: h!.device.deviceId,
+                      },
                       retryAfterMs: 500,
                     }
                   : undefined;
@@ -776,8 +783,6 @@ for (const platform of ["android", "ios"] as const) {
                     holder: "session_broker",
                     scopeKey: "scope",
                     bindingIndex: 0,
-                    scopeState: null,
-                    execSessionUuid: "slot-exec",
                   });
                 }
               },
@@ -1311,6 +1316,11 @@ for (const platform of ["android", "ios"] as const) {
                   sessionUuid: "late-owner",
                   owned: false,
                   restartHandoff: true,
+                  target: {
+                    platform,
+                    stableDeviceId: h!.device.deviceId,
+                    deviceId: h!.device.deviceId,
+                  },
                   retryAfterMs: 500,
                 }
               : undefined;
@@ -1442,6 +1452,11 @@ for (const platform of ["android", "ios"] as const) {
                   sessionUuid: "restart-owner",
                   owned: true,
                   restartHandoff: true,
+                  target: {
+                    platform,
+                    stableDeviceId: h!.device.deviceId,
+                    deviceId: h!.device.deviceId,
+                  },
                   retryAfterMs: 500,
                 }
               : undefined;
@@ -1517,6 +1532,7 @@ function reserveReadTarget(platform: Platform, id: string): void {
             sessionUuid: "restart-owner",
             owned: true,
             restartHandoff: true,
+            target: { platform, stableDeviceId: h!.device.deviceId, deviceId: h!.device.deviceId },
             retryAfterMs: 500,
           }
         : undefined;
@@ -1911,7 +1927,8 @@ for (const platform of ["android", "ios"] as const) {
         const coldVerify =
           phase === "cold boot"
             ? spyOn(current.manager, "verifyAndroidDevice").mockImplementation(
-                (id, options, resolved) => verify(id, "android", options, resolved),
+                (id, options, resolved?: ResolvedDeviceIdentity) =>
+                  verify(id, "android", options, resolved),
               )
             : undefined;
         if (!coldVerify) {

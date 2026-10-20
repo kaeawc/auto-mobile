@@ -13,7 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class FakeTelemetryPushClientTest {
+internal class FakeTelemetryPushClientTest : FakeTelemetryPushClientDispatcherFixture() {
 
   @Test
   fun `connect sets connected state and emits Connected`() = runBlocking {
@@ -73,7 +73,7 @@ class FakeTelemetryPushClientTest {
       )
 
     val collected = mutableListOf<TelemetryDisplayEvent>()
-    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val scope = CoroutineScope(testDispatcher)
     val job = scope.launch {
       client.telemetryEvents.collect {
         collected.add(it)
@@ -95,7 +95,7 @@ class FakeTelemetryPushClientTest {
   fun `emitEvent delivers multiple events`() = runBlocking {
     val client = FakeTelemetryPushClient()
     val collected = mutableListOf<TelemetryDisplayEvent>()
-    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val scope = CoroutineScope(testDispatcher)
     val job = scope.launch {
       client.telemetryEvents.collect {
         collected.add(it)
@@ -163,3 +163,7 @@ class FakeTelemetryPushClientTest {
     assertEquals(null, client.getLastDeviceId())
   }
 }
+
+internal abstract class FakeTelemetryPushClientDispatcherFixture(
+  protected val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+)

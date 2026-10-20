@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
@@ -223,6 +224,11 @@ export function registerSwipeAtTools() {
     "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     swipeAtSchema,
     swipeAtHandler,
-    { defaultEnabled: false, supportsProgress: true, outputSchema: swipeAtResultSchema },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: swipeAtResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 }

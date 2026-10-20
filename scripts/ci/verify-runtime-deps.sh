@@ -30,7 +30,8 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   fi
 fi
 prepend_path_if_dir "${HOME}/.bun/bin"
-# shellcheck disable=SC1091
+# User startup configuration has no repository-owned static source.
+# shellcheck source=/dev/null
 if [[ -f "${HOME}/.bashrc" ]]; then source "${HOME}/.bashrc" 2>/dev/null || true; fi
 hash -r 2>/dev/null || true
 

@@ -16,11 +16,11 @@ final class PrototypeDataActionsTests: XCTestCase {
     }
 
     private func write(
-        _ data: String, _ op: PrototypeDataWrite.Op, _ path: String, _ value: JSONValue? = nil
+        _ data: String, _ operation: PrototypeDataWrite.Operation, _ path: String, _ value: JSONValue? = nil
     )
         throws -> Result<[String: JSONValue], PrototypeDataWriteFailure>
     {
-        try PrototypeDataWrite.apply(object(data), op: op, path: path, value: value)
+        try PrototypeDataWrite.apply(object(data), op: operation, path: path, value: value)
     }
 
     private func failure(_ result: Result<[String: JSONValue], PrototypeDataWriteFailure>) -> PrototypeDataWriteCode? {
@@ -254,7 +254,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         let events = try session.run(button(session, "Delete two"))
         XCTAssertEqual(events.count, 1)
         let event = try XCTUnwrap(events.first)
-        XCTAssertEqual(event.kind, "change")
+        XCTAssertEqual(event.wireKind, "change")
         XCTAssertEqual(event.name, "/data/items/1")
         XCTAssertEqual(event.payload, .object(["op": .string("remove"), "revision": .number(2)]))
         XCTAssertEqual(event.sequence, 1)

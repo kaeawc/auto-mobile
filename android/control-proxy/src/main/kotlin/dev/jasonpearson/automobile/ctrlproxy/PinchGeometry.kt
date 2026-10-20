@@ -97,13 +97,15 @@ internal fun pinchSegmentCount(rotationDegrees: Float): Int {
  * points. Mirrors the iOS `ObjCExceptionCatcher_computePinchFingersAt`.
  */
 internal fun computePinchFingerPositions(
-  centerX: Double,
-  centerY: Double,
-  distanceStart: Double,
-  distanceEnd: Double,
-  rotationDegrees: Float,
+  geometry: PinchStrokeGeometry,
   fraction: Double,
 ): PinchFingerPositions {
+  val centerX = geometry.centerX
+  val centerY = geometry.centerY
+  val distanceStart = geometry.distanceStart
+  val distanceEnd = geometry.distanceEnd
+  val rotationDegrees = geometry.rotationDegrees
+
   val radius = (distanceStart + (distanceEnd - distanceStart) * fraction) / 2.0
   val angle = Math.toRadians(rotationDegrees.toDouble()) * fraction
   val dx = radius * cos(angle)
@@ -130,12 +132,14 @@ internal fun computePinchPathInterior(
   val segments = pinchSegmentCount(rotationDegrees)
   return (1 until segments).map { index ->
     computePinchFingerPositions(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      index.toDouble() / segments,
+      PinchStrokeGeometry(
+        centerX = centerX,
+        centerY = centerY,
+        distanceStart = distanceStart,
+        distanceEnd = distanceEnd,
+        rotationDegrees = rotationDegrees,
+      ),
+      fraction = index.toDouble() / segments,
     )
   }
 }

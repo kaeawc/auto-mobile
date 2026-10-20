@@ -36,6 +36,7 @@ const EXCLUDED_FILES = new Set([
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
   "decisions/ios-user-files-provider.md",
   "decisions/mcp-sdk-v2-split-packages.md",
+  "decisions/prototype-embedded-request-routing.md",
   "decisions/prototype-request-retrofit.md",
   "decisions/types-bun-test-typecheck.md",
 ]);

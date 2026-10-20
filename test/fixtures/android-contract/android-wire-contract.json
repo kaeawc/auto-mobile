@@ -1947,14 +1947,20 @@
           "hasDefault": true
         },
         {
+          "name": "action",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
           "name": "success",
           "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "action",
-          "type": "string",
+          "name": "totalTimeMs",
+          "type": "long",
           "nullable": false,
           "hasDefault": false
         },
@@ -1965,15 +1971,56 @@
           "hasDefault": true
         },
         {
-          "name": "totalTimeMs",
+          "name": "error",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "cancel_ime_commit_result",
+      "fields": [
+        {
+          "name": "timestamp",
           "type": "long",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "error",
+          "name": "requestId",
           "type": "string",
           "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "targetRequestId",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "partialApplication",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "committedUnits",
+          "type": "int",
+          "nullable": false,
           "hasDefault": true
         },
         {
@@ -2041,14 +2088,20 @@
           "hasDefault": true
         },
         {
+          "name": "action",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
           "name": "success",
           "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "action",
-          "type": "string",
+          "name": "totalTimeMs",
+          "type": "long",
           "nullable": false,
           "hasDefault": false
         },
@@ -2057,12 +2110,6 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
-        },
-        {
-          "name": "totalTimeMs",
-          "type": "long",
-          "nullable": false,
-          "hasDefault": false
         },
         {
           "name": "error",
@@ -2104,6 +2151,36 @@
           "type": "long",
           "nullable": false,
           "hasDefault": false
+        },
+        {
+          "name": "partialApplication",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "committedUnits",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "insertedText",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "editorConsumed",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "trace",
+          "type": "list",
+          "nullable": true,
+          "hasDefault": true
         },
         {
           "name": "error",
@@ -2311,6 +2388,18 @@
           "hasDefault": false
         },
         {
+          "name": "totalTimeMs",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "packageName",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
           "name": "isDeviceOwner",
           "type": "boolean",
           "nullable": false,
@@ -2323,18 +2412,6 @@
           "hasDefault": false
         },
         {
-          "name": "packageName",
-          "type": "string",
-          "nullable": true,
-          "hasDefault": true
-        },
-        {
-          "name": "totalTimeMs",
-          "type": "long",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
           "name": "error",
           "type": "string",
           "nullable": true,
@@ -2343,6 +2420,71 @@
         {
           "name": "perfTiming",
           "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "display_transition",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "change",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "displayId",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "panelUniqueId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "panelFingerprint",
+          "type": "object:dev.jasonpearson.automobile.protocol.DisplayPanelFingerprint",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "width",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "height",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "state",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "rotation",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "deviceState",
+          "type": "int",
           "nullable": true,
           "hasDefault": true
         }
@@ -2673,16 +2815,22 @@
           "hasDefault": true
         },
         {
-          "name": "success",
+          "name": "approximated",
           "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
+          "nullable": true,
+          "hasDefault": true
         },
         {
           "name": "action",
           "type": "string",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
         },
         {
           "name": "totalTimeMs",
@@ -2701,10 +2849,104 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "insert_text_result",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
         },
         {
-          "name": "approximated",
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "success",
           "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "totalTimeMs",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "error",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "warning",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "caretPlaced",
+          "type": "boolean",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "resultingTextLength",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "partialApplication",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
+      "serialName": "insert_text_state_result",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": true
+        },
+        {
+          "name": "state",
+          "type": "object:dev.jasonpearson.automobile.protocol.InsertTextState",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "perfTiming",
+          "type": "string",
           "nullable": true,
           "hasDefault": true
         }
@@ -2822,7 +3064,7 @@
         {
           "name": "profiles",
           "type": "list",
-          "nullable": false,
+          "nullable": true,
           "hasDefault": true
         },
         {
@@ -3677,6 +3919,18 @@
           "type": "string",
           "nullable": false,
           "hasDefault": false
+        },
+        {
+          "name": "displayId",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "panelUniqueId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -5629,6 +5883,20 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.DisplayPanelFingerprint": [
+      {
+        "name": "width",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "height",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.FrameMetricsData": [
       {
         "name": "applicationId",
@@ -6255,7 +6523,7 @@
     ],
     "dev.jasonpearson.automobile.protocol.PackageEventData": [
       {
-        "name": "eventType",
+        "name": "action",
         "type": "string",
         "nullable": false,
         "hasDefault": false
@@ -6267,9 +6535,27 @@
         "hasDefault": false
       },
       {
-        "name": "className",
-        "type": "string",
+        "name": "userId",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "uid",
+        "type": "int",
         "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "isSystem",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "removedForAllUsers",
+        "type": "boolean",
+        "nullable": false,
         "hasDefault": true
       }
     ],

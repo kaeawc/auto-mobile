@@ -22,14 +22,11 @@ import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
 import { startupOptionDeficits, mergeDaemonOptions } from "./startupOptions";
 import {
   DaemonVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonAssetVersionMismatchError,
-  daemonInternalErrors,
   type VersionMismatchReason,
-  type BuildMismatchReason,
-} from "./daemonErrors";
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
-
+} from "./DaemonVersionMismatchError";
+import { DaemonBuildMismatchError, type BuildMismatchReason } from "./DaemonBuildMismatchError";
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
 export async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();

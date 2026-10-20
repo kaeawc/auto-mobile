@@ -1,7 +1,8 @@
+import { guardDirectoryEntries, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import path from "node:path";
-import { parseSync, Visitor } from "oxc-parser";
+import { parseSync } from "oxc-parser";
 
 // #11576: the Windows unit lane's largest failure (80 of 132 classified failing jobs over
 // 2026-10-09/10, red on main for 15 hours) was one assertion:
@@ -256,7 +257,7 @@ describe("POSIX path literal expectations (Windows unit lane, #11576)", () => {
   let scanned: number;
   beforeAll(() => {
     const walk = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      guardDirectoryEntries(dir).flatMap((entry) => {
         const file = path.join(dir, entry.name);
         return entry.isDirectory() ? walk(file) : entry.name.endsWith(".test.ts") ? [file] : [];
       });
@@ -269,7 +270,7 @@ describe("POSIX path literal expectations (Windows unit lane, #11576)", () => {
         return [];
       }
       const allowed = (ALLOWLIST[relative] ?? []).map((entry) => entry.split(":")[0]);
-      return findPosixPathLiteralExpectations(readFileSync(file, "utf8"))
+      return findPosixPathLiteralExpectations(readGuardFile(file))
         .filter((line) => !allowed.includes(line))
         .map((line) => `test/${relative}:${line}`);
     });

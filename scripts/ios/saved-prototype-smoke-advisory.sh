@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/run_with_timeout.sh"
 device_id="${1:-}"
 if [[ -z "$device_id" ]]; then echo 'usage: saved-prototype-smoke-advisory.sh <simulator-udid>' >&2; exit 0; fi

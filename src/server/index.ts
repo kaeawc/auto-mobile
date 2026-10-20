@@ -27,7 +27,11 @@ import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
 import { installTasksProtocol } from "./tasks/installTasksProtocol";
 import type { TaskManager } from "../daemon/tasks/TaskManager";
 import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
-import { createTaskAwareToolCallExecutor, TASK_ELIGIBLE_TOOLS } from "./tasks/toolCallTasks";
+import {
+  createTaskAwareToolCallExecutor,
+  TASK_ELIGIBILITY,
+  type TaskEligibility,
+} from "./tasks/toolCallTasks";
 import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSessionOfBoundPlan";
 
 // Import the tool registry
@@ -85,7 +89,7 @@ import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
-} from "./toolSelectionProfileRegistry";
+} from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
   iosDependencies?: IosDoctorDependencies;
@@ -151,7 +155,7 @@ export interface McpServerOptions {
    * reconnects (a socket session id does not).
    */
   taskOwnerKey?: string;
-  taskEligibleTools?: ReadonlySet<string>;
+  taskEligibleTools?: TaskEligibility;
   taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
 
@@ -287,7 +291,7 @@ function installTasks(
     execute,
     taskManager,
     ownerKey,
-    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBLE_TOOLS,
+    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBILITY,
     ...(options.taskLeaseKeepalive && { keepalive: options.taskLeaseKeepalive }),
   });
 }
@@ -504,3 +508,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   return server;
 };
+
+/** Refresh externally changed resource rosters before a cached control-socket discovery reply. */
+export function refreshMcpResourceList(): Promise<void> {
+  return ResourceRegistry.refreshBeforeList();
+}

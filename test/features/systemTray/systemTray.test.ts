@@ -30,6 +30,7 @@ import {
   resolveNotificationGroupExpansionState,
   resolveNotificationSwipeElement,
   resolveNotificationTapElement,
+  clearMatchingSystemTrayNotifications,
 } from "../../../src/features/systemTray/systemTrayHelpers";
 import type { SystemTrayIosClient } from "../../../src/features/systemTray/systemTrayHelpers";
 import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
@@ -51,7 +52,7 @@ import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 isolateToolRegistry();
 
 const POLL_INTERVAL_MS = 250;
-// Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
+// Mirrors SYSTEM_TRAY_REEXPAND_INTERVAL_MS in helpers/runtime.ts.
 const REEXPAND_INTERVAL_MS = 1000;
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 const mockInstalledApps = (packageNames: string[]) =>
@@ -4589,6 +4590,171 @@ describe("exact notification classifier IDs", () => {
       ],
     };
     expect(getNotificationGroupChildRows(group)).toEqual([]);
+  });
+});
+
+describe("Android systemTray clearAll post-swipe recovery", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  const setup = () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observer = new FakeObserveScreen();
+    const swipes = () =>
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
+    const reopenTimes: number[] = [];
+    const executeCommand = adb.executeCommand.bind(adb);
+    spyOn(adb, "executeCommand").mockImplementation((command, options) => {
+      if (command.endsWith("expand-notifications") && swipes().length > 0) {
+        reopenTimes.push(timer.now());
+      }
+      return executeCommand(command, options);
+    });
+    observer.setObserveResult(() =>
+      createObservation(
+        adb.getExecutedCommands().some((command) => command.startsWith("shell input tap"))
+          ? headerlessTwoNotificationGroups.expanded
+          : headerlessTwoNotificationGroups.collapsed,
+      ),
+    );
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      observeScreenFactory: () => observer,
+    });
+    const drain = (signal?: AbortSignal) =>
+      clearMatchingSystemTrayNotifications(
+        device,
+        { appId: "com.android.shell" },
+        ["Delta", "Gamma"],
+        3125,
+        { maxSwipes: 1, signal },
+      );
+    return { timer, adb, observer, swipes, reopenTimes, drain };
+  };
+
+  test("reopens a grouped app's shade after one closed post-swipe observation", async () => {
+    const { observer, adb, swipes, reopenTimes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    let postSwipeReads = 0;
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      return Promise.resolve(
+        postSwipeReads++ === 0 ? createObservation() : createEmptyTrayObservation(),
+      );
+    });
+
+    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 1, stalled: false });
+    expect(reopenTimes).toHaveLength(1);
+    const commands = adb.getExecutedCommands();
+    expect(commands.findIndex((command) => command.startsWith("shell input tap"))).toBeLessThan(
+      commands.findIndex((command) => command.startsWith("shell input swipe")),
+    );
+  });
+
+  test("returns a stalled partial result when the post-swipe shade stays unreadable", async () => {
+    const { observer, swipes, reopenTimes, timer, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) =>
+      swipes().length > 0 ? Promise.resolve(createObservation()) : execute(options),
+    );
+
+    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(swipes()).toHaveLength(1);
+    expect(timer.now()).toBe(3125);
+    expect(reopenTimes.length).toBeGreaterThan(0);
+    for (let index = 1; index < reopenTimes.length; index++) {
+      expect(reopenTimes[index] - reopenTimes[index - 1]).toBeGreaterThanOrEqual(
+        REEXPAND_INTERVAL_MS,
+      );
+    }
+  });
+
+  test("returns a stalled partial result when the verified post-swipe read times out", async () => {
+    const { observer, swipes, timer, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) =>
+      swipes().length > 0 ? new Promise<ObserveResult>(() => {}) : execute(options),
+    );
+
+    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(swipes()).toHaveLength(1);
+    expect(timer.now()).toBe(3125);
+  });
+
+  test("propagates cancellation during a post-swipe read", async () => {
+    const { observer, swipes, timer, drain } = setup();
+    const controller = new AbortController();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      timer.setTimeout(() => controller.abort(), 125);
+      return new Promise<ObserveResult>(() => {});
+    });
+
+    await expect(drain(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(swipes()).toHaveLength(1);
+    expect(timer.now()).toBeLessThan(3125);
+  });
+
+  test("bounds a hung reopen by the shared deadline and cancels its pending work", async () => {
+    const { observer, swipes, timer, reopenTimes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    let reopenSignal: AbortSignal | undefined;
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      if (reopenTimes.length > 0) {
+        reopenSignal = options?.signal;
+        return new Promise<ObserveResult>(() => {});
+      }
+      return Promise.resolve(createObservation());
+    });
+
+    expect(await drain()).toEqual({ swipeCount: 1, dismissedCount: 0, stalled: true });
+    expect(timer.now()).toBe(3125);
+    expect(reopenTimes).toHaveLength(1);
+    expect(reopenSignal?.aborted).toBe(true);
+  });
+
+  test("propagates cancellation while reopening the post-swipe shade", async () => {
+    const { observer, swipes, timer, reopenTimes, drain } = setup();
+    const controller = new AbortController();
+    const execute = observer.execute.bind(observer);
+    spyOn(observer, "execute").mockImplementation((options) => {
+      if (swipes().length === 0) {
+        return execute(options);
+      }
+      if (reopenTimes.length > 0) {
+        timer.setTimeout(() => controller.abort(), 125);
+        return new Promise<ObserveResult>(() => {});
+      }
+      return Promise.resolve(createObservation());
+    });
+
+    await expect(drain(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(timer.now()).toBeLessThan(3125);
+    expect(reopenTimes).toHaveLength(1);
+  });
+
+  test("does not convert an unrelated post-swipe read error into partial success", async () => {
+    const { observer, swipes, drain } = setup();
+    const execute = observer.execute.bind(observer);
+    const readError = new Error("observer failed");
+    spyOn(observer, "execute").mockImplementation((options) =>
+      swipes().length > 0 ? Promise.reject(readError) : execute(options),
+    );
+
+    await expect(drain()).rejects.toBe(readError);
   });
 });
 

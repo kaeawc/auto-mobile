@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { toolJson } from "../helpers/toolResponse";
 import * as planUtils from "../../src/server/planExecutorFactory";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";

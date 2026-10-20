@@ -1,6 +1,13 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { swipeOnSchema } from "../../../src/server/interactionTools";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
+import type {
+  ObservedActionResult,
+  ObservedEnvelope,
+  ObservedChangeOptions,
+} from "../../../src/features/action/observedInteractionTypes";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
 import type { ObserveResult, SwipeOnOptions } from "../../../src/models";
 import { encodeAndroidFlat, type LogicalNode } from "../../fixtures/hierarchyArbitraries";
@@ -37,7 +44,7 @@ function observation(kind = "missing", top = 100): ObserveResult {
   if (kind === "container-ambiguous") {
     panel.children.push(node("list"));
   }
-  return {
+  return buildObserveResult({
     updatedAt: top,
     observationId: "test-observation",
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
@@ -55,7 +62,7 @@ function observation(kind = "missing", top = 100): ObserveResult {
         ),
       },
     },
-  };
+  });
 }
 function harness(frames: ObserveResult[], resolver?: ElementResolver) {
   const observe = new FakeObserveScreen();
@@ -65,10 +72,14 @@ function harness(frames: ObserveResult[], resolver?: ElementResolver) {
   timer.enableAutoAdvance();
   const runner = new FakeTalkBackSwipeExecutor();
   class TestSwipeOn extends SwipeOn {
-    override async observedInteraction<T>(
-      run: (observation: ObserveResult) => Promise<T>,
-    ): Promise<T & { observation: ObserveResult }> {
-      const result = await run(frames[Math.min(index, frames.length - 1)]);
+    override async observedInteraction<R extends ObservedActionResult>(
+      run: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+      options: ObservedChangeOptions,
+    ): Promise<R & ObservedEnvelope> {
+      const result = await runBlockWith(() => frames[Math.min(index, frames.length - 1)])(
+        run,
+        options,
+      );
       index++;
       timer.advanceTime(200);
       return { ...result, observation: frames[Math.min(index, frames.length - 1)] };

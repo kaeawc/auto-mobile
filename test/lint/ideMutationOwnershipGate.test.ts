@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { Visitor } from "oxc-parser";
-import { parseGuardSource } from "./astGuard";
+
+import { parseGuardSource, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 
 /**
  * Every device-mutating `ide/*` socket route must reach the ownership check (#10827), as `input/*`
@@ -53,9 +53,31 @@ describe("mutating ide/* routes reach the device ownership gate (#10827)", () =>
 
   beforeAll(() => {
     methods = new Map();
-    for (const relative of ["socketServer.ts", "socketServer/ideDeviceRoutes.ts"]) {
+    for (const relative of [
+      "socketServer.ts",
+      "socketServerParts/ClientRequestCancellation.ts",
+      "socketServerParts/DaemonSocketQueueOverflowError.ts",
+      "socketServerParts/McpBindings.ts",
+      "socketServerParts/McpExecution.ts",
+      "socketServerParts/McpRouting.ts",
+      "socketServerParts/ReleasedBoundSessionError.ts",
+      "socketServerParts/SocketAdmission.ts",
+      "socketServerParts/SocketIdeRoutes.ts",
+      "socketServerParts/SocketInput.ts",
+      "socketServerParts/SocketLifecycle.ts",
+      "socketServerParts/SocketServerRuntime.ts",
+      "socketServerParts/SocketTextInput.ts",
+      "socketServerParts/SocketTransport.ts",
+      "socketServerParts/createSocketServerOperations.ts",
+      "socketServerParts/socketServerContracts.ts",
+      "socketServerParts/socketServerOperations.ts",
+
+      "socketServer/ideDeviceRoutes.ts",
+      "socketServer/inputDeviceGating.ts",
+      "socketServer/inputStrokes.ts",
+    ]) {
       const file = join(import.meta.dir, "..", "..", "src", "daemon", relative);
-      for (const [name, calls] of thisCallsByMethod(file, readFileSync(file, "utf8"))) {
+      for (const [name, calls] of thisCallsByMethod(file, readGuardFile(file))) {
         methods.set(name, calls);
       }
     }

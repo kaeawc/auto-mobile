@@ -1,7 +1,7 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { SwipeOnElement } from "../../../src/features/action/SwipeOnElement";
-import type { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import type { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import type { BootedDevice, Element, ObserveResult, SwipeResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -42,11 +42,7 @@ class TestSwipeOnElement extends SwipeOnElement {
   // Exercise the action callback directly, as in the TapOnElement tests. This
   // isolates its dispatch boundary from BaseVisualChange's own abort checks and
   // avoids real observation, device commands, and timers.
-  override async observedInteraction(
-    action: Parameters<BaseVisualChange["observedInteraction"]>[0],
-  ): Promise<SwipeResult> {
-    return action(observation);
-  }
+  override observedInteraction = runBlockWith(observation);
 }
 
 describe("SwipeOnElement", () => {
@@ -91,6 +87,6 @@ describe("SwipeOnElement", () => {
     expect(await swipe.execute(element, "up")).toBe(gesture.result);
     expect(gesture.calls).toHaveLength(1);
     expect(gesture.calls[0]?.slice(0, 5)).toEqual([200, 700, 200, 200, {}]);
-    expect(gesture.calls[0]?.[6]).toBeUndefined();
+    expect(gesture.calls[0]?.slice(6)).toEqual([]);
   });
 });

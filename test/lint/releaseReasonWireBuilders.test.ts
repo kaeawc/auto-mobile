@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import {
   EXEMPT_RELEASE_REASON_HOLDERS,
@@ -11,11 +12,11 @@ const root = join(import.meta.dir, "..", "..");
 const builderFiles = new Set(RELEASE_REASON_WIRE_BUILDERS.map((owner) => owner.split("#")[0]));
 // Parse each src file exactly once, outside timed test bodies; all rules share this inventory.
 const inventory = Object.freeze(
-  readdirSync(join(root, "src"), { recursive: true })
+  readdirSync(join(root, "src"), { recursive: true, encoding: "utf8" })
     .filter((file) => file.endsWith(".ts"))
     .flatMap((file) => {
       const relative = `src/${file.split(sep).join("/")}`;
-      return scanReleaseReasonSerialisations(relative, readFileSync(join(root, relative), "utf8"), {
+      return scanReleaseReasonSerialisations(relative, readGuardFile(join(root, relative)), {
         hostsWireBuilder: builderFiles.has(relative),
       });
     }),

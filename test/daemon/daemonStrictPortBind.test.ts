@@ -70,6 +70,7 @@ function daemonWithFakeHttpServer(
   outcome: "bind-ok" | "bind-refused",
 ): Daemon {
   return new Daemon(options, {
+    httpToken: "test-http-token",
     httpServerFactory: () => new FakeBindServer(outcome),
   });
 }

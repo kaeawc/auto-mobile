@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -197,4 +197,8 @@ describe("Window disk cache unit-test guard", () => {
     ).toEqual([]);
     expect(adb.getExecutedCommands()).toEqual([]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

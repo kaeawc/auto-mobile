@@ -18,6 +18,7 @@ import type {
   BindingRegistry,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS } from "../../../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { exponentialBackoff } from "../../../../src/utils/Backoff";
 import { logger } from "../../../../src/utils/logger";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -253,15 +254,15 @@ describe("rehydrated managed execution peer claim fence", () => {
     async () => {
       faults.busy.claimExecution = 3;
       await reowner.reown([S], { rehydrated: true });
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       expect(faults.calls.claimExecution).toBe(1);
       await advance(24);
       expect(faults.calls.claimExecution).toBe(1);
       await advance(1);
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       expect(reowner.automationRefusal(S)).toBeDefined();
       await advance(25);
-      expect(timer.getPendingTimeouts()).toEqual([40]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 40]);
       expect(reowner.automationRefusal(S)).toBeDefined();
       await advance(40);
       await reowner.whenIdle();
@@ -486,7 +487,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       });
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       await advance(24);
       expect(opens).toBe(1);
       await advance(1);
@@ -532,7 +533,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       };
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)).toBeUndefined();
@@ -548,7 +549,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       await registry.updateBindingState(key, BINDING, "settling", { settler: PREVIOUS });
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       for (const pid of PEERS) {
         expect((await claimAs(pid)).kind).toBe("binding_not_ready");
       }
@@ -573,11 +574,11 @@ describe("rehydrated managed execution peer claim fence", () => {
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
       await advance(25);
-      await drainUntil(() => timer.getPendingTimeouts()[0] === 25, {
+      await drainUntil(() => timer.getPendingTimeouts().includes(25), {
         description: "the second binding_not_ready attempt to schedule its backoff",
       });
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       const assignment = (await registry.getAssignment(key))!;
       await registry.updateBindingState(
         key,
@@ -603,7 +604,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       faults.busy.claimExecution = 1;
       await reowner.reown([S]);
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)).toBeUndefined();
@@ -619,7 +620,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       await registry.updateBindingState(key, BINDING, "settling", { settler: PREVIOUS });
       await reowner.reown([S]);
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([25]);
+      expect(timer.getPendingTimeouts()).toEqual([MANAGED_EXECUTION_REOWN_MAX_UNCONFIRMED_MS, 25]);
       judge = viewOf(PEERS[0]!);
       await registry.recoverSettledBindings(key.scopeKey);
       judge = viewOf(OWNER.pid);

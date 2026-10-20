@@ -1,4 +1,5 @@
 import { type WireHierarchyNodeSlot } from "../observeResultWire";
+import { STATUS_BAR_ROOT_IDS } from "../../../../utils/androidStatusBar";
 import type { ObserveResult } from "../../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../models/ViewHierarchyResult";
 import { nodeAttributes as hierarchyNodeAttributes } from "../../../../models/ViewHierarchyResult";
@@ -100,13 +101,6 @@ function isKeyboardNodeForDiff(
     (iosKeyboardVisible && isIosKeyboardClass(platformClassNameForDiff(rec).trim() || undefined))
   );
 }
-
-/** Roots of the SystemUI status bar subtree (clock, notification icons, signal, battery). */
-const STATUS_BAR_ROOT_IDS: ReadonlySet<string> = new Set([
-  "com.android.systemui:id/status_bar_launch_animation_container",
-  "com.android.systemui:id/status_bar_container",
-  "com.android.systemui:id/status_bar",
-]);
 
 /**
  * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.

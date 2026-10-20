@@ -139,6 +139,24 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
     this.deviceSessionResolver = resolver;
   }
 
+  /** Whether a live subscriber would receive this device/package's samples. */
+  hasSubscriberForDevice(deviceId: string, packageName: string): boolean {
+    const data = {
+      deviceSessionUuid: this.deviceSessionResolver.resolveUuid(deviceId),
+      packageName,
+    };
+    for (const subscriber of this.subscribers.values()) {
+      if (
+        !subscriber.backfilling &&
+        !subscriber.socket.destroyed &&
+        this.matchesFilter(subscriber.filter, data)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Push live performance data to all interested subscribers. `deviceSessionUuid`
    * is (re)resolved here from `deviceId` so the routing key reflects the device's
@@ -265,7 +283,10 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
     };
   }
 
-  protected matchesFilter(filter: PerformanceFilter, data: LivePerformanceData): boolean {
+  protected matchesFilter(
+    filter: PerformanceFilter,
+    data: Pick<LivePerformanceData, "deviceSessionUuid" | "packageName">,
+  ): boolean {
     const matchesDevice =
       filter.deviceSessionUuid === null || filter.deviceSessionUuid === data.deviceSessionUuid;
     const matchesPackage = filter.packageName === null || filter.packageName === data.packageName;

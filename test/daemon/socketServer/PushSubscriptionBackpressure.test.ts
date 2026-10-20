@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import type { Socket } from "node:net";
 import { PushSubscriptionSocketServer } from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
@@ -70,16 +70,18 @@ function rig() {
 }
 
 describe("push backpressure", () => {
-  const restoreLogs: Array<() => void> = [];
-  beforeAll(() => {
-    for (const method of ["debug", "info", "warn", "error"] as const) {
-      const spy = spyOn(logger, method).mockImplementation(() => {});
-      restoreLogs.push(() => spy.mockRestore());
-    }
+  let logSpies: ReturnType<typeof spyOn>[];
+  beforeEach(() => {
+    logSpies = [
+      spyOn(logger, "debug").mockImplementation(() => {}),
+      spyOn(logger, "info").mockImplementation(() => {}),
+      spyOn(logger, "warn").mockImplementation(() => {}),
+      spyOn(logger, "error").mockImplementation(() => {}),
+    ];
   });
-  afterAll(() => {
-    for (const restore of restoreLogs.splice(0)) {
-      restore();
+  afterEach(() => {
+    for (const spy of logSpies) {
+      spy.mockRestore();
     }
   });
   it("holds only the latest frame per type and subscription until drain", () => {

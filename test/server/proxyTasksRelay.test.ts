@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
@@ -79,18 +79,23 @@ class RawWire {
 }
 
 describe("stdio proxy relays the Tasks extension to the daemon (#4668)", () => {
-  let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
+  let isAvailableSpy: ReturnType<typeof spyOn>;
   let closeProxy: (() => Promise<void>) | undefined;
 
+  beforeEach(() => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  });
+
   afterEach(async () => {
-    await closeProxy?.();
-    closeProxy = undefined;
-    isAvailableSpy?.mockRestore();
-    isAvailableSpy = null;
+    try {
+      await closeProxy?.();
+    } finally {
+      closeProxy = undefined;
+      isAvailableSpy.mockRestore();
+    }
   });
 
   async function connect(...clients: FakeDaemonClient[]): Promise<RawWire> {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     let next = 0;

@@ -567,7 +567,7 @@ describe("rotation waits for the old stream to fully close before reopening (#61
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       mod.logger.info("triggers rotation");
@@ -643,7 +643,7 @@ describe("writes are serialized across log rotation (#6149)", () => {
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       // Record A triggers rotation; its close is withheld (finishClose deferred),
@@ -723,7 +723,7 @@ describe("joined writers recover from a failed shared rotation (#6149)", () => {
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       // A starts rotation and B joins it before the injected rename failure.
@@ -794,7 +794,7 @@ describe("the oversized-file check itself is serialized, not just the rotation (
       const originalEnd = oldStream.end.bind(oldStream);
       oldStream.end = (callback?: () => void) => {
         endWasCalled();
-        originalEnd(callback);
+        return originalEnd(callback);
       };
 
       mod.logger.info("record A triggers rotation");

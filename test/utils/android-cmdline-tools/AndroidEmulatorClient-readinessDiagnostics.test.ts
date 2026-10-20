@@ -135,7 +135,10 @@ describe("Android emulator readiness diagnostics", () => {
     await expect(readiness).rejects.toThrow("phase=device-discovery");
     await expect(readiness).rejects.toThrow("token=[REDACTED]");
     await expect(readiness).rejects.not.toThrow("super-secret");
-    const error = await readiness.catch((cause: unknown) => cause as Error);
+    const error = await readiness.catch((cause: unknown) => cause);
+    if (!(error instanceof Error)) {
+      throw new Error("Expected readiness to reject with an Error");
+    }
     expect(error.message.length).toBeLessThan(1_000);
   });
 

@@ -113,7 +113,7 @@ class ViewHierarchyScaleMetadataTest {
    * through it — the debounced direct extraction ([extractHierarchyDirect]) and the ADB
    * EXTRACT_HIERARCHY broadcast ([extractHierarchy]). If the helper's scale-1 contract is altered,
    * or either route stops calling it, no serialization test above would notice. Scans the committed
-   * source (the BroadcastGuardAdoptionTest mechanism) rather than executing the
+   * source (the BroadcastGuardAdoptionTestSourceTest mechanism) rather than executing the
    * AccessibilityService, which cannot be constructed in a unit test.
    */
   @Test

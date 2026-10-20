@@ -272,32 +272,34 @@ internal class HierarchyController(
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy? {
-    val contextAtExtractionStart = host.currentFrameContext()
+    return HierarchyCapture(snapshotOptions.displayId)
+      .extractDirect(disableAllFiltering, snapshotOptions)
+  }
+
+  private inner class HierarchyCapture(displayId: Int?) {
+    private val contextAtExtractionStart = host.currentFrameContext()
     // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
     // that interval, hierarchy geometry cannot be proven to match a single display orientation.
-    val selected = host.selectDisplayWindows(snapshotOptions.displayId)
-    val targetDisplayId = selected.displayId
-    val rotationProvenance = host.rotationProvenance()
-    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
-    val allWindows = selected.windows
-    val rootNode =
+    private val selected = host.selectDisplayWindows(displayId)
+    private val targetDisplayId = selected.displayId
+    private val rotationProvenance = host.rotationProvenance()
+    private val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
+    private val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
+    private val allWindows = selected.windows
+    private val rootNode =
       viewHierarchyExtractor.rootForDisplay(host.activeWindowRoot(), allWindows, targetDisplayId)
     // Capture foreground info atomically with rootNode to avoid race conditions
     // where the app state changes between hierarchy extraction and getForegroundActivity()
-    val capturedRootPackage = rootNode?.packageName?.toString()
-    val capturedWindowClass = host.lastWindowClassName()
-    val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
-    val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
+    private val capturedRootPackage = rootNode?.packageName?.toString()
+    private val capturedWindowClass = host.lastWindowClassName()
+    private val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
+    private val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
 
-    if (allWindows.isNullOrEmpty() && rootNode == null) {
-      Log.w(TAG, "No windows or root node available for extraction")
-      return null
-    }
-
-    // Use multi-window extraction if windows are available, otherwise fall back to single window
-    val hierarchy =
-      if (!allWindows.isNullOrEmpty()) {
+    fun walkDirect(
+      disableAllFiltering: Boolean,
+      snapshotOptions: HierarchySnapshotOptions,
+    ): ViewHierarchy? {
+      return if (!allWindows.isNullOrEmpty()) {
         Log.d(
           TAG,
           "Extracting from ${allWindows.size} windows " +
@@ -333,62 +335,173 @@ internal class HierarchyController(
             ),
         )
       }
-
-    if (snapshotOptions.isCancelled()) {
-      // A cancelled snapshot will not be delivered; do not retain its frame-context entry.
-      Log.d(TAG, "Discarding cancelled direct hierarchy extraction")
-      return null
     }
 
-    val rotation =
-      rotationProvenance.rotationIfUnchanged(
-        rotationCapture,
-        rotationAtCaptureStart,
-        displayController.getRotationOrNull(targetDisplayId),
-        targetDisplayId,
-      )
-    // Bounding rectangles are only meaningful relative to the same orientation
-    // as screenDimensions. Keep the established edge insets, but avoid emitting
-    // stale geometry when the capture's orientation could not be proven.
-    val captureInsets =
-      if (rotation == null) {
-        insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown())
-      } else {
-        insets
+    private fun enrichDirect(hierarchy: ViewHierarchy?): ViewHierarchy? {
+      val rotation =
+        rotationProvenance.rotationIfUnchanged(
+          rotationCapture,
+          rotationAtCaptureStart,
+          displayController.getRotationOrNull(targetDisplayId),
+          targetDisplayId,
+        )
+      // Bounding rectangles are only meaningful relative to the same orientation
+      // as screenDimensions. Keep the established edge insets, but avoid emitting
+      // stale geometry when the capture's orientation could not be proven.
+      val captureInsets =
+        if (rotation == null) {
+          insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown())
+        } else {
+          insets
+        }
+
+      // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
+      val wakefulness = host.wakefulness()
+      val foreground = host.foregroundActivity(capturedRootPackage, capturedWindowClass)
+      val density = displayController.getDensity()
+      val enriched =
+        HierarchyMetadataBuilder.enrich(
+          hierarchy,
+          HierarchyMetadata(
+            displayId = targetDisplayId,
+            panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            panelFingerprint = displayController.panelFingerprint(targetDisplayId),
+            screenWidth = screenDimensions?.width,
+            screenHeight = screenDimensions?.height,
+            rotation = rotation,
+            systemInsets = CtrlProxy.legacySystemInsets(captureInsets),
+            insets = captureInsets,
+            wakefulness = wakefulness,
+            foregroundActivity = foreground,
+            density = density,
+            sdkInt = Build.VERSION.SDK_INT,
+            deviceModel = Build.MODEL,
+            isEmulator = host.isEmulator(),
+            accessibilityTool = host.accessibilityTool(),
+          ),
+        )
+
+      return enriched
+    }
+
+    fun extractDirect(
+      disableAllFiltering: Boolean,
+      snapshotOptions: HierarchySnapshotOptions,
+    ): ViewHierarchy? {
+
+      if (allWindows.isNullOrEmpty() && rootNode == null) {
+        Log.w(TAG, "No windows or root node available for extraction")
+        return null
       }
 
-    // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
-    val wakefulness = host.wakefulness()
-    val foreground = host.foregroundActivity(capturedRootPackage, capturedWindowClass)
-    val density = displayController.getDensity()
-    val enriched =
-      HierarchyMetadataBuilder.enrich(
-        hierarchy,
-        HierarchyMetadata(
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-          panelFingerprint = displayController.panelFingerprint(targetDisplayId),
-          screenWidth = screenDimensions?.width,
-          screenHeight = screenDimensions?.height,
-          rotation = rotation,
-          systemInsets = CtrlProxy.legacySystemInsets(captureInsets),
-          insets = captureInsets,
-          wakefulness = wakefulness,
-          foregroundActivity = foreground,
-          density = density,
-          sdkInt = Build.VERSION.SDK_INT,
-          deviceModel = Build.MODEL,
-          isEmulator = host.isEmulator(),
-          accessibilityTool = host.accessibilityTool(),
-        ),
-      )
-    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
-    if (
-      hierarchyWithScaleMetadata != null && contextAtExtractionStart == host.currentFrameContext()
-    ) {
-      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
+      // Use multi-window extraction if windows are available, otherwise fall back to single window
+      val hierarchy = walkDirect(disableAllFiltering, snapshotOptions)
+
+      if (snapshotOptions.isCancelled()) {
+        // A cancelled snapshot will not be delivered; do not retain its frame-context entry.
+        Log.d(TAG, "Discarding cancelled direct hierarchy extraction")
+        return null
+      }
+
+      val enriched = enrichDirect(hierarchy)
+      val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
+      if (
+        hierarchyWithScaleMetadata != null && contextAtExtractionStart == host.currentFrameContext()
+      ) {
+        extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
+      }
+      return hierarchyWithScaleMetadata
     }
-    return hierarchyWithScaleMetadata
+
+    fun walkFallback(textFilter: String?, disableAllFiltering: Boolean): ViewHierarchy? {
+      return if (!allWindows.isNullOrEmpty()) {
+        Log.d(
+          TAG,
+          "extractHierarchy from ${allWindows.size} windows " +
+            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: ${host.occlusionEnabled()})",
+        )
+        viewHierarchyExtractor.extractFromAllWindows(
+          allWindows,
+          rootNode,
+          options =
+            HierarchyExtractionOptions(
+              textFilter = textFilter,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              occlusionEnabled = host.occlusionEnabled(),
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
+        )
+      } else {
+        viewHierarchyExtractor.extractFromActiveWindow(
+          rootNode,
+          options =
+            HierarchyExtractionOptions(
+              textFilter = textFilter,
+              screenDimensions = screenDimensions,
+              dedupeTextContentDesc = true,
+              disableAllFiltering = disableAllFiltering,
+              displayId = targetDisplayId,
+              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            ),
+        )
+      }
+    }
+
+    private fun enrichFallback(hierarchy: ViewHierarchy?): ViewHierarchy? {
+      val rotation =
+        rotationProvenance.rotationIfUnchanged(
+          rotationCapture,
+          rotationAtCaptureStart,
+          displayController.getRotationOrNull(targetDisplayId),
+          targetDisplayId,
+        )
+      val captureInsets =
+        if (rotation == null) insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown())
+        else insets
+      val enriched =
+        HierarchyMetadataBuilder.enrich(
+          hierarchy,
+          HierarchyMetadata(
+            displayId = targetDisplayId,
+            panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+            panelFingerprint = displayController.panelFingerprint(targetDisplayId),
+            screenWidth = screenDimensions?.width,
+            screenHeight = screenDimensions?.height,
+            rotation = rotation,
+            systemInsets = CtrlProxy.legacySystemInsets(captureInsets),
+            insets = captureInsets,
+            wakefulness = host.wakefulness(),
+            foregroundActivity = host.foregroundActivity(capturedRootPackage, capturedWindowClass),
+            density = displayController.getDensity(),
+            sdkInt = Build.VERSION.SDK_INT,
+            deviceModel = Build.MODEL,
+            isEmulator = host.isEmulator(),
+            accessibilityTool = host.accessibilityTool(),
+          ),
+        )
+
+      return enriched
+    }
+
+    fun extractFallback(textFilter: String?, disableAllFiltering: Boolean): ViewHierarchy? {
+
+      if (allWindows.isNullOrEmpty() && rootNode == null) {
+        return null
+      }
+
+      val hierarchy = walkFallback(textFilter, disableAllFiltering)
+      val enriched = enrichFallback(hierarchy)
+      val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
+      if (
+        hierarchyWithScaleMetadata != null && contextAtExtractionStart == host.currentFrameContext()
+      ) {
+        extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
+      }
+      return hierarchyWithScaleMetadata
+    }
   }
 
   /**
@@ -453,26 +566,7 @@ internal class HierarchyController(
         }
 
       if (hierarchy != null) {
-        // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
-        // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
-        // encode throws (leak fix).
-        deliverHierarchyFrame(
-          serialize = {
-            commandJob?.ensureActive()
-            perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-          },
-          write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
-          broadcast = { serialized ->
-            broadcastHierarchyUpdate(
-              hierarchy,
-              sync = true,
-              serialized = serialized,
-              requestId = requestId,
-              routeByRequestId = false,
-            )
-          },
-          releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
-        )
+        ImmediateHierarchyDelivery(requestId, commandJob).deliver(hierarchy)
       } else {
         commandJob?.ensureActive()
         serviceScope.coroutineContext[Job]?.ensureActive()
@@ -485,6 +579,34 @@ internal class HierarchyController(
     } catch (e: CancellationException) {
       host.releaseRequestOwner(requestId)
       throw e
+    }
+  }
+
+  private inner class ImmediateHierarchyDelivery(
+    private val requestId: String?,
+    private val commandJob: Job?,
+  ) {
+    suspend fun deliver(hierarchy: ViewHierarchy) {
+      // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
+      // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
+      // encode throws (leak fix).
+      deliverHierarchyFrame(
+        serialize = {
+          commandJob?.ensureActive()
+          perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+        },
+        write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
+        broadcast = { serialized ->
+          broadcastHierarchyUpdate(
+            hierarchy,
+            sync = true,
+            serialized = serialized,
+            requestId = requestId,
+            routeByRequestId = false,
+          )
+        },
+        releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+      )
     }
   }
 
@@ -532,99 +654,7 @@ internal class HierarchyController(
     textFilter: String? = null,
     disableAllFiltering: Boolean = false,
   ): ViewHierarchy? {
-    val contextAtExtractionStart = host.currentFrameContext()
-    // This is the synchronous ADB-broadcast fallback, not the debounced direct route above. It
-    // must bracket the same inputs and extraction so the fallback never publishes a hierarchy
-    // whose geometry and rotation came from different display states.
-    val selected = host.selectDisplayWindows(null)
-    val targetDisplayId = selected.displayId
-    val rotationProvenance = host.rotationProvenance()
-    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
-    val allWindows = selected.windows
-    val rootNode =
-      viewHierarchyExtractor.rootForDisplay(host.activeWindowRoot(), allWindows, targetDisplayId)
-    val capturedRootPackage = rootNode?.packageName?.toString()
-    val capturedWindowClass = host.lastWindowClassName()
-    val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
-    val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
-
-    if (allWindows.isNullOrEmpty() && rootNode == null) {
-      return null
-    }
-
-    val hierarchy =
-      if (!allWindows.isNullOrEmpty()) {
-        Log.d(
-          TAG,
-          "extractHierarchy from ${allWindows.size} windows " +
-            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: ${host.occlusionEnabled()})",
-        )
-        viewHierarchyExtractor.extractFromAllWindows(
-          allWindows,
-          rootNode,
-          options =
-            HierarchyExtractionOptions(
-              textFilter = textFilter,
-              screenDimensions = screenDimensions,
-              dedupeTextContentDesc = true,
-              disableAllFiltering = disableAllFiltering,
-              occlusionEnabled = host.occlusionEnabled(),
-              displayId = targetDisplayId,
-              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-            ),
-        )
-      } else {
-        viewHierarchyExtractor.extractFromActiveWindow(
-          rootNode,
-          options =
-            HierarchyExtractionOptions(
-              textFilter = textFilter,
-              screenDimensions = screenDimensions,
-              dedupeTextContentDesc = true,
-              disableAllFiltering = disableAllFiltering,
-              displayId = targetDisplayId,
-              panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-            ),
-        )
-      }
-    val rotation =
-      rotationProvenance.rotationIfUnchanged(
-        rotationCapture,
-        rotationAtCaptureStart,
-        displayController.getRotationOrNull(targetDisplayId),
-        targetDisplayId,
-      )
-    val captureInsets =
-      if (rotation == null) insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown()) else insets
-    val enriched =
-      HierarchyMetadataBuilder.enrich(
-        hierarchy,
-        HierarchyMetadata(
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-          panelFingerprint = displayController.panelFingerprint(targetDisplayId),
-          screenWidth = screenDimensions?.width,
-          screenHeight = screenDimensions?.height,
-          rotation = rotation,
-          systemInsets = CtrlProxy.legacySystemInsets(captureInsets),
-          insets = captureInsets,
-          wakefulness = host.wakefulness(),
-          foregroundActivity = host.foregroundActivity(capturedRootPackage, capturedWindowClass),
-          density = displayController.getDensity(),
-          sdkInt = Build.VERSION.SDK_INT,
-          deviceModel = Build.MODEL,
-          isEmulator = host.isEmulator(),
-          accessibilityTool = host.accessibilityTool(),
-        ),
-      )
-    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
-    if (
-      hierarchyWithScaleMetadata != null && contextAtExtractionStart == host.currentFrameContext()
-    ) {
-      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
-    }
-    return hierarchyWithScaleMetadata
+    return HierarchyCapture(null).extractFallback(textFilter, disableAllFiltering)
   }
 
   /**

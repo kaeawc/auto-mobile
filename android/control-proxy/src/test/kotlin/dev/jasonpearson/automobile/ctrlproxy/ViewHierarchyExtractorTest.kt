@@ -3932,13 +3932,12 @@ class ViewHierarchyExtractorTest {
     element: UIElementInfo,
   ): List<UIElementInfo> = this.visibleChildren(element)
 
-  @Suppress("UNCHECKED_CAST")
   private fun ViewHierarchyExtractor.optimizeHierarchyForTest(
     element: UIElementInfo,
   ): List<UIElementInfo> {
     val method = this.javaClass.getDeclaredMethod("optimizeHierarchy", UIElementInfo::class.java)
     method.isAccessible = true
-    return method.invoke(this, element) as List<UIElementInfo>
+    return (method.invoke(this, element) as List<*>).map { it as UIElementInfo }
   }
 
   // Issue #5471: the optimize pass walks typed children and performs ZERO serialization, so every
@@ -4139,7 +4138,6 @@ class ViewHierarchyExtractorTest {
   ): Map<*, *> {
     val method = this.javaClass.getDeclaredMethod("buildOcclusionInfo", List::class.java)
     method.isAccessible = true
-    @Suppress("UNCHECKED_CAST")
     return method.invoke(this, windowEntries) as Map<*, *>
   }
 
@@ -4160,7 +4158,6 @@ class ViewHierarchyExtractorTest {
         Boolean::class.javaPrimitiveType,
       )
     method.isAccessible = true
-    @Suppress("UNCHECKED_CAST")
     return method.invoke(this, element, occlusionInfo, windowKey, path, isRoot) as UIElementInfo?
   }
 
@@ -4177,9 +4174,9 @@ class ViewHierarchyExtractorTest {
         Int::class.javaPrimitiveType,
       )
     method.isAccessible = true
-    @Suppress("UNCHECKED_CAST")
-    return method.invoke(this, element, screenWidth, screenHeight)
-      as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>
+    return (method.invoke(this, element, screenWidth, screenHeight) as List<*>).map {
+      it as dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
+    }
   }
 
   private fun ViewHierarchyExtractor.detectContentHiddenRegionsAcrossRootsForTest(
@@ -4192,8 +4189,8 @@ class ViewHierarchyExtractorTest {
         dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions::class.java,
       )
     method.isAccessible = true
-    @Suppress("UNCHECKED_CAST")
-    return method.invoke(this, elements, null)
-      as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>?
+    return (method.invoke(this, elements, null) as List<*>?)?.map {
+      it as dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
+    }
   }
 }

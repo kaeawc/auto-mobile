@@ -17,7 +17,7 @@ export interface ReleaseReasonSerialisation {
 export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload",
   "src/server/proxyServer.ts#brokerSessionEndedPayload",
-  "src/server/planExecutionOrchestrator.ts#planBaseEndFields",
+  "src/server/planExecutionRecords.ts#planBaseEndFields",
   "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
   "src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails",
   "src/daemon/types.ts#releasedSessionNotFoundFields",

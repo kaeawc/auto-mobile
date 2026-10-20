@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
 import android.os.Build
@@ -131,8 +130,6 @@ class OverlayManager(
 
   internal fun isOverlayVisibleForTest(): Boolean = overlayVisible
 
-  // Injected sdkInt defaults to the runtime API; resolveCutoutMode guards the API 28+ field.
-  @SuppressLint("NewApi")
   private fun createLayoutParams(): WindowManager.LayoutParams {
     val overlayType = resolveOverlayType()
     return WindowManager.LayoutParams(
@@ -150,7 +147,9 @@ class OverlayManager(
         x = 0
         y = 0
         title = "AutoMobile Overlay"
-        resolveCutoutMode(sdkInt)?.let { mode -> layoutInDisplayCutoutMode = mode }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          resolveCutoutMode(sdkInt)?.let { mode -> layoutInDisplayCutoutMode = mode }
+        }
         // No setFitInsetsTypes(0): overlay layout flags normally ignore system-bar insets.
       }
   }

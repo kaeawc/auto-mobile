@@ -479,6 +479,7 @@ test/features/accessibility/WcagAudit.test.ts
 test/features/accessibility/WcagAuditContrastCoverage.test.ts
 test/features/action/ActionCall.test.ts
 test/features/action/AndroidImeCatalog.test.ts
+test/features/action/AndroidLaunchActivity-transport.test.ts
 test/features/action/AppLifecycle.foregroundReadFailure.test.ts
 test/features/action/AppLifecycle.test.ts
 test/features/action/BaseVisualChange.cachedFreshness.test.ts
@@ -1467,6 +1468,7 @@ test/server/tasks/taskRelay.test.ts
 test/server/tasks/tasksWireProtocol.test.ts
 test/server/telephonyTools.test.ts
 test/server/templates/list.test.ts
+test/server/thrownToolCallOutcome.test.ts
 test/server/toolCallDispatch.test.ts
 test/server/toolEnvelopePayload.classification.test.ts
 test/server/toolEnvelopePayload.property.test.ts
@@ -1536,6 +1538,7 @@ test/utils/android-cmdline-tools/AdbClient-getDeviceLock.captures.test.ts
 test/utils/android-cmdline-tools/AdbClient-getDeviceLock.test.ts
 test/utils/android-cmdline-tools/AdbClient-getForegroundAppChecked.test.ts
 test/utils/android-cmdline-tools/AdbClient-listUsers.test.ts
+test/utils/android-cmdline-tools/AdbClient-transportRecovery.test.ts
 test/utils/android-cmdline-tools/AdbClientApiLevelTimeout.test.ts
 test/utils/android-cmdline-tools/AdbClientPerfSpan.test.ts
 test/utils/android-cmdline-tools/AdbDeviceHealth.test.ts

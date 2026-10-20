@@ -458,7 +458,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 2,
     reason: "Installed-apps resource cache TTL, unrelated to device sessions.",
   },
-  "src/server/webrtcStreamManager.ts describeRecord": {
+  "src/server/webrtcStreamQueries.ts WebRtcStreamQueries.describeRecord": {
     writes: 1,
     reason:
       "WebRTC stream descriptor reporting its subscription lease expiry, not a session clock.",
@@ -476,7 +476,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason:
       "Output-schema field declaration (zod) for the retained-screenshot expiry, not a clock value.",
   },
-  "src/server/toolOutputSchemas.ts <module>": {
+  "src/server/toolOutputSchemas/observationContract.ts <module>": {
     writes: 2,
     reason: "Output-schema field declarations (zod), not clock values.",
   },

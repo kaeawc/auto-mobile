@@ -19,4 +19,3 @@
 1636	src/server/finalizeToolResponse.ts
 1894	src/server/toolOutputSchemas.ts
 2185	src/server/videoRecordingManager.ts
-2055	src/utils/fileLock.ts

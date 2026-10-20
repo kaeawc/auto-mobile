@@ -16,8 +16,8 @@ import {
   setDeviceSnapshotManagerDependencies,
   updateDeviceSnapshotConfig,
   withVmRetentionSnapshotProtection,
-} from "../../src/server/deviceSnapshotManager";
-import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/server/deviceSnapshotResourceUris";
+} from "../../src/daemon/deviceSnapshotManager";
+import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/daemon/deviceSnapshotResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";

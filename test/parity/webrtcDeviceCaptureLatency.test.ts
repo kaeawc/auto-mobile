@@ -273,11 +273,11 @@ describe("#4343 device capture latency instrumentation", () => {
     // these runtime graphs before registering describe.skip can wedge the
     // isolate before Bun prints the skipped test result.
     expect(source).not.toContain('from "../../src/features/webrtc/IosH264Source"');
-    expect(source).not.toContain('from "../../src/server/webrtcStreamManager"');
+    expect(source).not.toContain('from "../../src/daemon/webrtcStreamManager"');
     expect(source).not.toContain('from "../../src/utils/ios-cmdline-tools/SimCtlClient"');
     expect(source).not.toContain('from "../../src/features/webrtc/webrtcStreamingConfig"');
     expect(source).toContain('await import("../../src/features/webrtc/IosH264Source")');
-    expect(source).toContain('await import("../../src/server/webrtcStreamManager")');
+    expect(source).toContain('await import("../../src/daemon/webrtcStreamManager")');
     expect(source).toContain('await import("../../src/utils/ios-cmdline-tools/SimCtlClient")');
     expect(source).toContain('await import("../../src/features/webrtc/webrtcStreamingConfig")');
   });

@@ -1,18 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime.session
 
-interface ImeConnection {
-  fun commitText(text: String): Boolean
-
-  fun setComposingText(text: String, newCursorPosition: Int): Boolean
-
-  fun finishComposingText(): Boolean
-
-  fun setComposingRegion(start: Int, end: Int): Boolean
-
-  fun setSelection(start: Int, end: Int): Boolean
-
-  fun deleteSurroundingText(before: Int, after: Int): Boolean
-
+interface ImeConnection : ImeTextEditing {
   fun sendDownUpKey(keyCode: Int): Boolean
 
   fun performEditorAction(actionId: Int): Boolean
@@ -28,4 +16,19 @@ interface ImeConnection {
   fun textBeforeCursorOrNull(max: Int): String? = textBeforeCursor(max)
 
   fun textAfterCursor(max: Int): String
+}
+
+/** Text and composing operations on an editor connection. */
+interface ImeTextEditing {
+  fun commitText(text: String): Boolean
+
+  fun setComposingText(text: String, newCursorPosition: Int): Boolean
+
+  fun finishComposingText(): Boolean
+
+  fun setComposingRegion(start: Int, end: Int): Boolean
+
+  fun setSelection(start: Int, end: Int): Boolean
+
+  fun deleteSurroundingText(before: Int, after: Int): Boolean
 }

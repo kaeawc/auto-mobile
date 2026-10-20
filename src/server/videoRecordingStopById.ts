@@ -13,7 +13,7 @@ import {
   heldVideoRecordingOwner,
   listActiveVideoRecordings,
   stopVideoRecording,
-} from "./videoRecordingManager";
+} from "../daemon/videoRecordingManager";
 import {
   segmentedSessions,
   type StoppedSegmentedSession,

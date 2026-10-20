@@ -98,6 +98,17 @@ not the shade the outcome is indeterminate and the existing success result is
 kept. A confirmed dismiss costs no extra device call; a stuck row costs one sleep
 and one observe. iOS is unchanged.
 
+## Clear-all outcome (Android)
+
+Android `clearAll` expands collapsed groups before swiping individual rows and
+verifies each dismissal. If a post-swipe read finds the shade closed, it reopens
+the shade before another fresh read, throttled to once per second within the
+shared clear deadline. An unreadable shade or a read/reopen timeout after a
+swipe returns a partial result with `stalled: true` and a separate `swipeCount`;
+unverified swipes do not count as dismissals. App-filtered `dismissedCount`
+continues to use the before/after notification inventory. Cancellation still
+aborts the operation, and an unreadable shade before any swipe remains an error.
+
 ## Android implementation
 
 Open/close the tray (preferred, emulator):

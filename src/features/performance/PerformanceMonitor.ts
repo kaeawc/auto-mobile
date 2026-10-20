@@ -1,3 +1,9 @@
+import { PS_SNAPSHOT_ARGS } from "../../devices/bootAdmission/psSnapshot";
+import {
+  collectIOSPerformanceMetrics,
+  createIOSPerformanceProcessResolver,
+  type IOSPerformanceProcessResolver,
+} from "./iosPerformanceProcessSnapshot";
 import { defaultExecFileAsync, defaultSimCtlClientFactory } from "./PerformanceMonitorDefaults";
 export { defaultSimCtlClientFactory } from "./PerformanceMonitorDefaults";
 import {
@@ -112,11 +118,11 @@ export class PerformanceMonitor {
   }
 
   /**
-   * Start the background monitoring interval.
-   * Does nothing if already started.
+   * Arm the interval when devices are monitored; idle monitors have no timer.
+   * Does nothing if already armed.
    */
   start(): void {
-    if (this.intervalHandle) {
+    if (this.intervalHandle || this.monitoredDevices.size === 0) {
       return;
     }
 
@@ -214,6 +220,7 @@ export class PerformanceMonitor {
       gfxPrimed: false,
       previousMetricHealth: {},
     });
+    this.start();
     logger.info(
       `[PerformanceMonitor] Started monitoring ${packageName} on ${deviceId} (${platform})`,
     );
@@ -225,6 +232,10 @@ export class PerformanceMonitor {
   stopMonitoring(deviceId: string): void {
     this.cancelActiveAndroidSample(deviceId, "Performance monitoring stopped for device");
     if (this.monitoredDevices.delete(deviceId)) {
+      if (this.monitoredDevices.size === 0 && this.intervalHandle) {
+        this.timer.clearInterval(this.intervalHandle);
+        this.intervalHandle = null;
+      }
       // Discard retained samples so a later reconnect of the same deviceId
       // cannot surface stale metrics from the prior session.
       this.perfWindowBuffer.clear(deviceId);
@@ -358,12 +369,15 @@ export class PerformanceMonitor {
 
     const now = this.timer.now();
     const promises: Promise<void>[] = [];
+    const resolveIOSProcess = createIOSPerformanceProcessResolver(() =>
+      this.execFileAsync("ps", [...PS_SNAPSHOT_ARGS]),
+    );
 
     for (const device of this.monitoredDevices.values()) {
       if (this.pausedDeviceCounts.has(device.deviceId)) {
         continue;
       }
-      promises.push(this.sampleDevice(device, now, server));
+      promises.push(this.sampleDevice(device, now, server, resolveIOSProcess));
     }
 
     await Promise.all(promises);
@@ -376,6 +390,7 @@ export class PerformanceMonitor {
     device: MonitoredDevice,
     now: number,
     server: PerformanceDataPusher,
+    resolveIOSProcess: IOSPerformanceProcessResolver,
   ): Promise<void> {
     if (device.platform === "android") {
       const controller = new AbortController();
@@ -393,7 +408,7 @@ export class PerformanceMonitor {
       return;
     }
     try {
-      await this.sampleIOSDevice(device, now, server);
+      await this.sampleIOSDevice(device, now, server, resolveIOSProcess);
     } catch (error) {
       logger.debug(`[PerformanceMonitor] Error sampling ${device.deviceId}: ${error}`);
     }
@@ -534,6 +549,7 @@ export class PerformanceMonitor {
     device: MonitoredDevice,
     now: number,
     server: PerformanceDataPusher,
+    resolveIOSProcess: IOSPerformanceProcessResolver,
   ): Promise<void> {
     // Identity captured before any await (see sampleAndroidDevice).
     const samplingPackage = device.packageName;
@@ -544,23 +560,20 @@ export class PerformanceMonitor {
     const shouldCollectCpu =
       device.lastMediumTick === 0 ||
       now - device.lastMediumTick >= PerformanceMonitor.MEDIUM_INTERVAL_MS;
-    const cpuPromise = shouldCollectCpu
-      ? this.collectIOSCpuMetrics(device)
-      : Promise.resolve(device.cachedCpu);
-
-    // Collect slow metrics (memory) if interval elapsed or first collection
     const shouldCollectMemory =
       device.lastSlowTick === 0 || now - device.lastSlowTick >= PerformanceMonitor.SLOW_INTERVAL_MS;
-    const memoryPromise = shouldCollectMemory
-      ? this.collectIOSMemoryMetrics(device)
-      : Promise.resolve(device.cachedMemory);
-
-    const [cpu, memory] = await Promise.all([cpuPromise, memoryPromise]);
+    const { cpu, memory, pid } = await collectIOSPerformanceMetrics(
+      device,
+      shouldCollectCpu,
+      shouldCollectMemory,
+      resolveIOSProcess,
+    );
 
     if (!this.isSampleCurrent(device, samplingPackage, samplingGeneration)) {
       return;
     }
 
+    device.cachedPid = pid;
     device.lastFastTick = now;
     if (shouldCollectCpu) {
       device.lastMediumTick = now;
@@ -934,93 +947,6 @@ export class PerformanceMonitor {
       signal.throwIfAborted();
       logger.debug(`[PerformanceMonitor] Memory metrics failed for ${device.deviceId}: ${error}`);
       return { totalPssMb: null, breakdown: null };
-    }
-  }
-
-  /**
-   * Resolve the host `ps aux` columns for a simulator app process, scoped to a
-   * single simulator.
-   *
-   * iOS Simulator apps run as ordinary macOS processes whose command line is the
-   * app binary under `.../CoreSimulator/Devices/<UDID>/data/...`, so the device
-   * UDID is always present in the process line. Matching on the bundle id alone
-   * (the previous behavior) picked the *first* process on the host, so when the
-   * same bundle runs on two booted simulators both device-keyed snapshots
-   * received the first match's metrics (#5109). Requiring both the device's
-   * UDID (`device.deviceId`) and the bundle id in the same line scopes the match
-   * to this simulator. For a single simulator this is behavior-identical — the
-   * one matching line already contains its own UDID.
-   *
-   * Returns the whitespace-split `ps aux` columns of the matching line, or null
-   * when no process for this device+bundle is found. Caches the resolved PID.
-   */
-  private async resolveIOSProcessColumns(device: MonitoredDevice): Promise<string[] | null> {
-    // Run ps on the HOST (not inside simulator) to find the app process.
-    const { stdout } = await this.execFileAsync("ps", ["aux"]);
-
-    const lines = stdout.split("\n");
-    for (const line of lines) {
-      // Scope to this simulator: the command line carries both the device UDID
-      // (in the CoreSimulator data-container path) and the bundle id.
-      if (line.includes(device.deviceId) && line.includes(device.packageName)) {
-        // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
-        const parts = line.trim().split(/\s+/);
-        const pid = parseInt(parts[1], 10);
-        if (!isNaN(pid) && pid > 0) {
-          device.cachedPid = pid;
-        }
-        return parts;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Collect CPU usage for an iOS app.
-   * iOS Simulator apps run as macOS processes, so we use `ps` on the host,
-   * scoped to this simulator's UDID (see resolveIOSProcessColumns).
-   */
-  private async collectIOSCpuMetrics(device: MonitoredDevice): Promise<number | null> {
-    try {
-      const parts = await this.resolveIOSProcessColumns(device);
-      if (!parts) {
-        return null;
-      }
-      const cpuPercent = parseFloat(parts[2]);
-      if (isNaN(cpuPercent)) {
-        return null;
-      }
-      return Math.min(cpuPercent, 100); // Cap at 100%
-    } catch (error) {
-      logger.debug(`[PerformanceMonitor] iOS CPU metrics failed for ${device.deviceId}: ${error}`);
-      return null;
-    }
-  }
-
-  /**
-   * Collect memory usage for an iOS app.
-   * iOS Simulator apps run as macOS processes, so we use `ps` on the host,
-   * scoped to this simulator's UDID (see resolveIOSProcessColumns).
-   * Returns RSS (Resident Set Size) in megabytes.
-   */
-  private async collectIOSMemoryMetrics(device: MonitoredDevice): Promise<number | null> {
-    try {
-      const parts = await this.resolveIOSProcessColumns(device);
-      if (!parts) {
-        return null;
-      }
-      // RSS is in KB on macOS.
-      const rssKb = parseInt(parts[5], 10);
-      if (isNaN(rssKb)) {
-        return null;
-      }
-      return rssKb / 1024; // Convert to MB
-    } catch (error) {
-      logger.debug(
-        `[PerformanceMonitor] iOS memory metrics failed for ${device.deviceId}: ${error}`,
-      );
-      return null;
     }
   }
 }

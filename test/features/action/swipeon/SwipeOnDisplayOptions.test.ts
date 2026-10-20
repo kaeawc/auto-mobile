@@ -1,11 +1,12 @@
 import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
-import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, mock, spyOn, test } from "bun:test";
 import type {
   ObserveResult,
   ScrollableCandidate,
   SwipeDirection,
   SwipeOnOptions,
 } from "../../../../src/models";
+import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import { frame, harness } from "./displaySwipeHarness";
 import { runSessionDisplayPin } from "../../../../src/server/sessionDisplayPin";
@@ -59,9 +60,7 @@ function optionsHarness({
     observationFor: ({ display, observation }) =>
       display ? tree({ observation, nodes }) : defaultObservation,
   });
-  const cached = spyOn(h.observe, "getMostRecentCachedObserveResult").mockResolvedValue(
-    defaultObservation,
-  );
+  const cached = cachedObservation.mockResolvedValue(defaultObservation);
   return { ...h, cached };
 }
 
@@ -549,4 +548,11 @@ test("fromEdge on a display still rejects a genuinely wrong-way direction (#1299
   expect(result.success).toBe(false);
   expect(result.error).toContain('finger direction must be "right"');
   expect(h.legs()).toHaveLength(0);
+});
+
+let cachedObservation: ReturnType<
+  typeof spyOn<typeof FakeObserveScreen.prototype, "getMostRecentCachedObserveResult">
+>;
+beforeEach(() => {
+  cachedObservation = spyOn(FakeObserveScreen.prototype, "getMostRecentCachedObserveResult");
 });

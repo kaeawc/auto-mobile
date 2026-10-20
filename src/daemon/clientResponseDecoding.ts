@@ -98,9 +98,19 @@ export const MAX_CANCELLED_REQUEST_IDS = 256;
 export const DAEMON_RESPONSE_GRACE_MS = 2_000;
 
 export const socketIdentityStatusSchema = z.object({
+  unavailableSockets: z
+    .array(
+      z.object({
+        code: z.literal("AUXILIARY_SOCKET_UNAVAILABLE"),
+        name: z.string(),
+        socketPath: z.string().min(1),
+      }),
+    )
+    .optional(),
   reportedPidFilePath: z.string().min(1).optional(),
   reportedSocketPath: z.string().min(1).optional(),
   reportedSockets: z.record(z.string(), z.string().min(1)).optional(),
+  launchNonce: z.string().optional(),
   processStartedAt: z.number().finite().optional(),
   dbPath: z.string().min(1).optional(),
   pid: z.number().int().positive().optional(),

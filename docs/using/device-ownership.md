@@ -971,6 +971,35 @@ this way. `listDevices` reports `capacity` per gated platform as
 [environment variables](environment-variables.md#boot-capacity) for the opt-out
 and the per-platform overrides.
 
+For iOS `capacity_exhausted` refusals, `externalDevices` lists occupying simulator
+UDIDs with no known AutoMobile owner. `heldDevices` separately lists occupying
+UDIDs owned by AutoMobile admissions, live sessions or persisted broker bindings
+and journals, including after a daemon restart. Each field is an array of strings
+and is omitted when empty. Both groups count toward the same limit. A held device
+is not a stray simulator to shut down; release its session or binding first. Warm
+simulator hints exclude live-session and broker-held devices. Ownership only affects
+these labels and hints, never the capacity decision. If the broker registry cannot
+be read, AutoMobile logs a warning and uses its last good snapshot plus current
+in-memory ownership (or just in-memory ownership if there is no snapshot). A boot
+below the limit still proceeds. At the limit, the refusal still reports
+`capacity_exhausted`: unclassifiable occupying UDIDs appear in `externalDevices`,
+and the message states that ownership could not be read and those devices may
+also be held by AutoMobile. A failed simulator listing still returns
+`discovery_incomplete` because the occupying count is unknown. The `listDevices`
+capacity block does not read ownership.
+
+The reader covers this daemon's live sessions and the host-wide broker registry.
+Simulators held by another daemon on the same host (for example, a private daemon
+without bindings), and pool assignments still being set up, are not covered and
+still appear as external.
+
+The same classification applies to a binding's pre-create capacity check and to
+the boot-slot reservation made before replacing its device. A replacement's old
+device is excluded from the reservation's count; other held simulators still
+count and appear in `heldDevices`. Both arrays survive binding reconciliation,
+acquisition results and provisioning error payloads, including socket and MCP
+responses.
+
 ## Per-session settings
 
 Appearance configuration is per session (owner decision 2026-10-09, #10982).

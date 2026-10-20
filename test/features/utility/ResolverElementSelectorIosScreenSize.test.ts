@@ -4,7 +4,7 @@ import {
 } from "../../../src/features/utility/ElementResolver";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { buildObserveResult } from "../../helpers/observeFixture";
-import { expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { SetUIState } from "../../../src/features/action/SetUIState";
@@ -172,16 +172,18 @@ test.each([false, true])(
 /** Observe viewport routing through the public resolver collaborator, without matching a target. */
 function viewportUsedBySelector(selector: ResolverElementSelector, hierarchy: ViewHierarchyResult) {
   const intents: ResolutionIntent[] = [];
-  const resolve = spyOn(ElementResolver.prototype, "resolve").mockImplementation(
-    (_snapshot, _query, intent = { action: "inspect" }) => {
-      intents.push(intent);
-      return { chosen: null, candidates: [], matches: [], matchMode: "exact" };
-    },
-  );
-  try {
-    selector.selectByText(hierarchy, "viewport-probe", { intentAction: "inspect" });
-    return intents[0]?.viewport;
-  } finally {
-    resolve.mockRestore();
-  }
+  resolverSpy.mockImplementation((_snapshot, _query, intent = { action: "inspect" }) => {
+    intents.push(intent);
+    return { chosen: null, candidates: [], matches: [], matchMode: "exact" };
+  });
+  selector.selectByText(hierarchy, "viewport-probe", { intentAction: "inspect" });
+  return intents[0]?.viewport;
 }
+
+let resolverSpy: ReturnType<typeof spyOn<typeof ElementResolver.prototype, "resolve">>;
+beforeEach(() => {
+  resolverSpy = spyOn(ElementResolver.prototype, "resolve");
+});
+afterEach(() => {
+  resolverSpy.mockRestore();
+});

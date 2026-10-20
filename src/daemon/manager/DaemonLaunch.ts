@@ -13,7 +13,7 @@ import { resolveAutoMobileLogsDir } from "../../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../../utils/outputReductionFlags";
 import { EVENT_ALL_MARKERS_FLAG } from "../../utils/eventAllMarkers";
 import { ActionableError } from "../../models";
-import { PID_FILE_PATH, SOCKET_PATH, LOCK_FILE_PATH } from "../constants";
+import { DAEMON_LAUNCH_NONCE_ENV, PID_FILE_PATH, SOCKET_PATH, LOCK_FILE_PATH } from "../constants";
 import { DaemonStatus, DaemonOptions } from "../types";
 import {
   DAEMON_LAUNCH_CWD_ENV,
@@ -41,11 +41,13 @@ export interface DaemonLaunchHost {
     signal?: AbortSignal,
     shouldContinueWaiting?: () => boolean,
     maxProbeDurationMs?: number,
+    launchedProcess?: { pid: number | undefined; launchNonce?: string },
   ): Promise<boolean>;
   isLaunchedProcessReady(
     pid: number | undefined,
     timeoutMs: number,
     signal: AbortSignal,
+    launchNonce?: string,
   ): Promise<boolean>;
   createDaemonExitFailure(
     code: number | null,
@@ -80,12 +82,12 @@ export class DaemonLaunch {
       logFd: number;
       logPath: string;
     },
-    initial: { command: string; args: string[] },
+    initial: DaemonLaunchCommand,
     startDeadline: number,
     recoverySignal: AbortSignal | undefined,
   ): Promise<void> {
     const { options, childEnv, logSink, capturesLaunchOutput, logFd, logPath } = launch;
-    let { command: autoMobileCmd, args } = initial;
+    let { command: autoMobileCmd, args, packageRunner } = initial;
     let retriedIncompleteExtraction = false;
     while (true) {
       const attemptBudget = this.host.remainingTime(startDeadline);
@@ -96,6 +98,8 @@ export class DaemonLaunch {
       }
       try {
         this.host.throwIfRecoveryCancelled(recoverySignal);
+        let launchedPid: number | undefined;
+        const launchNonce = packageRunner ? this.host.seams.nextLaunchNonce() : undefined;
         await this.host.launcher.launchAndWait({
           command: autoMobileCmd,
           args,
@@ -107,13 +111,22 @@ export class DaemonLaunch {
               capturesLaunchOutput ? logFd : "ignore",
               logSink === "stderr" || logSink === "both" ? "pipe" : logFd,
             ],
-            env: childEnv,
+            env: { ...childEnv, [DAEMON_LAUNCH_NONCE_ENV]: launchNonce },
           },
-          onSpawn: logSink === "stderr" || logSink === "both" ? relayDaemonStderr : undefined,
+          onSpawn: (child) => {
+            launchedPid = child.pid;
+            if (logSink === "stderr" || logSink === "both") {
+              relayDaemonStderr(child);
+            }
+          },
           timeoutMs: attemptBudget,
-          waitForReady: (timeoutMs, signal) => this.host.waitForReady(timeoutMs, signal),
+          waitForReady: (timeoutMs, signal) =>
+            this.host.waitForReady(timeoutMs, signal, undefined, undefined, {
+              pid: launchedPid,
+              launchNonce,
+            }),
           isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
-            this.host.isLaunchedProcessReady(pid, timeoutMs, signal),
+            this.host.isLaunchedProcessReady(pid, timeoutMs, signal, launchNonce),
           formatFailure: (summary) => this.createDaemonStartupFailure(summary, logPath),
           formatExitFailure: (code, signal) =>
             this.host.createDaemonExitFailure(code, signal, logPath),
@@ -129,10 +142,11 @@ export class DaemonLaunch {
         if (!removed) {
           throw error;
         }
-        ({ command: autoMobileCmd, args } = this.host.withDaemonOptions(
-          this.host.fallbackLauncher.resolveCommand(),
-          options,
-        ));
+        ({
+          command: autoMobileCmd,
+          args,
+          packageRunner,
+        } = this.host.withDaemonOptions(this.host.fallbackLauncher.resolveCommand(), options));
         stderrLog(
           `Detected incomplete daemon package extraction (${INCOMPLETE_EXTRACTION_CODE}); removed it and retrying once...`,
         );
@@ -193,7 +207,7 @@ export class DaemonLaunch {
     appendDaemonFeatureArgs(args, options);
     // Shared specs keep output-reduction launch flags aligned with parseDaemonArgs (#2756).
     args.push(...outputReductionFlagsToArgs(options));
-    return { command: launch.command, args };
+    return { ...launch, args };
   }
 
   resolveLaunchCommand(): DaemonLaunchCommand {

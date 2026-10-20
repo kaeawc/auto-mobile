@@ -308,7 +308,13 @@ export class DaemonMaintenance {
           // Reinstall routing, lifecycle delivery, cadence, observation, and
           // navigation callbacks on that replacement.
           this.host.configureDeviceDataStreamServer();
-          logger.info("Observation stream socket server restarted successfully");
+          const healthy = this.host.observationStreamHealth().isHealthy();
+          const log = healthy ? logger.info : logger.warn;
+          log(
+            healthy
+              ? "Observation stream socket server restarted successfully"
+              : "Observation stream socket server remains unavailable after recovery",
+          );
         } catch (error) {
           logger.error(`Failed to restart observation stream socket server: ${error}`);
         }

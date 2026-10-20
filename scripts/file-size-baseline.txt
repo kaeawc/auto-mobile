@@ -9,7 +9,6 @@
 5519	src/daemon/sessionManager.ts
 1180	src/daemon/videoStreamSocketServer.ts
 1596	src/doctor/checks/ios.ts
-1874	src/features/observe/android/ctrlProxyProtocol.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1399	src/features/utility/ElementResolver.ts
 1502	src/features/video/FfmpegVideoProcessingBackend.ts

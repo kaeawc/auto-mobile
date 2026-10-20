@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { RealWaitForCondition } from "../../../src/features/observe/WaitForCondition";
 import type { WaitForCondition } from "../../../src/features/observe/interfaces/WaitForCondition";
@@ -96,6 +97,24 @@ function createTapWithSettleSequence(settleFrames: ObserveResult[]): TapOnElemen
 }
 
 describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes (#6284)", () => {
+  test("replaceObservationHierarchy preserves a fingerprinted capture and installs the new tree", () => {
+    const tap = createTapOnElement();
+    const original = makeHierarchy("before");
+    const replacement = makeHierarchy("after");
+    const observation = makeObservation({ viewHierarchy: original });
+    const captured = observation.viewHierarchy!;
+    const json = JSON.stringify(captured);
+    const fingerprint = hierarchyFingerprint(captured);
+    tap.testHooks.replaceObservationHierarchy(observation, replacement, true);
+    expect(JSON.stringify(captured)).toBe(json);
+    expect(hierarchyFingerprint(captured)).toBe(fingerprint);
+    expect(observation.viewHierarchy).toBe(replacement);
+    expect(hierarchyFingerprint(observation.viewHierarchy)).not.toBe(fingerprint);
+    expect(hierarchyFingerprint(observation.viewHierarchy)).toBe(
+      hierarchyFingerprint(makeHierarchy("after")),
+    );
+  });
+
   test("baseline -> A -> A -> B reaches the settled destination B, not the transient A", async () => {
     const previous = makeObservation({ updatedAt: 1, viewHierarchy: makeHierarchy("baseline") });
     // Entering capture: a transient hierarchy flip (activeWindow unchanged).

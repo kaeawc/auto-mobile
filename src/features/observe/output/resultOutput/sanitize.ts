@@ -6,6 +6,10 @@ import type { ViewHierarchyNode } from "../../../../models/ViewHierarchyResult";
 import { projectSkeleton } from "../SkeletonProjection";
 import { DefaultObserveElementCollector } from "../../ObserveElementCollector";
 import { getSearchableEntries } from "../elementProvenance";
+import {
+  attachRawViewHierarchy,
+  resolveViewHierarchyForSearch,
+} from "../../../utility/viewHierarchySearch";
 import { markOccludedRowsOnFullProjection } from "../FullProjectionOcclusion";
 import { capLayoutWarnings } from "../../audits/SafeAreaAuditor";
 import {
@@ -238,13 +242,14 @@ export function projectSanitizedObserveSkeleton(
  * is never mutated" contract holds; only `out` (the clone) is edited.
  */
 function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
-  const elements = skeletonElementsForProjection(source);
+  const projectionSource = skeletonSourceForProjection(source);
+  const elements = projectionSource.elements;
   const { skeleton, context, keyboard } = elements
     ? projectSkeleton(
         elements,
         source.screenSize,
-        isIosObservation(source) ? undefined : source.viewHierarchy,
-        { ios: isIosObservation(source), iosHierarchy: source.viewHierarchy },
+        isIosObservation(source) ? undefined : projectionSource.viewHierarchy,
+        { ios: isIosObservation(source), iosHierarchy: projectionSource.viewHierarchy },
       )
     : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
   out.skeleton = skeleton;
@@ -287,25 +292,102 @@ function markOccludedRowsForFullProjection(out: ObserveResult, obs: ObserveResul
     obs.viewHierarchy.windows?.length &&
     !isIosObservation(obs)
   ) {
-    markOccludedRowsOnFullProjection(out, obs, skeletonElementsForProjection(obs));
+    const source = skeletonSourceForProjection(obs);
+    markOccludedRowsOnFullProjection(out, source, source.elements);
   }
 }
 
-function skeletonElementsForProjection(source: ObserveResult): ObserveResult["elements"] {
+interface SkeletonProjectionValidation {
+  inputs?: string;
+  collected?: ObserveResult["elements"];
+  hierarchy?: ObserveResult["viewHierarchy"];
+}
+
+const skeletonValidationByElements = new WeakMap<object, SkeletonProjectionValidation>();
+
+/** Share lazy validation across cache clones without changing their enumerable wire data. */
+export function inheritSkeletonProjectionValidation(
+  source: ObserveResult,
+  copy: ObserveResult,
+): void {
+  if (!source.elements || !copy.elements) {
+    return;
+  }
+  const validation = skeletonValidationByElements.get(source.elements) ?? {};
+  skeletonValidationByElements.set(source.elements, validation);
+  skeletonValidationByElements.set(copy.elements, validation);
+}
+
+function sourceWithSkeletonValidation(
+  source: ObserveResult,
+  validation: SkeletonProjectionValidation,
+): ObserveResult {
+  return validation.collected
+    ? { ...source, elements: validation.collected, viewHierarchy: validation.hierarchy }
+    : source;
+}
+
+/** Own node identities while retaining the collector's active raw-search evidence. */
+function cloneSkeletonHierarchy(
+  hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  searchHierarchy: ObserveResult["viewHierarchy"],
+): NonNullable<ObserveResult["viewHierarchy"]> {
+  try {
+    const [copy, searchCopy] = structuredClone([hierarchy, searchHierarchy] as const);
+    if (searchCopy && searchCopy !== copy) {
+      attachRawViewHierarchy(copy, searchCopy);
+    }
+    return copy;
+  } catch (error) {
+    // Non-wire callers can carry non-cloneable values. Preserve legacy collection
+    // and error behavior for them, without retaining caller-owned nodes in the memo.
+    if (error instanceof DOMException && error.name === "DataCloneError") {
+      return hierarchy;
+    }
+    throw error;
+  }
+}
+
+function skeletonSourceForProjection(source: ObserveResult): ObserveResult {
   // Cache structuredClone and full-output JSON cloning discard the collector's
   // provenance. Restore it only when recollection reproduces the supplied
   // categories and descriptors: elements remain authoritative for output.
   const elements = source.elements;
   if (!elements || getSearchableEntries(elements) || !source.viewHierarchy) {
-    return elements;
+    return source;
   }
-  const collected = new DefaultObserveElementCollector().collect(
+  const platform = isIosObservation(source) ? "ios" : "android";
+  const searchHierarchy = resolveViewHierarchyForSearch(source.viewHierarchy);
+  // Cache returns are independently mutable. Check the inputs, including raw-search
+  // evidence when present, before reusing a validation from this entry or a sibling clone.
+  const inputs = JSON.stringify([
+    elements,
     source.viewHierarchy,
-    isIosObservation(source) ? "ios" : "android",
-  );
-  return isDeepStrictEqual(skeletonElementShape(elements), skeletonElementShape(collected))
+    searchHierarchy === source.viewHierarchy ? undefined : searchHierarchy,
+    platform,
+  ]);
+  const validation = skeletonValidationByElements.get(elements);
+  if (validation?.inputs === inputs) {
+    return sourceWithSkeletonValidation(source, validation);
+  }
+  // Collected entries retain node identities. Own their hierarchy as well so a
+  // later cache clone (or a caller mutating an earlier return) cannot detach them.
+  const hierarchy = cloneSkeletonHierarchy(source.viewHierarchy, searchHierarchy);
+  const collected = new DefaultObserveElementCollector().collect(hierarchy, platform);
+  const validated = isDeepStrictEqual(
+    skeletonElementShape(elements),
+    skeletonElementShape(collected),
+  )
     ? collected
-    : elements;
+    : undefined;
+  if (hierarchy !== source.viewHierarchy) {
+    const next = validation ?? {};
+    next.inputs = inputs;
+    next.collected = validated;
+    next.hierarchy = validated ? hierarchy : undefined;
+    skeletonValidationByElements.set(elements, next);
+  }
+  return sourceWithSkeletonValidation(source, { collected: validated, hierarchy });
 }
 
 /** Normalize only the existing lossless wire transforms before comparing collections. */

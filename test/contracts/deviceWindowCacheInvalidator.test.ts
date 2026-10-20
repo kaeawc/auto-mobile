@@ -17,6 +17,9 @@ import {
 afterEach(() => resetObserveCacheStore());
 
 const observation: ObserveResult = {
+  updatedAt: 0,
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  observationId: "contract",
   screenSize: { width: 1080, height: 2400 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
   viewHierarchy: { hierarchy: {} },

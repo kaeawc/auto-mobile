@@ -1047,6 +1047,16 @@ object BroadcastGuardScanner {
       }
     }
 
+    val launchBlocks = scanGuardedLaunches(source, code, violations)
+    val rawLaunchBlocks = scanRawLaunches(source, code, violations)
+    return ScanResult(guardedHelpers, launchBlocks, rawLaunchBlocks, violations)
+  }
+
+  private fun scanGuardedLaunches(
+    source: String,
+    code: String,
+    violations: MutableList<Violation>,
+  ): Int {
     var launchBlocks = 0
     for (m in LAUNCH.findAll(code)) {
       launchBlocks++
@@ -1065,6 +1075,14 @@ object BroadcastGuardScanner {
       }
     }
 
+    return launchBlocks
+  }
+
+  private fun scanRawLaunches(
+    source: String,
+    code: String,
+    violations: MutableList<Violation>,
+  ): Int {
     var rawLaunchBlocks = 0
     for (m in SERVICE_SCOPE_LAUNCH.findAll(code)) {
       val call = parseLaunchCall(code, m.range.last + 1) ?: continue
@@ -1087,7 +1105,7 @@ object BroadcastGuardScanner {
       }
     }
 
-    return ScanResult(guardedHelpers, launchBlocks, rawLaunchBlocks, violations)
+    return rawLaunchBlocks
   }
 
   private fun unguardedBroadcasts(

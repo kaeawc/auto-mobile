@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { describe, expect, test } from "bun:test";
 import type {
   Element,
@@ -247,10 +248,11 @@ async function executeFocusWithDuplicateEmail(
   const tapped: Element[] = [];
   const sourceObservation = makeFocusObservation(before);
   sourceObservation.observationId = "initial-capture";
-  tap.observedInteraction = async (action) => ({
-    ...(await action(sourceObservation)),
-    observation: makeFocusObservation(after),
-  });
+  tap.observedInteraction = (action, options) =>
+    runBlockWithEnvelope(sourceObservation, { observation: makeFocusObservation(after) })(
+      action,
+      options,
+    );
   tap.refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
   tap.executeAndroidTap = async (
     _action: string,

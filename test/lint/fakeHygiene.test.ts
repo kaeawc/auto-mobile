@@ -295,7 +295,7 @@ function forbiddenLinesIn(source: string): string[] {
         }
         bindName(functionScope, parameter.name, null);
       }
-      if (node.body) {
+      if ("body" in node && node.body) {
         visit(node.body, functionScope);
       }
       return;

@@ -12,10 +12,10 @@ internal fun calculateDragReorder(
   val newIndex = (currentIndex + rowsCrossed).coerceIn(0, lastIndex)
   val remainingOffset = accumulatedOffset - (newIndex - currentIndex) * rowStridePx
   // Discard outward movement at either edge so it cannot accumulate or delay reversing direction.
+  val beforeFirst = newIndex == 0 && remainingOffset < 0f
+  val afterLast = newIndex == lastIndex && remainingOffset > 0f
   val clampedOffset =
-    if (
-      (newIndex == 0 && remainingOffset < 0f) || (newIndex == lastIndex && remainingOffset > 0f)
-    ) {
+    if (beforeFirst || afterLast) {
       0f
     } else {
       remainingOffset

@@ -113,6 +113,6 @@ export function withWindows(
 ): ViewHierarchyResult {
   return {
     ...hierarchy,
-    windows: roots.map((root, index) => ({ windowLayer: index, hierarchy: { node: root } })),
+    windows: roots.map((root, index) => ({ windowLayer: index, hierarchy: { node: [root] } })),
   };
 }

@@ -2,8 +2,10 @@ import { clearDeviceError, markDeviceError, holderOf, isIdle } from "./deviceBin
 import { logger } from "../utils/logger";
 import type { BootedDevice, Platform } from "../models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
-import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
-import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
+import {
+  resetBootedDevicesResourceCache,
+  resetAndroidDeviceImageResourceCache,
+} from "./deviceResourceInvalidation";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";

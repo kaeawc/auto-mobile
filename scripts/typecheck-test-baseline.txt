@@ -1,32 +1,21 @@
 # AutoMobile test typecheck baseline (issue #11787) -- see scripts/typecheck-baseline.sh
 # generated-with: tsgo 7.0.0-dev.20260707.2
 # format: <file> <TScode> <count>
-scripts/benchmark-device-tools-fixture.ts TS2322 2
 scripts/check-mcp-sdk-boundary.ts TS2551 1
 scripts/ci/ciTimeToGreenReport.ts TS2322 1
-scripts/lib/tsImportDeps.ts TS2339 2
-scripts/manual-test/brokerDeviceScenarios.ts TS7022 1
-scripts/manual-test/brokerDeviceScenarios.ts TS7024 1
 scripts/manual-test/private-daemon.ts TS2345 1
 scripts/mcp-drive.ts TS2322 1
 test/cli/usageErrorInstalledSetups.test.ts TS2352 1
-test/contracts/AdbExecutorContract.ts TS2339 2
-test/contracts/DeviceManagerContract.ts TS18048 2
 test/contracts/HierarchyCaptureContract.ts TS2739 1
 test/contracts/ObserveCacheStoreContract.ts TS2322 1
-test/contracts/ObserveScreenContract.ts TS2722 1
-test/contracts/ObserveScreenContract.ts TS2739 1
 test/contracts/androidCtrlProxy.test.ts TS2554 1
 test/contracts/deviceHealthMarkers.test.ts TS2741 1
 test/contracts/deviceWindowCacheInvalidator.test.ts TS2739 1
 test/contracts/iosCtrlProxy.test.ts TS2352 1
 test/contracts/observeScreen.test.ts TS2739 1
-test/devices/ActiveDeviceSelection.test.ts TS2554 2
-test/doctor/automobile.test.ts TS2769 2
 test/doctor/checks/iosSimFleet.test.ts TS2741 1
 test/doctor/checks/workProfileAccessibility.test.ts TS2345 1
 test/doctor/index.test.ts TS2769 1
-test/fakes/FakeAdbClientFactory.test.ts TS2769 2
 test/fakes/FakeAndroidInventoryLoad.ts TS2322 1
 test/fakes/FakeFailureRecorder.test.ts TS2741 1
 test/fakes/FakeFailuresStreamRepository.ts TS2741 1
@@ -100,24 +89,3 @@ test/lint/releaseReasonWireBuilders.ts TS2305 1
 test/lint/sessionClockOffsetProviderSingleRead.test.ts TS2345 1
 test/lint/sortedListingBoundary.test.ts TS2339 1
 test/lint/testGuardedDocsWorkflow.test.ts TS2339 1
-test/lint/toolReadControlClassification.test.ts TS2740 1
-test/models/sessionConfig.test.ts TS2345 1
-test/package/webrtcRuntimeMetadata.integration.test.ts TS2353 1
-test/plan/planExecutorParallelDeviceLoss.test.ts TS2769 1
-test/release/artifactCapabilities.test.ts TS2741 1
-test/scripts/attestation/validators/trustPolicy.test.ts TS2769 1
-test/scripts/benchmarkSettledScreenshotIsolation.test.ts TS2769 1
-test/scripts/benchmarkSettledScreenshotReliability.test.ts TS2769 1
-test/scripts/dbMigrationsSelfContained.test.ts TS7053 1
-test/scripts/iosIntegrationWorkflowChangeGuard.test.ts TS2339 1
-test/scripts/manualTestAuxSocket.test.ts TS2769 1
-test/scripts/manualTestBrokerClientFiles.test.ts TS2769 1
-test/scripts/manualTestBrokerDeviceScenarios.test.ts TS2345 1
-test/scripts/manualTestBrokerLiveAdapter.test.ts TS2769 1
-test/scripts/manualTestControlSocketProbe.test.ts TS2769 1
-test/scripts/manualTestPrivateDaemon.test.ts TS2769 1
-test/scripts/manualTestPrivateDaemonDevices.test.ts TS2322 1
-test/scripts/manualTestPrivateDaemonEnv.test.ts TS2322 1
-test/scripts/manualTestProxySession.test.ts TS2769 1
-test/scripts/stress-harness-tap.test.ts TS2741 1
-test/vision/ClaudeVisionClient.test.ts TS2769 1

@@ -2,6 +2,7 @@ import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/dev
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
@@ -512,6 +513,32 @@ describe("session-only broker lifecycle", () => {
       cleanupPending: false,
     });
     await ready("next");
+  });
+
+  test("reset capacity refusal preserves the device and typed error until a retry succeeds", async () => {
+    broker = new SessionBroker({ ...options, reuseCleanDevices: true });
+    const first = await ready("first");
+    const refusal = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 5_000 },
+      "iOS simulator capacity exhausted",
+    );
+    devices.resetError = refusal;
+
+    await expect(broker.release(first)).rejects.toBe(refusal);
+    expect((await options.store.listResources())[0].state).toBe("resetting");
+    expect(devices.destroyed).toEqual([]);
+    expect(await broker.status("first")).toMatchObject({ cleanupPending: true });
+    await broker.recover();
+    expect((await options.store.listResources())[0].state).toBe("resetting");
+    expect(devices.destroyed).toEqual([]);
+
+    devices.resetError = undefined;
+    await broker.recover();
+    expect((await options.store.listResources())[0].state).toBe("idle");
+    expect(await broker.release(first)).toMatchObject({ outcome: "released" });
+    await ready("second");
+    expect(devices.prepared[1]).toBe(devices.prepared[0]);
+    expect(devices.destroyed).toEqual([]);
   });
 
   test("reset exception retires the device instead of reusing contaminated state", async () => {

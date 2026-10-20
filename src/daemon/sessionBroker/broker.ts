@@ -7,6 +7,7 @@ import {
   type SessionDeviceCatalog,
   type SessionRequirementDefaults,
 } from "../../devices/sessionRequirements";
+import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import {
@@ -859,6 +860,11 @@ export class SessionBroker {
       }
       return "idle";
     } catch (error) {
+      // Admission refusal leaves a healthy erased simulator shut down. Keep the durable reset
+      // pending and let release/recovery retry it, preserving the typed retryable error.
+      if (error instanceof BootCapacityExhaustedError) {
+        throw error;
+      }
       // Native execution/journal fences still prevent destructive work before the drain joins.
       logger.warn(
         `Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`,

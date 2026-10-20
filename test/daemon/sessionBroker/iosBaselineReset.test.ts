@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { IosBaselineReset } from "../../../src/daemon/sessionBroker/iosBaselineReset";
 import type { BrokerNativeProfile } from "../../../src/daemon/sessionBroker/profile";
+import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
+import { FleetBootInstrumentation } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
+import type {
+  IosBootInstrumentation,
+  IosBootRequest,
+} from "../../../src/models/IosBootInstrumentation";
+import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
+import { FakeSimulatorCapacityGate } from "../../fakes/FakeSimulatorCapacityGate";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice, DeviceInfo } from "../../../src/models/DeviceInfo";
 
@@ -44,7 +54,36 @@ function image(
   };
 }
 
+class FakeResetBootInstrumentation implements IosBootInstrumentation {
+  readonly requests: IosBootRequest[] = [];
+  error: Error | undefined;
+  beforeBoot: (() => void) | undefined;
+
+  constructor(private readonly events: string[]) {}
+
+  async run<T>(request: IosBootRequest, boot: (remainingMs: number) => Promise<T>): Promise<T> {
+    this.requests.push(request);
+    this.events.push("admission:start");
+    if (this.error) {
+      throw this.error;
+    }
+    this.beforeBoot?.();
+    const result = await boot(request.timeoutMs);
+    this.events.push("admission:end");
+    return result;
+  }
+}
+
+function capacityRefusal(): BootCapacityExhaustedError {
+  return new BootCapacityExhaustedError(
+    { platform: "ios", limit: 1, booted: 1, retryAfterMs: 5_000 },
+    "iOS simulator capacity exhausted",
+  );
+}
+
 interface HarnessOptions {
+  instrumentation?: IosBootInstrumentation;
+  timer?: FakeTimer;
   inventories?: DeviceInfo[][];
   assertOwned?: (call: number) => Promise<void>;
   stopDevice?: () => Promise<void>;
@@ -54,36 +93,41 @@ interface HarnessOptions {
 
 function harness(options: HarnessOptions = {}) {
   const events: string[] = [];
+  const instrumentation = new FakeResetBootInstrumentation(events);
   const listOptions: unknown[] = [];
   const inventories = options.inventories ?? [[image()], [image("Shutdown")], [image()]];
   let listCall = 0;
   let ownershipCall = 0;
-  const resetter = new IosBaselineReset({
-    simctl: {
-      listSimulatorImages: async (...args) => {
-        events.push(`list:${++listCall}`);
-        listOptions.push(args);
-        return inventories[listCall - 1] ?? [];
+  const resetter = new IosBaselineReset(
+    {
+      iosBootInstrumentation: options.instrumentation ?? instrumentation,
+      simctl: {
+        listSimulatorImages: async (...args) => {
+          events.push(`list:${++listCall}`);
+          listOptions.push(args);
+          return inventories[listCall - 1] ?? [];
+        },
+        eraseSimulator: async (udid) => {
+          events.push(`erase:${udid}`);
+          await options.eraseSimulator?.();
+        },
+        bootSimulator: async (udid) => {
+          events.push(`boot:${udid}`);
+          return (await options.bootSimulator?.()) ?? DEVICE;
+        },
       },
-      eraseSimulator: async (udid) => {
-        events.push(`erase:${udid}`);
-        await options.eraseSimulator?.();
-      },
-      bootSimulator: async (udid) => {
-        events.push(`boot:${udid}`);
-        return (await options.bootSimulator?.()) ?? DEVICE;
+      stopDevice: async (device) => {
+        events.push(`stop:${device.deviceId}`);
+        await options.stopDevice?.();
       },
     },
-    stopDevice: async (device) => {
-      events.push(`stop:${device.deviceId}`);
-      await options.stopDevice?.();
-    },
-  });
+    options.timer ?? new FakeTimer(),
+  );
   const assertOwned = async () => {
     events.push(`owned:${++ownershipCall}`);
     await options.assertOwned?.(ownershipCall);
   };
-  return { resetter, assertOwned, events, listOptions };
+  return { resetter, assertOwned, events, listOptions, instrumentation };
 }
 
 describe("IosBaselineReset", () => {
@@ -99,16 +143,165 @@ describe("IosBaselineReset", () => {
       "list:2",
       "owned:2",
       `erase:${UDID}`,
+      "admission:start",
       "owned:3",
       `boot:${UDID}`,
+      "admission:end",
       "list:3",
       "owned:4",
+    ]);
+    expect(h.instrumentation.requests).toEqual([
+      { udid: UDID, runtime: RUNTIME, timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS },
     ]);
     expect(h.listOptions).toEqual([
       [undefined, { bypassCache: true }],
       [undefined, { bypassCache: true }],
       [undefined, { bypassCache: true }],
     ]);
+  });
+
+  test("a capacity refusal stays typed and never calls bootSimulator", async () => {
+    const h = harness();
+    const refusal = capacityRefusal();
+    h.instrumentation.error = refusal;
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(refusal);
+    expect(refusal).toMatchObject({ code: "capacity_exhausted", retryable: true });
+    expect(h.events).toEqual([
+      "list:1",
+      "owned:1",
+      `stop:${UDID}`,
+      "list:2",
+      "owned:2",
+      `erase:${UDID}`,
+      "admission:start",
+    ]);
+  });
+
+  test("ownership lost during admission prevents the boot mutation", async () => {
+    const ownershipLost = new ActionableError("ownership changed during admission");
+    let owned = true;
+    const h = harness({
+      assertOwned: async () => {
+        if (!owned) {
+          throw ownershipLost;
+        }
+      },
+    });
+    h.instrumentation.beforeBoot = () => {
+      owned = false;
+    };
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(ownershipLost);
+    expect(h.events).toContain("admission:start");
+    expect(h.events).not.toContain(`boot:${UDID}`);
+    expect(h.events).not.toContain("list:3");
+  });
+
+  test("a deferred boot retries from authoritative Shutdown and re-erases before admission", async () => {
+    const h = harness({
+      inventories: [
+        [image()],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image("Shutdown")],
+        [image()],
+      ],
+    });
+    const refusal = capacityRefusal();
+    h.instrumentation.error = refusal;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(refusal);
+    h.instrumentation.error = undefined;
+    h.events.length = 0;
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(h.events).toEqual([
+      "list:3",
+      "owned:3",
+      "list:4",
+      "owned:4",
+      `erase:${UDID}`,
+      "admission:start",
+      "owned:5",
+      `boot:${UDID}`,
+      "admission:end",
+      "list:5",
+      "owned:6",
+    ]);
+  });
+
+  test("a deferred boot refuses changed identity before any retry mutation", async () => {
+    const h = harness({
+      inventories: [
+        [image()],
+        [image("Shutdown")],
+        [image("Shutdown", { runtimeId: `${RUNTIME}-other` })],
+      ],
+    });
+    const refusal = capacityRefusal();
+    h.instrumentation.error = refusal;
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBe(refusal);
+    h.instrumentation.error = undefined;
+    h.events.length = 0;
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toThrow(
+      "lacks authoritative Shutdown",
+    );
+    expect(h.events).toEqual(["list:3"]);
+  });
+
+  test("an admitted reset records only boot duration in the shared instrumentation history", async () => {
+    const timer = new FakeTimer();
+    const history = new InMemoryBootDurationHistory();
+    const gate = new FakeSimulatorCapacityGate(timer, {
+      outcome: "allow",
+      limits: { maxBooted: 1, source: "derived" },
+      bootedCount: 0,
+    });
+    const h = harness({
+      timer,
+      instrumentation: new FleetBootInstrumentation({ timer, history, gate }),
+      stopDevice: async () => {
+        timer.advanceTime(10);
+      },
+      eraseSimulator: async () => {
+        timer.advanceTime(20);
+      },
+      bootSimulator: async () => {
+        expect(gate.admitted).toBe(1);
+        timer.advanceTime(42);
+        return DEVICE;
+      },
+    });
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).resolves.toBe("clean");
+    expect(gate.requests[0]).toMatchObject({ runtime: RUNTIME, excludeUdids: [UDID] });
+    expect(history.latestFor(UDID)).toMatchObject({ udid: UDID, durationMs: 42 });
+    expect(gate.admitted).toBe(0);
+  });
+
+  test("the real instrumentation's gate refusal prevents boot and records no duration", async () => {
+    const timer = new FakeTimer();
+    const history = new InMemoryBootDurationHistory();
+    const gate = new FakeSimulatorCapacityGate(timer, {
+      outcome: "refuse",
+      reason: "at-capacity",
+      limits: { maxBooted: 1, source: "derived" },
+      bootedCount: 1,
+      retryAfterMs: 5_000,
+      message: "capacity exhausted",
+    });
+    const h = harness({
+      timer,
+      instrumentation: new FleetBootInstrumentation({ timer, history, gate }),
+    });
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toBeInstanceOf(
+      BootCapacityExhaustedError,
+    );
+    expect(h.events).not.toContain(`boot:${UDID}`);
+    expect(history.latestFor(UDID)).toBeUndefined();
+    expect(gate.admitted).toBe(0);
   });
 
   test("cannot erase until fresh inventory authoritatively reports Shutdown", async () => {
@@ -178,6 +371,7 @@ describe("IosBaselineReset", () => {
     ["unknown availability", [image("Booted", { isAvailable: undefined })]],
     ["partial type", [image("Booted", { deviceType: undefined })]],
     ["transitional state", [image("Booting")]],
+    ["shutdown without a deferred boot", [image("Shutdown")]],
     ["different runtime", [image("Booted", { runtimeId: `${RUNTIME}-other` })]],
     ["different type", [image("Booted", { deviceType: `${DEVICE_TYPE}-other` })]],
     ["different OS", [image("Booted", { osVersion: "28.0", iosVersion: "28.0" })]],

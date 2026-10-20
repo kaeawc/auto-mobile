@@ -8,6 +8,7 @@ import {
   listDevices,
   listInstalledSystemImages,
 } from "../../utils/android-cmdline-tools/avdmanager";
+import { bootAdmissionServices } from "../../devices/bootAdmissionServices";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -162,6 +163,7 @@ export async function openSessionBrokerService(
 function nativeIosBaselineReset(): IosBaselineReset {
   return new IosBaselineReset({
     simctl: new SimCtlClient(null),
+    iosBootInstrumentation: bootAdmissionServices.iosBootInstrumentation(),
     stopDevice: async (device) => {
       // The ordinary lifecycle handler joins device controllers and invalidates caches before
       // erasure. A raw simctl shutdown would skip that provider bookkeeping.

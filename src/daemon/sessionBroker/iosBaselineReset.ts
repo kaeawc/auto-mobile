@@ -1,5 +1,8 @@
 import type { BrokerNativeProfile } from "./profile";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
+import type { IosBootInstrumentation } from "../../models/IosBootInstrumentation";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import type { BootedDevice, DeviceInfo } from "../../models/DeviceInfo";
 import type { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { compareIosVersions } from "../../utils/ios-cmdline-tools/iosVersion";
@@ -11,9 +14,12 @@ type ResetSimctl = Pick<SimCtlClient, "listSimulatorImages" | "eraseSimulator" |
 type ExpectedState = "Booted" | "Shutdown";
 
 export class IosBaselineReset {
+  private readonly deferredBoots = new Set<string>();
+
   constructor(
     private readonly dependencies: {
       simctl: ResetSimctl;
+      iosBootInstrumentation: IosBootInstrumentation;
       stopDevice: (device: BootedDevice) => Promise<void>;
     },
     private readonly timer: Pick<Timer, "now"> = defaultTimer,
@@ -25,10 +31,20 @@ export class IosBaselineReset {
     assertOwned: () => Promise<void>,
   ): Promise<"clean"> {
     this.assertInput(device, profile);
-    await this.readExpectedTarget(device.deviceId, profile, "Booted", "start reset");
+    // Only a capacity refusal from this resetter permits a shut-down retry. Re-erase below:
+    // ownership and inventory are checked again, so a retry never trusts an old clean result.
+    const deferredBoot = this.deferredBoots.delete(device.deviceId);
+    await this.readExpectedTarget(
+      device.deviceId,
+      profile,
+      deferredBoot ? "Shutdown" : "Booted",
+      "start reset",
+    );
 
     await assertOwned();
-    await this.measureStep(device.deviceId, "stop", () => this.dependencies.stopDevice(device));
+    if (!deferredBoot) {
+      await this.measureStep(device.deviceId, "stop", () => this.dependencies.stopDevice(device));
+    }
 
     await this.readExpectedTarget(device.deviceId, profile, "Shutdown", "erase simulator");
     await assertOwned();
@@ -36,9 +52,8 @@ export class IosBaselineReset {
       this.dependencies.simctl.eraseSimulator(device.deviceId),
     );
 
-    await assertOwned();
     const booted = await this.measureStep(device.deviceId, "boot", () =>
-      this.dependencies.simctl.bootSimulator(device.deviceId),
+      this.bootAdmitted(device.deviceId, profile, assertOwned),
     );
     if (booted.platform !== "ios" || booted.deviceId !== device.deviceId) {
       throw new ActionableError(
@@ -49,6 +64,28 @@ export class IosBaselineReset {
     await this.readExpectedTarget(device.deviceId, profile, "Booted", "confirm clean baseline");
     await assertOwned();
     return "clean";
+  }
+
+  private async bootAdmitted(
+    udid: string,
+    profile: IosProfile,
+    assertOwned: () => Promise<void>,
+  ): Promise<BootedDevice> {
+    try {
+      return await this.dependencies.iosBootInstrumentation.run(
+        { udid, runtime: profile.runtimeId, timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS },
+        async () => {
+          // Admission samples asynchronously; fence ownership immediately before the mutation.
+          await assertOwned();
+          return this.dependencies.simctl.bootSimulator(udid);
+        },
+      );
+    } catch (error) {
+      if (error instanceof BootCapacityExhaustedError) {
+        this.deferredBoots.add(udid);
+      }
+      throw toActionableError(error, "Cannot boot erased iOS simulator");
+    }
   }
 
   private async measureStep<T>(

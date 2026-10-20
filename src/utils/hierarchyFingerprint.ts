@@ -1,5 +1,6 @@
 import type { ViewHierarchyResult } from "../models";
 import { NodeCryptoService } from "./crypto";
+import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 
 /**
@@ -13,21 +14,38 @@ import { logger } from "./logger";
  * Returns `null` when there is no tree to fingerprint, or when serialization fails
  * on a malformed hierarchy.
  */
-export const hierarchyFingerprint = (
-  viewHierarchy: ViewHierarchyResult | null | undefined,
-): string | null => {
-  if (!viewHierarchy?.hierarchy) {
-    return null;
-  }
-  try {
-    return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy.hierarchy));
-  } catch (error) {
-    // Fingerprints feed best-effort change detection and cache keys; a malformed
-    // hierarchy (e.g. a cycle) must not fail the action, so report "unknown".
-    logger.debug(`[hierarchyFingerprint] Failed to fingerprint view hierarchy: ${error}`);
-    return null;
-  }
-};
+export function createHierarchyFingerprinter(
+  hash: (serializedHierarchy: string) => string,
+): (viewHierarchy: ViewHierarchyResult | null | undefined) => string | null {
+  const fingerprints = new WeakMap<ViewHierarchyResult, string | null>();
+  return (viewHierarchy) => {
+    if (!viewHierarchy?.hierarchy) {
+      return null;
+    }
+    const cached = fingerprints.get(viewHierarchy);
+    if (cached !== undefined) {
+      return cached;
+    }
+    let fingerprint: string | null = null;
+    try {
+      fingerprint = hash(JSON.stringify(viewHierarchy.hierarchy));
+    } catch (error) {
+      // Change detection is best-effort: malformed captures report "unknown".
+      // Cache that verdict too, after logging the failure once for this object.
+      logger.warn(
+        `[hierarchyFingerprint] Failed to fingerprint view hierarchy: ${errorMessage(error)}`,
+      );
+    }
+    fingerprints.set(viewHierarchy, fingerprint);
+    return fingerprint;
+  };
+}
+
+// Captures are immutable after publication: structural transforms must return a
+// new ViewHierarchyResult. Metadata alone does not participate in the hash.
+export const hierarchyFingerprint = createHierarchyFingerprinter((serialized) =>
+  NodeCryptoService.generateCacheKey(serialized),
+);
 
 /**
  * Whether two captures show a different screen. Returns `null` when either side

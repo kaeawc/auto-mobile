@@ -1,3 +1,1 @@
-src/daemon/deviceSnapshotSocketServer.ts -> src/server/deviceSnapshotManager
 src/daemon/statelessMcpServerFactory.ts -> src/server
-src/daemon/webrtcStreamSocketServer.ts -> src/server/webrtcStreamManager

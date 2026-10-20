@@ -9,7 +9,7 @@ import {
 } from "../helpers/refusalWireFixtures";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
-import * as manager from "../../src/server/webrtcStreamManager";
+import * as manager from "../../src/daemon/webrtcStreamManager";
 import { WebRtcStreamSocketServer } from "../../src/daemon/webrtcStreamSocketServer";
 import type { WebRtcStreamSocketRequest } from "../../src/daemon/webrtcStreamSocketTypes";
 import {
@@ -19,7 +19,7 @@ import {
 import { DaemonState } from "../../src/daemon/daemonState";
 import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
-import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
+import { createWebRtcStreamDeviceIncarnationListener } from "../../src/daemon/webrtcStreamIncarnationListener";
 import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";

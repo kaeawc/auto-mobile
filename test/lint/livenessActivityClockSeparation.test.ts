@@ -891,28 +891,49 @@ function forwardedOwnerMethod(initializer: ts.Expression): ts.PropertyAccessExpr
   return callee;
 }
 
+function normalizeTsPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function portCompilerHost(
+  models: ReadonlyMap<string, FileModel>,
+  options: ts.CompilerOptions,
+  libraryPath: string,
+  library: ts.SourceFile,
+): ts.CompilerHost {
+  const host = ts.createCompilerHost(options);
+  const modelAt = (path: string): FileModel | undefined => {
+    const normalized = normalizeTsPath(path);
+    // node:path.win32 accepts both separators, including TypeScript's absolute paths.
+    return models.get(isAbsolute(normalized) ? repoPath(normalized) : normalized);
+  };
+  const isLibrary = (path: string): boolean =>
+    normalizeTsPath(path) === normalizeTsPath(libraryPath);
+  host.getCurrentDirectory = () => normalizeTsPath(ROOT);
+  host.fileExists = (path) => isLibrary(path) || modelAt(path) !== undefined;
+  host.readFile = (path) => (isLibrary(path) ? library.text : modelAt(path)?.source.text);
+  host.getSourceFile = (path) => (isLibrary(path) ? library : modelAt(path)?.source);
+  host.directoryExists = () => true;
+  host.getDirectories = () => [];
+  host.realpath = normalizeTsPath;
+  return host;
+}
+
 /** Resolve application delegates from scanned ASTs, with standard Pick/Readonly utility types. */
 function portTypeChecker(models: ReadonlyMap<string, FileModel>): ts.TypeChecker {
   const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
-  const host = ts.createCompilerHost(options);
   // Shared runtime views use Pick. Supply TypeScript's own utility types instead of treating
   // those receivers as any under noLib, which would hide their collaborator targets.
-  const libraryPath = join(dirname(ts.getDefaultLibFilePath(options)), "lib.es5.d.ts");
+  const libraryPath = normalizeTsPath(
+    join(dirname(ts.getDefaultLibFilePath(options)), "lib.es5.d.ts"),
+  );
   const library = ts.createSourceFile(
     libraryPath,
     readGuardFile(libraryPath),
     options.target!,
     true,
   );
-  const modelAt = (path: string): FileModel | undefined =>
-    models.get(isAbsolute(path) ? relative(ROOT, path).split(sep).join("/") : path);
-  host.getCurrentDirectory = () => ROOT;
-  host.fileExists = (path) => path === libraryPath || modelAt(path) !== undefined;
-  host.readFile = (path) => modelAt(path)?.source.text;
-  host.getSourceFile = (path) => (path === libraryPath ? library : modelAt(path)?.source);
-  host.directoryExists = () => true;
-  host.getDirectories = () => [];
-  host.realpath = (path) => path;
+  const host = portCompilerHost(models, options, libraryPath, library);
   return ts.createProgram([...models.keys(), libraryPath], options, host).getTypeChecker();
 }
 
@@ -1360,6 +1381,39 @@ function repoPath(full: string): string {
 }
 
 describe("liveness paths never write activity clocks (#10656, #10668)", () => {
+  test("port compiler host resolves both Windows library spellings and absolute model paths", () => {
+    const libraryPath = String.raw`C:\typescript\lib\lib.es5.d.ts`;
+    const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
+    const library = ts.createSourceFile(
+      libraryPath,
+      "type Pick<T, K extends keyof T> = { [P in K]: T[P] };",
+      options.target!,
+      true,
+    );
+    const owner = parse(
+      "owner.ts",
+      'class Target {} class Owner { target: Pick<{ target: Target }, "target">; }',
+    );
+    const host = portCompilerHost(new Map([[owner.path, owner]]), options, libraryPath, library);
+    const program = ts.createProgram([owner.path, libraryPath], options, host);
+    const checker = program.getTypeChecker();
+    // Pick's mapped property must resolve rather than disappearing into any.
+    const ownerDeclaration = owner.source.statements.filter(ts.isClassDeclaration)[1]!;
+    const member = ownerDeclaration.members[0]!;
+    expect(checker.getTypeAtLocation(member).getProperty("target")).toBeDefined();
+    for (const path of [libraryPath, libraryPath.replaceAll("\\", "/")]) {
+      expect(host.fileExists(path)).toBe(true);
+      expect(host.getSourceFile(path, options.target!)).toBe(library);
+      expect(host.readFile(path)).toBe(library.text);
+      expect(host.realpath?.(path)).toBe("C:/typescript/lib/lib.es5.d.ts");
+    }
+    for (const path of [join(ROOT, owner.path), join(ROOT, owner.path).replaceAll("\\", "/")]) {
+      expect(host.fileExists(path)).toBe(true);
+      expect(host.getSourceFile(path, options.target!)).toBe(owner.source);
+      expect(host.readFile(path)).toBe(owner.source.text);
+    }
+  });
+
   const models = new Map<string, FileModel>();
   const inventory = new Map<string, number[]>();
   let ports: PortIndex = new Map();

@@ -19,7 +19,7 @@ import { ToolRegistry } from "../../../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../../src/server/videoRecordingManager";
+} from "../../../../src/daemon/videoRecordingManager";
 import { classifyDisplayCutout } from "../../../../src/utils/displayCutout";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../../../src/utils/provisionedDeviceTransportFence";
 import { FakeDeviceResourceObserver } from "../../../fakes/FakeDeviceResourceObserver";

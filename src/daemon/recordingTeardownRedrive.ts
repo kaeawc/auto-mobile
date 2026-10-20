@@ -1,6 +1,6 @@
-import { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "../daemon/recorderTeardownRecovery";
+import { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "./recorderTeardownRecovery";
 import { DeviceUnreachableError } from "../models/DeviceUnreachableError";
-import type { SessionManager } from "../daemon/sessionManager";
+import type { SessionManager } from "./sessionManager";
 import type {
   VideoRecordingRecord,
   VideoRecordingRepository,
@@ -16,7 +16,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { INCOMPLETE_MARK_GRACE_MS } from "./videoRecordingManager";
 
-export { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "../daemon/recorderTeardownRecovery";
+export { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "./recorderTeardownRecovery";
 
 export interface StartupOrphanCaptures {
   /** Retained startup rows on this device whose descriptor is still unconfirmed. */

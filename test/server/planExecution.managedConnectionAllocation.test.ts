@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { registerPlanTools } from "../../src/server/planTools";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";

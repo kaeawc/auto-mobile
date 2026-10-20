@@ -266,6 +266,7 @@ test/daemon/proxySessionEventLeavesSiblingCallInFlight.test.ts
 test/daemon/proxyStallHandoverReleaseGate.test.ts
 test/daemon/proxyToolErrorCodeClassification.test.ts
 test/daemon/readEndReleaseRearmScenario.test.ts
+test/daemon/recordingCleanupPorts.test.ts
 test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusedRoutingCallExtendsIdle.test.ts
 test/daemon/registerSessionManagedConnection.test.ts

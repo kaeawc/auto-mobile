@@ -9,7 +9,7 @@ import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

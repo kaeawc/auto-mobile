@@ -10,7 +10,7 @@ import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,

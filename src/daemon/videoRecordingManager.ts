@@ -4,7 +4,7 @@ import {
   probeDurationMs,
   type RecordingCodecProbe,
 } from "../features/video/recordingCodec";
-import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
+import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import type { StartupOrphanCaptures } from "./recordingTeardownRedrive";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
@@ -36,7 +36,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createTimestampedId } from "../utils/IdGenerator";
 import { combineAbortSignals, runOutsideRequestContext } from "../utils/AbortContext";
-import { ResourceRegistry } from "./resourceRegistry";
+import { notifyResourcesUpdated } from "./resourceUpdateNotifier";
 import {
   FINISHED_VIDEO_RECORDING_STATUSES,
   VideoRecordingRepository,
@@ -1253,7 +1253,7 @@ async function notifyVideoRecordingResources(recordingIds: string[]): Promise<vo
     uris.add(buildVideoArchiveItemUri(recordingId));
   }
 
-  await ResourceRegistry.notifyResourcesUpdated(Array.from(uris));
+  await notifyResourcesUpdated(Array.from(uris));
 }
 
 export async function getVideoRecordingConfig(): Promise<VideoRecordingConfig> {

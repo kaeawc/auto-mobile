@@ -28,7 +28,7 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 
 isolateToolRegistry();
 

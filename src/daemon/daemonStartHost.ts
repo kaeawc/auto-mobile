@@ -3,8 +3,8 @@ import {
   listActiveVideoRecordings,
   setStartupOrphanCaptures,
   setVideoRecordingManagerDependencies,
-} from "../server/videoRecordingManager";
-import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
+} from "./videoRecordingManager";
+import { redriveUnconfirmedCaptureTeardowns } from "./recordingTeardownRedrive";
 import type { DaemonExitRecord } from "./daemonExitRecord";
 import type { DaemonSocketServer } from "./daemonSocketServer";
 import type { RehydrationSummary } from "./sessionManager";

@@ -13,7 +13,7 @@ import {
 import {
   buildVideoArchiveItemUri,
   VIDEO_RESOURCE_URIS,
-} from "../../src/server/videoRecordingResourceUris";
+} from "../../src/daemon/videoRecordingResourceUris";
 import type { VideoRecordingMetadata } from "../../src/models";
 
 const ARCHIVE_ROOT = "/tmp/video-archive";

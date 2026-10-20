@@ -1,6 +1,6 @@
 import { RecordingTeardownRetryBudgetExceeded } from "./RecordingTeardownRetryBudgetExceeded";
 import { ActionableError } from "../models/ActionableError";
-import type { SessionManager } from "../daemon/sessionManager";
+import type { SessionManager } from "./sessionManager";
 import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -11,15 +11,8 @@ import {
   isDeviceGestureRecordingOwnedBy,
   ownedDeviceGestureRecordingId,
   stopDeviceGestureRecording,
-} from "../daemon/deviceGestureRecordingManager";
-import {
-  adoptOwnerlessSegmentedVideoRecordings,
-  captureSegmentedRecordingIdsForOwner,
-  hasSegmentedVideoRecordingsForOwner,
-  finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
-  segmentedVideoRecordingHandlesForOwner,
-  stopSegmentedVideoRecordingsForOwner,
-} from "./videoRecordingTools";
+} from "./deviceGestureRecordingManager";
+import { segmentedRecordingCleanup } from "./segmentedRecordingCleanup";
 import {
   adoptOwnerlessActiveVideoRecordings,
   INCOMPLETE_MARK_GRACE_MS,
@@ -135,10 +128,11 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
   abandonRecordingsOnReplacedDevice,
   hasRecordingsToStop: (sessionId, deviceId) =>
     listOwnedActiveVideoRecordingIds().length > 0 ||
-    hasSegmentedVideoRecordingsForOwner(sessionId, deviceId) ||
+    segmentedRecordingCleanup.hasSegmentedVideoRecordingsForOwner(sessionId, deviceId) ||
     isDeviceGestureRecordingOwnedBy(sessionId, deviceId),
-  stopSegmentedRecordings: stopSegmentedVideoRecordingsForOwner,
-  captureSegmentedRecordingIdsForOwner,
+  stopSegmentedRecordings: segmentedRecordingCleanup.stopSegmentedVideoRecordingsForOwner,
+  captureSegmentedRecordingIdsForOwner:
+    segmentedRecordingCleanup.captureSegmentedRecordingIdsForOwner,
   listActiveVideoRecordings: (deviceId) => listActiveVideoRecordings({ deviceId }),
   stopVideoRecording: async (recordingId) => {
     await stopVideoRecordingUnattended(recordingId);
@@ -150,7 +144,7 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     const deviceGestureRecordingId = ownedDeviceGestureRecordingId(sessionId, deviceId);
     return [
       ...listActiveVideoRecordingIdsForOwner(sessionId, deviceId),
-      ...segmentedVideoRecordingHandlesForOwner(sessionId, deviceId),
+      ...segmentedRecordingCleanup.segmentedVideoRecordingHandlesForOwner(sessionId, deviceId),
       ...(deviceGestureRecordingId === undefined ? [] : [deviceGestureRecordingId]),
     ];
   },
@@ -229,7 +223,10 @@ async function abandonRecordingsOnReplacedDevice(
   const gestureId = ownedDeviceGestureRecordingId(sessionId, deviceId);
   await Promise.all([
     logHostOnlyAbandonFailure(() =>
-      finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(sessionId, deviceId),
+      segmentedRecordingCleanup.finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(
+        sessionId,
+        deviceId,
+      ),
     ),
     ...recordingIds.map((recordingId) =>
       logHostOnlyAbandonFailure(() => abandonVideoRecordingOnReplacedDevice(recordingId)),
@@ -614,7 +611,7 @@ export interface RecordingAcquisitionDeps {
 const defaultRecordingAcquisitionDeps: RecordingAcquisitionDeps = {
   timer: defaultTimer,
   adoptVideoRecordings: adoptOwnerlessActiveVideoRecordings,
-  adoptSegmentedRecordings: adoptOwnerlessSegmentedVideoRecordings,
+  adoptSegmentedRecordings: segmentedRecordingCleanup.adoptOwnerlessSegmentedVideoRecordings,
   adoptDeviceGestureRecording: adoptOwnerlessDeviceGestureRecording,
 };
 

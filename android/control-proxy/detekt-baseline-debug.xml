@@ -2,7 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:CtrlProxy.kt:selector.resourceId != null &amp;&amp; (fields.resourceId == null || (fields.resourceId != selector.resourceId &amp;&amp; !fields.resourceId.endsWith(":id/${selector.resourceId}")))</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$!surface.host.isShowing || surface.request.layer != PrototypeWindowLayer.APP || surface.foreground.suspended || surface.host.isHiddenForCapture</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$!surface.runtime.persistent &amp;&amp; count == 0 &amp;&amp; (observerSession == null || observerSession == surface.observerSession)</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$count == 0 &amp;&amp; surfaces.isEmpty() &amp;&amp; (observerSession == null || observerSession == lifecycle.observerSession())</ID>
@@ -19,8 +18,6 @@
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
-    <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastSdkEvent</ID>
-    <ID>CyclomaticComplexMethod:CtrlProxy.kt:internal fun findNodeByResourceId: AccessibilityNodeInfo?</ID>
     <ID>CyclomaticComplexMethod:CtrlProxyMessageHandler.kt:CtrlProxyMessageHandler$override suspend fun handleMessage: WebSocketResponse?</ID>
     <ID>CyclomaticComplexMethod:FailureReceivers.kt:CrashReceiver$private fun parse: CrashReport?</ID>
     <ID>CyclomaticComplexMethod:GestureController.kt:GestureController$fun performDrag</ID>
@@ -103,7 +100,6 @@
     <ID>LongMethod:CaCertificateController.kt:CaCertificateController$suspend fun performRemoveCaCertificate</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastSdkEvent</ID>
     <ID>LongMethod:CtrlProxyIme.kt:CtrlProxyIme$private fun awaitInputConnection</ID>
     <ID>LongMethod:CtrlProxyMessageHandler.kt:CtrlProxyMessageHandler$override suspend fun handleMessage: WebSocketResponse?</ID>
     <ID>LongMethod:GestureController.kt:GestureController$fun performDrag</ID>
@@ -157,9 +153,6 @@
     <ID>LongParameterList:ClipboardController.kt:ClipboardController$private suspend fun broadcastClipboardResult</ID>
     <ID>LongParameterList:ConnectionCommandQueue.kt:ConnectionCommandQueue</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastActionResult</ID>
-    <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastCrashEvent</ID>
-    <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastHandledExceptionEvent</ID>
-    <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastPackageEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun handledExceptionEventResponse: HandledExceptionEvent</ID>
     <ID>LongParameterList:CtrlProxyActions.kt:CtrlProxyActions$suspend fun setPreference</ID>

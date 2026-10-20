@@ -59,26 +59,86 @@ class DaemonHttpTokenProviderTest {
     }
   }
 
+  @Test
+  fun `startup 503 retries with a fresh token within the retry budget`() {
+    val requests = mutableListOf<HttpRequest>()
+    val delays = mutableListOf<Long>()
+    files.content = null
+    val options =
+      McpHttpClientOptions(
+          endpoint = "http://localhost/mcp",
+          tokenProvider = reader,
+          requestSender =
+            HttpRequestSender { request ->
+              requests.add(request)
+              if (requests.size == 1) {
+                files.content = "published"
+                UnauthorizedResponse(request, 503, mapOf("Retry-After" to listOf("1")))
+              } else UnauthorizedResponse(request, 200)
+            },
+        )
+        .apply { startupRetryDelay = { delays.add(it) } }
+    McpHttpTransport(options)
+      .sendRequest(JsonRpcRequest(id = JsonPrimitive("test"), method = "ping"), false, true)
+    assertEquals(
+      listOf(null, "Bearer published"),
+      requests.map { it.headers().firstValue("Authorization").orElse(null) },
+    )
+    assertEquals(listOf(1000L), delays)
+  }
+
+  @Test
+  fun `startup 503 stops at the attempt limit and respects a short deadline`() {
+    for (shortDeadline in listOf(false, true)) {
+      var attempts = 0
+      val delays = mutableListOf<Long>()
+      val options =
+        McpHttpClientOptions(
+            endpoint = "http://localhost/mcp",
+            tokenProvider = reader,
+            requestSender =
+              HttpRequestSender { request ->
+                attempts++
+                UnauthorizedResponse(request, 503, mapOf("Retry-After" to listOf("1")))
+              },
+          )
+          .apply { startupRetryDelay = { delays.add(it) } }
+      kotlin.test.assertFailsWith<McpConnectionException> {
+        McpHttpTransport(options)
+          .sendRequest(
+            JsonRpcRequest(id = JsonPrimitive("test"), method = "ping"),
+            false,
+            true,
+            deadline = if (shortDeadline) StatusRequestDeadline(500, nowNanos = { 0L }) else null,
+          )
+      }
+      assertEquals(if (shortDeadline) 1 else 6, attempts)
+      assertEquals(if (shortDeadline) 0 else 5, delays.size)
+    }
+  }
+
   private fun assertEndpointAuthentication(url: String, daemon: Boolean, caller: Boolean) {
     var reads = 0
     val requests = mutableListOf<HttpRequest>()
     val transport =
       McpHttpTransport(
         McpHttpClientOptions(
-          endpoint = url,
-          mcpSessionKey = "test-session",
-          requestHeaders = if (caller) mapOf("aUtHoRiZaTiOn" to "caller") else emptyMap(),
-          tokenProvider =
-            DaemonHttpTokenProvider {
-              reads++
-              "local"
-            },
-          requestSender =
-            HttpRequestSender { request ->
-              requests.add(request)
-              UnauthorizedResponse(request)
-            },
-        ),
+            endpoint = url,
+            mcpSessionKey = "test-session",
+            tokenProvider =
+              DaemonHttpTokenProvider {
+                reads++
+                "local"
+              },
+            requestSender =
+              HttpRequestSender { request ->
+                requests.add(request)
+                UnauthorizedResponse(request)
+              },
+          )
+          .apply {
+            requestHeaders = if (caller) mapOf("aUtHoRiZaTiOn" to "caller") else emptyMap()
+          },
       )
     kotlin.test.assertFailsWith<McpConnectionException> {
       transport.sendRequest(
@@ -96,16 +156,21 @@ class DaemonHttpTokenProviderTest {
     assertEquals(if (daemon && !caller) 2 else 0, reads, url)
   }
 
-  private class UnauthorizedResponse(private val original: HttpRequest) : HttpResponse<String> {
-    override fun statusCode() = 401
+  private class UnauthorizedResponse(
+    private val original: HttpRequest,
+    private val status: Int = 401,
+    private val responseHeaders: Map<String, List<String>> = emptyMap(),
+  ) : HttpResponse<String> {
+    override fun statusCode() = status
 
     override fun request() = original
 
     override fun previousResponse(): Optional<HttpResponse<String>> = Optional.empty()
 
-    override fun headers(): HttpHeaders = HttpHeaders.of(emptyMap()) { _, _ -> true }
+    override fun headers(): HttpHeaders = HttpHeaders.of(responseHeaders) { _, _ -> true }
 
-    override fun body() = "Unauthorized"
+    override fun body() =
+      if (status == 200) """{"jsonrpc":"2.0","id":"test","result":{}}""" else "Unavailable"
 
     override fun sslSession(): Optional<SSLSession> = Optional.empty()
 

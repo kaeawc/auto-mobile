@@ -56,6 +56,101 @@ final class DaemonHTTPAuthenticationTests: XCTestCase {
         }
     }
 
+    private actor StartupPerformer: HTTPRequestPerforming {
+        var captured: [String?] = []
+        let repeated: Bool
+        init(repeated: Bool) { self.repeated = repeated }
+        func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+            captured.append(request.value(forHTTPHeaderField: "Authorization"))
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: XCTUnwrap(request.url), statusCode: repeated || captured.count == 1 ? 503 : 200,
+                httpVersion: nil, headerFields: ["Retry-After": "1"]
+            ))
+            return (Data(), response)
+        }
+    }
+
+    private actor StartupScheduler: DeadlineScheduler {
+        var delays: [TimeInterval] = []
+        func sleep(seconds: TimeInterval) async throws { delays.append(seconds) }
+    }
+
+    func testStartup503RetriesFreshDiscoveryAndStopsAtLimit() async throws {
+        for repeated in [false, true] {
+            let performer = StartupPerformer(repeated: repeated)
+            let tokens = FakeDaemonHTTPTokenProvider([nil, "published"])
+            let scheduler = StartupScheduler()
+            let authenticated = AuthenticatedDaemonHTTPRequestPerformer(
+                performer: performer, tokenProvider: tokens, scheduler: scheduler
+            )
+            let request = try URLRequest(url: XCTUnwrap(URL(string: "http://localhost/heartbeat")))
+            let response = try await authenticated.perform(request)
+            let captured = await performer.captured
+            let delays = await scheduler.delays
+            XCTAssertEqual((response.1 as? HTTPURLResponse)?.statusCode, repeated ? 503 : 200)
+            XCTAssertEqual(captured, [nil] + Array(repeating: "Bearer published", count: repeated ? 5 : 1))
+            XCTAssertEqual(tokens.reads, repeated ? 6 : 2)
+            XCTAssertEqual(delays, Array(repeating: 1, count: repeated ? 5 : 1))
+        }
+    }
+
+    func testStartup503RetryRemainsInsideClientDeadline() async throws {
+        let performer = AsyncFakeHTTPPerformer()
+        let scheduler = VirtualDeadlineScheduler()
+        let client = try client(performer, tokens: FakeDaemonHTTPTokenProvider(), scheduler: scheduler)
+        let task = Task { try await client.initialize(timeout: 5) }
+        try await performer.requests.wait(for: 1)
+        try await scheduler.registered.wait(for: 1)
+        performer.reply(0, data: Data(), status: 503, headers: ["Retry-After": "1"])
+        try await scheduler.registered.wait(for: 2)
+        scheduler.advance(by: 5)
+        await assertTransportFailure(task, .requestFailed("Request timed out"))
+        XCTAssertEqual(scheduler.pendingCount, 0)
+    }
+
+    func testDaemonSessionPerformerRefusesRedirectIncludingCallerAuthorization() async throws {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let original = try XCTUnwrap(URL(string: "http://localhost/heartbeat"))
+        let remote = try XCTUnwrap(URL(string: "https://example.com/heartbeat"))
+        var request = URLRequest(url: original)
+        request.setValue("Bearer local", forHTTPHeaderField: "Authorization")
+        let performer = URLSessionRequestPerformer(session: session, exchange: { session, original, delegate in
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: XCTUnwrap(original.url), statusCode: 302, httpVersion: nil,
+                headerFields: ["Location": remote.absoluteString]
+            ))
+            let next = URLRequest(url: remote)
+            let completion = SingleResumeCell<URLRequest?>()
+            if let delegate {
+                delegate.urlSession(
+                    session,
+                    task: session.dataTask(with: original),
+                    willPerformHTTPRedirection: response,
+                    newRequest: next
+                ) {
+                    completion.resume(returning: $0)
+                }
+            } else { completion.resume(returning: next) }
+            let accepted = try await completion.wait()
+            if let accepted {
+                return try (
+                    Data(),
+                    XCTUnwrap(HTTPURLResponse(
+                        url: XCTUnwrap(accepted.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    ))
+                )
+            }
+            return (Data(), response)
+        })
+        let (_, response) = try await performer.perform(request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 302)
+        XCTAssertEqual(response.url, original)
+    }
+
     private struct RejectedPerformer: HTTPRequestPerforming {
         func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
             guard let url = request.url,

@@ -39,7 +39,7 @@ class DaemonHttpTokenProviderTest {
   private var directory: Path? = null
 
   @Test
-  fun `shared HTTP endpoint vectors limit heartbeat credentials and preserve caller authorization`() {
+  fun `shared HTTP endpoint vectors limit heartbeat credentials`() {
     val vectors =
       Json.parseToJsonElement(File("../../test/fixtures/daemon-http-endpoints.json").readText())
         .jsonArray
@@ -47,13 +47,87 @@ class DaemonHttpTokenProviderTest {
       val fields = vector.jsonObject
       val url = fields.getValue("url").jsonPrimitive.content
       val daemon = fields.getValue("daemon").jsonPrimitive.content.toBooleanStrict()
-      for (caller in listOf(false, true)) {
-        assertEndpointAuthentication(url, daemon, caller)
-      }
+      assertEndpointAuthentication(url, daemon)
     }
   }
 
-  private fun assertEndpointAuthentication(url: String, daemon: Boolean, caller: Boolean) {
+  @Test
+  fun `startup 503 retries with fresh discovery and stops after one replay`() {
+    for (repeated in listOf(false, true)) {
+      val connections = mutableListOf<HeartbeatConnection>()
+      val captured = mutableListOf<String?>()
+      val delays = mutableListOf<Long>()
+      var nowNanos = 0L
+      files.content = null
+      val endpoint =
+        URL(
+          null,
+          "http://localhost/heartbeat",
+          object : URLStreamHandler() {
+            override fun openConnection(endpoint: URL): URLConnection =
+              HeartbeatConnection(endpoint, if (connections.isEmpty() || repeated) 503 else 200)
+                .also { connections.add(it) }
+          },
+        )
+      val send = {
+        HeartbeatTransport.sendHeartbeat(
+          endpoint,
+          "session",
+          "owner",
+          reader,
+          retryClock =
+            object : HeartbeatRetryClock {
+              override fun nowNanos() = nowNanos
+
+              override fun sleep(ms: Long) {
+                delays.add(ms)
+                nowNanos += ms * 1_000_000
+                captured.add(connections.last().authorization)
+                files.content = "published"
+              }
+            },
+        )
+      }
+      if (repeated) kotlin.test.assertFailsWith<IOException> { send() } else send()
+      captured.add(connections.last().authorization)
+      assertEquals(listOf(null, "Bearer published"), captured)
+      assertEquals(listOf(1000L), delays)
+      assertEquals(2, connections.size)
+      assertEquals(listOf(1000, 500), connections.map { it.connectTimeout })
+      assertEquals(listOf(1000, 500), connections.map { it.readTimeout })
+    }
+  }
+
+  @Test
+  fun `startup retry does not extend the heartbeat deadline`() {
+    var now = 0L
+    var connections = 0
+    val endpoint =
+      URL(
+        null,
+        "http://localhost/heartbeat",
+        object : URLStreamHandler() {
+          override fun openConnection(endpoint: URL): URLConnection {
+            connections++
+            return HeartbeatConnection(endpoint, 503) { now = 1_500_000_000L }
+          }
+        },
+      )
+    val clock =
+      object : HeartbeatRetryClock {
+        override fun nowNanos() = now
+
+        override fun sleep(ms: Long) {
+          error("No time remains for the requested delay")
+        }
+      }
+    kotlin.test.assertFailsWith<IOException> {
+      HeartbeatTransport.sendHeartbeat(endpoint, "session", "owner", reader, clock)
+    }
+    assertEquals(1, connections)
+  }
+
+  private fun assertEndpointAuthentication(url: String, daemon: Boolean) {
     var reads = 0
     val connections = mutableListOf<HeartbeatConnection>()
     val endpoint =
@@ -63,7 +137,6 @@ class DaemonHttpTokenProviderTest {
         object : URLStreamHandler() {
           override fun openConnection(endpoint: URL): URLConnection =
             HeartbeatConnection(endpoint).also {
-              if (caller) it.setRequestProperty("Authorization", "caller")
               connections.add(it)
             }
         },
@@ -79,13 +152,28 @@ class DaemonHttpTokenProviderTest {
         },
       )
     }
-    val expected = if (caller) "caller" else if (daemon) "Bearer local" else null
-    assertTrue(connections.all { it.getRequestProperty("Authorization") == expected }, url)
-    assertEquals(if (daemon && !caller) 2 else 1, connections.size, url)
-    assertEquals(if (daemon && !caller) 2 else 0, reads, url)
+    val expected = if (daemon) "Bearer local" else null
+    assertTrue(connections.all { it.authorization == expected }, url)
+    assertEquals(if (daemon) 2 else 1, connections.size, url)
+    assertEquals(if (daemon) 2 else 0, reads, url)
   }
 
-  private class HeartbeatConnection(endpoint: URL) : HttpURLConnection(endpoint) {
+  private class HeartbeatConnection(
+    endpoint: URL,
+    private val status: Int = 401,
+    private val onResponse: () -> Unit = {},
+  ) : HttpURLConnection(endpoint) {
+    var authorization: String? = null
+      private set
+
+    override fun setRequestProperty(name: String, value: String) {
+      if (name.equals("Authorization", ignoreCase = true)) authorization = value
+      super.setRequestProperty(name, value)
+    }
+
+    override fun getRequestProperty(name: String): String? =
+      if (name.equals("Authorization", ignoreCase = true)) null else super.getRequestProperty(name)
+
     override fun connect() = Unit
 
     override fun disconnect() = Unit
@@ -96,7 +184,14 @@ class DaemonHttpTokenProviderTest {
 
     override fun getErrorStream() = ByteArrayInputStream(byteArrayOf())
 
-    override fun getResponseCode() = 401
+    override fun getResponseCode(): Int {
+      onResponse()
+      return status
+    }
+
+    override fun getHeaderField(name: String) = if (name == "Retry-After") "1" else null
+
+    override fun getInputStream() = ByteArrayInputStream(byteArrayOf())
   }
 
   @After

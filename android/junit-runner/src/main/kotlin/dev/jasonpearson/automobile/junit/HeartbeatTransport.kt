@@ -13,6 +13,19 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+/** Monotonic time and delay for the heartbeat's bounded authentication/startup replay. */
+internal interface HeartbeatRetryClock {
+  fun nowNanos(): Long
+
+  fun sleep(ms: Long)
+}
+
+internal object SystemHeartbeatRetryClock : HeartbeatRetryClock {
+  override fun nowNanos() = System.nanoTime()
+
+  override fun sleep(ms: Long) = Thread.sleep(ms)
+}
+
 internal object HeartbeatTransport {
   private val HTTP_SUCCESS = 200..299
   private val json = Json { ignoreUnknownKeys = true }
@@ -36,11 +49,21 @@ internal object HeartbeatTransport {
     sessionId: String,
     livenessOwnerToken: String = DaemonLivenessOwner.token,
     tokenProvider: DaemonHttpTokenProvider = this.tokenProvider,
+    retryClock: HeartbeatRetryClock = SystemHeartbeatRetryClock,
   ) {
-    if (
-      sendBeat(endpoint, sessionId, livenessOwnerToken, tokenProvider, retryAuthentication = true)
-    ) {
-      sendBeat(endpoint, sessionId, livenessOwnerToken, tokenProvider, retryAuthentication = false)
+    val started = retryClock.nowNanos()
+    val budgetMs =
+      DaemonHeartbeat.HEARTBEAT_CONNECT_TIMEOUT_MS + DaemonHeartbeat.HEARTBEAT_READ_TIMEOUT_MS
+    val remainingMs = { budgetMs - (retryClock.nowNanos() - started) / 1_000_000 }
+    repeat(2) { attempt ->
+      val remaining = remainingMs()
+      if (remaining <= 0) throw IOException("Daemon heartbeat for $sessionId timed out")
+      val retryDelay =
+        sendBeat(endpoint, sessionId, livenessOwnerToken, tokenProvider, remaining.toInt())
+          ?: return
+      if (attempt == 1 || remainingMs() <= retryDelay)
+        throw IOException("Daemon heartbeat for $sessionId retry budget exhausted")
+      if (retryDelay > 0) retryClock.sleep(retryDelay)
     }
   }
 
@@ -49,19 +72,23 @@ internal object HeartbeatTransport {
     sessionId: String,
     livenessOwnerToken: String,
     tokenProvider: DaemonHttpTokenProvider,
-    retryAuthentication: Boolean,
-  ): Boolean {
+    remainingMs: Int,
+  ): Long? {
     val connection = endpoint.openConnection() as HttpURLConnection
     try {
       connection.instanceFollowRedirects = false
       connection.requestMethod = "POST"
-      val usesDaemonAuthentication =
-        isDaemonHttpEndpoint(endpoint) && connection.getRequestProperty("Authorization") == null
+      // This transport creates the connection and owns its headers; the JDK hides Authorization
+      // from getRequestProperty, so it cannot be used to detect caller-supplied credentials.
+      val usesDaemonAuthentication = isDaemonHttpEndpoint(endpoint)
       if (usesDaemonAuthentication) {
         tokenProvider.read()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
       }
       connection.setRequestProperty("Content-Type", "application/json")
-      DaemonHeartbeat.applyBeatTimeouts(connection)
+      // Split the remaining end-to-end budget across connect and read; never reset it on replay.
+      val phaseTimeout = (remainingMs / 2).coerceAtLeast(1)
+      connection.connectTimeout = minOf(DaemonHeartbeat.HEARTBEAT_CONNECT_TIMEOUT_MS, phaseTimeout)
+      connection.readTimeout = minOf(DaemonHeartbeat.HEARTBEAT_READ_TIMEOUT_MS, phaseTimeout)
       connection.doOutput = true
 
       val payload =
@@ -74,13 +101,11 @@ internal object HeartbeatTransport {
       connection.outputStream.use { it.write(payload.toByteArray()) }
 
       val status = connection.responseCode
-      if (
-        status == HttpURLConnection.HTTP_UNAUTHORIZED &&
-          retryAuthentication &&
-          usesDaemonAuthentication
-      ) {
+      val retryDelay = retryDelayMs(connection, status, usesDaemonAuthentication)
+      if (retryDelay != null) {
         connection.errorStream?.use { it.readBytes() }
-        return true
+        // Share the existing single-replay budget with authentication refresh.
+        return retryDelay
       }
       if (status == HttpURLConnection.HTTP_NOT_FOUND) {
         val body = connection.errorStream?.use { String(it.readBytes()) }.orEmpty()
@@ -91,10 +116,21 @@ internal object HeartbeatTransport {
         throw IOException("Daemon heartbeat for $sessionId failed with HTTP $status")
       }
       connection.inputStream.use { it.readBytes() }
-      return false
+      return null
     } finally {
       connection.disconnect()
     }
+  }
+
+  private fun retryDelayMs(connection: HttpURLConnection, status: Int, eligible: Boolean): Long? {
+    if (!eligible) return null
+    if (status == HttpURLConnection.HTTP_UNAUTHORIZED) return 0
+    if (
+      status == HttpURLConnection.HTTP_UNAVAILABLE &&
+        connection.getHeaderField("Retry-After") == "1"
+    )
+      return 1000
+    return null
   }
 
   private fun sessionReleased(sessionId: String, body: String): DaemonSessionReleasedException {

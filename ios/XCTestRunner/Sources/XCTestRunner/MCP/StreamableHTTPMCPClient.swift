@@ -42,7 +42,11 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         self.endpoint = endpoint
         logger = options.logger
         self.performer = AuthenticatedDaemonHTTPRequestPerformer.isDaemonEndpoint(endpoint)
-            ? AuthenticatedDaemonHTTPRequestPerformer(performer: performer, tokenProvider: options.tokenProvider)
+            ? AuthenticatedDaemonHTTPRequestPerformer(
+                performer: performer,
+                tokenProvider: options.tokenProvider,
+                scheduler: options.scheduler
+            )
             : performer
         scheduler = options.scheduler
     }

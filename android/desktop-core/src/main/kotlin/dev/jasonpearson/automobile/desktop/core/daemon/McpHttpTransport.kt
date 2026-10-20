@@ -172,6 +172,7 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
     includeSession: Boolean,
     deadline: StatusRequestDeadline?,
     retryAuthentication: Boolean = true,
+    startupRetries: Int = 5,
   ): HttpResponse<String> {
     val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
     // The MCP streamable-HTTP transport answers 406 unless Accept lists both forms.
@@ -201,10 +202,20 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
         sendAuthenticatedRequest(httpRequest)
       }
 
+    if (waitForStartupRetry(response, httpRequest, deadline, startupRetries)) {
+      return exchange(request, includeSession, deadline, retryAuthentication, startupRetries - 1)
+    }
+
     if (
       response.statusCode() == 401 && retryAuthentication && usesDaemonAuthentication(httpRequest)
     ) {
-      return exchange(request, includeSession, deadline, retryAuthentication = false)
+      return exchange(
+        request,
+        includeSession,
+        deadline,
+        retryAuthentication = false,
+        startupRetries = startupRetries,
+      )
     }
     response.headers().firstValue(SESSION_HEADER).ifPresent { header ->
       if (header.isNotBlank()) {
@@ -212,6 +223,22 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
       }
     }
     return response
+  }
+
+  private fun waitForStartupRetry(
+    response: HttpResponse<String>,
+    request: HttpRequest,
+    deadline: StatusRequestDeadline?,
+    remainingRetries: Int,
+  ): Boolean {
+    if (remainingRetries <= 0 || !usesDaemonAuthentication(request)) return false
+    if (
+      response.statusCode() != 503 || response.headers().firstValue("Retry-After").orElse("") != "1"
+    )
+      return false
+    if (deadline != null && deadline.remainingTimeoutMs() <= 1000) return false
+    options.startupRetryDelay(1000)
+    return true
   }
 
   /**
@@ -258,9 +285,6 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
       ?: httpClient.send(authenticated, HttpResponse.BodyHandlers.ofString())
   }
 
-  private fun usesDaemonAuthentication(request: HttpRequest): Boolean =
-    isDaemonHttpEndpoint(request.uri()) && request.headers().firstValue("Authorization").isEmpty
-
   companion object {
     /** Must match `MCP_SESSION_KEY_HEADER` in src/daemon/mcpSessionKey.ts. */
     internal const val MCP_SESSION_KEY_HEADER = "x-auto-mobile-mcp-session-id"
@@ -276,3 +300,6 @@ internal class McpHttpTransport(val options: McpHttpClientOptions) {
         (e is McpConnectionException && e.message?.contains("server error") == true)
   }
 }
+
+private fun usesDaemonAuthentication(request: HttpRequest): Boolean =
+  isDaemonHttpEndpoint(request.uri()) && request.headers().firstValue("Authorization").isEmpty

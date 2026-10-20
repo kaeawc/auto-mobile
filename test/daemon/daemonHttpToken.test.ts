@@ -57,6 +57,15 @@ describe("daemon HTTP token helpers", () => {
     },
   );
 
+  test.each(endpointVectors)(
+    "URL-object input requires original authority spelling: $url",
+    ({ url }) => {
+      expect(daemonHttpAuthHeaders(new URL(url), { AUTOMOBILE_DAEMON_HTTP_TOKEN: TOKEN })).toEqual(
+        {},
+      );
+    },
+  );
+
   test("uses the injected identifier deterministically", () => {
     const ids = new CountingIdGenerator("uuid");
     expect(generateDaemonHttpToken(ids)).toBe("uuid-1");
@@ -401,8 +410,28 @@ class RemovalFiles implements DaemonHttpTokenRemovalFiles {
   beforeMove: () => void = () => {};
   afterMove: () => void = () => {};
   beforeRestore: () => void = () => {};
+  restoreCalls = 0;
+  entries: string[] = [];
+  metadata = new Map<
+    string,
+    { directory?: boolean; symlink?: boolean; uid?: number; mode?: number }
+  >();
+  removedDirectories: string[] = [];
+  list(_path: string): string[] {
+    return this.entries;
+  }
+  inspect(path: string) {
+    const entry = this.metadata.get(path) ?? {};
+    return {
+      isFile: () => !entry.directory && !entry.symlink,
+      isDirectory: () => !!entry.directory,
+      isSymbolicLink: () => !!entry.symlink,
+      uid: entry.uid ?? process.getuid?.() ?? 0,
+      mode: entry.mode ?? 0o700,
+    };
+  }
   createDirectory(prefix: string): string {
-    return `${prefix}private`;
+    return `${prefix}Ab12Cd`;
   }
   move(source: string, destination: string): void {
     this.beforeMove();
@@ -418,6 +447,7 @@ class RemovalFiles implements DaemonHttpTokenRemovalFiles {
     return this.files.get(path);
   }
   restore(source: string, destination: string): void {
+    this.restoreCalls++;
     this.beforeRestore();
     if (this.files.has(destination)) {
       throw new Error("Destination exists");
@@ -431,11 +461,74 @@ class RemovalFiles implements DaemonHttpTokenRemovalFiles {
   remove(path: string): void {
     this.files.delete(path);
   }
-  removeDirectory(_path: string): void {}
+  removeDirectory(path: string): void {
+    this.removedDirectories.push(path);
+  }
 }
 
 describe("atomic token removal", () => {
   const scratch = useScratchRoot("am-token-remove-");
+  test("publication sweeps private crash claims through the filesystem seam", () => {
+    const parent = scratch.next();
+    const path = join(parent, "daemon.token");
+    const files = new RemovalFiles();
+    files.entries = [
+      "daemon.token.remove-Ab12Cd",
+      "daemon.token.remove-Ab12Ce",
+      "daemon.token.remove-Ab12Cf",
+      "daemon.token.remove-Ab12Cg",
+      "daemon.token.remove-invalid",
+      "other.remove-Ab12Cd",
+    ];
+    for (const name of files.entries) {
+      const directory = join(parent, name);
+      files.metadata.set(directory, { directory: true });
+      files.files.set(`${directory}/token`, "stale");
+    }
+    files.metadata.set(join(parent, files.entries[1]!), { directory: true, symlink: true });
+    files.metadata.set(join(parent, files.entries[2]!), { directory: true, mode: 0o755 });
+    files.metadata.set(join(parent, files.entries[3]!), { directory: true, uid: -1 });
+    new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), { removalFiles: files }).write(
+      TOKEN,
+    );
+    expect(files.removedDirectories).toEqual([join(parent, files.entries[0]!)]);
+    expect(files.files.has(`${parent}/${files.entries[0]}/token`)).toBe(false);
+    expect(files.files.size).toBe(5);
+  });
+
+  test("a restore failure without a newer publication also discards the claim", () => {
+    const path = join(scratch.next(), "daemon.token");
+    const files = new RemovalFiles();
+    const store = new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+      removalFiles: files,
+    });
+    store.write(TOKEN);
+    files.files.set(path, "successor");
+    files.beforeRestore = () => {
+      throw new Error("Hard links unavailable");
+    };
+    store.remove();
+    expect(files.files.size).toBe(0);
+    expect(files.removedDirectories).toHaveLength(1);
+  });
+
+  test("a claimed symlink is removed without restoring it", () => {
+    const path = join(scratch.next(), "daemon.token");
+    const files = new RemovalFiles();
+    const store = new FileDaemonHttpTokenStore(path, new CountingIdGenerator(), {
+      removalFiles: files,
+    });
+    store.write(TOKEN);
+    files.files.set(path, "successor");
+    files.afterMove = () => {
+      files.metadata.set(`${path}.remove-Ab12Cd/token`, { symlink: true });
+    };
+    store.remove();
+    expect(files.restoreCalls).toBe(0);
+    expect(files.files.size).toBe(0);
+    expect(files.removedDirectories).toHaveLength(1);
+  });
+
   test.each(["before move", "after move", "before restore"])(
     "preserves successor publication %s",
     (step) => {
@@ -466,9 +559,8 @@ describe("atomic token removal", () => {
       }
       store.remove();
       expect(files.files.get(path)).toBe(step === "before restore" ? "newest" : "successor");
-      if (step === "before restore") {
-        expect([...files.files.values()]).toContain("successor");
-      }
+      expect(files.files.size).toBe(1);
+      expect(files.removedDirectories).toHaveLength(1);
     },
   );
 });

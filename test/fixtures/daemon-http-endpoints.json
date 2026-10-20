@@ -74,5 +74,25 @@
   {
     "url": "http://[0:0:0:0:0:0:0:1]/mcp",
     "daemon": false
+  },
+  {
+    "url": "http://%6Cocalhost/",
+    "daemon": false
+  },
+  {
+    "url": "http://127.000.000.001/",
+    "daemon": false
+  },
+  {
+    "url": "http://0177.0.0.1/",
+    "daemon": false
+  },
+  {
+    "url": "http://0x7f.0.0.1/",
+    "daemon": false
+  },
+  {
+    "url": "http://127.0.1/",
+    "daemon": false
   }
 ]

@@ -6,6 +6,8 @@ import {
   fchmodSync,
   fstatSync,
   lstatSync,
+  readdirSync,
+  type Stats,
   linkSync,
   mkdtempSync,
   rmdirSync,
@@ -17,7 +19,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname } from "node:path";
+import { basename, join, dirname } from "node:path";
 import { ENV, readEnvTrimmed } from "../config/env";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { exponentialBackoff } from "../utils/Backoff";
@@ -37,9 +39,13 @@ export function generateDaemonHttpToken(idGen?: IdGenerator): string {
 
 export { FakeDaemonHttpTokenStore } from "./FakeDaemonHttpTokenStore";
 
-/** Only removal operations are injectable; reads retain descriptor validation in production. */
+/** Cleanup operations are injectable; reads retain descriptor validation in production. */
 export interface DaemonHttpTokenRemovalFiles {
   createDirectory(prefix: string): string;
+  list(path: string): string[];
+  inspect(
+    path: string,
+  ): Pick<Stats, "isFile" | "isDirectory" | "isSymbolicLink" | "uid" | "mode"> | undefined;
   move(source: string, destination: string): void;
   read(path: string): string | undefined;
   restore(source: string, destination: string): void;
@@ -69,6 +75,8 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
   ) {
     this.removalFiles = options.removalFiles ?? {
       createDirectory: mkdtempSync,
+      list: readdirSync,
+      inspect: (path) => lstatSync(path, { throwIfNoEntry: false }),
       move: (source, destination) => {
         this.assertTarget(source);
         renameSync(source, destination);
@@ -138,6 +146,7 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
       this.publish(temporaryPath);
       created = false;
       this.publishedToken = token.trim();
+      this.sweepRemovalDirectories();
     } catch (error) {
       logger.warn("Unable to persist daemon HTTP token");
       throw toActionableError(error, "Unable to persist daemon HTTP token");
@@ -191,6 +200,50 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
     }
   }
 
+  private cleanClaim(directory: string): void {
+    const files = this.removalFiles;
+    try {
+      // unlink never follows the claimed entry. Windows open handles may prevent deletion;
+      // cleanup is best effort, and a later publication sweeps the private directory again.
+      files.remove(`${directory}/token`);
+    } catch {
+      // Missing claims and Windows sharing locks are expected during cleanup.
+      logger.debug("Daemon HTTP token claim cleanup unavailable");
+    }
+    try {
+      files.removeDirectory(directory);
+    } catch {
+      // Do not recursively remove unrelated entries from a private directory.
+      logger.debug("Daemon HTTP token removal directory cleanup unavailable");
+    }
+  }
+
+  private sweepRemovalDirectories(): void {
+    const files = this.removalFiles;
+    try {
+      const parent = dirname(this.path);
+      const prefix = `${basename(this.path)}.remove-`;
+      for (const name of files.list(parent)) {
+        if (!name.startsWith(prefix) || !/^[A-Za-z0-9]{6}$/.test(name.slice(prefix.length))) {
+          continue;
+        }
+        const directory = join(parent, name);
+        const stat = files.inspect(directory);
+        if (
+          stat?.isDirectory() &&
+          !stat.isSymbolicLink() &&
+          stat.uid === process.getuid?.() &&
+          (stat.mode & 0o7777) === 0o700
+        ) {
+          this.cleanClaim(directory);
+        }
+      }
+    } catch {
+      // Stale cleanup must not prevent publication; no credential values enter diagnostics.
+      logger.debug("Daemon HTTP token stale claim cleanup unavailable");
+    }
+  }
+
   remove(): void {
     const token = this.publishedToken;
     this.publishedToken = undefined;
@@ -199,32 +252,25 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
     }
     const files = this.removalFiles;
     let directory: string | undefined;
-    let retained = false;
     try {
       directory = files.createDirectory(`${this.path}.remove-`);
       const moved = `${directory}/token`;
       // Rename claims one directory entry atomically. A later publication stays at the public path.
-      // Windows sharing violations leave that path untouched; shutdown cleanup is best effort.
       files.move(this.path, moved);
-      retained = true;
       if (!tokensEqual(files.read(moved) ?? "", token)) {
-        // link is no-replace on POSIX and Windows. If another publication already occupies the
-        // path, preserve the claimed file in its private directory rather than replacing either.
-        files.restore(moved, this.path);
+        // Never relink a swapped symlink: macOS link() follows symbolic links.
+        const stat = files.inspect(moved);
+        if (stat?.isFile() && !stat.isSymbolicLink()) {
+          // link is no-replace. A failed restore must still discard the private claim.
+          files.restore(moved, this.path);
+        }
       }
-      files.remove(moved);
-      retained = false;
     } catch {
       // Missing files, sharing locks, and a newer publication are expected during shutdown.
       logger.debug("Daemon HTTP token file removal unavailable");
     } finally {
-      if (directory && !retained) {
-        try {
-          files.removeDirectory(directory);
-        } catch {
-          // A private empty cleanup directory may remain after best-effort shutdown.
-          logger.debug("Daemon HTTP token removal directory cleanup unavailable");
-        }
+      if (directory) {
+        this.cleanClaim(directory);
       }
     }
   }
@@ -245,11 +291,13 @@ export function readDaemonHttpToken(env: NodeJS.ProcessEnv = process.env): strin
 
 /** Exact loopback names only; other 127/8 and IPv4-mapped IPv6 addresses are excluded. */
 export function isDaemonHttpEndpoint(endpoint: string | URL): boolean {
-  const url = URL.parse(String(endpoint));
-  // WHATWG normalizes numeric aliases and expanded IPv6. For string inputs also require
-  // an explicit allowlisted authority spelling, retaining URL parsing as the validity check.
+  // WHATWG URL objects discard original host spelling (127.1 becomes 127.0.0.1,
+  // and %6Cocalhost becomes localhost). Require the original string for credential scope.
+  if (typeof endpoint !== "string") {
+    return false;
+  }
+  const url = URL.parse(endpoint);
   const literalHost =
-    typeof endpoint !== "string" ||
     /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:[/?#]|$)/i.test(
       endpoint,
     );

@@ -8,6 +8,8 @@ export type MatchMode = "exact" | "contains" | "regex";
 export interface ResolverSnapshot {
   id: string;
   nodes: readonly SearchableEntry[];
+  /** Optional search/ID-namespace subset; `nodes` retains the original ancestry indexes. */
+  searchedNodes?: readonly SearchableEntry[];
 }
 
 export interface ElementReference {

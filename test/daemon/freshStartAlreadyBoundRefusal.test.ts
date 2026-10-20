@@ -4,7 +4,7 @@ import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 
 /** A freshly started device held by another session is the typed device_owned_by_other_session (#11351). */
 describe("freshStartAlreadyBoundError", () => {

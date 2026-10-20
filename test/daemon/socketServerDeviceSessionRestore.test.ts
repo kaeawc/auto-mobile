@@ -9,7 +9,7 @@ import {
 } from "../../src/daemon/constants";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";

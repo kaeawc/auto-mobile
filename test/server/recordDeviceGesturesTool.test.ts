@@ -18,7 +18,7 @@ import type { BootedDevice } from "../../src/models";
 import { registerPlanTools } from "../../src/server/planTools";
 import * as realDeviceGestureRecordingManager from "../../src/daemon/deviceGestureRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { z } from "zod/v4";
 import { getRemovedToolHint } from "../../src/utils/removedTools";
 import { executionTracker } from "../../src/daemon/executionTracker";

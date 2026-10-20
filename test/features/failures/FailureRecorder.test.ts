@@ -7,7 +7,7 @@ import type {
   RecordNonFatalInput,
 } from "../../../src/features/failures/FailureRecorder";
 import type { RecordFailureInput } from "../../../src/db/failureAnalyticsRepository";
-import type { StackTraceElement } from "../../../src/server/failuresResources";
+import type { StackTraceElement } from "../../../src/models/failureAnalytics";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 

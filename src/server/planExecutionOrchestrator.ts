@@ -69,7 +69,7 @@ import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
-import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../daemon/shapeToolCallError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { healthSummaryField, planHealthWriterFromEnv, reportPlanHealth } from "./planHealthSummary";

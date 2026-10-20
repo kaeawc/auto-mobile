@@ -7,7 +7,7 @@ import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionMa
 import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 

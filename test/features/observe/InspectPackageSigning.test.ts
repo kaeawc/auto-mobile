@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { promises as fsPromises, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../../src/models";
@@ -14,6 +14,8 @@ import { bufferByteSource } from "../../../src/utils/android-cmdline-tools/apkSi
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { loadSignedApk, SIGNER_A, SIGNER_B } from "../../helpers/signedApkFixtures";
+
+afterEach(() => mock.restore());
 
 const PACKAGE = "dev.jasonpearson.automobile.playground";
 const APK_PATH = "/data/app/~~x/dev.jasonpearson.automobile.playground-y/base.apk";

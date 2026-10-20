@@ -1,4 +1,0 @@
-# AutoMobile test typecheck baseline (issue #11787) -- see scripts/typecheck-baseline.sh
-# generated-with: tsgo 7.0.0-dev.20260707.2
-# format: <file> <TScode> <count>
-

@@ -391,14 +391,7 @@ export class BrokerDeviceAcquisition {
         disposition: null,
         readiness: null,
         lifecycle: { evidence: result.evidence },
-        failure: {
-          code: result.failure.code,
-          retryable: result.failure.retryable,
-          message: result.failure.message,
-          nextAction: result.failure.nextAction,
-          ...(result.failure.capacity ? { capacity: result.failure.capacity } : {}),
-          ...(result.failure.budget ? { budget: result.failure.budget } : {}),
-        },
+        failure: result.failure,
       };
     }
     const ready: BindingResultEntry = {

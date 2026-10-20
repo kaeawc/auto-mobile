@@ -1,5 +1,5 @@
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { suspendedCapture } from "../../../helpers/prototypeSuspendedCapture";
 import {
   scopeHierarchyForSelector,
@@ -11,6 +11,11 @@ import {
 } from "../../../../src/features/prototype/prototypeSuspended";
 import { typedRefusalFields } from "../../../../src/models/typedRefusalFields";
 import { ActionableError } from "../../../../src/models/ActionableError";
+
+afterEach(() => {
+  mock.restore();
+});
+
 describe("captured Android prototype suspension", () => {
   for (const rootless of [false, true]) {
     test(`conversion retains true and omits absent/false, rootless=${rootless}`, () => {

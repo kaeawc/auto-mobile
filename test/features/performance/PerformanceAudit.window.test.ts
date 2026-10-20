@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { PerformanceAudit } from "../../../src/features/performance/PerformanceAudit";
 import {
   PERF_AUDIT_WINDOW_MS,
@@ -14,6 +14,10 @@ import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
+
+afterEach(() => {
+  mock.restore();
+});
 
 /**
  * Issue #10094: CPU usage was process lifetime ticks divided by DEVICE uptime
@@ -196,19 +200,21 @@ describe("PerformanceAudit windowed CPU and jank", () => {
   let factory: FakeAdbClientFactory;
   let timer: FakeTimer;
   let audit: PerformanceAudit;
+  let cpuReads: ReturnType<typeof spyOn<PerformanceAudit, "readCpuSample">>;
 
   beforeEach(() => {
     factory = new FakeAdbClientFactory();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
     audit = new PerformanceAudit(device, factory, undefined, timer);
+    cpuReads = spyOn(audit, "readCpuSample");
     factory.getFakeClient().setCommandResult("shell pidof 'com.example'", "1220\n");
     factory.getFakeClient().setCommandResult("shell ps -T -p '1220' | wc -l", "49\n");
   });
 
   const stubCpuSamples = (...samples: Array<CpuSample | null>) => {
     const queue = [...samples];
-    return spyOn(audit, "readCpuSample").mockImplementation(async () => {
+    return cpuReads.mockImplementation(async () => {
       const sample = queue.shift() ?? null;
       return sample ? { sample, statRaw: capturedStat } : null;
     });

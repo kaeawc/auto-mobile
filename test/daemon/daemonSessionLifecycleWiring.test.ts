@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { wireSessionLifecycle } from "../../src/daemon/daemonSessionLifecycleWiring";
 import type { DaemonSessionLifecycleHost } from "../../src/daemon/daemonSessionLifecycleWiring";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 const REGISTRATIONS = [
   "onDeviceOwnershipChange",

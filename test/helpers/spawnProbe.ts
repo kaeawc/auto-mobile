@@ -1,7 +1,7 @@
 /** The slice of a `Bun.spawnSync` result that a JSON-printing probe child needs. */
 export interface ProbeSpawnResult {
   exitCode: number | null;
-  signalCode?: string | null;
+  signalCode?: string | number | null;
   exitedDueToTimeout?: boolean;
   stdout: { toString(): string };
   stderr: { toString(): string };

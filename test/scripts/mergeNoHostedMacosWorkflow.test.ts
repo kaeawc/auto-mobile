@@ -24,16 +24,13 @@ describe("On Merge hosted macOS removal (#8583, #11010)", () => {
 
   test("keeps the four portable lanes and removes the two macOS-only jobs", () => {
     const jobs = loadJobs(WORKFLOW);
-    for (const id of [
-      "bats-tests",
-      "bats-integration-tests",
-      "node-unit-tests",
-      "node-host-integration-tests",
-    ]) {
+    for (const id of ["bats-tests", "bats-integration-tests", "node-host-integration-tests"]) {
       expect(jobs[id], `${id} must remain present`).toBeDefined();
       expect(jobs[id]?.strategy?.matrix?.os).toContain("ubuntu-latest");
       expect(jobs[id]?.strategy?.matrix?.os?.some((os) => /^macos-/i.test(os))).toBe(false);
     }
+    expect(jobs["node-unit-tests"]?.strategy?.matrix?.os).toEqual(["windows-latest"]);
+    expect(jobs["ts-code-coverage"]?.["runs-on"]).toBe("ubuntu-latest");
     for (const id of ["node-unit-tests", "node-host-integration-tests"]) {
       expect(jobs[id]?.strategy?.matrix?.os).toContain("windows-latest");
     }

@@ -266,3 +266,21 @@ assert_no_rerun() {
   run bash "$SCRIPT" 123 1
   [ "$status" -eq 2 ]
 }
+
+@test "coverage unit gate qualifies for the same fresh-runner rerun" {
+  jq '.jobs[0].name = "TypeScript Code Coverage"' "$FIXTURE" > "$FIXTURE.tmp"
+  mv "$FIXTURE.tmp" "$FIXTURE"
+  run bash "$SCRIPT" rerun 123 1
+  [ "$status" -eq 0 ]
+  grep -q 'run rerun 123 --failed' "$GH_CALLS"
+}
+
+@test "ordinary coverage failures never qualify for a fresh-runner rerun" {
+  jq '.jobs[0].name = "TypeScript Code Coverage"' "$FIXTURE" > "$FIXTURE.tmp"
+  mv "$FIXTURE.tmp" "$FIXTURE"
+  echo '1 fail' > "$JOB_LOG"
+  run bash "$SCRIPT" rerun 123 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lacks the contention marker"* ]]
+  ! grep -q 'run rerun' "$GH_CALLS"
+}

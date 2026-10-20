@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createDaemonPerformanceDemandProbe } from "../../../src/features/performance/PerformanceDemandProbe";
+import type { PerformanceDemandProbe } from "../../../src/features/performance/PerformanceMonitorTypes";
 import type { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
 import { PerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
 import {
@@ -19,7 +21,7 @@ class RecordingBuffer extends PerfWindowBuffer {
 }
 
 const monitors: PerformanceMonitor[] = [];
-function setup() {
+function setup(demandProbe?: PerformanceDemandProbe) {
   const timer = new FakeTimer();
   const adb = new FakeAdbClientFactory();
   const buffer = new RecordingBuffer();
@@ -30,8 +32,8 @@ function setup() {
   const ps: string[] = [];
   const monitor = new PerformanceMonitor(timer, {
     adbClientFactory: adb,
-    demandProbe: {
-      hasDemand: (deviceId) => {
+    demandProbe: demandProbe ?? {
+      hasDemand: (deviceId, _packageName, _platform) => {
         probes.push(deviceId);
         return demanded.has(deviceId);
       },
@@ -81,6 +83,28 @@ afterEach(() => {
 });
 
 describe("PerformanceMonitor demand", () => {
+  test("device-stream demand samples Android while leaving iOS dormant", async () => {
+    const streamChecks: string[] = [];
+    const probe = createDaemonPerformanceDemandProbe({
+      getPerformancePushServer: () => null,
+      getTelemetryPushServer: () => null,
+      getDeviceDataStreamServer: () => ({
+        hasSubscriberForDevice: (deviceId) => {
+          streamChecks.push(deviceId);
+          return true;
+        },
+      }),
+    });
+    const { monitor, advance, pushes, ps } = setup(probe);
+    monitor.startMonitoring("android-a", "com.a", "android");
+    monitor.startMonitoring("ios-a", "com.c", "ios");
+    await advance(1000);
+    expect(streamChecks).toEqual(["android-a", "android-a"]);
+    expect(pushes).toHaveLength(2);
+    expect(pushes.every(({ deviceId }) => deviceId === "android-a")).toBe(true);
+    expect(ps).toHaveLength(0);
+  });
+
   test("no consumers: zero subprocesses, pushes or buffer records for a minute", async () => {
     const { adb, buffer, pushes, ps, probes, advance, registerFleet } = setup();
     registerFleet();

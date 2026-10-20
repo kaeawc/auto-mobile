@@ -326,7 +326,9 @@ class OverlayDrawer(
     val centerY = rect.centerY()
     val radiusX = rect.width() / 2f
     val radiusY = rect.height() / 2f
-    if (!radiusX.isFinite() || !radiusY.isFinite() || radiusX <= 0f || radiusY <= 0f) {
+    val hasInvalidRadii =
+      !radiusX.isFinite() || !radiusY.isFinite() || radiusX <= 0f || radiusY <= 0f
+    if (hasInvalidRadii) {
       return emptyList()
     }
 

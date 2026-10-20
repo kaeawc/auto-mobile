@@ -1185,18 +1185,23 @@ object LaunchCancellationScanner {
       // Walk back over the contiguous catch chain (only whitespace between clauses) this broad
       // catch
       // belongs to, looking for a rethrowing CancellationException catch bound to the same `try`.
-      var guarded = false
-      var j = idx - 1
-      while (j >= 0 && body.substring(catches[j].blockEnd, catches[j + 1].start).isBlank()) {
-        if (catches[j].simpleType == "CancellationException" && catches[j].rethrows) {
-          guarded = true
-          break
-        }
-        j--
-      }
+      val guarded = hasCancellationGuard(body, catches, idx)
       if (!guarded) offsets.add(c.start)
     }
     return offsets
+  }
+
+  private fun hasCancellationGuard(body: String, catches: List<CatchClause>, idx: Int): Boolean {
+    var guarded = false
+    var j = idx - 1
+    while (j >= 0 && body.substring(catches[j].blockEnd, catches[j + 1].start).isBlank()) {
+      if (catches[j].simpleType == "CancellationException" && catches[j].rethrows) {
+        guarded = true
+        break
+      }
+      j--
+    }
+    return guarded
   }
 
   /**
@@ -1223,32 +1228,43 @@ object LaunchCancellationScanner {
    * still reads as one statement per top-level line.
    */
   private fun blankNestedGroups(s: String): String {
-    val out = StringBuilder(s.length)
-    var brace = 0
-    var paren = 0
-    for (c in s) {
+    val nesting = GroupNesting()
+    return buildString(s.length) {
+      for (c in s) append(nesting.mask(c))
+    }
+  }
+
+  private class GroupNesting {
+    private var brace = 0
+    private var paren = 0
+
+    fun mask(c: Char): Char =
       when {
         c == '{' -> {
-          out.append(if (brace == 0 && paren == 0) '{' else ' ')
+          val visible = brace == 0 && paren == 0
           brace++
+          if (visible) '{' else ' '
         }
         c == '}' -> {
           brace--
-          out.append(if (brace == 0 && paren == 0) '}' else ' ')
+          if (brace == 0 && paren == 0) '}' else ' '
         }
-        brace > 0 -> out.append(' ')
-        c == '(' -> {
-          out.append(if (paren == 0) '(' else ' ')
-          paren++
-        }
-        c == ')' -> {
-          paren--
-          out.append(if (paren == 0) ')' else ' ')
-        }
-        paren > 0 -> out.append(' ')
-        else -> out.append(c)
+        brace > 0 -> ' '
+        else -> maskParentheses(c)
       }
-    }
-    return out.toString()
+
+    private fun maskParentheses(c: Char): Char =
+      when (c) {
+        '(' -> {
+          val visible = paren == 0
+          paren++
+          if (visible) '(' else ' '
+        }
+        ')' -> {
+          paren--
+          if (paren == 0) ')' else ' '
+        }
+        else -> if (paren > 0) ' ' else c
+      }
   }
 }

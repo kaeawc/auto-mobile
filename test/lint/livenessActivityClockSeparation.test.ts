@@ -76,7 +76,7 @@ const LIVENESS_READS: ReadonlySet<string> = new Set([
 
 /** Liveness-only entry points, per file. Keys are `Class.method` or a module function name. */
 const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
-  "src/daemon/sessionManager.ts": ["SessionManager.forgiveDaemonStall"],
+  "src/daemon/sessionManager/activityClocks.ts": ["SessionActivityClocks.forgiveDaemonStall"],
   // The lease and policy moved out of SessionManager (#11797); it reaches SessionManager's own
   // helpers (`getSession`, `recordSessionActivity`, ...) through its `port`.
   "src/daemon/sessionLivenessLease.ts": [
@@ -173,8 +173,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isLateExecutionWhileEarlierWorkIsActive",
     // #11359: the wall-clock request deadline is converted onto the session clock before it is
     // compared with the session-clock restart deadline.
-    "SessionManager.waitForAbortedAssignment",
-    "SessionManager.waitForSharedAssignment",
+  ],
+  "src/daemon/sessionManager/acquisition.ts": [
+    "SessionAcquisition.waitForAbortedAssignment",
+    "SessionAcquisition.waitForSharedAssignment",
   ],
   // #11162: the release's deferral is a session-clock instant from the execution veto.
   "src/daemon/ownerDisconnectRelease.ts": [
@@ -234,7 +236,7 @@ interface Classified {
  * removing or adding a write forces this list to be updated.
  */
 const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
-  "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.forgiveDaemonStall": {
     writes: 2,
     reason:
       "#10662: stall forgiveness compensates for time the daemon itself lost. It shifts " +
@@ -258,19 +260,19 @@ const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
  */
 const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   // --- Session idle clocks (SessionManager) --------------------------------
-  "src/daemon/sessionManager.ts SessionManager.reclaimAndRefreshExistingSession": {
+  "src/daemon/sessionManager/admission.ts SessionAdmission.reclaimAndRefreshExistingSession": {
     writes: 4,
     reason:
       "Tool usage: getOrCreateSession resolving a session for a tool call refreshes " +
       "lastUsedAt/expiresAt, and restores both if the durable write fails.",
   },
-  "src/daemon/sessionManager.ts SessionManager.createSession": {
+  "src/daemon/sessionManager/creationGuard.ts SessionCreationGuard.createSession": {
     writes: 2,
     reason:
       "Tool usage: a session is created for a device acquisition (a tool call), and its " +
       "lastUsedAt/expiresAt start the idle window from that moment.",
   },
-  "src/daemon/sessionManager.ts SessionManager.recordToolCallEnded": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.recordToolCallEnded": {
     writes: 2,
     reason:
       "Tool usage: the end of a tool call restarts the idle window (owner decision 2026-10-08), " +
@@ -294,13 +296,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
         "Policy (#11176): a failed durable write of the managed-execution adoption restores the " +
         "previous expiresAt; the new deadline itself comes from rebaseIdleDeadlineOnLastActivity.",
     },
-  "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.forgiveDaemonStall": {
     writes: 2,
     reason:
       "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES " +
       "(#10662, #10835).",
   },
-  "src/daemon/sessionManager.ts SessionManager.startRehydratedOwnerWindows": {
+  "src/daemon/sessionManager/activityClocks.ts SessionActivityClocks.startRehydratedOwnerWindows": {
     writes: 2,
     reason:
       "Startup (#11388): a rehydrated session's idle window starts when the daemon can hear " +
@@ -840,7 +842,7 @@ interface FunctionRef {
 type PortIndex = ReadonlyMap<string, readonly FunctionRef[]>;
 
 /** Property names a collaborator stores its port under (`this.port`, `this.deps.port`, `this.pool`). */
-const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool"]);
+const PORT_FIELDS: ReadonlySet<string> = new Set(["port", "pool", "host"]);
 
 /** Unwrap only forwarder results: `void` elsewhere still means retiring a clock. */
 function unwrapForwarder(expression: ts.Expression): ts.Expression {
@@ -1478,6 +1480,24 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         models.get(controllerPath)!,
         "SessionLivenessController",
         new Set(DEADLINE_REDERIVATION_HELPERS[controllerPath] ?? []),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/admission.ts")!,
+        "SessionAdmission",
+        new Set(),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/creationGuard.ts")!,
+        "SessionCreationGuard",
+        new Set(),
+        { models, ports },
+      ),
+      ...activityWritingMethods(
+        models.get("src/daemon/sessionManager/activityClocks.ts")!,
+        "SessionActivityClocks",
+        new Set(),
         { models, ports },
       ),
     ]);

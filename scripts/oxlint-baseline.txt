@@ -7,7 +7,6 @@
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(complexity)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(max-classes-per-file)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(max-params)
-1	src/daemon/daemon.ts	auto-mobile(max-class-lines)
 1	src/daemon/daemon.ts	eslint(complexity)
 1	src/daemon/daemonMcpProxy.ts	auto-mobile(max-class-lines)
 1	src/daemon/devicePool.ts	auto-mobile(max-class-lines)

@@ -13,7 +13,7 @@ import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
 import { stripInternalToolParams } from "../../src/server/index";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
 import { stripInternalParams } from "../../src/features/record/ToolCallRecorder";

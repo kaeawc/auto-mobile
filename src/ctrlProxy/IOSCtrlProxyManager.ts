@@ -1,6 +1,5 @@
 import { MapDeviceClientRegistry } from "./deviceClientRegistry";
 import { type IosTunnelClient } from "./ios/IosTunnelClient";
-import type { IosPhysicalDeviceLister } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import type { IosCtrlProxyManagerDiagnostics } from "./ios/IosCtrlProxyManagerDiagnostics";
 import type {
   IosCtrlProxyRunnerSnapshot,
@@ -19,9 +18,7 @@ import { ActionableError } from "../models/ActionableError";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { PortManager } from "../utils/PortManager";
 import { type HostProcessExecutor } from "../utils/HostCommandExecutor";
-import { XcodeSigningManager } from "../utils/ios-cmdline-tools/XcodeSigning";
-import { XcodebuildClient, type Xcodebuild } from "../utils/ios-cmdline-tools/XcodebuildClient";
-import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
+import { XcodebuildClient } from "../utils/ios-cmdline-tools/XcodebuildClient";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { ForcedRestartBudget } from "./ForcedRestartBudget";
 import type { ExistingIosManager } from "./ios/ExistingIosManager";
@@ -33,7 +30,6 @@ import {
   CtrlProxyIosSetupResult,
   CtrlProxyStartOptions,
   CtrlProxyIosManager,
-  RemoteCtrlProxyIOSRunner,
   IproxyTunnelStartOptions,
   CtrlProxyIosCapabilities,
   NO_PHYSICAL_DEVICES,
@@ -368,31 +364,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Create instance for testing with injected dependencies
    */
   public static createForTestingWithDeps(
-    device: BootedDevice,
-    timer: Timer,
-    builder: IosCtrlProxyBuilderSurface | undefined,
-    processExecutor: HostProcessExecutor,
-    signingManager?: XcodeSigningManager,
-    deviceAppManager?: DeviceAppManager,
-    remoteRunner?: RemoteCtrlProxyIOSRunner,
-    hostPortAvailabilityChecker?: HostPortAvailabilityChecker,
-    xcodebuild?: Xcodebuild,
-    processClient?: IosCtrlProxyProcessClient,
-    physicalDeviceLister?: IosPhysicalDeviceLister,
+    options: IosCtrlProxyManagerTestOptions,
   ): IOSCtrlProxyManager {
-    return IOSCtrlProxyManager.createForTestingWithOptions({
-      device,
-      timer,
-      builder,
-      processExecutor,
-      signingManager,
-      deviceAppManager,
-      remoteRunner,
-      hostPortAvailabilityChecker,
-      xcodebuild,
-      processClient,
-      physicalDeviceLister,
-    });
+    return IOSCtrlProxyManager.createForTestingWithOptions(options);
   }
 
   /**

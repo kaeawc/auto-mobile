@@ -7,51 +7,45 @@ import {
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
 import { TextIndeterminateError } from "../features/action/TextIndeterminateError";
-import { McpError } from "../daemon/mcpError";
+import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
+import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import {
   McpTimeoutError,
   isMcpQueueTimeoutError,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
-} from "../daemon/McpTimeoutError";
+} from "./McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
 import { PrototypeSuspendedError } from "../features/prototype/prototypeSuspended";
-import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
+import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   recoveryIdentityLoss,
   recoveryIdentityLossPayload,
   sessionReleasedDuringCallPayload,
-} from "../daemon/deviceSessionResult";
-import {
-  DaemonRestartDeferredError,
-  daemonRestartDeferredPayload,
-} from "../daemon/daemonRestartAdmission";
-import {
-  DaemonRestartPendingError,
-  daemonRestartPendingPayload,
-} from "../daemon/daemonRestartPending";
+} from "./deviceSessionResult";
+import { DaemonRestartDeferredError, daemonRestartDeferredPayload } from "./daemonRestartAdmission";
+import { DaemonRestartPendingError, daemonRestartPendingPayload } from "./daemonRestartPending";
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "../daemon/deviceOutsideBoundSessionRefusal";
+} from "./deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { SdkTooOldError } from "../models/SdkTooOldError";
 import { AppNotRunningError } from "../models/AppNotRunningError";
-import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
-import { DeviceOutsideBrokerGrantError } from "../daemon/sessionBroker/connectionRefusal";
+import { InputDeviceOwnedError } from "./inputDeviceOwnership";
+import { DeviceGestureRecordingStartUnheldError } from "./deviceGestureRecordingStartAdmission";
+import { DeviceOutsideBrokerGrantError } from "./sessionBroker/connectionRefusal";
 import {
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,
   BindingOwnershipUnconfirmedError,
-} from "../daemon/sessionBroker/provisioning/refusal";
+} from "./sessionBroker/provisioning/refusal";
 import {
   RetryableDeviceAcquisitionError,
   DeviceUnhealthyError,

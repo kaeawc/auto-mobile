@@ -38,7 +38,7 @@ import {
   heldDeviceBindRefusal,
 } from "../daemon/inputDeviceOwnership";
 import { executionTracker } from "../daemon/executionTracker";
-import { isTypedToolRefusal } from "./shapeToolCallError";
+import { isTypedToolRefusal } from "../daemon/shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";

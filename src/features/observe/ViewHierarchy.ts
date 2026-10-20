@@ -105,7 +105,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     await this.accessibilityServiceClient.setRecompositionTrackingEnabled(enabled, perf, signal);
   }
 
-  async getScreenIdentity(applicationId?: string): Promise<ScreenIdentity | undefined> {
+  async getScreenIdentity(
+    applicationId?: string,
+    capturedAt?: number,
+  ): Promise<ScreenIdentity | undefined> {
     if (this.device.platform === "android") {
       return this.accessibilityServiceClient.getSdkScreenIdentity(applicationId);
     }
@@ -114,6 +117,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     }
     return IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.refreshSdkScreenIdentity(
       applicationId,
+      capturedAt,
     );
   }
 

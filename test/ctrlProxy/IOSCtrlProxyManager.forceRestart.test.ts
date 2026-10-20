@@ -48,8 +48,10 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
       });
     }
 
-    test("replaces a joined startup when the runner exits during WebSocket initialization", async function () {
+    test("replaces a joined startup when the runner exits during startup completion", async function () {
       const supervisor = createSupervisorProbe();
+      const completing = deferred();
+      const startup = deferred();
       let launches = 0;
       const manager: IOSCtrlProxyManager = IOSCtrlProxyManager.createForTestingWithOptions({
         device: testDevice,
@@ -62,6 +64,9 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
             launches++;
             if (launches === 1) {
               await defaults.completeHealthStartup(start, new NoOpPerformanceTracker());
+              completing.resolve();
+              await startup.promise;
+              start.controller.signal.throwIfAborted();
             }
           },
           retireRunnerAfterFinalSharedStartCancellation: async () => {},
@@ -74,10 +79,7 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
 
       const firstStart = manager.start();
       const firstFailure = firstStart.catch((error: Error) => error.message);
-      for (let i = 0; i < 20 && fakeTimer.getSleepHistory().length === 0; i++) {
-        await Promise.resolve();
-      }
-      expect(fakeTimer.getSleepHistory()).toContain(500);
+      await completing.promise;
       const autoSetup = manager.setup();
       const externalWaiters = () => manager.runnerSnapshot().sharedStartExternalWaitingCallers;
       for (let i = 0; i < 20 && externalWaiters() !== 2; i++) {
@@ -86,7 +88,7 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
       expect(externalWaiters()).toBe(2);
       const recovery = manager.forceRestart({ joinInFlightStart: true });
       supervisor.supervisor.processExited();
-      await fakeTimer.advanceTimeAsync(500);
+      startup.resolve();
 
       await recovery;
       expect(await firstFailure).toBe("iOS CtrlProxy runner exited during startup");

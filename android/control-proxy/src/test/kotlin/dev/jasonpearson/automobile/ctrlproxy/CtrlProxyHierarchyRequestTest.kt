@@ -57,8 +57,11 @@ class CtrlProxyHierarchyRequestTest {
     val server =
       WebSocketServer(
         scope = scope,
-        messageHandler = handler,
-        onClientDisconnected = handler::disconnect,
+        options =
+          WebSocketServerOptions(
+            messageHandler = handler,
+            onClientDisconnected = handler::disconnect,
+          ),
       )
     val requester = RecordingTransport()
     val peer = RecordingTransport()

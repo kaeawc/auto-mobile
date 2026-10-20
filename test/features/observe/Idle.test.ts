@@ -683,7 +683,7 @@ describe("Idle - Unit Tests", function () {
       { pkg: "com.samsung.android.app.launcher", expected: true, why: "exact samsung launcher" },
       { pkg: "com.miui.home", expected: true, why: "exact miui home" },
       { pkg: "com.oneplus.launcher", expected: true, why: "exact oneplus" },
-      { pkg: "com.android.settings", expected: true, why: "exact settings" },
+      { pkg: "com.android.settings", expected: false, why: "Settings provides real gfxinfo" },
       // Sub-packages of a known system package (prefix match).
       { pkg: "com.miui.home.settings", expected: true, why: "sub-package of miui.home" },
       { pkg: "com.android.launcher3.dev", expected: true, why: "sub-package of launcher3" },

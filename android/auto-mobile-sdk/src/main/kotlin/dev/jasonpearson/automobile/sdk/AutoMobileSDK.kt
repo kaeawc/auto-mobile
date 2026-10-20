@@ -572,13 +572,15 @@ object AutoMobileSDK {
     notifyRuntimeContextChanged(if (tenantId == null) "tenant_cleared" else "tenant_changed")
   }
 
+  private fun isCustomEventCaptureUnavailable(): Boolean = context == null || navigationOnlyMode
+
   /** Records a bounded, schema-versioned application event. */
   fun recordCustomEvent(
     name: String,
     schemaVersion: String = "1",
     fields: Map<String, String> = emptyMap(),
   ) {
-    if (!_isEnabled || name.isBlank() || context == null || navigationOnlyMode) return
+    if (!_isEnabled || name.isBlank() || isCustomEventCaptureUnavailable()) return
     val buf = eventBuffer ?: return
     val ctx = context ?: return
     val snapshot = sdkContext?.snapshot()

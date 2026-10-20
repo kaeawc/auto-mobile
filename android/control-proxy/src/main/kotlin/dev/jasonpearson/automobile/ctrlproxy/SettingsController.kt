@@ -77,14 +77,16 @@ internal class SettingsController(
       perfProvider.end()
       val totalTime = timeProvider.currentTimeMillis() - startTime
       broadcastSettingsGetResult(
-        requestId,
-        namespace,
-        key,
-        success,
-        value,
-        found,
-        error,
-        totalTime,
+        SettingsGetOutcome(
+          requestId = requestId,
+          namespace = namespace,
+          key = key,
+          success = success,
+          value = value,
+          found = found,
+          error = error,
+          totalTimeMs = totalTime,
+        ),
       )
     }
   }
@@ -166,7 +168,16 @@ internal class SettingsController(
     } finally {
       perfProvider.end()
       val totalTime = timeProvider.currentTimeMillis() - startTime
-      broadcastSettingsPutResult(requestId, namespace, key, success, error, totalTime)
+      broadcastSettingsPutResult(
+        SettingsPutOutcome(
+          requestId = requestId,
+          namespace = namespace,
+          key = key,
+          success = success,
+          error = error,
+          totalTimeMs = totalTime,
+        ),
+      )
     }
   }
 
@@ -213,7 +224,16 @@ internal class SettingsController(
     } finally {
       perfProvider.end()
       val totalTime = timeProvider.currentTimeMillis() - startTime
-      broadcastSettingsListResult(requestId, namespace, success, entries, error, totalTime)
+      broadcastSettingsListResult(
+        SettingsListOutcome(
+          requestId = requestId,
+          namespace = namespace,
+          success = success,
+          entries = entries,
+          error = error,
+          totalTimeMs = totalTime,
+        ),
+      )
     }
   }
 
@@ -253,77 +273,54 @@ internal class SettingsController(
     }
   }
 
-  private suspend fun broadcastSettingsGetResult(
-    requestId: String?,
-    namespace: String,
-    key: String,
-    success: Boolean,
-    value: String?,
-    found: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastSettingsGetResult(outcome: SettingsGetOutcome) {
     if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(requestId, "settings_get_result") {
+    resultBroadcaster.guard(outcome.requestId, "settings_get_result") {
       responseSender.broadcast(
         SettingsGetResult(
           timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          namespace = namespace,
-          key = key,
-          value = value,
-          found = found,
-          totalTimeMs = totalTimeMs,
-          error = error,
+          requestId = outcome.requestId,
+          success = outcome.success,
+          namespace = outcome.namespace,
+          key = outcome.key,
+          value = outcome.value,
+          found = outcome.found,
+          totalTimeMs = outcome.totalTimeMs,
+          error = outcome.error,
         ),
       )
     }
   }
 
-  private suspend fun broadcastSettingsPutResult(
-    requestId: String?,
-    namespace: String,
-    key: String,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastSettingsPutResult(outcome: SettingsPutOutcome) {
     if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(requestId, "settings_put_result") {
+    resultBroadcaster.guard(outcome.requestId, "settings_put_result") {
       responseSender.broadcast(
         SettingsPutResult(
           timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          namespace = namespace,
-          key = key,
-          totalTimeMs = totalTimeMs,
-          error = error,
+          requestId = outcome.requestId,
+          success = outcome.success,
+          namespace = outcome.namespace,
+          key = outcome.key,
+          totalTimeMs = outcome.totalTimeMs,
+          error = outcome.error,
         ),
       )
     }
   }
 
-  private suspend fun broadcastSettingsListResult(
-    requestId: String?,
-    namespace: String,
-    success: Boolean,
-    entries: Map<String, String>?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastSettingsListResult(outcome: SettingsListOutcome) {
     if (!responseSender.isRunning()) return
-    resultBroadcaster.guard(requestId, "settings_list_result") {
+    resultBroadcaster.guard(outcome.requestId, "settings_list_result") {
       responseSender.broadcast(
         SettingsListResult(
           timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          namespace = namespace,
-          entries = entries,
-          totalTimeMs = totalTimeMs,
-          error = error,
+          requestId = outcome.requestId,
+          success = outcome.success,
+          namespace = outcome.namespace,
+          entries = outcome.entries,
+          totalTimeMs = outcome.totalTimeMs,
+          error = outcome.error,
         ),
       )
     }

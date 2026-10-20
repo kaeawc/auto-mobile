@@ -1,2 +1,0 @@
-# AutoMobile test unknown-cast ratchet baseline -- see scripts/test-as-any-baseline.sh
-

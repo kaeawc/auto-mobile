@@ -68,8 +68,10 @@ class DatabaseInspectorProvider : ContentProvider() {
       val response = dispatchCall(method, driver, extras, capabilities)
       result.putBoolean("success", true)
       result.putString("result", response.toString())
+    } catch (e: DatabaseError.SqlError) {
+      result.putSqlError(e)
     } catch (e: DatabaseError) {
-      result.putDatabaseError(e)
+      result.putError(e::class.simpleName ?: "UNKNOWN", e.message ?: "Unknown error")
     } catch (e: IllegalArgumentException) {
       result.putError("INVALID_ARGUMENT", e.message ?: "Invalid argument")
     } catch (e: Exception) {
@@ -95,10 +97,8 @@ class DatabaseInspectorProvider : ContentProvider() {
       else -> throw IllegalArgumentException("Unknown method: $method")
     }
 
-  private fun Bundle.putDatabaseError(e: DatabaseError) {
-    val multipleStatements =
-      e is DatabaseError.SqlError &&
-        e.message == "SQL error: Multiple SQL statements are not supported"
+  private fun Bundle.putSqlError(e: DatabaseError.SqlError) {
+    val multipleStatements = e.message == "SQL error: Multiple SQL statements are not supported"
     putError(
       if (multipleStatements) "multiple_statements_not_supported"
       else e::class.simpleName ?: "UNKNOWN",

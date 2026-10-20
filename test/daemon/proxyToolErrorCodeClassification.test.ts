@@ -38,17 +38,18 @@ function makeProxy(structured: boolean): Classifier {
     autoStartDaemon: false,
   });
   // Bracket access reaches the private classification seams without a type-erasing cast.
-  proxy["structuredToolErrorCodes"] = structured;
+  proxy.getInternalsForTesting().structuredToolErrorCodes = structured;
   return {
     structuredToolErrorCodes: structured,
     isPreDispatchDaemonSessionError: (error) =>
-      proxy["errorClassifier"].isPreDispatchDaemonSessionError(error),
-    isUnknownToolError: (error) => proxy["errorClassifier"].isUnknownToolError(error),
+      proxy.getInternalsForTesting().errorClassifier.isPreDispatchDaemonSessionError(error),
+    isUnknownToolError: (error) =>
+      proxy.getInternalsForTesting().errorClassifier.isUnknownToolError(error),
     isRecoverableUnknownToolError: (error) =>
-      proxy["errorClassifier"].isRecoverableUnknownToolError(error),
+      proxy.getInternalsForTesting().errorClassifier.isRecoverableUnknownToolError(error),
     isRecoverableDaemonSessionError: (error) =>
-      proxy["errorClassifier"].isRecoverableDaemonSessionError(error),
-    frontendRegistersTool: (name) => proxy["frontendRegistersTool"](name),
+      proxy.getInternalsForTesting().errorClassifier.isRecoverableDaemonSessionError(error),
+    frontendRegistersTool: (name) => proxy.getInternalsForTesting().frontendRegistersTool(name),
   };
 }
 

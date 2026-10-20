@@ -172,19 +172,7 @@ class FailuresViewAllUiTest {
         else emptyList(),
       failureScreens = emptyMap(),
       stackTraceElements = emptyList(),
-      toolCallInfo =
-        when (section) {
-          FailureSection.ErrorCodes ->
-            AggregatedToolCallInfo("tap", rows.associate { "code-$it" to 7 - it }, emptyMap(), null)
-          FailureSection.Parameters ->
-            AggregatedToolCallInfo(
-              "tap",
-              emptyMap(),
-              rows.associate { "parameter-$it" to listOf("value-$it") },
-              null,
-            )
-          else -> null
-        },
+      toolCallInfo = toolCallInfo(section, rows),
       affectedTests =
         if (section == FailureSection.Tests) rows.associate { "test-$it" to 7 - it }
         else emptyMap(),
@@ -212,4 +200,18 @@ class FailuresViewAllUiTest {
         else emptyList(),
     )
   }
+
+  private fun toolCallInfo(section: FailureSection, rows: List<Int>): AggregatedToolCallInfo? =
+    when (section) {
+      FailureSection.ErrorCodes ->
+        AggregatedToolCallInfo("tap", rows.associate { "code-$it" to 7 - it }, emptyMap(), null)
+      FailureSection.Parameters ->
+        AggregatedToolCallInfo(
+          "tap",
+          emptyMap(),
+          rows.associate { "parameter-$it" to listOf("value-$it") },
+          null,
+        )
+      else -> null
+    }
 }

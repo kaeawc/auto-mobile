@@ -81,7 +81,7 @@ export class SimCtlBoot {
     const lease = await this.acquireSimulatorBoot(udid, deadlineMs, startSignal);
     try {
       if (this.context.timer.now() >= deadlineMs) {
-        throw new Error(`Timed out waiting to start iOS simulator ${udid}`);
+        throw new DOMException(`Timed out waiting to start iOS simulator ${udid}`, "TimeoutError");
       }
       if (startSignal?.aborted) {
         throw startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
@@ -288,7 +288,7 @@ export class SimCtlBoot {
     }
     try {
       if (this.context.timer.now() >= deadlineMs) {
-        throw new Error(`Timed out waiting to start iOS simulator ${udid}`);
+        throw new DOMException(`Timed out waiting to start iOS simulator ${udid}`, "TimeoutError");
       }
       if (signal?.aborted) {
         throw signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
@@ -357,7 +357,11 @@ export class SimCtlBoot {
           deadlineMs === undefined ? undefined : Math.max(0, deadlineMs - this.context.timer.now()),
         signal,
         label: `iOS simulator ${operation}`,
-        timeoutError: () => new Error(`Timed out waiting to ${operation} iOS simulator ${udid}`),
+        timeoutError: () =>
+          new DOMException(
+            `Timed out waiting to ${operation} iOS simulator ${udid}`,
+            "TimeoutError",
+          ),
       });
       acquired = true;
       acquiredRelease = undefined;
@@ -421,19 +425,19 @@ export class SimCtlBoot {
   }
 
   /**
-   * Reclassify any error surfaced while waiting for a simulator to become
-   * ready (both the `assumeBooted` and full-verification paths) into an
-   * `ActionableError` naming the UDID. This is the single site that gives the
-   * boot-deadline-expired condition (and any other failure reaching either
-   * path) one consistent, actionable shape (issue #6413).
+   * Keep existing UDID diagnostics and preserve the cause for provisioning (#13807).
+   * Phase settlement can prefer this contextual operation failure over its own
+   * timeout; retaining the cause avoids changing that shared settlement policy.
    */
   classifyBootReadinessError(udid: string, error: unknown): ActionableError {
     const message = errorMessage(error);
     // "Invalid device" means the UDID doesn't exist at all
     if (message.includes("Invalid device")) {
-      return new ActionableError(`Simulator with UDID ${udid} not found`);
+      return new ActionableError(`Simulator with UDID ${udid} not found`, { cause: error });
     }
-    return new ActionableError(`Simulator with UDID ${udid} failed to become ready: ${message}`);
+    return new ActionableError(`Simulator with UDID ${udid} failed to become ready: ${message}`, {
+      cause: error,
+    });
   }
 
   /**
@@ -621,6 +625,7 @@ export class SimCtlBoot {
       throw new ActionableError(
         `Simulator boot verification for ${udid} timed out before the next recovery step ` +
           `(deadline elapsed ${-remainingMs}ms ago)`,
+        { cause: new DOMException("Simulator boot deadline expired", "TimeoutError") },
       );
     }
     return remainingMs;

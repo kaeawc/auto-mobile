@@ -28,6 +28,7 @@ export type PluginRuleName =
   | "no-inline-error-normalize"
   | "no-caught-error-interpolation"
   | "no-unknown-cast"
+  | "no-as-any"
   | "no-accumulator-foreach"
   | "no-bare-expect"
   | "stress-explicit-timeout"

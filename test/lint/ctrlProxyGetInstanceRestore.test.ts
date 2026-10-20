@@ -1,6 +1,7 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join, relative, sep } from "node:path";
 
 /**
@@ -133,7 +134,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         current = current.parent;
         continue;
       }
-      if (teardownCallbacks.has(current)) {
+      if ([...teardownCallbacks].some((callback) => callback === current)) {
         return true;
       }
       const call = current.parent;
@@ -349,13 +350,20 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
           if (ts.isShorthandPropertyAssignment(property)) {
             recordReassignedTarget(property.name, position);
           } else if (ts.isPropertyAssignment(property) || ts.isSpreadAssignment(property)) {
-            recordReassignedTarget(property.initializer ?? property.expression, position);
+            recordReassignedTarget(
+              ts.isPropertyAssignment(property) ? property.initializer : property.expression,
+              position,
+            );
           }
         }
       }
     };
     const reassignmentWalk = (node: ts.Node): void => {
-      if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      ) {
         recordReassignedTarget(node.left, node.pos);
       }
       if (
@@ -586,7 +594,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
   }
 
   function walk(dir: string, files: string[] = []): string[] {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(dir)) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full, files);
@@ -610,7 +618,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     const facts = new Map<string, FileFacts>();
     const candidates = new Map<string, string>();
     for (const file of walk(TEST)) {
-      const source = readFileSync(file, "utf8");
+      const source = readGuardFile(file);
       if (!source.includes(PREFILTER) || !source.includes("getInstance")) {
         continue;
       }

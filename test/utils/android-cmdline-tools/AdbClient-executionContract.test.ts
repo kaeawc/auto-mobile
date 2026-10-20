@@ -231,20 +231,23 @@ describe("AdbClient retry contract", () => {
     });
 
     await expect(client.executeCommand("shell echo hi")).rejects.toThrow("offline");
-    expect(calls).toBe(4);
-    expect(timer.getSleepHistory()).toEqual([200, 500, 1000]);
-    expect(timer.getCurrentTime()).toBe(1_700);
+    expect(calls).toBe(5);
+    expect(timer.getSleepHistory()).toEqual([250, 500, 1000, 2000]);
+    expect(timer.getCurrentTime()).toBe(3_750);
   });
 
   test.each(["shell monkey -p 'com.example' --user 0 1", "shell kill -USR1 1234"])(
-    "does not replay an unclassified action after device offline: %s",
+    "does not replay an unclassified action after remote offline output: %s",
     async (command) => {
       let calls = 0;
       const client = new AdbClient(
         DEVICE,
         async () => {
           calls += 1;
-          throw new Error("error: device offline");
+          throw wrapCommandError(new Error("remote command exited 1"), {
+            command: "adb",
+            stdout: "error: device offline",
+          });
         },
         autoRetrySeam(),
       );
@@ -428,14 +431,17 @@ describe("AdbClient retry contract", () => {
       dispatches: 1,
     },
   ])(
-    "retries only allowlisted shell reads after device offline: $name",
+    "retries only allowlisted shell reads after remote offline output: $name",
     async ({ command, dispatches }) => {
       let calls = 0;
       const client = new AdbClient(
         DEVICE,
         async () => {
           calls += 1;
-          throw new Error("error: device offline");
+          throw wrapCommandError(new Error("remote command exited 1"), {
+            command: "adb",
+            stdout: "error: device offline",
+          });
         },
         autoRetrySeam(),
       );
@@ -547,13 +553,16 @@ describe("AdbClient retry contract", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
-  test("does not replay a delivered mutation after an offline error", async () => {
+  test("does not replay a delivered mutation after remote offline output", async () => {
     let dispatches = 0;
     const client = new AdbClient(
       DEVICE,
       async () => {
         dispatches += 1;
-        throw new Error("error: device offline");
+        throw wrapCommandError(new Error("remote command exited 1"), {
+          command: "adb",
+          stdout: "error: device offline",
+        });
       },
       autoRetrySeam(),
     );
@@ -881,8 +890,8 @@ describe("AdbClient.getAndroidApiLevel caching", () => {
 
     expect(await client.getAndroidApiLevel()).toBeNull();
     expect(await client.getAndroidApiLevel()).toBeNull();
-    // The failure is cached: exactly one probe, not one per call.
-    expect(calls).toBe(1);
+    // One logical probe retries refused transport commands, then caches the failure.
+    expect(calls).toBe(5);
   });
 
   test("re-probes after setDevice clears the cache", async () => {
@@ -980,7 +989,7 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
   test("falls back to the host clock when both device tiers fail", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_650_000_000_000);
-    const exec = (): Promise<ExecResult> => Promise.reject(new Error("device offline"));
+    const exec = (): Promise<ExecResult> => Promise.reject(new Error("timestamp unavailable"));
     timer.enableAutoAdvance();
     const client = new AdbClient(DEVICE, exec, {
       retryExecutor: new DefaultRetryExecutor(timer),
@@ -1092,7 +1101,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
 
 describe("AdbClient alias missing-device attribution", () => {
   test.each([false, true])(
-    "alias error is non-retryable and notifies its canonical device (noRetry=%s)",
+    "exhausted alias transport notifies its canonical device (noRetry=%s)",
     async (noRetry) => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -1116,11 +1125,11 @@ describe("AdbClient alias missing-device attribution", () => {
         await expect(
           client.execute(["shell", "getprop", "sys.boot_completed"], { noRetry }),
         ).rejects.toThrow("localhost:5555");
-        expect(attempts).toBe(1);
+        expect(attempts).toBe(5);
         expect(notifications).toEqual([
           { deviceId: DEVICE.deviceId, message: expect.stringContaining("localhost:5555") },
         ]);
-        expect(timer.getSleepHistory()).toEqual([]);
+        expect(timer.getSleepHistory()).toEqual([250, 500, 1000, 2000]);
       } finally {
         stop();
         timer.reset();

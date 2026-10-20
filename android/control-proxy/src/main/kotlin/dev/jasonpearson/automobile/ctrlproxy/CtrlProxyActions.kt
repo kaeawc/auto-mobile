@@ -17,6 +17,7 @@ import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.serialization.json.JsonArray
 
 /**
@@ -220,14 +221,7 @@ interface CtrlProxyActions {
 
   suspend fun getPreference(requestId: String?, packageName: String, fileName: String, key: String)
 
-  suspend fun setPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  )
+  suspend fun setPreference(request: SetPreference)
 
   suspend fun removePreference(
     requestId: String?,

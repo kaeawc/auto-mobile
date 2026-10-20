@@ -2,17 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:TestPlanValidator.kt:TestPlanValidator$multiDeviceErrors.isEmpty() &amp;&amp; devicesFieldErrors.isEmpty() &amp;&amp; deviceLabelErrors.isEmpty() &amp;&amp; barrierCoordinationErrors.isEmpty()</ID>
-    <ID>ComplexCondition:TestPlanValidator.kt:TestPlanValidator$validationErrors.isEmpty() &amp;&amp; toolNameErrors.isEmpty() &amp;&amp; clockInstantErrors.isEmpty() &amp;&amp; multiDeviceErrors.isEmpty() &amp;&amp; devicesFieldErrors.isEmpty() &amp;&amp; deviceLabelErrors.isEmpty() &amp;&amp; barrierCoordinationErrors.isEmpty() &amp;&amp; scheduleFeasibilityErrors.isEmpty()</ID>
-    <ID>ComplexCondition:TestPlanValidator.kt:TestPlanValidator$value.isFinite() &amp;&amp; value &gt;= 1.0 &amp;&amp; value &lt;= Long.MAX_VALUE.toDouble() &amp;&amp; value == kotlin.math.floor(value)</ID>
-    <ID>CyclomaticComplexMethod:TestPlanValidator.kt:TestPlanValidator$fun validateYaml: ValidationResult</ID>
-    <ID>CyclomaticComplexMethod:TestPlanValidator.kt:TestPlanValidator$private fun formatError: ValidationError</ID>
-    <ID>LargeClass:TestPlanValidator.kt:TestPlanValidator</ID>
-    <ID>LongMethod:TestPlanValidator.kt:TestPlanValidator$fun validateYaml: ValidationResult</ID>
-    <ID>SwallowedException:TestPlanValidator.kt:TestPlanValidator$e: ArithmeticException</ID>
     <ID>TooGenericExceptionCaught:TestPlanValidator.kt:TestPlanValidator$e: Exception</ID>
-    <ID>TooManyFunctions:CoordinationScheduleFeasibility.kt:CoordinationScheduleFeasibility</ID>
-    <ID>TooManyFunctions:TestPlanValidator.kt:TestPlanValidator</ID>
-    <ID>UnsafeCallOnNullableType:TestPlanValidator.kt:TestPlanValidator$schema!!</ID>
   </CurrentIssues>
 </SmellBaseline>

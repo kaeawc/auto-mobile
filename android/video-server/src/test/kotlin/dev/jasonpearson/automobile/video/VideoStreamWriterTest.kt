@@ -74,8 +74,8 @@ class VideoStreamWriterTest {
     val connection = FakeClientConnection(outputStream = blocking, onClose = blocking::release)
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
-    subject.bindServerSocket()
-    subject.acceptClients {}
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients {}
     assertFalse(connection.closed)
 
     // Simulate the transport writer thread wedged in a blocking packet write.
@@ -92,13 +92,13 @@ class VideoStreamWriterTest {
 
     // Before the stall deadline the watchdog leaves the client alone.
     now = 1_000L + VideoStreamWriter.WRITE_STALL_TIMEOUT_MS - 1
-    assertFalse(subject.checkWriteStall())
+    assertFalse(subject.transport.checkWriteStall())
     assertFalse(connection.closed)
 
     // At the deadline the watchdog force-closes the client out of band.
     now = 1_000L + VideoStreamWriter.WRITE_STALL_TIMEOUT_MS
     val stallStartMs = now
-    assertTrue(subject.checkWriteStall())
+    assertTrue(subject.transport.checkWriteStall())
     assertTrue("stalled write must force-close the client", connection.closed)
 
     // The wedged write unblocks (throws), runs the detach path, and the writer thread finishes.
@@ -118,14 +118,14 @@ class VideoStreamWriterTest {
     val connection = FakeClientConnection()
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
-    subject.bindServerSocket()
-    subject.acceptClients {}
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients {}
 
     // A write that completed promptly leaves no in-flight stamp, so no matter how far the clock
     // advances the watchdog must not tear down a healthy client.
     assertTrue(subject.writeAudioPacket(byteArrayOf(1, 2, 3), ptsUs = 0))
     now = 1_000_000L
-    assertFalse(subject.checkWriteStall())
+    assertFalse(subject.transport.checkWriteStall())
     assertFalse(connection.closed)
 
     subject.stop()
@@ -227,7 +227,7 @@ class VideoStreamWriterTest {
   }
 
   /**
-   * Drives [VideoStreamWriter.acceptClients] deterministically: each queued action produces the
+   * Drives [VideoClientTransport.acceptClients] deterministically: each queued action produces the
    * next `accept()` result (a connection, a thrown [IOException], or the end of the queue which
    * returns `null` so the acceptor loop stops).
    */
@@ -285,8 +285,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })), expectedToken = token)
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("a valid handshake must attach", 1, attachCount.get())
     assertTrue("an authenticated client must receive the stream header", output.writeCount > 0)
@@ -304,8 +304,8 @@ class VideoStreamWriterTest {
     val subject =
       writer({ now }, FakeServerSocket(listOf({ connection })), expectedToken = "session-0001")
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("a wrong-token peer must never attach", 0, attachCount.get())
     assertEquals("a wrong-token peer must receive no stream bytes", 0, output.writeCount)
@@ -322,8 +322,8 @@ class VideoStreamWriterTest {
     val subject =
       writer({ now }, FakeServerSocket(listOf({ connection })), expectedToken = "session-0001")
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("a silent connector must never attach", 0, attachCount.get())
     assertEquals("a silent connector must receive no stream bytes", 0, output.writeCount)
@@ -344,8 +344,8 @@ class VideoStreamWriterTest {
         expectedToken = token,
       )
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("only the authenticated client attaches", 1, attachCount.get())
     assertFalse(
@@ -365,8 +365,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals(1, attachCount.get())
     assertFalse(connection.closed)
@@ -391,8 +391,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("failed attach must not report a connected client", 0, attachCount.get())
     assertTrue("rolled-back attach must close the client socket", connection.closed)
@@ -434,10 +434,10 @@ class VideoStreamWriterTest {
     )
 
     try {
-      subject.bindServerSocket()
+      subject.transport.bindServerSocket()
       // A later attach must restart the window at rollback, rather than keep the initial deadline.
       now = 2_000L
-      subject.acceptClients { attachCount.incrementAndGet() }
+      subject.transport.acceptClients { attachCount.incrementAndGet() }
 
       assertEquals("failed replay must not report a connected client", 0, attachCount.get())
       assertTrue("rolled-back replay must close the client socket", connection.closed)
@@ -465,9 +465,9 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ throw IOException("accept failed") })))
 
-    subject.bindServerSocket()
+    subject.transport.bindServerSocket()
     // Must not throw: the acceptor swallows the accept IOException and returns.
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals(0, attachCount.get())
     // Nothing ever attached, so the initial clientless window still governs shutdown.
@@ -483,8 +483,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ first }, { second })))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("both clients attach in turn", 2, attachCount.get())
     assertTrue("the replacement displaces and closes the first client", first.closed)
@@ -519,8 +519,8 @@ class VideoStreamWriterTest {
       lastCommand.set(command)
       received.countDown()
     }
-    subject.bindServerSocket()
-    subject.acceptClients {}
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients {}
 
     assertTrue(
       "command reader must dispatch the client's request byte",
@@ -555,8 +555,8 @@ class VideoStreamWriterTest {
         keyFrameReceived.countDown()
       }
     }
-    subject.bindServerSocket()
-    subject.acceptClients {}
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients {}
 
     assertTrue(
       "the whitelisted keyframe request must still be forwarded",
@@ -583,8 +583,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("a disallowed peer must never be reported as connected", 0, attachCount.get())
     assertEquals("a disallowed peer must receive no stream bytes", 0, output.writeCount)
@@ -599,8 +599,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("an allowed shell peer must attach", 1, attachCount.get())
     assertTrue("an allowed peer must receive the stream header", output.writeCount > 0)
@@ -614,8 +614,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("an allowed root peer must attach", 1, attachCount.get())
     assertFalse(connection.closed)
@@ -633,8 +633,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(listOf({ allowed }, { intruder })))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("only the allowed client attaches", 1, attachCount.get())
     assertFalse("the allowed client must not be displaced by a rejected peer", allowed.closed)
@@ -673,8 +673,8 @@ class VideoStreamWriterTest {
     val attachCount = AtomicInteger()
     val subject = writer({ now }, FakeServerSocket(connections.map { conn -> { conn } }))
 
-    subject.bindServerSocket()
-    subject.acceptClients { attachCount.incrementAndGet() }
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients { attachCount.incrementAndGet() }
 
     assertEquals("only the rate-limit budget of connections is admitted", max, attachCount.get())
     // The last admitted connection is the current client and stays attached.
@@ -706,8 +706,8 @@ class VideoStreamWriterTest {
       budgetFillers.map { c -> { c } } + stormBeyondBudget.map { c -> { c } }
     val subject = writer({ now }, FakeServerSocket(actions), expectedToken = token)
 
-    subject.bindServerSocket()
-    subject.acceptClients {}
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients {}
 
     for ((i, conn) in stormBeyondBudget.withIndex()) {
       assertEquals(
@@ -725,7 +725,7 @@ class VideoStreamWriterTest {
   @Test
   fun writeReturnsTrueWithNoClientSoWritesAreDroppedNotFailed() {
     val subject = writer({ 0L }, FakeServerSocket(emptyList()))
-    subject.bindServerSocket()
+    subject.transport.bindServerSocket()
 
     // No client has attached: writes are silently dropped (cached, for the next client) and must
     // report success so the encode loop is not torn down while waiting for a reconnect.
@@ -735,7 +735,7 @@ class VideoStreamWriterTest {
   @Test
   fun writeReturnsFalseOnlyAfterStop() {
     val subject = writer({ 0L }, FakeServerSocket(emptyList()))
-    subject.bindServerSocket()
+    subject.transport.bindServerSocket()
     subject.stop()
 
     // Once stopped the contract flips to false, the single condition the encode loop treats as
@@ -747,8 +747,8 @@ class VideoStreamWriterTest {
   fun stopClosesServerSocketAndClearsClient() {
     val serverSocket = FakeServerSocket(listOf({ FakeClientConnection() }))
     val subject = writer({ 0L }, serverSocket)
-    subject.bindServerSocket()
-    subject.acceptClients {}
+    subject.transport.bindServerSocket()
+    subject.transport.acceptClients {}
 
     subject.stop()
 

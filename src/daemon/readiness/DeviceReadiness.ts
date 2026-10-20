@@ -1,16 +1,34 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
+import { RunnerReadinessService } from "../../ctrlProxy/RunnerReadinessService";
 import { ActiveDeviceSelection } from "../../devices/ActiveDeviceSelection";
-import { ctrlProxyClientLifecycle } from "../../features/observe/ctrlProxyClientLifecycle";
-import { CtrlProxyForwardOwnershipUnreadableError } from "../../features/observe/android/foreignCtrlProxyForwardEvidence";
-import { describeDevices } from "../../devices/runningReadTarget";
-import { daemonDeviceAdmissionGate, DeviceAdmissionGate } from "../../utils/deviceAdmissionGate";
+import { BootedDeviceDiscoveryIncompleteError } from "../../devices/deviceBootService";
+import { getDeviceCreationGate } from "../../devices/deviceCreationGate";
 import {
-  ambientDeviceExecutionBinding,
-  type DeviceExecutionBinding,
-} from "../../utils/deviceExecutionBinding";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { isIosSimulatorAlreadyStoppedError } from "../../utils/ios-cmdline-tools/simulatorStateErrors";
-import type { HostChildProcess as ChildProcess } from "../../utils/HostCommandExecutor";
+  createDefaultDeviceProvisioner,
+  type ProvisionedDevice,
+} from "../../devices/deviceProvisioning";
+import {
+  assertAndroidImageRunningStateKnown,
+  PHYSICAL_IOS_SCAN_BUDGET_MS,
+  waitForDeviceReadyOrCancel,
+} from "../../devices/deviceUtils";
+import { describeDevices } from "../../devices/runningReadTarget";
+import {
+  getVirtualDeviceLifecycleCoordinator,
+  type StableVirtualDeviceIdentity,
+  type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleIdentity,
+  type VirtualDeviceLifecycleLease,
+} from "../../devices/virtualDeviceLifecycleCoordinator";
+import { getSharedBootAdmissionGates } from "../../features/bootAdmission/sharedBootAdmissionGates";
+import type { IosBootInstrumentation } from "../../features/iosSimFleet/IosBootInstrumentation";
+import { createDefaultIosBootInstrumentation } from "../../features/iosSimFleet/defaultIosBootInstrumentation";
+import { AndroidCtrlProxyClient } from "../../features/observe/android";
+import { CtrlProxyForwardOwnershipUnreadableError } from "../../features/observe/android/foreignCtrlProxyForwardEvidence";
+import { ctrlProxyClientLifecycle } from "../../features/observe/ctrlProxyClientLifecycle";
+import { IOSCtrlProxyClient } from "../../features/observe/ios";
+import type { IosCtrlProxy } from "../../features/observe/ios/IOSCtrlProxyClient";
 import {
   ActionableError,
   BootedDevice,
@@ -19,318 +37,84 @@ import {
   SomePlatform,
   toActionableError,
 } from "../../models";
+import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
+import { runWithAbortSignal } from "../../utils/AbortContext";
+import { trackProcess, waitForExit } from "../../utils/ChildProcessTracker";
+import type { HostChildProcess as ChildProcess } from "../../utils/HostCommandExecutor";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import {
-  assertAndroidImageRunningStateKnown,
-  type DeviceManagerSimCtl,
-  PHYSICAL_IOS_SCAN_BUDGET_MS,
-  waitForDeviceReadyOrCancel,
-} from "../../devices/deviceUtils";
+  createGlobalPerformanceTracker,
+  createPerformanceTracker,
+} from "../../utils/PerformanceTracker";
+import { serverConfig } from "../../utils/ServerConfig";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import type { IosPhysicalDeviceLister } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
-import { type DiscoverySource } from "../../utils/discoverySource";
-import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
-import { Window as WindowImpl } from "../../features/observe/Window";
-import type { Window } from "../../features/observe/interfaces/Window";
-import { logger } from "../../utils/logger";
-import type { CtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
-import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../ctrlProxy/IOSCtrlProxyManager";
-import { BootedDeviceDiscoveryIncompleteError } from "../../devices/deviceBootService";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { daemonDeviceAdmissionGate, DeviceAdmissionGate } from "../../utils/deviceAdmissionGate";
+import {
+  ambientDeviceExecutionBinding,
+  type DeviceExecutionBinding,
+} from "../../utils/deviceExecutionBinding";
+import { deviceReadinessLockKey, withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import { PlatformDeviceManager } from "../../utils/interfaces/DeviceUtils";
-import { getDeviceCreationGate } from "../../devices/deviceCreationGate";
-import {
-  createDefaultDeviceProvisioner,
-  type IosSimulatorCreator,
-  type ProvisionedDevice,
-} from "../../devices/deviceProvisioning";
-import { AndroidCtrlProxyClient } from "../../features/observe/android";
-import type { AndroidCtrlProxy } from "../../features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../../features/observe/ios";
-import type { IOSCtrlProxy } from "../../features/observe/ios/IOSCtrlProxyClient";
-import { RealObserveScreen } from "../../features/observe/ObserveScreen";
-import type { ObserveScreenCache } from "../../models/ObserveScreenCache";
-import {
-  createPerformanceTracker,
-  createGlobalPerformanceTracker,
-} from "../../utils/PerformanceTracker";
-import { storeSetupTiming } from "../setupTiming";
+import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { checkIosCtrlProxyOverride } from "../../utils/iosCtrlProxyOverride";
+import { logger } from "../../utils/logger";
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../utils/runnerReadinessConfig";
+import { resolveAppearanceSessionKey } from "../appearanceSessionKey";
 import {
   applyAppearanceOnConnect,
   type AppearanceOnConnectDependencies,
 } from "../applyAppearanceOnConnect";
-import { resolveAppearanceSessionKey } from "../appearanceSessionKey";
-import { checkIosCtrlProxyOverride } from "../../utils/iosCtrlProxyOverride";
-import { RunnerReadinessService } from "../../ctrlProxy/RunnerReadinessService";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
-import { getSharedBootAdmissionGates } from "../../features/bootAdmission/sharedBootAdmissionGates";
-import { createDefaultIosBootInstrumentation } from "../../features/iosSimFleet/defaultIosBootInstrumentation";
-import type { IosBootInstrumentation } from "../../features/iosSimFleet/IosBootInstrumentation";
-import { serverConfig } from "../../utils/ServerConfig";
-import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../utils/runnerReadinessConfig";
-import { trackProcess, waitForExit } from "../../utils/ChildProcessTracker";
-import {
-  getVirtualDeviceLifecycleCoordinator,
-  type StableVirtualDeviceIdentity,
-  type VirtualDeviceLifecycleCoordinator,
-  type VirtualDeviceLifecycleIdentity,
-  type VirtualDeviceLifecycleLease,
-} from "../../devices/virtualDeviceLifecycleCoordinator";
-import { runWithAbortSignal } from "../../utils/AbortContext";
-import { isEmulatorLaunchCancelledError } from "../../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
-import { terminateOwnedEmulatorProcess } from "../../devices/coldBootProcessTermination";
-import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
-import { deviceReadinessLockKey, withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
-import {
-  DefaultDeviceClientProvider,
-  type ObserveClientFactories,
-} from "./DefaultDeviceClientProvider";
-import { type LifecycleStartHold, lifecycleIdentityForDevice } from "./readinessLifecycleIdentity";
+import { storeSetupTiming } from "../setupTiming";
+import { createDefaultBindingExclusion } from "../sessionBroker/provisioning/exclusion";
+import { selectReadinessAutoStartImage } from "./readinessAutoStart";
 import { AndroidCtrlProxyReadiness } from "./AndroidCtrlProxyReadiness";
+import { rollBackCreatedIosSimulator } from "./CreatedIosSimulatorRollback";
+import {
+  type ConnectedPlatformScan,
+  type ConnectedPlatformScanOptions,
+  createDefaultDeviceClientProvider,
+  type DeviceClientProvider,
+  type DeviceClientSimctl,
+  type DeviceReadinessContract,
+  type DeviceReadinessLevel,
+  type DeviceReadinessOptions,
+  type DeviceReadyOptions,
+  type ResolvedDeviceIdentity,
+} from "./DeviceReadinessContracts";
 import { ReadinessSelection } from "./ReadinessSelection";
+import { lifecycleIdentityForDevice, type LifecycleStartHold } from "./readinessLifecycleIdentity";
+import { runWithLifecycleLease, startDeviceOwningCancelledLaunch } from "./readinessLifecycleStart";
 import {
   androidReadinessWindowDevice,
   assertAndroidActiveWindow,
   assertIosDeviceAvailable,
   assertUsableIosOverride,
 } from "./readinessValidation";
-/**
- * The simctl surface the session manager drives, plus what the device manager built from it
- * needs. Exactly what consumers use, so a fake (`FakeSimctl`) satisfies it without a cast.
- */
-export type DeviceClientSimctl = DeviceManagerSimCtl &
-  IosSimulatorCreator &
-  Pick<SimCtl, "bootSimulator" | "getDeviceInfo" | "presentSimulatorAfterStart">;
-
-/**
- * Provider interface for device clients - enables dependency injection for testing
- */
-export interface DeviceClientProvider {
-  getAdb(): AdbExecutor;
-  getSimctl(): DeviceClientSimctl | undefined;
-  getAndroidEmulator(): AndroidEmulatorClient | undefined;
-  getDeviceUtils(): PlatformDeviceManager;
-  /**
-   * Connected physical iOS device discovery for readiness scans (#11063).
-   * Optional: a provider without one leaves the `ios-physical` source unscanned.
-   */
-  getIosPhysicalDeviceLister?(): IosPhysicalDeviceLister | undefined;
-  getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager;
-  getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy;
-  getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager;
-  getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy;
-  getWindow(device: BootedDevice): Window;
-  getObserveScreenCache(): ObserveScreenCache;
-}
-
-/** Observe-layer clients wired at the composition root, so the provider imports none of them. */
-const defaultObserveClientFactories: ObserveClientFactories = {
-  androidCtrlProxyClient: (device) => AndroidCtrlProxyClient.getInstance(device),
-  iosCtrlProxyClient: (device, port) => IOSCtrlProxyClient.getInstance(device, port),
-  createWindow: (device, adbFactory) => new WindowImpl(device, adbFactory),
-  observeScreenCache: () => RealObserveScreen.defaultObserveScreenCache,
-};
-
-/** The production provider, with the observe-layer clients injected. */
-export function createDefaultDeviceClientProvider(
-  adbFactory?: AdbClientFactory,
-): DefaultDeviceClientProvider {
-  return new DefaultDeviceClientProvider(defaultObserveClientFactories, adbFactory);
-}
-
-/**
- * Interface for device session management
- * Handles device detection, verification, and lifecycle for Android and iOS platforms
- */
-export interface DeviceReadiness {
-  /**
-   * Get the current device ID
-   */
-  getCurrentDevice(): BootedDevice | undefined;
-
-  /**
-   * Get the current platform
-   */
-  getCurrentPlatform(): Platform | undefined;
-
-  /**
-   * Set the current device ID and platform
-   */
-  setCurrentDevice(device: BootedDevice, platform: Platform): void;
-
-  /** Explicit selection made by the legacy setActiveDevice tool. */
-  getExplicitDevicePin(): BootedDevice | undefined;
-  setExplicitDevicePin(device: BootedDevice): void;
-  clearExplicitDevicePin(deviceId: string): void;
-
-  /**
-   * Ensure a device is ready for the specified platform and return its ID
-   * Throws an error if both Android and iOS devices are connected when auto-detecting platform
-   */
-  ensureDeviceReady(
-    platform: SomePlatform,
-    providedDeviceId?: string,
-    options?: DeviceReadyOptions,
-  ): Promise<BootedDevice>;
-
-  /**
-   * Detect the platform of connected devices
-   */
-  detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]>;
-  detectConnectedPlatformsWithStatus(
-    signal?: AbortSignal,
-    options?: ConnectedPlatformScanOptions,
-  ): Promise<ConnectedPlatformScan>;
-
-  /**
-   * Verify a specific device is connected and ready for the given platform.
-   * `resolvedIdentity` carries the AVD-resolved discovery entry for an Android
-   * emulator so readiness caches key on the runtime, not the reused serial.
-   */
-  verifyDevice(
-    deviceId: string,
-    platform: Platform,
-    options?: DeviceReadyOptions,
-    resolvedIdentity?: ResolvedDeviceIdentity,
-  ): Promise<void>;
-
-  /**
-   * Verify an Android device is connected and ready
-   */
-  verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void>;
-
-  /**
-   * Verify an iOS device is connected and ready
-   */
-  verifyIosDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void>;
-
-  /**
-   * Find an available device or start an emulator for the specified platform
-   */
-  findOrStartDevice(platform: Platform, options?: DeviceReadyOptions): Promise<BootedDevice>;
-
-  /**
-   * Find an available Android device or start an emulator
-   */
-  findOrStartAndroidDevice(options?: DeviceReadyOptions): Promise<BootedDevice>;
-
-  /**
-   * Find an available iOS device or start a simulator
-   */
-  findOrStartIosDevice(options?: DeviceReadyOptions): Promise<BootedDevice>;
-}
-
-export interface ConnectedPlatformScan {
-  devices: BootedDevice[];
-  /** A platform is scanned when at least one of its discovery sources completed. */
-  scanned: Record<Platform, boolean>;
-  /**
-   * Per-source completeness (#11063). iOS has two independent sources, so a
-   * pinned device's absence is authoritative only when its own source
-   * completed. Absent for producers that report platforms only.
-   */
-  scannedSources?: Partial<Record<DiscoverySource, boolean>>;
-}
+export {
+  type ConnectedPlatformScan,
+  type ConnectedPlatformScanOptions,
+  createDefaultDeviceClientProvider,
+  type DeviceClientProvider,
+  type DeviceClientSimctl,
+  type DeviceReadinessLevel,
+  type DeviceReadinessOptions,
+  deviceReadinessRank,
+  type DeviceReadyOptions,
+  type ResolvedDeviceIdentity,
+} from "./DeviceReadinessContracts";
 export { isScanAuthoritativeFor } from "./readinessLifecycleIdentity";
-
-export type DeviceReadinessLevel = "booted" | "automationReady";
-
-/** Same cadence as the deleteDevice absence verification (DEVICE_SHUTDOWN_POLL_INTERVAL_MS). */
-const CREATED_IOS_ABSENCE_POLL_MS = 1_000;
-const CREATED_IOS_ABSENCE_TIMEOUT_MS = 10_000;
-
-/**
- * Ordering of {@link DeviceReadinessLevel} by how much setup each represents
- * having achieved. `SessionManager.setDeviceReadiness` (#6227 round 7) uses
- * this to keep the recorded level monotonic — a session's readiness record
- * may only be raised, never silently downgraded by a later, less-demanding
- * acquisition of the same session.
- */
-const DEVICE_READINESS_RANK: Readonly<Record<DeviceReadinessLevel, number>> = {
-  booted: 0,
-  automationReady: 1,
-};
-
-export function deviceReadinessRank(level: DeviceReadinessLevel): number {
-  return DEVICE_READINESS_RANK[level];
-}
-
-/** The discovery entry that resolved an Android runtime's identity for a serial. */
-export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "observedAt">;
-
-export interface DeviceReadyOptions {
-  sessionId?: string;
-  /**
-   * What the caller will do with the device. A `read` gets only the readiness reading needs: no
-   * current-device pin or appearance write (#11641). Defaults to `control`.
-   * A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
-   * (owner decision 2026-10-12, #11964). Android readiness may write CtrlProxy accessibility settings.
-   * A read may boot only the `deviceId` supplied on this call, after alias resolution.
-   * Platform-only selection, a setActiveDevice pin, and a cached current device are not
-   * explicit IDs. Session-bound calls keep control readiness (toolRegistry does not mark them read).
-   */
-  intent?: "read" | "control";
-  /** Last read ownership check after image discovery, before any lifecycle or boot work. */
-  beforeReadBoot?: (image: DeviceInfo) => Promise<void>;
-  /** Resolved read identity check before runner resume or verification. */
-  beforeReadReadiness?: (device: BootedDevice) => Promise<void>;
-  skipCtrlProxyDownload?: boolean;
-  signal?: AbortSignal;
-  /** Reuses device discovery already started by the current target resolution. */
-  getConnectedPlatforms?: () => Promise<ConnectedPlatformScan | BootedDevice[]>;
-  /**
-   * `booted` verifies only that the target is connected and booted.
-   * `automationReady` additionally prepares CtrlProxy. Defaults to
-   * `automationReady` for existing device-aware tools.
-   */
-  readiness?: DeviceReadinessLevel;
-  /**
-   * @deprecated Use skipCtrlProxyDownload instead.
-   */
-  skipAccessibilityDownload?: boolean;
-  /**
-   * @deprecated Use skipCtrlProxyDownload instead.
-   */
-  skipAccessibilitySetup?: boolean;
-}
-
-export interface ConnectedPlatformScanOptions {
-  /** An Android-only caller never waits on (or scans) the physical iOS lister (#11077). */
-  platform?: SomePlatform;
-}
 
 export { PHYSICAL_IOS_SCAN_BUDGET_MS };
 
-export interface DeviceReadinessOptions {
-  /** Overrides {@link PHYSICAL_IOS_SCAN_BUDGET_MS}. */
-  physicalIosScanBudgetMs?: number;
-  appearanceOnConnectDependencies?: Partial<AppearanceOnConnectDependencies>;
-  admissionGate?: DeviceAdmissionGate;
-  executionBinding?: DeviceExecutionBinding;
-  runnerReadinessTimer?: Timer;
-  runnerReadinessTimeoutMs?: number;
-  /**
-   * Boot-class budget for one-time runner provisioning (cold CtrlProxy launch)
-   * on the session auto-start path, which owns no separate device-boot deadline.
-   * Defaults to {@link DEFAULT_RUNNER_PROVISION_TIMEOUT_MS} (#5376).
-   */
-  runnerProvisionTimeoutMs?: number;
-  lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
-  idGenerator?: IdGenerator;
-  /**
-   * Capacity gating and boot-duration recording for simulator boots this manager starts itself
-   * (`findOrStartIosDevice`). Defaults to the process-wide iOS gate (#11236).
-   */
-  iosBootInstrumentation?: IosBootInstrumentation;
-}
-
-export class DeviceReadiness implements DeviceReadiness {
+export class DeviceReadiness implements DeviceReadinessContract {
   private readonly selection = new ActiveDeviceSelection();
   private static instance: DeviceReadiness;
   private static defaultProvider: DeviceClientProvider | undefined;
@@ -341,6 +125,7 @@ export class DeviceReadiness implements DeviceReadiness {
   private readonly adbFactory: AdbClientFactory;
   private readonly runnerReadinessService: RunnerReadinessService;
   private readonly runnerReadinessTimer: Timer;
+  private readonly bindingExclusion;
   private readonly physicalIosScanBudgetMs: number;
   private readonly runnerReadinessTimeoutMs: number | undefined;
   private readonly runnerProvisionTimeoutMs: number | undefined;
@@ -353,7 +138,7 @@ export class DeviceReadiness implements DeviceReadiness {
     | undefined;
 
   // Client recreation after an iOS device restart needs a fresh callback.
-  private static pushUpdateListenersRegistered: WeakSet<IOSCtrlProxy> = new WeakSet();
+  private static pushUpdateListenersRegistered: WeakSet<IosCtrlProxy> = new WeakSet();
 
   private constructor(
     provider: DeviceClientProvider,
@@ -371,6 +156,8 @@ export class DeviceReadiness implements DeviceReadiness {
     });
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
+    this.bindingExclusion =
+      options.bindingExclusion ?? createDefaultBindingExclusion(this.runnerReadinessTimer);
     this.physicalIosScanBudgetMs = options.physicalIosScanBudgetMs ?? PHYSICAL_IOS_SCAN_BUDGET_MS;
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
     this.iosBootInstrumentationInstance = options.iosBootInstrumentation;
@@ -878,7 +665,7 @@ export class DeviceReadiness implements DeviceReadiness {
     }
 
     // Start the first available AVD
-    const deviceImage = availableImages[0];
+    const deviceImage = await selectReadinessAutoStartImage(availableImages, this.bindingExclusion);
     return await this.bootAndroidReadinessImage(deviceImage, options, perf);
   }
 
@@ -980,112 +767,19 @@ export class DeviceReadiness implements DeviceReadiness {
       throw error;
     }
   }
-
-  /** Deletes a simulator this request created and then failed to bind, boot or verify. */
   private async rollBackCreatedIosSimulator(
     created: { name: string; deviceId?: string },
     failure: unknown,
   ): Promise<void> {
-    if (!created.deviceId) {
-      logger.warn(
-        `[DeviceReadiness] Cannot roll back created iOS simulator '${created.name}': no UDID.`,
-      );
-      return;
-    }
-    logger.warn(
-      `[DeviceReadiness] Rolling back created iOS simulator '${created.name}' ` +
-        `(${created.deviceId}) after failure: ${errorMessage(failure)}`,
+    return rollBackCreatedIosSimulator(
+      {
+        simctl: () => this.simctl,
+        provider: this.provider,
+        runnerReadinessTimer: this.runnerReadinessTimer,
+      },
+      created,
+      failure,
     );
-    // Cancellation cleanup must not inherit an already-aborted request signal.
-    const cleanupSignal = new AbortController().signal;
-    const device: BootedDevice = {
-      name: created.name,
-      platform: "ios",
-      deviceId: created.deviceId,
-    };
-    let step = "retire runner";
-    try {
-      // Same order as the deleteDevice teardown: runner, shutdown, delete, verify absence.
-      await this.retireCreatedIosRunner(device);
-      step = "shut down";
-      await this.shutDownCreatedIosSimulator(device, cleanupSignal);
-      step = "delete";
-      await this.simctl!.deleteSimulator(created.deviceId, { signal: cleanupSignal });
-      step = "verify absence of";
-      await this.verifyCreatedIosSimulatorAbsent(created.deviceId, cleanupSignal);
-    } catch (cleanupError) {
-      // The caller's failure is what explains the request; a rollback error never replaces it.
-      const state = await this.readCreatedIosSimulatorState(created.deviceId, cleanupSignal);
-      logger.warn(
-        `[DeviceReadiness] Failed to ${step} created iOS simulator ` +
-          `'${created.name}' (${created.deviceId}, state: ${state}); it may be left behind: ` +
-          errorMessage(cleanupError),
-        cleanupError,
-      );
-    }
-  }
-
-  /** Mirrors the teardown's pre-shutdown runner stop; a failure is logged, not fatal. */
-  private async retireCreatedIosRunner(device: BootedDevice): Promise<void> {
-    try {
-      // Fence the observer first so the runner's socket close cannot reconnect and reboot the simulator.
-      await IOSCtrlProxyClient.retireInstance(device.deviceId);
-      await this.provider.getIOSCtrlProxyManager(device).stop();
-    } catch (error) {
-      logger.warn(
-        `[DeviceReadiness] Failed to stop CtrlProxy iOS for created simulator ` +
-          `${device.deviceId} before rollback: ${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
-
-  private async shutDownCreatedIosSimulator(
-    device: BootedDevice,
-    signal: AbortSignal,
-  ): Promise<void> {
-    try {
-      await this.simctl!.killSimulator(device, { signal });
-    } catch (error) {
-      if (!isIosSimulatorAlreadyStoppedError(error)) {
-        throw error;
-      }
-      // simctl reports the simulator is already Shutdown: the state the delete needs.
-      logger.debug(
-        `[DeviceReadiness] ${device.deviceId} was already shut down: ${errorMessage(error)}`,
-      );
-    }
-  }
-
-  private async verifyCreatedIosSimulatorAbsent(udid: string, signal: AbortSignal): Promise<void> {
-    const deadlineMs = this.runnerReadinessTimer.now() + CREATED_IOS_ABSENCE_TIMEOUT_MS;
-    for (;;) {
-      const images = await this.simctl!.listSimulatorImages(undefined, {
-        bypassCache: true,
-        signal,
-      });
-      if (!images.some((image) => image.deviceId === udid)) {
-        return;
-      }
-      if (this.runnerReadinessTimer.now() >= deadlineMs) {
-        throw new ActionableError(`iOS simulator ${udid} is still listed after delete.`);
-      }
-      await this.runnerReadinessTimer.sleep(CREATED_IOS_ABSENCE_POLL_MS);
-    }
-  }
-
-  private async readCreatedIosSimulatorState(udid: string, signal: AbortSignal): Promise<string> {
-    try {
-      const images = await this.simctl!.listSimulatorImages(undefined, {
-        bypassCache: true,
-        signal,
-      });
-      const image = images.find((candidate) => candidate.deviceId === udid);
-      return image ? (image.state ?? "unknown") : "absent";
-    } catch (error) {
-      logger.debug(`[DeviceReadiness] Could not read state of ${udid}: ${errorMessage(error)}`);
-      return "unknown";
-    }
   }
 
   /**
@@ -1138,7 +832,7 @@ export class DeviceReadiness implements DeviceReadiness {
               return { provisioned: device, lease: lifecycleLease };
             },
           );
-          return await this.runWithLifecycleLease(lease, options, async (signal) => {
+          return await runWithLifecycleLease(lease, options, async (signal) => {
             perf.startOperation("bootSimulator");
             const createdDevice = await this.bootIosSimulatorAdmitted(
               this.simctl!,
@@ -1216,7 +910,7 @@ export class DeviceReadiness implements DeviceReadiness {
     }
 
     // No booted devices - boot the first available simulator
-    const device = availableDevices[0];
+    const device = await selectReadinessAutoStartImage(availableDevices, this.bindingExclusion);
     return await this.bootIosReadinessImage(device, options, perf);
   }
 
@@ -1302,7 +996,7 @@ export class DeviceReadiness implements DeviceReadiness {
     );
     const held: Promise<unknown>[] = [];
     try {
-      return await this.runWithLifecycleLease(lifecycleLease, options, (signal) =>
+      return await runWithLifecycleLease(lifecycleLease, options, (signal) =>
         operation(signal, {
           lease: lifecycleLease,
           holdLeaseUntil: (settlement) => {
@@ -1320,42 +1014,15 @@ export class DeviceReadiness implements DeviceReadiness {
       }
     }
   }
-
-  /**
-   * Starts the device, and when the launch is cancelled after the emulator was
-   * spawned, takes the child from the cancellation error and terminates it with the
-   * shared SIGTERM -> bounded wait -> SIGKILL escalation, holding the AVD lease until
-   * its exit is confirmed. The launch rejects the moment the request aborts, so
-   * without this the lease would be released while the child is still shutting down
-   * and a following start of the same AVD could spawn a second emulator (#10075).
-   */
   private async startDeviceOwningCancelledLaunch(
     image: DeviceInfo,
     hold: LifecycleStartHold,
   ): Promise<ChildProcess | null> {
-    try {
-      return await this.deviceUtils.startDevice(image);
-    } catch (error) {
-      if (isEmulatorLaunchCancelledError(error) && error.process) {
-        hold.holdLeaseUntil(
-          terminateOwnedEmulatorProcess(error.process, image.name, this.runnerReadinessTimer, {
-            markHeldByUnkillableProcess: (pid) => hold.lease.markHeldByUnkillableProcess?.(pid),
-          }).then((outcome) => (outcome.state === "survived" ? outcome.gone : undefined)),
-        );
-      }
-      throw error;
-    }
-  }
-
-  private async runWithLifecycleLease<T>(
-    lifecycleLease: VirtualDeviceLifecycleLease,
-    options: DeviceReadyOptions | undefined,
-    operation: (signal: AbortSignal) => Promise<T>,
-  ): Promise<T> {
-    const signals = [options?.signal, lifecycleLease.signal].filter(
-      (signal): signal is AbortSignal => signal !== undefined,
+    return startDeviceOwningCancelledLaunch(
+      { deviceUtils: () => this.deviceUtils, runnerReadinessTimer: this.runnerReadinessTimer },
+      image,
+      hold,
     );
-    return await operation(signals.length === 1 ? signals[0] : AbortSignal.any(signals));
   }
 
   /**

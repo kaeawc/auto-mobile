@@ -1,5 +1,5 @@
 import { runBlockWith } from "../../helpers/observedInteractionStub";
-import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test, beforeEach } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -15,6 +15,16 @@ import {
   capturedTwoWindowHierarchy,
   observationOf,
 } from "../../helpers/prototypeWindowCapture";
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+
+let managerInstanceSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyManager, "getInstance">>;
+beforeEach(() => {
+  managerInstanceSpy = spyOn(AndroidCtrlProxyManager, "getInstance");
+});
 
 const device: BootedDevice = {
   name: "Android test device",
@@ -32,10 +42,8 @@ function createPinch(hierarchy: ViewHierarchyResult) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const service = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
-  spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
-    FakeCtrlProxyManager.withAvailability(true),
-  );
+  clientSpy.mockReturnValue(service);
+  managerInstanceSpy.mockReturnValue(FakeCtrlProxyManager.withAvailability(true));
   const observation = { ...observationOf(hierarchy), screenSize: { width: 1080, height: 2400 } };
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation);
@@ -59,12 +67,10 @@ afterEach(() => {
 });
 
 describe("pinchOn layer (#9305)", () => {
-  // CI's per-test time excludes only beforeAll: one throwaway pinch pays the resolver's one-time
-  // module/JIT cost over the captured hierarchy here, not in the first timed test.
-  beforeAll(async () => {
+  // A throwaway pinch pays the resolver's module/JIT cost before each measured test.
+  beforeEach(async () => {
     const { pinchOn } = createPinch(capturedFloatingCoverHierarchy());
     await pinchOn.execute(pinch("coverBox", "prototype"));
-    mock.restore();
   });
 
   test('"prototype" resolves the container among prototype nodes and pinches inside the prototype', async () => {

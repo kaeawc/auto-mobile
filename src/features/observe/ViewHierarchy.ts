@@ -1,62 +1,54 @@
-import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "./DeviceServiceUtils";
-import { iosHierarchyAcquisition } from "./ios/types";
-import { linkWindowRoots } from "./linkWindowRoots";
+import {
+  BootedDevice,
+  Element,
+  ScreenIdentity,
+  ViewHierarchyQueryOptions,
+  ViewHierarchyResult,
+} from "../../models";
+import { nodeAttributes, type Hierarchy } from "../../models/ViewHierarchyResult";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { BootedDevice } from "../../models";
-import { Element } from "../../models";
-import { ScreenIdentity } from "../../models";
-import { ViewHierarchyResult } from "../../models";
-import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
-import { DefaultElementParser } from "../utility/ElementParser";
-import { findAccessibilityFocusedElement, findFocusedElement } from "./HierarchyFocus";
-import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { ViewHierarchyQueryOptions } from "../../models";
-import { AndroidCtrlProxyClient, type ViewHierarchyAndroidCtrlProxy } from "./android";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "./ios";
-import { IosRunnerStalledError } from "./ios/IosRunnerStalledError";
-import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
+import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import { logger } from "../../utils/logger";
+import { NoOpPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
+import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
+import { DefaultElementParser } from "../utility/ElementParser";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
-import type {
-  ViewHierarchy as ViewHierarchyInterface,
-  HierarchyReadOptions,
-} from "./interfaces/ViewHierarchy";
-import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import {
-  normalizeIosHierarchy,
-  projectActionableHierarchy,
-  filterOffscreenNodes,
-} from "./HierarchyNormalization";
-import { HOST_OUTPUT_CHILD_CAP_REASON_PREFIX } from "./truncationReasons";
-import type { CtrlProxyHierarchyResponse } from "./ios/types";
-import { nodeAttributes, type Hierarchy } from "../../models/ViewHierarchyResult";
+import { AndroidCtrlProxyClient, type ViewHierarchyAndroidCtrlProxy } from "./android";
 import {
   defaultObserveAccessibilityManagerFactory,
   recoverRootlessAccessibilityService,
   type ObserveAccessibilityManagerFactory,
 } from "./android/ObserveAccessibilityRecovery";
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "./DeviceServiceUtils";
+import { findAccessibilityFocusedElement, findFocusedElement } from "./HierarchyFocus";
+import {
+  filterOffscreenNodes,
+  normalizeIosHierarchy,
+  projectActionableHierarchy,
+} from "./HierarchyNormalization";
 import { resolveViewHierarchyReadArgs, type ViewHierarchyReadRequest } from "./hierarchyReadArgs";
+import type {
+  HierarchyReadOptions,
+  ViewHierarchy as ViewHierarchyInterface,
+} from "./interfaces/ViewHierarchy";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "./ios";
+import { IosRunnerStalledError } from "./ios/IosRunnerStalledError";
+import type { CtrlProxyHierarchyResponse } from "./ios/types";
+import { iosHierarchyAcquisition } from "./ios/types";
+import { linkWindowRoots } from "./linkWindowRoots";
+import { HOST_OUTPUT_CHILD_CAP_REASON_PREFIX } from "./truncationReasons";
 import {
   androidNullHierarchyFailure,
   annotateAndroidHierarchyAvailability,
 } from "./ViewHierarchyAndroidAvailability";
-
-function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hierarchy {
-  const reason = result?.unavailableReason ?? "unknown";
-  const detail = result?.unavailableDetail;
-  return {
-    error: `Failed to retrieve iOS view hierarchy from CtrlProxy iOS: ${reason}${detail ? `: ${detail}` : ""}`,
-    iosUnavailableReason: reason,
-    unavailableReason: reason,
-    unavailableDetail: detail,
-  };
-}
+import { iosHierarchyUnavailable, type RecoveryReadContext } from "./ViewHierarchyRecovery";
 
 /**
  * Maximum number of direct children the raw-element-search filter walks per node.
@@ -67,16 +59,6 @@ function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hie
 export const MAX_FILTERED_CHILDREN_PER_NODE = 64;
 /** Reserve enough time for one useful device re-fetch after recovery. */
 export const MIN_RECOVERY_REFETCH_BUDGET_MS = 100;
-
-interface RecoveryReadContext {
-  queryOptions?: ViewHierarchyQueryOptions;
-  perf: PerformanceTracker;
-  skipWaitForFresh: boolean;
-  minTimestamp: number;
-  signal?: AbortSignal;
-  deadline?: number;
-  requireFreshExtraction?: boolean;
-}
 
 export class ViewHierarchy implements ViewHierarchyInterface {
   private device: BootedDevice;
@@ -262,7 +244,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
   private classifyDisconnectedIosHierarchy(
     result: ViewHierarchyResult,
-    client: Pick<IOSCtrlProxy, "isConnected">,
+    client: Pick<IosCtrlProxy, "isConnected">,
   ): void {
     // A request-scoped runner error can be untyped while the host socket has
     // already closed. The known disconnect is sufficient to join recovery.

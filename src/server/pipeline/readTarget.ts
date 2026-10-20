@@ -4,7 +4,7 @@ import {
   matchRunningReadTarget,
   isProvidedReadTargetNotFound,
 } from "../../devices/runningReadTarget";
-import { AmbiguousDeviceTargetError } from "../ambiguousDeviceTargetRefusal";
+import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
 import {
   type ConnectedPlatformScan,
   type DeviceReadyOptions,

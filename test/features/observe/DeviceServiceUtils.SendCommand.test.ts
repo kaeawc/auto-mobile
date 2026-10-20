@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import {
   sendCommand,
   type SendCommandOptions,
@@ -8,6 +8,8 @@ import { RequestManager } from "../../../src/utils/RequestManager";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
+
+afterEach(() => mock.restore());
 
 function harness(overrides: Partial<DelegateContext> = {}) {
   const timer = new FakeTimer();

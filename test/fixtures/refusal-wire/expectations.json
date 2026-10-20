@@ -1,5 +1,5 @@
 {
-  "description": "How a runner must classify each typed daemon refusal in this directory (<code>.json, generated from the real TypeScript builders by scripts/generate-refusal-wire-fixtures.ts). wait = wait for the device within the bounded device wait; acquire-new-session = retry under a fresh session UUID; retry = ordinary bounded retry; fail = fail the attempt. Precedence when a runner derives it: wait, then acquire-new-session (nextAction), then retry (retryable: true), else fail. knownGaps maps a runner (kotlin, swift) to the disposition it currently produces instead of the expected one, so the suite stays green while the gap is tracked; a gap that starts matching the expectation fails the suite until the entry is removed. fields is what a runner must read from the fixture's wire payload: the typed code, retryable, whether nextAction is acquire_new_session, a positive retryAfterMs hint, and (capacity refusals) the externalDevices that count against the limit. A field absent from a row is absent on the wire. session_held_by_recovery waits when retryable; device_unhealthy waits only when retryable and recovering are true. fields.recovering pins the wire boolean when present.",
+  "description": "How a runner must classify each typed daemon refusal in this directory (<code>.json, generated from the real TypeScript builders by scripts/generate-refusal-wire-fixtures.ts). wait = wait for the device within the bounded device wait; acquire-new-session = retry under a fresh session UUID; retry = ordinary bounded retry; fail = fail the attempt. Precedence when a runner derives it: wait, then acquire-new-session (nextAction), then retry (retryable: true), else fail. knownGaps maps a runner (kotlin, swift) to the disposition it currently produces instead of the expected one, so the suite stays green while the gap is tracked; a gap that starts matching the expectation fails the suite until the entry is removed. fields is what a runner must read from the fixture's wire payload: the typed code, retryable, whether nextAction is acquire_new_session, a positive retryAfterMs hint, and (capacity refusals) the externalDevices and iOS heldDevices that count against the limit. A field absent from a row is absent on the wire. session_held_by_recovery waits when retryable; device_unhealthy waits only when retryable and recovering are true. fields.recovering pins the wire boolean when present.",
   "codes": {
     "target_identity_unresolved": {
       "expected": "retry",
@@ -43,6 +43,15 @@
         "acquireNewSession": false
       }
     },
+    "device_transport_unavailable": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_transport_unavailable",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
     "session_released_during_creation": {
       "expected": "acquire-new-session",
       "fields": {
@@ -52,6 +61,22 @@
       }
     },
     "timeout.iosHomeLaunch": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "cancelled.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "cancelled",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "timeout.sdkCapabilityQuery": {
       "expected": "retry",
       "fields": {
         "code": "timeout",
@@ -232,7 +257,21 @@
         "retryable": true,
         "acquireNewSession": false,
         "retryAfterMs": 5000,
-        "externalDevices": ["9A1B2C3D-0000-4000-8000-000000000001"]
+        "externalDevices": ["9A1B2C3D-0000-4000-8000-000000000001"],
+        "heldDevices": ["9A1B2C3D-0000-4000-8000-000000000002"]
+      }
+    },
+    "capacity_exhausted.ios.held_only": {
+      "expected": "wait",
+      "fields": {
+        "code": "capacity_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 5000,
+        "heldDevices": [
+          "9A1B2C3D-0000-4000-8000-000000000001",
+          "9A1B2C3D-0000-4000-8000-000000000002"
+        ]
       }
     },
     "discovery_incomplete.ios": {
@@ -548,6 +587,22 @@
       "fields": {
         "code": "runtime_incompatible",
         "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "not_connected.sdkCapabilityQuery": {
+      "expected": "retry",
+      "fields": {
+        "code": "not_connected",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "sdk_capability_query_failed": {
+      "expected": "retry",
+      "fields": {
+        "code": "sdk_capability_query_failed",
+        "retryable": true,
         "acquireNewSession": false
       }
     }

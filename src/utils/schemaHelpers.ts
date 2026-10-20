@@ -5,15 +5,25 @@ export const platformSchema = z.enum(["android", "ios"]);
 
 export const DEVICE_LABEL_DESCRIPTION = "Device label";
 
+export const includeExtrasSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    "Opt in to raw accessibility extras metadata in structuredContent only (default off). " +
+      "Only meaningful with project:'full' or raw:true; text content always omits extras.",
+  );
+
 /**
  * Response-shape control for tools that embed a post-action observation (issue
  * #5872). Spread into an action tool's `z.object` shape to give it the same
  * projection control `observe` already has: the embedded observation defaults to
- * the compact skeleton, and these two fields opt back into the raw hierarchy.
+ * the compact skeleton, and raw/project opt back into the raw hierarchy.
+ * includeExtras additionally opts into accessibility metadata in structured content only.
  * The compact form always lands under `skeleton`, the raw form under
  * `viewHierarchy`, regardless of which tool produced it.
  */
 export const responseShapeControlFields = {
+  includeExtras: includeExtrasSchema,
   raw: z
     .boolean()
     .optional()

@@ -7,10 +7,16 @@ import android.os.Looper
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.RequestGestureStart
+import dev.jasonpearson.automobile.protocol.RequestPinch
+import dev.jasonpearson.automobile.protocol.RequestSwipe
+import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
+import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -33,6 +39,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
+@OptIn(ExperimentalCoroutinesApi::class)
 class GestureControllerTest {
   private class FakeTimer : TimeProvider {
     var now = 1_000L
@@ -109,7 +116,7 @@ class GestureControllerTest {
   }
 
   private val events = mutableListOf<String>()
-  private val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+  private val scope = CoroutineScope(UnconfinedTestDispatcher() + SupervisorJob())
   private val timer = FakeTimer()
   private val host = FakeHost(scope, events)
   private val sender = FakeSender(events)
@@ -117,10 +124,13 @@ class GestureControllerTest {
     GestureController(
         host = host,
         scope = { scope },
-        perfProvider = PerfProvider.createForTesting(timer),
-        timeProvider = timer,
-        resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
-        responseSender = sender,
+        reporting =
+          GestureReportingDependencies(
+            perfProvider = PerfProvider.createForTesting(timer),
+            timeProvider = timer,
+            resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
+            responseSender = sender,
+          ),
         gestureThreadFactory = ::InlineGestureThread,
       )
       .also { it.startThread() }
@@ -132,7 +142,7 @@ class GestureControllerTest {
 
   @Test
   fun `completed swipe reports success with gesture and total time`() {
-    controller.performSwipe("swipe", 1.0, 2.0, 3.0, 4.0, 250L, "epoch:1", null)
+    controller.performSwipe(RequestSwipe("swipe", 1.0, 2.0, 3.0, 4.0, 250L, "epoch:1", null))
     assertEquals(1, host.forgets)
     assertTrue(sender.frames.isEmpty())
     completeLast(250L)
@@ -146,7 +156,7 @@ class GestureControllerTest {
 
   @Test
   fun `cancelled pinch reports failure without a gesture time`() {
-    controller.performPinch("pinch", 100.0, 100.0, 10.0, 50.0, 0f, 300L, null)
+    controller.performPinch(RequestPinch("pinch", 100.0, 100.0, 10.0, 50.0, 0f, 300L, null))
     host.dispatches.last().let { it.callback.onCancelled(it.gesture) }
     val frame = sender.frames.single()
     assertEquals("pinch_result", frame.getValue("type").jsonPrimitive.content)
@@ -158,7 +168,9 @@ class GestureControllerTest {
   @Test
   fun `completed tap publishes the settled hierarchy before the tap result`() {
     host.settled = ViewHierarchy()
-    controller.performTapCoordinates("tap", 5.0, 6.0, 10L, null, displayId = 3)
+    controller.performTapCoordinates(
+      RequestTapCoordinates("tap", 5.0, 6.0, 10L, null, displayId = 3),
+    )
     completeLast(10L)
     assertEquals(listOf<Int?>(3), host.settledDisplays)
     assertEquals(listOf("hierarchy", "tap_coordinates_result"), events)
@@ -167,7 +179,7 @@ class GestureControllerTest {
 
   @Test
   fun `stale frame context fails before dispatching`() {
-    controller.performSwipe("stale", 1.0, 2.0, 3.0, 4.0, 250L, "epoch:0", null)
+    controller.performSwipe(RequestSwipe("stale", 1.0, 2.0, 3.0, 4.0, 250L, "epoch:0", null))
     assertTrue(host.dispatches.isEmpty())
     val frame = sender.frames.single()
     assertFalse(frame.getValue("success").jsonPrimitive.boolean)
@@ -180,7 +192,9 @@ class GestureControllerTest {
   @Test
   fun `results are dropped while the server is not running`() {
     sender.running = false
-    controller.performTwoFingerSwipe("multi", 1.0, 2.0, 3.0, 4.0, 100L, 20, null, 3)
+    controller.performTwoFingerSwipe(
+      RequestTwoFingerSwipe("multi", 1.0, 2.0, 3.0, 4.0, 100L, 20, null, 3),
+    )
     assertEquals(3, host.dispatches.single().gesture.strokeCount)
     completeLast(100L)
     assertTrue(sender.frames.isEmpty())
@@ -189,7 +203,7 @@ class GestureControllerTest {
   @Test
   @Config(sdk = [25])
   fun `streamed gestures are refused before API 26`() {
-    controller.startStream("start", "g", 1.0, 2.0, null, null)
+    controller.startStream(RequestGestureStart("start", "g", 1.0, 2.0, null), requester = null)
     assertEquals(1, host.forgets)
     assertTrue(host.dispatches.isEmpty())
     val frame = sender.frames.single()

@@ -2,13 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:AnalyticsTracker.kt:fun Activity.enableAnalyticsTracking</ID>
-    <ID>SwallowedException:AnalyticsRepository.kt:AnalyticsRepository$e: Exception</ID>
-    <ID>SwallowedException:AuthRepository.kt:AuthRepository$e: Throwable</ID>
-    <ID>SwallowedException:SessionRepository.kt:SessionRepository$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:AnalyticsRepository.kt:AnalyticsRepository$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:AuthRepository.kt:AuthRepository$e: Throwable</ID>
-    <ID>TooGenericExceptionCaught:SessionRepository.kt:SessionRepository$e: Exception</ID>
-    <ID>TooManyFunctions:AnalyticsRepository.kt:AnalyticsRepository</ID>
   </CurrentIssues>
 </SmellBaseline>

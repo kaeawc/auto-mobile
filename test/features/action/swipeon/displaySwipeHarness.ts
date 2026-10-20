@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../../helpers/observedInteractionStub";
 import { spyOn } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
@@ -96,10 +97,7 @@ export function harness({
     requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
   });
   ctrl.setSupportedCommands(route === "ctrlproxy" ? ["gesture_display_id_v1"] : []);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    // @ts-expect-error -- Fake supplies the client methods exercised by this harness.
-    ctrl,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
   const observe = new FakeObserveScreen();
   const detector = new FakeAccessibilityDetector();
   const talkback = spyOn(TalkBackSwipeExecutor.prototype, "executeSwipeGesture");
@@ -154,11 +152,15 @@ export function harness({
     const previous =
       options.previousObservation ??
       (observationFor ? await observe.execute({ display: options.display }) : frame());
-    const result = await run(previous);
+    const result = await runBlockWith(previous)(run, options);
     const observation = await (options.postActionObserveScreen ?? observe).execute({
       display: options.display,
     });
-    return { ...result, observation, effect: "changed" };
+    return {
+      ...result,
+      observation,
+      effect: { screenChanged: true, basis: "viewHierarchy changed" },
+    };
   };
   const dispatched = () => {
     swipes++;

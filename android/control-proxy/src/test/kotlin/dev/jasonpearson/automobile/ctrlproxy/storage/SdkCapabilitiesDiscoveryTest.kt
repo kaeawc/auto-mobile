@@ -134,4 +134,12 @@ class SdkCapabilitiesDiscoveryTest {
     val state = discoverSdkCapabilities(context, "com.example", userId = 10, serviceUserId = 0)
     assertEquals("BRIDGE_NOT_INSTALLED", state.reason)
   }
+
+  @Test
+  fun `provider null pointer failure is bridge unavailable`() {
+    every { manager.resolveContentProvider(any(), 0) } returns ProviderInfo()
+    every { resolver.call(any<Uri>(), eq("snapshot"), null, null) } throws
+      NullPointerException("provider failed through Binder")
+    assertEquals("BRIDGE_UNAVAILABLE", discoverSdkCapabilities(context, "com.example").reason)
+  }
 }

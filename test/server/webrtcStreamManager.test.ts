@@ -1,8 +1,8 @@
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as manager from "../../src/server/webrtcStreamManager";
+import * as manager from "../../src/daemon/webrtcStreamManager";
 import { logger } from "../../src/utils/logger";
-import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
+import { createWebRtcStreamDeviceIncarnationListener } from "../../src/daemon/webrtcStreamIncarnationListener";
 import {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
@@ -17,7 +17,7 @@ import {
   waitForWebRtcStreamReadiness,
   WEBRTC_STREAM_LEASE_TTL_MS,
   type WebRtcStreamManagerDependencies,
-} from "../../src/server/webrtcStreamManager";
+} from "../../src/daemon/webrtcStreamManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ActionableError, type BootedDevice } from "../../src/models";

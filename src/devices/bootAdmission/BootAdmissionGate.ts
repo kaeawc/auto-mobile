@@ -52,6 +52,8 @@ export interface RefusedCapacityDecision {
   message: string;
   /** Counted devices this process did not start (e.g. launched from Android Studio). */
   externalDevices?: string[];
+  /** Counted iOS simulators owned by AutoMobile admissions, sessions or bindings. */
+  heldDevices?: string[];
 }
 
 export interface BootAdmissionResult<D> {
@@ -70,15 +72,25 @@ export function atCapacityDecision(
   bootedCount: number,
   limits: CapacityLimits,
   retryAfterMs: number,
-  describe: { noun: string; envName: string; externalDevices?: readonly string[] },
+  describe: {
+    noun: string;
+    envName: string;
+    externalDevices?: readonly string[];
+    heldDevices?: readonly string[];
+    /** Ownership labels use a retained or empty snapshot after a failed read. */
+    ownershipUnknown?: boolean;
+  },
 ): RefusedCapacityDecision | undefined {
   if (bootedCount < limits.maxBooted) {
     return undefined;
   }
   const external = describe.externalDevices ?? [];
+  const held = describe.heldDevices ?? [];
+  const heldNote =
+    held.length > 0 ? ` ${held.length} of them are held by AutoMobile: ${held.join(", ")}.` : "";
   const externalNote =
     external.length > 0
-      ? ` ${external.length} of them were not started by AutoMobile but still count toward the limit: ${external.join(", ")}.`
+      ? ` ${external.length} of them ${describe.ownershipUnknown ? "have unconfirmed AutoMobile ownership" : describe.heldDevices ? "have no AutoMobile owner" : "were not started by AutoMobile"} but still count toward the limit: ${external.join(", ")}.`
       : "";
   const optOut = external.length > 0 ? ` or disable the gate with ${BOOT_CAPACITY_GATE_ENV}=0` : "";
   return {
@@ -88,7 +100,8 @@ export function atCapacityDecision(
     bootedCount,
     retryAfterMs,
     ...(external.length > 0 ? { externalDevices: [...external] } : {}),
-    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
+    ...(held.length > 0 ? { heldDevices: [...held] } : {}),
+    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote}${heldNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
   };
 }
 
@@ -202,6 +215,7 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
       booted: decision.bootedCount,
       retryAfterMs: decision.retryAfterMs,
       ...(decision.externalDevices ? { externalDevices: decision.externalDevices } : {}),
+      ...(decision.heldDevices ? { heldDevices: decision.heldDevices } : {}),
     },
     `Refused to boot: no ${noun} capacity (code capacity_exhausted, retryable; retry after ${decision.retryAfterMs}ms): ${decision.message}`,
   );
@@ -209,6 +223,8 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
 
 export interface LedgerEntry {
   deviceId?: string;
+  /** An old device whose slot is held until the replacement binds its own identity. */
+  replacement?: boolean;
   /** Pid of the process spawned for the boot, once handed off with one. */
   processId?: number;
   /** Set once the boot was handed off: the entry ends when the device is visible or this passes. */
@@ -222,6 +238,7 @@ export interface LedgerEntry {
  * repeated, a later call adding the device id or process id the earlier one lacked.
  */
 export interface LedgerAdmission {
+  bind(deviceId?: string): void;
   release(): void;
   handOff(deviceId: string | undefined, untilMs: number, processId?: number): void;
 }
@@ -272,10 +289,16 @@ export class BootAdmissionLedger {
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
-  admit(deviceId?: string): LedgerAdmission {
+  admit(deviceId?: string, replacement = false): LedgerAdmission {
     const token = Symbol("boot-admission");
-    this.entries.set(token, { deviceId });
+    this.entries.set(token, { deviceId, replacement });
     return {
+      bind: (boundDeviceId) => {
+        const entry = this.entries.get(token);
+        if (entry) {
+          this.entries.set(token, { ...entry, deviceId: boundDeviceId, replacement: false });
+        }
+      },
       release: () => this.end(token),
       handOff: (handedOffDeviceId, untilMs, processId) => {
         const entry = this.entries.get(token);
@@ -305,7 +328,12 @@ export class BootAdmissionLedger {
     // A device a listing showed is running whatever its boot deadline says: an older listing
     // still open counts it until that sample decides, so the window keeps it without a deadline.
     const kept = listed
-      ? { deviceId: entry.deviceId, processId: entry.processId, handedOff: entry.handedOff }
+      ? {
+          deviceId: entry.deviceId,
+          processId: entry.processId,
+          handedOff: entry.handedOff,
+          replacement: entry.replacement,
+        }
       : entry;
     for (const window of this.openWindows) {
       window.ended.push(kept);
@@ -373,7 +401,11 @@ export class BootAdmissionLedger {
     // Read before the loop below ends the listed entries into the open windows, this one included.
     const known = [...this.windowEnded(sampleWindow), ...this.entries.values()];
     const listedWithoutProcess = known.filter(
-      (entry) => isVisible(entry) && !hasListedProcess(entry) && entry.deviceId !== excludeDeviceId,
+      (entry) =>
+        isVisible(entry) &&
+        !hasListedProcess(entry) &&
+        entry.deviceId !== excludeDeviceId &&
+        !entry.replacement,
     ).length;
     for (const [token, entry] of [...this.entries]) {
       const visible = isVisible(entry);
@@ -391,6 +423,8 @@ export class BootAdmissionLedger {
     return {
       count: boots.length,
       boots: boots.map((entry) => ({
+        deviceId: entry.deviceId,
+        replacement: entry.replacement,
         processId: entry.processId,
         handedOff: entry.handedOff === true,
       })),

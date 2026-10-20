@@ -1,4 +1,4 @@
-import { expect, test, spyOn } from "bun:test";
+import { expect, test, spyOn, afterEach, mock } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import {
@@ -15,6 +15,8 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import { FakeLockOwnerGenerationProbe } from "../../fakes/FakeLockOwnerGenerationProbe";
+
+afterEach(() => mock.restore());
 
 const rows = parsePsSnapshot(
   readFileSync(

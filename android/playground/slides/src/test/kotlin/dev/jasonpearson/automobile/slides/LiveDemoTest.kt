@@ -28,7 +28,7 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
-  @Ignore
+  @Ignore("Live bug reproduction requires a connected device")
   @Test
   fun `Bug Reproduction Demo`() {
 
@@ -61,7 +61,7 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
-  @Ignore
+  @Ignore("Live restart demo requires a connected device and a running slide presentation")
   @Test
   fun `AutoMobile restart slide`() {
 
@@ -71,7 +71,7 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
-  @Ignore
+  @Ignore("Live announcement requires a connected device and an authenticated Bluesky account")
   @Test
   fun `Announce AutoMobile is OSS on GitHub`() {
 

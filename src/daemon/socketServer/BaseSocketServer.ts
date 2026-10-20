@@ -6,6 +6,9 @@ import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "../daemonSocketReachability";
+import { AuxiliarySocketBindConflict } from "../auxiliarySocketAvailability";
+import { AuxiliarySocketOwner } from "../auxiliarySocketOwner";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -56,6 +59,7 @@ export abstract class BaseSocketServer {
     serverName: string = "Socket",
     idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
     socketReachability: DaemonSocketReachabilityLike = new DaemonSocketReachability(),
+    private readonly socketOwner: AuxiliarySocketOwner = new AuxiliarySocketOwner(),
   ) {
     this.socketPath = socketPath;
     this.timer = timer;
@@ -89,6 +93,17 @@ export abstract class BaseSocketServer {
         // creates the socket at the umask default (issue #4750).
         secureFile(this.socketPath)
           .then(() => {
+            if (this.socketFileIdentity) {
+              try {
+                this.socketOwner.publish(this.socketPath, this.serverName, this.socketFileIdentity);
+              } catch (error) {
+                // Advisory holder metadata must not disable an already-bound socket.
+                logger.warn(
+                  `[${this.serverName}] Unable to publish socket owner: ${errorMessage(error)}`,
+                  error,
+                );
+              }
+            }
             this.onServerStarted();
             resolve();
           })
@@ -123,10 +138,11 @@ export abstract class BaseSocketServer {
     // Option 1: compare dev+ino across the async probe, then unlink synchronously
     // without another event-loop yield. A successor's rebound path must survive;
     // reuse the close-time identity check instead of adding a per-stream lock.
-    if (reachable || !this.isOwnedSocketFile(originalIdentity)) {
-      throw new ActionableError(
-        `[${this.serverName}] Refusing to bind auxiliary socket ${this.socketPath}: another daemon is listening. Stop the daemon that owns it or use \`--daemon restart\` to replace it.`,
-      );
+    if (reachable) {
+      throw this.socketOwner.conflict(this.socketPath, this.serverName);
+    }
+    if (!this.isOwnedSocketFile(originalIdentity)) {
+      throw new AuxiliarySocketBindConflict(this.socketPath, this.serverName);
     }
 
     try {
@@ -162,6 +178,10 @@ export abstract class BaseSocketServer {
     // live subscribers (e.g. IDE-plugin observation streams). Instead unref and
     // leave the dead listener for process teardown.
     const ownsSocketPath = this.isOwnedSocketFile();
+
+    if (ownsSocketPath) {
+      this.socketOwner.remove(this.socketPath);
+    }
 
     if (ownsSocketPath || !existsSync(this.socketPath)) {
       await new Promise<void>((resolve) => {

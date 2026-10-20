@@ -173,6 +173,23 @@ below are the defaults; the constants live in
   with `device_owned_by_other_session`. A successful restore moves ownership, so
   the previous connection no longer owns the session.
 
+After a daemon restart, managed execution calls receive `binding_ownership_unconfirmed`
+while the daemon reclaims the binding. Its `retryAfterMs` starts at 1,000 ms, increases
+by 1,000 ms per complete second since the first claim attempt, and caps at 5,000 ms
+(without jitter). Retries stop once both 60 s on the daemon's timer since the first
+attempt and at least three attempts have elapsed; recovery and waiting for the first
+shared registry turn do not consume that budget. The existing ownership-loss path
+then releases the session and calls receive
+`session_ownership_lost`, `retryable: false`, `nextAction: "acquire_new_session"`.
+`scope_not_valid`, `binding_missing`, and `binding_in_use` claim refusals lose
+ownership immediately. The shared registry result type also includes the commit-only
+`device_assigned_elsewhere` refusal, which is defensively treated as loss.
+`binding_not_ready`, `stale_binding`, and registry contention/deadline failures retry
+within the same bound. A confirmed claim wins even when it completes at or after
+the bound: the bound stops retries and never overrides proof of ownership.
+A retained session that is no longer live stops retrying, except during an active
+release hold. A synchronous registry write can delay deadline delivery until it returns.
+
 A managed session released while binding ownership is unconfirmed holds device teardown for
 up to 1.9 s on the daemon’s timer: two shared turns at their worst case
 (700 ms attempt bound + the registry’s 250 ms busy timeout each), covering the turn
@@ -368,9 +385,12 @@ acquisitions as anonymous (#11096):
   `src/models/deviceSessionRecovery.ts`, #11098), with `idle: true` beside the
   release reason after an idle release. Acquire a new session with
   `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
-- Booted-device discovery that did not complete (adb or simctl failed, or a
-  running emulator's AVD identity has not resolved) is refused with the retryable
-  code `discovery_incomplete` instead of booting or adopting a device blind. Retry
+- Booted-device discovery that did not complete (adb or simctl failed, or an
+  unresolved running emulator could be the requested AVD) is refused with the
+  retryable code `discovery_incomplete` instead of booting or adopting a device
+  blind. `provisionDevice` skips the unresolved-sibling guard for an AVD it just
+  created; otherwise it retries identity discovery within the caller's deadline
+  before refusing with the unresolved serials. Retry
   the acquisition. `setActiveDevice` answers it for a device it cannot find only
   when the discovery that could have listed that device failed, and names that
   platform: an iOS UDID while simctl failed is iOS discovery, and an id whose
@@ -968,6 +988,35 @@ this way. `listDevices` reports `capacity` per gated platform as
 [environment variables](environment-variables.md#boot-capacity) for the opt-out
 and the per-platform overrides.
 
+For iOS `capacity_exhausted` refusals, `externalDevices` lists occupying simulator
+UDIDs with no known AutoMobile owner. `heldDevices` separately lists occupying
+UDIDs owned by AutoMobile admissions, live sessions or persisted broker bindings
+and journals, including after a daemon restart. Each field is an array of strings
+and is omitted when empty. Both groups count toward the same limit. A held device
+is not a stray simulator to shut down; release its session or binding first. Warm
+simulator hints exclude live-session and broker-held devices. Ownership only affects
+these labels and hints, never the capacity decision. If the broker registry cannot
+be read, AutoMobile logs a warning and uses its last good snapshot plus current
+in-memory ownership (or just in-memory ownership if there is no snapshot). A boot
+below the limit still proceeds. At the limit, the refusal still reports
+`capacity_exhausted`: unclassifiable occupying UDIDs appear in `externalDevices`,
+and the message states that ownership could not be read and those devices may
+also be held by AutoMobile. A failed simulator listing still returns
+`discovery_incomplete` because the occupying count is unknown. The `listDevices`
+capacity block does not read ownership.
+
+The reader covers this daemon's live sessions and the host-wide broker registry.
+Simulators held by another daemon on the same host (for example, a private daemon
+without bindings), and pool assignments still being set up, are not covered and
+still appear as external.
+
+The same classification applies to a binding's pre-create capacity check and to
+the boot-slot reservation made before replacing its device. A replacement's old
+device is excluded from the reservation's count; other held simulators still
+count and appear in `heldDevices`. Both arrays survive binding reconciliation,
+acquisition results and provisioning error payloads, including socket and MCP
+responses.
+
 ## Per-session settings
 
 Appearance configuration is per session (owner decision 2026-10-09, #10982).
@@ -994,6 +1043,29 @@ device (owner decision 2026-10-09, #11145):
   fails to reset is logged and stays recorded, so the next acquisition by
   another session tries again. A failed reset does not quarantine the device.
 - Records are stored in the daemon database, so they survive a daemon restart.
+
+## Transient Android transport failures
+
+For a session-owned Android device whose loss is not confirmed, an ADB transport
+failure returns `code: "device_transport_unavailable"`, `retryable: true`,
+`retryAfterMs` (currently 1000), `deviceId`, and `dispatched` in the tool error.
+The wire dispatch state is `false | "unknown" | true`; `true` is reserved for a
+positively confirmed dispatch and is not currently emitted for this error.
+
+- `false`: ADB refused the command before dispatch (the selected device was
+  missing or offline). AutoMobile retries briefly for up to 3750 ms, bounded by
+  the command timeout, before returning the error. Retrying the command is safe.
+- `"unknown"`: ADB lost its transport after dispatch (`connection terminated`,
+  `error: closed`, `protocol fault`, or exit 255 with empty or transport-only
+  stderr). The command may already have run. Observe before reissuing a
+  non-idempotent action, especially an `openLink` with a single-use sign-in link.
+  `retryable: true` means the transport may recover; it does not authorize blind
+  replay. AutoMobile does not replay non-safe commands on this path. Safe read
+  commands retain their normal retry policy; exhaustion also reports
+  `dispatched: "unknown"` for the final transport failure.
+
+Confirmed device loss remains terminal (`DeviceLostError`). This retryable
+transport error does not establish that a session or its device has been lost.
 
 ## Related
 

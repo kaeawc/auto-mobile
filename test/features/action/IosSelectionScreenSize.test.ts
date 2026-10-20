@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -89,22 +90,24 @@ test("tapOn text selection dispatches the derived right-hand target's centre wit
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
   const observation: ObserveResult = buildObserveResult({
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     observationId: "derived-geometry",
     updatedAt: 1,
     viewHierarchy: hierarchy,
     screenSize: { width: 951, height: 669 },
   });
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.prepareSelectionCapture = async () => null;
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
     observation: current,
+    effect: undefined,
   });
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({ text: duoSelectionText, action: "tap" });
   expect(result.success).toBe(true);

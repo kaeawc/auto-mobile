@@ -348,15 +348,17 @@ test("default and hard host ceilings refuse before preflight or launch", async (
   expect(parseBrokerBatchArgs(["up", "--max-devices", "5"])).toHaveProperty("error");
 });
 
-test.each([
-  ["up", "--clients", "a-phone", "--all"],
-  ["up", "--clients", "a-phone,a-phone"],
-  ["up", "--clients", "../foreign"],
-  ["up", "--stagger-ms", "-1"],
-  ["up", "--stagger-ms", "2147483648"],
-  ["status", "--all"],
-  ["up", "--unknown"],
-])("invalid flags %j are usage errors", (...args: string[]) => {
+test.each(
+  [
+    ["up", "--clients", "a-phone", "--all"],
+    ["up", "--clients", "a-phone,a-phone"],
+    ["up", "--clients", "../foreign"],
+    ["up", "--stagger-ms", "-1"],
+    ["up", "--stagger-ms", "2147483648"],
+    ["status", "--all"],
+    ["up", "--unknown"],
+  ].map((args) => ({ args })),
+)("invalid flags %j are usage errors", ({ args }) => {
   expect(parseBrokerBatchArgs(args)).toHaveProperty("error");
 });
 
@@ -539,7 +541,7 @@ test("up reports refused native info and records a leak without granting ledger 
 });
 
 test("devices inventory output tolerates diagnostics and surfaces them when no inventory arrives", () => {
-  const view = { devices: [{ name: "n", deviceId: "d", platform: "ios" }], daemons: [] };
+  const view = { devices: [{ name: "n", deviceId: "d", platform: "ios" as const }], daemons: [] };
   expect(parseDevicesViewOutput(0, ["note: slow probe", JSON.stringify(view)])).toEqual(view);
   let message = "";
   try {

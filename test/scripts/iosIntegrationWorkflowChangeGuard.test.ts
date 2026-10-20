@@ -20,7 +20,11 @@ describe("Fast Validation independence from XCTestRunner", () => {
     expect(fastValidation?.if).toBe("always()");
     expect(fastValidation?.["timeout-minutes"]).toBe(20);
     expect(steps.some((step) => step.id === "validate-ios-workflow-change")).toBe(false);
-    expect(steps.some((step) => step.if?.includes("requires_xctest_result"))).toBe(false);
+    expect(
+      steps.some(
+        (step) => typeof step.if === "string" && step.if.includes("requires_xctest_result"),
+      ),
+    ).toBe(false);
     expect(steps.some((step) => step.name?.includes("forced XCTestRunner"))).toBe(false);
   });
 

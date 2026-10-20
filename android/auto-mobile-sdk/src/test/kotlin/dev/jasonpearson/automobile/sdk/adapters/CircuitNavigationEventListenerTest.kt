@@ -22,10 +22,12 @@ import com.slack.circuitx.navigation.intercepting.rememberInterceptingNavigator
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NavigationEvent
 import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -35,6 +37,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class CircuitNavigationEventListenerTest {
 
   @Before
@@ -55,7 +58,7 @@ class CircuitNavigationEventListenerTest {
     val events = collectEvents()
     val delegate = fakeNavigator(HomeScreen)
     lateinit var navigator: Navigator
-    val composition = TestComposition()
+    val composition = TestComposition(UnconfinedTestDispatcher(testScheduler))
 
     try {
       composition.setContent {
@@ -118,7 +121,7 @@ class CircuitNavigationEventListenerTest {
     val events = collectEvents()
     val delegate = fakeNavigator(HomeScreen)
     lateinit var navigator: Navigator
-    val composition = TestComposition()
+    val composition = TestComposition(UnconfinedTestDispatcher(testScheduler))
 
     try {
       composition.setContent {
@@ -153,7 +156,7 @@ class CircuitNavigationEventListenerTest {
     val consumedNavigator = fakeNavigator(SettingsScreen)
     lateinit var rewritten: Navigator
     lateinit var consumed: Navigator
-    val composition = TestComposition()
+    val composition = TestComposition(UnconfinedTestDispatcher(testScheduler))
 
     try {
       composition.setContent {
@@ -196,7 +199,7 @@ class CircuitNavigationEventListenerTest {
     var useUpdatedExtractors by mutableStateOf(false)
     lateinit var navigator: Navigator
     var listener: NavigationEventListener? = null
-    val composition = TestComposition()
+    val composition = TestComposition(UnconfinedTestDispatcher(testScheduler))
 
     try {
       composition.setContent {
@@ -240,7 +243,7 @@ class CircuitNavigationEventListenerTest {
     val events = collectEvents()
     val delegate = fakeNavigator(HomeScreen)
     lateinit var navigator: Navigator
-    val composition = TestComposition()
+    val composition = TestComposition(UnconfinedTestDispatcher(testScheduler))
 
     try {
       composition.setContent {
@@ -269,7 +272,7 @@ class CircuitNavigationEventListenerTest {
   @Test
   fun `stop remains effective after listener recomposition`() = runTest {
     var recompositionVersion by mutableStateOf(0)
-    val composition = TestComposition()
+    val composition = TestComposition(UnconfinedTestDispatcher(testScheduler))
 
     try {
       composition.setContent {
@@ -299,7 +302,7 @@ class CircuitNavigationEventListenerTest {
     val nestedDelegate = fakeNavigator(SettingsScreen)
     lateinit var outerNavigator: Navigator
     lateinit var nestedNavigator: Navigator
-    val composition = TestComposition()
+    val composition = TestComposition(UnconfinedTestDispatcher(testScheduler))
 
     try {
       composition.setContent {
@@ -373,8 +376,8 @@ class CircuitNavigationEventListenerTest {
     }
   }
 
-  private class TestComposition {
-    private val scope = CoroutineScope(Dispatchers.Unconfined + ImmediateFrameClock)
+  private class TestComposition(dispatcher: CoroutineDispatcher) {
+    private val scope = CoroutineScope(dispatcher + ImmediateFrameClock)
     private val recomposer = Recomposer(scope.coroutineContext)
     private val composition = Composition(UnitApplier(), recomposer)
 

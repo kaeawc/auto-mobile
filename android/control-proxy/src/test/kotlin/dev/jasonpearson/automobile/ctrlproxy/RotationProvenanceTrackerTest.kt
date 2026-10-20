@@ -227,7 +227,8 @@ class RotationProvenanceTrackerTest {
       val start = source.indexOf(route)
       assertTrue("$route not found", start >= 0)
       val bodyOpen = source.indexOf('{', start)
-      val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val entry = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val body = rotationCaptureBody(source, route, entry)
       assertTrue(
         "$route must capture the display-change generation before acquiring capture inputs",
         "rotationProvenance.beginCapture(targetDisplayId)" in body,
@@ -256,9 +257,16 @@ class RotationProvenanceTrackerTest {
     val start = source.indexOf("suspend fun takeScreenshotAsync")
     assertTrue(start >= 0)
     val bodyOpen = source.indexOf('{', start)
-    val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
-    assertTrue(body.contains("host.takeScreenshot(\n              targetDisplayId,"))
-    assertFalse(body.contains("host.takeScreenshot(\n              Display.DEFAULT_DISPLAY,"))
+    val entry = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+    assertTrue(entry.contains("captureBitmap(targetDisplayId)"))
+    val captureStart = source.indexOf("private suspend fun captureBitmap(")
+    val captureOpen = source.indexOf('{', captureStart)
+    val body =
+      source
+        .substring(captureOpen, KotlinSourceScan.matchBrace(source, captureOpen))
+        .replace(Regex("\\s+"), "")
+    assertTrue(body.contains("host.takeScreenshot(targetDisplayId,"))
+    assertFalse(body.contains("host.takeScreenshot(Display.DEFAULT_DISPLAY,"))
   }
 
   private class FakeRotationChangeSignal(private val synchronizeResult: Boolean = true) :
@@ -319,5 +327,30 @@ class RotationProvenanceTrackerTest {
     }
     fail("Could not locate $fileName from user.dir=${System.getProperty("user.dir")}")
     error("unreachable")
+  }
+}
+
+private fun rotationCaptureBody(source: String, route: String, entry: String): String {
+  return if (route.contains("Screenshot")) {
+    assertTrue(entry.contains("captureBitmap(targetDisplayId)"))
+    val captureStart = source.indexOf("private suspend fun captureBitmap(")
+    val captureOpen = source.indexOf('{', captureStart)
+    source.substring(captureOpen, KotlinSourceScan.matchBrace(source, captureOpen))
+  } else {
+    val suffix = if (route.contains("Direct")) "Direct" else "Fallback"
+    assertTrue(entry.contains("HierarchyCapture("))
+    assertTrue(entry.contains(".extract$suffix("))
+    val captureStart = source.indexOf("private inner class HierarchyCapture(")
+    val captureOpen = source.indexOf('{', captureStart)
+    val capture = source.substring(captureOpen, KotlinSourceScan.matchBrace(source, captureOpen))
+    val extractStart = capture.indexOf("fun extract$suffix(")
+    val extractOpen = capture.indexOf('{', extractStart)
+    val extraction =
+      capture.substring(extractOpen, KotlinSourceScan.matchBrace(capture, extractOpen))
+    assertTrue(extraction.contains("enrich$suffix(hierarchy)"))
+    val enrichStart = capture.indexOf("private fun enrich$suffix(")
+    val enrichOpen = capture.indexOf('{', enrichStart)
+    capture.substring(0, capture.indexOf("fun walkDirect(")) +
+      capture.substring(enrichOpen, KotlinSourceScan.matchBrace(capture, enrichOpen))
   }
 }

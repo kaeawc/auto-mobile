@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import kotlinx.coroutines.CoroutineScope
@@ -14,10 +14,11 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,17 +48,8 @@ class ImeControllerTest {
   private class FakeIme(var result: ImeCommitResult) : ImeController.ImeTarget {
     var committed: String? = null
 
-    override fun commitText(
-      text: String,
-      priorImeId: String?,
-      isCancelled: () -> Boolean,
-      delivery: ImeTextDelivery,
-      timeoutMs: Long?,
-      requestDeadlineMs: Long,
-      trace: Boolean,
-      onResult: (ImeCommitResult) -> Unit,
-    ) {
-      committed = text
+    override fun commitText(request: ImeCommitRequest, onResult: (ImeCommitResult) -> Unit) {
+      committed = request.text
       onResult(result)
     }
   }
@@ -93,11 +85,11 @@ class ImeControllerTest {
     override fun isRunning() = running
 
     override suspend fun broadcastWithPerfSync(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
+      messageBuilder: (perfTiming: JsonElement?) -> String,
     ) {
-      frames += type to buildJsonObject(buildContent)
+      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
+      val type = frame.getValue("type").jsonPrimitive.content
+      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming", "requestId"))
     }
 
     override suspend fun broadcastSetKeyboardProfileResult(
@@ -128,8 +120,11 @@ class ImeControllerTest {
         resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
         jsonCompact = Json { encodeDefaults = true },
         responseSender = sender,
-        uptimeMillis = { clock[0] },
-        pause = { clock[0] += it },
+        config =
+          ImeConfig(
+            uptimeMillis = { clock[0] },
+            pause = { clock[0] += it },
+          ),
       )
     return Fixture(host, sender, controller, clock)
   }

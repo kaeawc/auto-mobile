@@ -60,6 +60,7 @@ function harness(reads: ForegroundAppReadResult[], adb = new FakeAdbExecutor()) 
       },
     },
     cacheInvalidator: {
+      retireAppProcess: () => {},
       invalidate: () => {
         invalidations++;
       },

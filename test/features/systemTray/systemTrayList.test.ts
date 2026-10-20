@@ -1485,7 +1485,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     });
     const payload = toolJson(response);
     expect(payload).toMatchObject({ success: false, dismissedCount: 0 });
-    expect(payload.message).toContain("matching notification remains");
+    expect(payload.message).toContain("matching notification may remain");
     expect(payload.message).not.toContain("No notifications found");
     expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(1);
     expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
@@ -1931,31 +1931,47 @@ describe("systemTray clearAll dumpsys ownership", () => {
     }
   });
 
-  test("an unreadable post-dismissal shade fails with its cause and is closed", async () => {
-    const { adb, timer, observer, swipes } = setupDelayedClear(0);
-    const execute = observer.execute.bind(observer);
-    const executeSpy = spyOn(observer, "execute").mockImplementation((options) =>
-      swipes().length > 0
-        ? Promise.resolve({ ...page(), viewHierarchy: undefined })
-        : execute(options),
-    );
-    const installedAppsSpy = mockInstalledApps([SHELL]);
-    try {
-      await expect(
-        handler()(device, {
+  for (const readTimesOut of [false, true]) {
+    test(`an unreadable post-dismissal shade reports partial counts (read timeout: ${readTimesOut})`, async () => {
+      const { adb, timer, observer, swipes } = setupDelayedClear(0);
+      const unchangedDump = execResult(
+        dumpsys(record(1, "Alpha", "Body of Alpha"), record(2, "Beta", "Body of Beta")),
+      );
+      adb.setCommandResponseSequence("dumpsys notification", [unchangedDump, unchangedDump]);
+      const execute = observer.execute.bind(observer);
+      const executeSpy = spyOn(observer, "execute").mockImplementation((options) =>
+        swipes().length > 0
+          ? readTimesOut && options?.requireFreshExtraction
+            ? new Promise<ObserveResult>(() => {})
+            : Promise.resolve({ ...page(), viewHierarchy: undefined })
+          : execute(options),
+      );
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        const response = await handler()(device, {
           action: "clearAll",
           notification: { appId: SHELL },
           awaitTimeout: 625,
-        }),
-      ).rejects.toThrow("shade not readable after dismissal");
-      expect(swipes()).toHaveLength(1);
-      expect(timer.now()).toBe(625);
-      expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
-    } finally {
-      installedAppsSpy.mockRestore();
-      executeSpy.mockRestore();
-    }
-  });
+        });
+        expect(toolJson(response)).toMatchObject({
+          success: false,
+          stalled: true,
+          swipeCount: 1,
+          dismissedCount: 0,
+          expectedCount: 2,
+          remainingCount: 2,
+        });
+        expect(toolJson(response).message).toContain("Cleared 0 of 2 notification(s)");
+        expect(toolIsError(response)).toBe(true);
+        expect(swipes()).toHaveLength(1);
+        expect(timer.now()).toBe(625);
+        expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+      } finally {
+        installedAppsSpy.mockRestore();
+        executeSpy.mockRestore();
+      }
+    });
+  }
 
   test("clearAll expands a real collapsed group before dismissing a child", async () => {
     const { adb, timer } = setup(

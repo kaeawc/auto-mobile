@@ -468,6 +468,7 @@ describe("VoiceOverSwipeExecutor", () => {
         executor,
         fakeIosClient,
         fakeVoiceOverDetector,
+        fakeTimer,
       );
 
       const result = await voiceOverExecutor.executeSwipeGesture({
@@ -498,6 +499,7 @@ describe("VoiceOverSwipeExecutor", () => {
         executor,
         fakeIosClient,
         fakeVoiceOverDetector,
+        fakeTimer,
       );
 
       const result = await voiceOverExecutor.executeSwipeGesture({

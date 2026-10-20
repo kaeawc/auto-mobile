@@ -40,76 +40,43 @@ enum class CenterTabType(val title: String, val icon: String) {
 fun CenterTabStrip(
   openTabs: List<CenterTabType>,
   selectedTab: CenterTabType,
-  onSelectTab: (CenterTabType) -> Unit,
-  onCloseTab: (CenterTabType) -> Unit,
-  onAddTab: (CenterTabType) -> Unit,
   modifier: Modifier = Modifier,
+  options: CenterTabActions,
 ) {
-  val colors = SharedTheme.globalColors
-  var showAddMenu by remember { mutableStateOf(false) }
+  return with(options) {
+    val colors = SharedTheme.globalColors
+    var showAddMenu by remember { mutableStateOf(false) }
 
-  Row(
-    modifier =
-      modifier.background(colors.panelBackground).padding(horizontal = 4.dp, vertical = 2.dp),
-    horizontalArrangement = Arrangement.spacedBy(2.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    openTabs.forEach { tab ->
-      val isSelected = tab == selectedTab
-      Row(
-        modifier =
-          Modifier.clip(RoundedCornerShape(4.dp))
-            .background(
-              if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
-            )
-            .clickable { onSelectTab(tab) }
-            .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-      ) {
-        Text(tab.icon, fontSize = 11.sp)
+    Row(
+      modifier =
+        modifier.background(colors.panelBackground).padding(horizontal = 4.dp, vertical = 2.dp),
+      horizontalArrangement = Arrangement.spacedBy(2.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      OpenTabRows(openTabs, selectedTab)
+
+      // "+" button to add new tab types
+      Box {
         Text(
-          tab.title,
-          fontSize = 11.sp,
-          color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+          "+",
+          fontSize = 13.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+          modifier =
+            Modifier.clip(RoundedCornerShape(4.dp))
+              .clickable { showAddMenu = !showAddMenu }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(horizontal = 6.dp, vertical = 4.dp),
         )
-        // Close button (only if more than one tab open)
-        if (openTabs.size > 1) {
-          Text(
-            "\u00D7",
-            fontSize = 12.sp,
-            color = colors.text.normal.copy(alpha = 0.4f),
-            modifier =
-              Modifier.clickable { onCloseTab(tab) }
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(start = 2.dp),
+        if (showAddMenu) {
+          AddTabMenu(
+            openTabs = openTabs,
+            onAdd = { tab ->
+              onAddTab(tab)
+              showAddMenu = false
+            },
+            onDismiss = { showAddMenu = false },
           )
         }
-      }
-    }
-
-    // "+" button to add new tab types
-    Box {
-      Text(
-        "+",
-        fontSize = 13.sp,
-        color = colors.text.normal.copy(alpha = 0.5f),
-        modifier =
-          Modifier.clip(RoundedCornerShape(4.dp))
-            .clickable { showAddMenu = !showAddMenu }
-            .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-      )
-      if (showAddMenu) {
-        AddTabMenu(
-          openTabs = openTabs,
-          onAdd = { tab ->
-            onAddTab(tab)
-            showAddMenu = false
-          },
-          onDismiss = { showAddMenu = false },
-        )
       }
     }
   }
@@ -146,6 +113,54 @@ private fun AddTabMenu(
             Modifier.clickable { onAdd(tab) }
               .pointerHoverIcon(PointerIcon.Hand)
               .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+      }
+    }
+  }
+}
+
+data class CenterTabActions(
+  val onSelectTab: (CenterTabType) -> Unit,
+  val onCloseTab: (CenterTabType) -> Unit,
+  val onAddTab: (CenterTabType) -> Unit,
+)
+
+@Composable
+private fun CenterTabActions.OpenTabRows(
+  openTabs: List<CenterTabType>,
+  selectedTab: CenterTabType,
+) {
+  val colors = SharedTheme.globalColors
+  openTabs.forEach { tab ->
+    val isSelected = tab == selectedTab
+    Row(
+      modifier =
+        Modifier.clip(RoundedCornerShape(4.dp))
+          .background(
+            if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
+          )
+          .clickable { onSelectTab(tab) }
+          .pointerHoverIcon(PointerIcon.Hand)
+          .padding(horizontal = 8.dp, vertical = 4.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      Text(tab.icon, fontSize = 11.sp)
+      Text(
+        tab.title,
+        fontSize = 11.sp,
+        color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+      )
+      // Close button (only if more than one tab open)
+      if (openTabs.size > 1) {
+        Text(
+          "\u00D7",
+          fontSize = 12.sp,
+          color = colors.text.normal.copy(alpha = 0.4f),
+          modifier =
+            Modifier.clickable { onCloseTab(tab) }
+              .pointerHoverIcon(PointerIcon.Hand)
+              .padding(start = 2.dp),
         )
       }
     }

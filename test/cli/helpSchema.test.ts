@@ -11,7 +11,7 @@ import { z } from "zod/v4";
 import { describe, expect, test } from "bun:test";
 import { getCliHelpParameterInfo, getCliHelpSchemaShape } from "../../src/cli";
 import { launchAppSchema } from "../../src/server/appTools";
-import { waitForSchema } from "../../src/server/observeTools";
+import { observeSchema, waitForSchema } from "../../src/server/observeTools";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 
 isolateToolRegistry();
@@ -140,4 +140,20 @@ test("defaulted nested command fields are optional inputs", () => {
   expect(sendKeysSchema.safeParse({ commands: [{ action: "type", text: "x" }] }).success).toBe(
     true,
   );
+});
+
+test("observe CLI parses include-extras as an optional boolean", () => {
+  for (const [argv, expected] of [
+    [["observe", "--project", "full", "--include-extras"], true],
+    [["observe", "--project", "full", "--include-extras=false"], false],
+  ] as const) {
+    const parsed = parseCliArgs([...argv]);
+    expect(parsed.params.includeExtras).toBe(expected);
+    expect(observeSchema.parse(parsed.params).includeExtras).toBe(expected);
+  }
+  const shape = getCliHelpSchemaShape(observeSchema);
+  expect(getCliHelpParameterInfo(shape?.includeExtras)).toMatchObject({
+    isOptional: true,
+    typeName: "boolean",
+  });
 });

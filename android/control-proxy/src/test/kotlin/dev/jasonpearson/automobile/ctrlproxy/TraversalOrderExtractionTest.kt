@@ -100,7 +100,7 @@ class TraversalOrderExtractionTest {
     for (child in children) {
       Shadows.shadowOf(node).addChild(child)
     }
-    // Match service-delivered nodes, as in ViewHierarchyExtractorTest's fakeNode helper.
+    // Match service-delivered nodes, as in ViewHierarchyExtractorFixtures' fakeNode helper.
     AccessibilityNodeInfo::class
       .java
       .getMethod("setSealed", Boolean::class.javaPrimitiveType)

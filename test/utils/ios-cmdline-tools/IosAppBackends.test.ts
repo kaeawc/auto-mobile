@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import {
   PhysicalIosAppInfoBackend,
   PhysicalIosAppListBackend,
@@ -11,6 +11,8 @@ import type { IosAppMetadataSource } from "../../../src/models/IosAppMetadataSou
 import type { IosInstalledAppRecord } from "../../../src/utils/ios-cmdline-tools/iosInstalledApp";
 import { findAppByBundleId } from "../../../src/features/observe/GetAppMetadata";
 import { logger } from "../../../src/utils/logger";
+
+afterEach(() => mock.restore());
 
 const simulatorId = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 const modernPhysicalId = "00008030-001C2D3E1234567A";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import {
   resolveMcpRequestTimeoutMs,
   resolveMcpRequestTimeoutMsOnce,
@@ -21,7 +21,7 @@ function executePlanFrame(): DaemonRequest {
 describe("resolveMcpRequestTimeoutMsOnce", () => {
   test("agrees with the uncached budget for ordinary and plan frames", () => {
     const frames: DaemonRequest[] = [
-      { id: "1", type: "mcp_request", method: "tools/list" },
+      { id: "1", type: "mcp_request", method: "tools/list", params: {} },
       {
         id: "2",
         type: "mcp_request",
@@ -69,7 +69,15 @@ describe("resolveMcpRequestTimeoutMsOnce", () => {
   });
 
   test("the socket server resolves a request's budget through the cache only", () => {
-    const source = readFileSync("src/daemon/socketServer.ts", "utf8");
+    // The socket server's code lives in socketServer.ts and its socketServerParts collaborators.
+    const source = [
+      "src/daemon/socketServer.ts",
+      ...readdirSync("src/daemon/socketServerParts").map(
+        (name) => `src/daemon/socketServerParts/${name}`,
+      ),
+    ]
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
     expect(source).not.toMatch(/resolveMcpRequestTimeoutMs\(/);
     expect(source).toMatch(/resolveMcpRequestTimeoutMsOnce\(/);
   });

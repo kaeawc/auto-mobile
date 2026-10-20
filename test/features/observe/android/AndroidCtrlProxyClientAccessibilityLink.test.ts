@@ -13,7 +13,7 @@ describe("Android semantic link activation outcomes", () => {
     adb.setScreenState(true);
     let socket!: FakeWebSocket;
     const client = AndroidCtrlProxyClient.createForTesting(
-      { deviceId: "semantic-link", platform: "android", name: "Test Device", isEmulator: true },
+      { deviceId: "semantic-link", platform: "android", name: "Test Device" },
       adb,
       {
         webSocketFactory: (url) => (socket = new FakeWebSocket(url, "none", 0, timer)),
@@ -64,7 +64,7 @@ describe("Android semantic link activation outcomes", () => {
       if (mode === "timeout") {
         timer.advanceTime(5000);
       } else if (mode === "transport") {
-        client["requestManager"].cancelAll("WebSocket connection closed");
+        socket.terminate();
       } else if (mode === "abort after dispatch") {
         controller.abort(new Error("cancelled"));
         for (let i = 0; i < 30; i++) {

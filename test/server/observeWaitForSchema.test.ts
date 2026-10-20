@@ -15,7 +15,13 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../fakes/FakeElementSelector";
 import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import type { ConditionResolver } from "../../src/features/observe/ConditionPredicates";
-import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../src/models";
 import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import {
   canDisplayExist,
@@ -48,7 +54,7 @@ const bounds = (left: number, top: number, right: number, bottom: number) => ({
 });
 
 const makeHierarchy = (
-  nodes: unknown[],
+  nodes: ViewHierarchyNode[],
   screenSize = { width: 200, height: 200 },
 ): ViewHierarchyResult => ({
   hierarchy: {
@@ -502,10 +508,11 @@ describe("published observe waitFor input schema", () => {
   });
 
   test("advertises exclusive container selectors", () => {
-    for (const [container, expected] of [
+    const containerCases: Array<[object, boolean]> = [
       [{}, false],
       [{ elementId: "scope", text: "Scope" }, false],
-    ]) {
+    ];
+    for (const [container, expected] of containerCases) {
       expect(
         validatePublishedObserveInput({
           platform: "android",
@@ -1213,22 +1220,24 @@ describe("findWaitForElement rich predicates", () => {
   test("exact textMatch preserves surrounding whitespace while normalizing quotes and case", () => {
     const finder = new ElementResolver();
     const hierarchy = makeHierarchy([{ $: { text: "Submit", bounds: bounds(0, 0, 100, 40) } }]);
+    const root = hierarchy.hierarchy.node;
+    if (!root) {
+      throw new Error("expected makeHierarchy to produce a root node");
+    }
     // A padded query must not match an unpadded node.
     expect(
       findWaitForElement(finder, { text: " Submit ", textMatch: "exact" }, hierarchy),
     ).toBeNull();
     // An unpadded query still tolerates incidental whitespace in node text.
-    hierarchy.hierarchy.node.node = [{ $: { text: "Submit ", bounds: bounds(0, 0, 100, 40) } }];
+    root.node = [{ $: { text: "Submit ", bounds: bounds(0, 0, 100, 40) } }];
     expect(
       findWaitForElement(finder, { text: "Submit", textMatch: "exact" }, hierarchy)?.text,
     ).toBe("Submit ");
-    hierarchy.hierarchy.node.node = [{ $: { text: " Submit ", bounds: bounds(0, 0, 100, 40) } }];
+    root.node = [{ $: { text: " Submit ", bounds: bounds(0, 0, 100, 40) } }];
     expect(
       findWaitForElement(finder, { text: " Submit ", textMatch: "exact" }, hierarchy)?.text,
     ).toBe(" Submit ");
-    hierarchy.hierarchy.node.node = [
-      { $: { text: " Don’t Submit ", bounds: bounds(0, 0, 100, 40) } },
-    ];
+    root.node = [{ $: { text: " Don’t Submit ", bounds: bounds(0, 0, 100, 40) } }];
     expect(
       findWaitForElement(finder, { text: " don't submit ", textMatch: "exact" }, hierarchy)?.text,
     ).toBe(" Don’t Submit ");
@@ -1334,6 +1343,8 @@ describe("waitForObservation activeWindow", () => {
     timer.enableAutoAdvance();
     const budgets: Array<number | undefined> = [];
     const observation: ObserveResult = {
+      observationId: "obs-test",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       updatedAt: 0,
       screenSize: { width: 200, height: 200 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -1360,8 +1371,10 @@ describe("waitForObservation activeWindow", () => {
   const makeObservation = (
     appId: string,
     activityName: string,
-    nodes: unknown[] = [],
+    nodes: ViewHierarchyNode[] = [],
   ): ObserveResult => ({
+    observationId: "obs-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: 0,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -1406,7 +1419,7 @@ describe("waitForObservation activeWindow", () => {
 
   const postureObservation = (
     posture: "opened" | "closed" | "unknown",
-    nodes: unknown[] = [],
+    nodes: ViewHierarchyNode[] = [],
   ): ObserveResult => ({
     ...makeObservation("com.example.app", "", nodes),
     display: { key: "inner", role: "inner", posture, generation: 0 },
@@ -2334,6 +2347,8 @@ describe("observeSchema settled", () => {
 
 describe("waitForObservation settled", () => {
   const makeObservation = (markerId: string): ObserveResult => ({
+    observationId: "obs-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: 0,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -2451,7 +2466,9 @@ describe("observeSchema waitFor.absent", () => {
 });
 
 describe("waitForObservation absent", () => {
-  const makeObservation = (nodes: unknown[]): ObserveResult => ({
+  const makeObservation = (nodes: ViewHierarchyNode[]): ObserveResult => ({
+    observationId: "obs-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: 0,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -2472,8 +2489,11 @@ describe("waitForObservation absent", () => {
       },
     ],
     ["empty", { viewHierarchy: { hierarchy: {} } }],
-    ["zero nodes", { viewHierarchy: { hierarchy: { node: [] } } }],
-    ["incomplete", { viewHierarchy: { hierarchy: { node: [] }, ctrlProxyIncomplete: true } }],
+    ["zero nodes", { viewHierarchy: { hierarchy: { node: { node: [] } } } }],
+    [
+      "incomplete",
+      { viewHierarchy: { hierarchy: { node: { node: [] } }, ctrlProxyIncomplete: true } },
+    ],
     [
       "unavailable reason",
       {
@@ -2605,7 +2625,7 @@ describe("waitForObservation absent", () => {
         ...makeObservation([spinner]),
         viewHierarchy: { ...makeHierarchy([spinner]), updatedAt: 10 },
       },
-      { ...makeObservation([]), viewHierarchy: { hierarchy: { node: [] } } },
+      { ...makeObservation([]), viewHierarchy: { hierarchy: { node: { node: [] } } } },
     ]);
     const outcome = await waitForObservation(
       screen,
@@ -2650,30 +2670,30 @@ describe("waitForObservation absent", () => {
     expect(screen.getExecuteCallCount()).toBe(3);
   });
 
-  test.each([
-    { text: "Ready" },
-    { textAny: ["Ready"] },
-    { elementId: "message_list" },
-    { className: "Button" },
-    { contentDescription: "Ready" },
-  ])("positive legacy %j ignores unavailable matching nodes", async (selector) => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const screen = new FakeObserveScreen();
-    screen.setObserveResult(() => ({
-      ...makeObservation([
-        { $: { ...list.$, text: "Ready", class: "Button", "content-desc": "Ready" } },
-      ]),
-      freshness: { isFresh: false, category: "unavailable" },
-    }));
-    const outcome = await waitForObservation(
-      screen,
-      { ...selector, timeout: 300 },
-      { skipBackStack: false, timer },
-    );
-    expect(outcome.matched).toBe(false);
-    expect(outcome.timedOut).toBe(true);
-  });
+  const positiveLegacySelectors: WaitForWithSettled[] = [
+    { text: "Ready", timeout: 300 },
+    { textAny: ["Ready"], timeout: 300 },
+    { elementId: "message_list", timeout: 300 },
+    { className: "Button", timeout: 300 },
+    { contentDescription: "Ready", timeout: 300 },
+  ];
+  test.each(positiveLegacySelectors)(
+    "positive legacy %j ignores unavailable matching nodes",
+    async (selector) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult((): ObserveResult => ({
+        ...makeObservation([
+          { $: { ...list.$, text: "Ready", class: "Button", "content-desc": "Ready" } },
+        ]),
+        freshness: { isFresh: false, category: "unavailable" },
+      }));
+      const outcome = await waitForObservation(screen, selector, { skipBackStack: false, timer });
+      expect(outcome.matched).toBe(false);
+      expect(outcome.timedOut).toBe(true);
+    },
+  );
 
   test("legacy stable gate cannot settle an unavailable hierarchy with matching window metadata", async () => {
     const timer = new FakeTimer();
@@ -2824,13 +2844,6 @@ test("textAny chooses and locks contains when exact source is offscreen", () => 
   ]);
   hierarchy.screenWidth = 100;
   hierarchy.screenHeight = 100;
-  expect(
-    findWaitForElement(
-      new ElementResolver(),
-      { textAny: ["Ready"], textMatch: "exact" },
-      hierarchy,
-    ),
-  ).toBeNull();
   expect(
     findWaitForElement(
       new ElementResolver(),

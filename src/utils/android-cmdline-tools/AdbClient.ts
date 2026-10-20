@@ -1,63 +1,72 @@
-import { parseCommandArgs } from "./AdbCommandArguments";
-import { resetAdbDeviceDiscoveryCache } from "./AdbDeviceDiscovery";
-import { isSafeToRetryCommand, isPreDispatchError } from "./adbCommandRetryPolicy";
-import { AdbDeviceDiscovery } from "./AdbDeviceDiscovery";
-import { AdbDeviceReadings } from "./AdbDeviceReadings";
-import { AdbPathDiscovery } from "./AdbPathDiscovery";
-import {
-  getNativeHelperRegistry,
-  type NativeHelperTracker,
-} from "../nativeHelpers/NativeHelperRegistry";
-import { resolveAdbClientSettings, type AdbClientDependencies } from "./AdbClientDependencies";
-import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
+import { AndroidUser, BootedDevice, DeviceLockState, ExecResult } from "../../models";
+import { deviceLostErrorFromAbortSignal, isDeviceLostError } from "../../models/DeviceLostError";
+import { getAbortSignal } from "../AbortContext";
 import { type AndroidTransportRouting } from "../androidSerial";
+import type { BackoffPolicy } from "../Backoff";
+import { delayForAttempt, sequenceBackoff } from "../Backoff";
+import { TTLCache } from "../cache/Cache";
 import { errorMessage } from "../describeUnknownError";
-import { logger } from "../logger";
+import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 import { runExecSeam } from "../ExecSeam";
 import {
   DefaultHostCommandExecutor,
   execFileAsync as sharedExecFileAsync,
   type HostProcessExecutor,
-  type HostChildProcess as ChildProcess,
   type SpawnFn,
 } from "../HostCommandExecutor";
-import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../models";
+import { logger } from "../logger";
 import {
-  AdbExecutor,
-  type ForegroundApp,
-  type ForegroundAppReadResult,
-  type AdbExecuteOptions,
-  type AdbDeviceState,
-  type AdbProcess,
-  type AdbSpawnOptions,
-  type DeviceTimestampResult,
-} from "./interfaces/AdbExecutor";
-import { getAbortSignal } from "../AbortContext";
+  getNativeHelperRegistry,
+  type NativeHelperTracker,
+} from "../nativeHelpers/NativeHelperRegistry";
 import { trackAmbient } from "../PerfContext";
-import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { requirePipedOutput } from "../pipedChildProcess";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
-import { delayForAttempt, sequenceBackoff } from "../Backoff";
-import { TTLCache } from "../cache/Cache";
+import type { SystemDetection } from "../system/SystemDetection";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { removeFinishedAdbChild, trackActiveAdbChild } from "./adbActiveProcesses";
+import { resolveAdbClientSettings, type AdbClientDependencies } from "./AdbClientDependencies";
+import { parseCommandArgs } from "./AdbCommandArguments";
+import {
+  isNonRetryableAdbError,
+  isPreDispatchError,
+  isSafeToRetryCommand,
+} from "./adbCommandRetryPolicy";
+import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
+import { AdbDeviceDiscovery, resetAdbDeviceDiscoveryCache } from "./AdbDeviceDiscovery";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
-import type { EmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
+import { AdbDeviceReadings } from "./AdbDeviceReadings";
+import { AdbDeviceTransportUnavailableError } from "./AdbDeviceTransportUnavailableError";
+import { AdbPathDiscovery } from "./AdbPathDiscovery";
+import { AdbSignalExecutor } from "./AdbSignalExecutor";
+import {
+  ADB_TRANSPORT_RECOVERY_BACKOFF,
+  executeWithAdbTransportRecovery,
+  getAdbAbortError,
+} from "./adbTransportRecovery";
 import {
   defaultAdbTransportRestartRegistry,
   isAdbTransportRestartCommand,
   type AdbTransportRestartRegistry,
 } from "./AdbTransportRestartRegistry";
-import type { SystemDetection } from "../system/SystemDetection";
-import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
-import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
-import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
+import type { EmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
+import {
+  AdbExecutor,
+  type AdbDeviceState,
+  type AdbExecuteOptions,
+  type AdbProcess,
+  type AdbSpawnOptions,
+  type DeviceTimestampResult,
+  type ForegroundApp,
+  type ForegroundAppReadResult,
+} from "./interfaces/AdbExecutor";
+export { terminateActiveAdbProcesses } from "./adbActiveProcesses";
 
 export { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 export { AdbUnavailableError } from "./AdbUnavailableError";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
-
-const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
 
 // Route the default long-lived spawn through the shared host-process seam so the
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The
@@ -194,7 +203,7 @@ export class AdbClient implements AdbExecutor {
       get systemDetectionFactory() {
         return client.systemDetectionFactory;
       },
-      getAbortError: (...args) => client.getAbortError(...args),
+      getAbortError: getAdbAbortError,
     });
   }
 
@@ -215,6 +224,7 @@ export class AdbClient implements AdbExecutor {
   private readonly systemDetectionFactory: () => SystemDetection;
   private readonly observationSequence: DiscoveryObservationSequence;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry | undefined;
+  private readonly transportBackoff: BackoffPolicy;
   private readonly defaultTimeoutMs: number;
   private readonly transportRouting: AndroidTransportRouting | undefined;
   private readonly transportRestartRegistry: AdbTransportRestartRegistry | undefined;
@@ -245,6 +255,7 @@ export class AdbClient implements AdbExecutor {
       spawnFn = null,
       retryExecutor = defaultRetryExecutor,
       timer = defaultTimer,
+      transportBackoff = ADB_TRANSPORT_RECOVERY_BACKOFF,
       consoleBusyRegistry,
       hostProcessExecutor = adbHostProcessExecutor,
       transportRouting,
@@ -268,6 +279,7 @@ export class AdbClient implements AdbExecutor {
     this.spawnFn = this.resolveSpawnFn(spawnFn);
     this.retryExecutor = retryExecutor;
     this.timer = timer;
+    this.transportBackoff = transportBackoff;
     this.adbPathDiscovery = this.createAdbPathDiscovery();
     // Initialize with fallback, will be updated lazily
     this.adbPath = this.getFallbackAdbPath();
@@ -512,12 +524,12 @@ export class AdbClient implements AdbExecutor {
     const startTime = this.timer.now();
     const signal = options.signal ?? getAbortSignal();
     if (signal?.aborted) {
-      throw this.getAbortError(signal);
+      throw getAdbAbortError(signal);
     }
 
     const { adbPath, baseArgs } = await this.getBaseCommandParts(options.timeoutMs, signal);
     if (signal?.aborted) {
-      throw this.getAbortError(signal);
+      throw getAdbAbortError(signal);
     }
     const fullArgs = [...baseArgs, ...args];
     const remainingTimeoutMs = this.getRemainingTimeoutMs(
@@ -567,7 +579,7 @@ export class AdbClient implements AdbExecutor {
     const onAbort = () => {
       if (!cleaned) {
         child.kill("SIGTERM");
-        settleStart?.(this.getAbortError(signal));
+        settleStart?.(getAdbAbortError(signal));
         cleanup();
       }
     };
@@ -669,44 +681,6 @@ export class AdbClient implements AdbExecutor {
     }
   }
 
-  /**
-   * Determine if an error is non-retryable (auth, syntax, or device errors).
-   * Returns true if the error should NOT be retried.
-   */
-  private isNonRetryableError(error: Error, transportId?: string): boolean {
-    const underlying = error.cause instanceof Error ? error.cause : error;
-    const stderr = (underlying as Error & { stderr?: string | Buffer }).stderr;
-    const message = (
-      stderr
-        ? Buffer.isBuffer(stderr)
-          ? stderr.toString()
-          : stderr
-        : underlying.message.startsWith("Command failed:")
-          ? ""
-          : underlying.message
-    ).toLowerCase();
-    if (isAdbMissingDeviceError(underlying, this.device?.deviceId, transportId)) {
-      return true;
-    }
-    const nonRetryablePatterns = [
-      "operation cancelled",
-      "unauthorized",
-      "authentication failed",
-      "permission denied",
-      "unknown command",
-      "invalid argument",
-      "syntax error",
-      "device not found",
-      "no devices",
-      "install_failed_version_downgrade",
-      "install_failed_update_incompatible",
-      "install_parse_failed_no_certificates",
-      "install_parse_failed_inconsistent_certificates",
-      "install_parse_failed_unexpected_exception",
-    ];
-    return nonRetryablePatterns.some((pattern) => message.includes(pattern));
-  }
-
   private notifyMissingDeviceIfNeeded(
     error: unknown,
     busyAtDispatch: { busy: boolean; generation: number },
@@ -746,14 +720,6 @@ export class AdbClient implements AdbExecutor {
       message.includes("ENOENT") ||
       message.includes("Executable not found")
     );
-  }
-
-  private getAbortError(signal?: AbortSignal): Error {
-    const reason = signal?.reason;
-    if (reason instanceof Error && isDeviceLossCancellationReason(reason.message)) {
-      return reason;
-    }
-    return new Error(OPERATION_CANCELLED_MESSAGE);
   }
 
   private shouldSkipMissingAdbProbe(): boolean {
@@ -808,9 +774,13 @@ export class AdbClient implements AdbExecutor {
     // Name by the leading subcommand tokens so spans aggregate (e.g.
     // `adb shell getprop`) instead of exploding per argument set.
     const spanArgs = options.logLabel ? commandArgs.slice(0, 1) : commandArgs.slice(0, 2);
+    const signal = options.signal ?? getAbortSignal();
     return trackAmbient(`adb ${spanArgs.join(" ")}`.trimEnd(), () =>
       this.executeArgsImplInner(commandArgs, options),
-    );
+    ).catch((error: unknown) => {
+      const lost = signal && deviceLostErrorFromAbortSignal(signal);
+      throw lost ?? error;
+    });
   }
 
   private async executeArgsImplInner(
@@ -832,7 +802,7 @@ export class AdbClient implements AdbExecutor {
     const { adbPath, baseArgs } = await this.getBaseCommandParts(timeoutMs, resolvedSignal);
     const fullArgs = [...baseArgs, ...commandArgs];
     const command = logLabel ?? commandArgs.join(" ");
-    const exec = async (remainingMs?: number): Promise<ExecResult> => {
+    const rawExec = async (remainingMs?: number): Promise<ExecResult> => {
       try {
         return await this.execWithSignal(
           adbPath,
@@ -847,6 +817,28 @@ export class AdbClient implements AdbExecutor {
       }
     };
 
+    const exec = () =>
+      executeWithAdbTransportRecovery(
+        async (attempt) => {
+          if (attempt > 1) {
+            await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
+          }
+          return rawExec(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
+        },
+        {
+          deviceId: this.device?.deviceId,
+          transportId: baseArgs[1],
+          timer: this.timer,
+          backoff: this.transportBackoff,
+          remainingMs: () =>
+            timeoutMs === undefined ? undefined : timeoutMs - (this.timer.now() - startTime),
+          signal: resolvedSignal,
+          onExhausted: (error) =>
+            this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]),
+        },
+      );
+    let busyAtDispatch = { busy: false, generation: 0 };
+
     // Log which device is receiving this command for parallel execution debugging
     const deviceInfo = this.device ? `[DEVICE:${this.device.deviceId}]` : "[NO-DEVICE]";
     logger.debug(
@@ -854,17 +846,15 @@ export class AdbClient implements AdbExecutor {
     );
 
     if (noRetry) {
-      // No retry - just execute once
-      let busyAtDispatch = { busy: false, generation: 0 };
+      // Skip general retries; pre-dispatch transport refusals still get their bounded wait.
       try {
         await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
         busyAtDispatch = this.getConsoleBusyAtDispatch();
-        return await exec(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
+        return await exec();
       } catch (error) {
         if (resolvedSignal?.aborted) {
-          throw this.getAbortError(resolvedSignal);
+          throw getAdbAbortError(resolvedSignal);
         }
-        this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]);
         const duration = this.timer.now() - startTime;
         const message = (error as Error).message;
         if (this.isMissingExecutableError(error)) {
@@ -877,16 +867,15 @@ export class AdbClient implements AdbExecutor {
     }
 
     // Use retry executor for retryable commands
-    let busyAtDispatch = { busy: false, generation: 0 };
     return this.retryExecutor.executeOrThrow(
       async () => {
         busyAtDispatch = { busy: false, generation: 0 };
         if (resolvedSignal?.aborted) {
-          throw this.getAbortError(resolvedSignal);
+          throw getAdbAbortError(resolvedSignal);
         }
         await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
         busyAtDispatch = this.getConsoleBusyAtDispatch();
-        return await exec(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
+        return await exec();
       },
       {
         maxAttempts: AdbClient.MAX_ADB_RETRIES + 1,
@@ -903,6 +892,12 @@ export class AdbClient implements AdbExecutor {
           if (resolvedSignal?.aborted) {
             return false;
           }
+          if (
+            isDeviceLostError(error) ||
+            (error instanceof AdbDeviceTransportUnavailableError && error.dispatched !== "unknown")
+          ) {
+            return false;
+          }
           if (error instanceof AdbCommandTimeoutError) {
             // A dispatch timeout has, by construction, already consumed the
             // whole command budget. Retrying would sleep past the caller's
@@ -910,13 +905,17 @@ export class AdbClient implements AdbExecutor {
             // original "Command timed out after ..." error instead.
             return false;
           }
-          if (this.isNonRetryableError(error, baseArgs[1])) {
-            this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]);
+          const retryError =
+            error instanceof AdbDeviceTransportUnavailableError && error.cause instanceof Error
+              ? error.cause
+              : error;
+          if (isNonRetryableAdbError(retryError, this.device !== null)) {
             return false;
           }
           return (
             isSafeToRetryCommand(commandArgs, beforeDispatch !== undefined) ||
-            isPreDispatchError(error)
+            (!(error instanceof AdbDeviceTransportUnavailableError) &&
+              isPreDispatchError(retryError))
           );
         },
         onRetry: (error, attempt) => {
@@ -927,8 +926,7 @@ export class AdbClient implements AdbExecutor {
       },
     );
   }
-
-  private async execWithSignal(
+  private execWithSignal(
     file: string,
     args: string[],
     maxBuffer?: number,
@@ -936,169 +934,14 @@ export class AdbClient implements AdbExecutor {
     signal?: AbortSignal,
     options: Pick<AdbExecuteOptions, "waitForProcessSettlementAfterAbort" | "onStdout"> = {},
   ): Promise<ExecResult> {
-    const { waitForProcessSettlementAfterAbort, onStdout } = options;
-    if (signal?.aborted) {
-      throw this.getAbortError(signal);
-    }
-
-    if (this.isTestMode) {
-      return this.execAsync(file, args, maxBuffer);
-    }
-
-    return new Promise<ExecResult>((resolve, reject) => {
-      let settled = false;
-      let pendingTerminationError: Error | undefined;
-      let terminationTimeoutId: NodeJS.Timeout | undefined;
-      let killSettlementTimeoutId: NodeJS.Timeout | undefined;
-      const { child, result } = this.hostProcessExecutor.executeCommandWithChild(
-        file,
-        args,
-        maxBuffer ? { maxBuffer } : undefined,
-      );
-      const stopObservingStdout = this.observeStdout(child, onStdout);
-      result
-        .then((execResult) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanup();
-          if (pendingTerminationError) {
-            reject(pendingTerminationError);
-            return;
-          }
-          resolve(execResult);
-        })
-        .catch((error: unknown) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          cleanup();
-          reject(pendingTerminationError ?? error);
-        });
-
-      trackActiveAdbChild(child);
-
-      const onAbort = () => {
-        if (settled) {
-          return;
-        }
-        const abortError = this.getAbortError(signal);
-        if (waitForProcessSettlementAfterAbort) {
-          pendingTerminationError ??= abortError;
-          if (timeoutId) {
-            this.timer.clearTimeout(timeoutId);
-          }
-          signal?.removeEventListener("abort", onAbort);
-          child.kill("SIGTERM");
-          terminationTimeoutId = this.timer.setTimeout(() => {
-            if (settled) {
-              return;
-            }
-            child.kill("SIGKILL");
-            waitForProcessExitAfterSigkill();
-          }, PROCESS_SETTLEMENT_GRACE_MS);
-          return;
-        }
-        settled = true;
-        cleanup();
-        child.kill("SIGTERM");
-        reject(abortError);
-      };
-
-      const onExit = () => {
-        activeProcesses.delete(child);
-      };
-
-      const settleAfterSigkill = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cleanup();
-        reject(pendingTerminationError);
-      };
-
-      const waitForProcessExitAfterSigkill = () => {
-        child.once("exit", settleAfterSigkill);
-        child.once("close", settleAfterSigkill);
-        killSettlementTimeoutId = this.timer.setTimeout(() => {
-          if (settled) {
-            return;
-          }
-          logger.warn(
-            `[ADB] Child did not exit after SIGKILL within ${PROCESS_SETTLEMENT_GRACE_MS}ms; settling command termination`,
-          );
-          settleAfterSigkill();
-        }, PROCESS_SETTLEMENT_GRACE_MS);
-      };
-
-      const cleanup = () => {
-        stopObservingStdout();
-        removeFinishedAdbChild(child);
-        child.off("exit", onExit);
-        child.off("exit", settleAfterSigkill);
-        child.off("close", settleAfterSigkill);
-        signal?.removeEventListener("abort", onAbort);
-        if (timeoutId) {
-          this.timer.clearTimeout(timeoutId);
-        }
-        if (terminationTimeoutId) {
-          this.timer.clearTimeout(terminationTimeoutId);
-        }
-        if (killSettlementTimeoutId) {
-          this.timer.clearTimeout(killSettlementTimeoutId);
-        }
-      };
-
-      let timeoutId: NodeJS.Timeout | undefined;
-      if (timeoutMs) {
-        timeoutId = this.timer.setTimeout(() => {
-          if (settled) {
-            return;
-          }
-          const timeoutError = new AdbCommandTimeoutError(
-            `Command timed out after ${timeoutMs}ms: ${file} ${args.join(" ")}`,
-          );
-          if (waitForProcessSettlementAfterAbort) {
-            pendingTerminationError ??= timeoutError;
-            signal?.removeEventListener("abort", onAbort);
-            child.kill("SIGTERM");
-            terminationTimeoutId = this.timer.setTimeout(() => {
-              if (settled) {
-                return;
-              }
-              child.kill("SIGKILL");
-              waitForProcessExitAfterSigkill();
-            }, PROCESS_SETTLEMENT_GRACE_MS);
-            return;
-          }
-          settled = true;
-          cleanup();
-          child.kill("SIGTERM");
-          reject(timeoutError);
-        }, timeoutMs);
-      }
-
-      child.on("exit", onExit);
-
-      if (signal) {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-    });
+    return new AdbSignalExecutor({
+      isTestMode: this.isTestMode,
+      execAsync: this.execAsync,
+      hostProcessExecutor: this.hostProcessExecutor,
+      timer: this.timer,
+    }).execWithSignal(file, args, maxBuffer, timeoutMs, signal, options);
   }
 
-  private observeStdout(child: ChildProcess, onStdout?: (chunk: string) => void): () => void {
-    if (!onStdout || !child.stdout) {
-      return () => {};
-    }
-    const listener = (chunk: Buffer | string) => onStdout(chunk.toString());
-    child.stdout.on("data", listener);
-    return () => {
-      child.stdout?.off("data", listener);
-    };
-  }
   getBootedAndroidDevices(
     options: {
       bypassCache?: boolean;
@@ -1161,106 +1004,4 @@ export class AdbClient implements AdbExecutor {
   ): Promise<ForegroundAppReadResult> {
     return this.adbDeviceReadings.getForegroundAppChecked(signal, timeout);
   }
-}
-
-// Shared across instances: daemon shutdown must cover request-scoped clients too.
-const activeProcesses = new Set<ChildProcess>();
-
-function isActiveAdbChild(child: ChildProcess): boolean {
-  return (
-    (child.exitCode === null || child.exitCode === undefined) &&
-    (child.signalCode === null || child.signalCode === undefined)
-  );
-}
-
-export async function terminateActiveAdbProcesses(
-  options: { timer?: Timer; graceMs?: number } = {},
-): Promise<{ terminated: number; failed: number }> {
-  const timer = options.timer ?? defaultTimer;
-  const graceMs = Math.max(0, options.graceMs ?? 500);
-  const summary = { terminated: 0, failed: 0 };
-  const pending = new Set<ChildProcess>();
-  for (const child of [...activeProcesses]) {
-    const result = terminateAdbChild(child);
-    if (result === "pending") {
-      pending.add(child);
-    } else if (result === "failed") {
-      summary.failed++;
-    }
-  }
-  try {
-    await waitForActiveAdbChildren(pending, timer, graceMs);
-    for (const child of pending) {
-      killActiveAdbChild(child);
-    }
-    await waitForActiveAdbChildren(pending, timer, graceMs);
-    for (const child of pending) {
-      if (!isPendingAdbChild(child)) {
-        activeProcesses.delete(child);
-        summary.terminated++;
-      } else {
-        summary.failed++;
-        logger.warn(`[ADB] Host child ${child.pid ?? "unknown"} still alive after bounded cleanup`);
-      }
-    }
-  } catch (error) {
-    logger.warn(`[ADB] Failed to wait for host children: ${errorMessage(error)}`, error);
-    summary.failed += pending.size;
-  }
-  return summary;
-}
-
-async function waitForActiveAdbChildren(
-  children: Set<ChildProcess>,
-  timer: Timer,
-  graceMs: number,
-): Promise<void> {
-  const now = () => timer.monotonicNow?.() ?? timer.now();
-  const deadline = now() + graceMs;
-  while ([...children].some((child) => isPendingAdbChild(child)) && now() < deadline) {
-    await timer.sleep(Math.min(25, deadline - now()));
-  }
-}
-
-function trackActiveAdbChild(child: ChildProcess): void {
-  activeProcesses.add(child);
-  child.once("exit", () => activeProcesses.delete(child));
-}
-
-function removeFinishedAdbChild(child: ChildProcess): void {
-  if (!isActiveAdbChild(child)) {
-    activeProcesses.delete(child);
-  }
-}
-
-function terminateAdbChild(child: ChildProcess): "pending" | "skipped" | "failed" {
-  if (!isActiveAdbChild(child)) {
-    activeProcesses.delete(child);
-    return "skipped";
-  }
-  if (child.pid !== undefined && (child.pid <= 1 || child.pid === process.pid)) {
-    return "skipped";
-  }
-  try {
-    child.kill("SIGTERM");
-    return "pending";
-  } catch (error) {
-    logger.warn(`[ADB] Failed to terminate host child: ${errorMessage(error)}`, error);
-    return "failed";
-  }
-}
-
-function killActiveAdbChild(child: ChildProcess): void {
-  if (!isPendingAdbChild(child)) {
-    return;
-  }
-  try {
-    child.kill("SIGKILL");
-  } catch (error) {
-    logger.warn(`[ADB] Failed to kill host child: ${errorMessage(error)}`, error);
-  }
-}
-
-function isPendingAdbChild(child: ChildProcess): boolean {
-  return activeProcesses.has(child) && isActiveAdbChild(child);
 }

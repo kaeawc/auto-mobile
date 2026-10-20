@@ -1,5 +1,9 @@
+import { buildObserveResult } from "./observeFixture";
 import { TapAtCoordinate } from "../../src/features/action/TapAtCoordinate";
-import type { CoordinateTapClient } from "../../src/features/action/coordinateTapDispatch";
+import type {
+  CoordinateTapClient,
+  IosCoordinateTapClient,
+} from "../../src/features/action/coordinateTapDispatch";
 import type { SnapshotReferenceStore } from "../../src/features/observe/SnapshotReferenceStore";
 import type { RenderedObservationReader } from "../../src/features/action/TargetDisplayAction";
 import type { BootedDevice, ObserveResult } from "../../src/models";
@@ -20,9 +24,9 @@ export function observation(
   rotation = 0,
   node: Record<string, unknown> = {},
 ): ObserveResult {
-  return {
+  return buildObserveResult({
     observationId: "test-observation",
-    timestamp: 1,
+    updatedAt: 1,
     screenSize: { width, height },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     rotation,
@@ -34,7 +38,7 @@ export function observation(
       screenWidth: width,
       screenHeight: height,
     },
-  } as ObserveResult;
+  });
 }
 
 export function createTapAt(
@@ -76,7 +80,10 @@ export function createTapAt(
     snapshotReferences,
     lastRenderedObservation,
     androidClient: unusedClient,
-    iosClient: unusedClient,
+    iosClient: {
+      ...unusedClient,
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+    } satisfies IosCoordinateTapClient,
     dispatchAndroidCoordinateTap: async (_client, _adb, x, y, duration, options) => {
       androidDispatches.push({ x, y, duration, frameContext: options?.frameContext });
     },

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.settings
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.File
+import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -44,7 +45,13 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
         file.inputStream().use { loaded.load(it) }
         props.putAll(loaded)
       }
-    } catch (error: Exception) {
+    } catch (error: IOException) {
+      // Best-effort: an unreadable settings file leaves defaults in place rather than crashing.
+      LOG.warn("Failed to read desktop settings from ${file.path}: ${error.message}", error)
+    } catch (error: IllegalArgumentException) {
+      // Best-effort: an unreadable settings file leaves defaults in place rather than crashing.
+      LOG.warn("Failed to read desktop settings from ${file.path}: ${error.message}", error)
+    } catch (error: SecurityException) {
       // Best-effort: an unreadable settings file leaves defaults in place rather than crashing.
       LOG.warn("Failed to read desktop settings from ${file.path}: ${error.message}", error)
     }
@@ -77,7 +84,15 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
       } finally {
         tmp.delete() // no-op once the move has consumed it; cleans up if the write/move threw
       }
-    } catch (error: Exception) {
+    } catch (error: IOException) {
+      // Best-effort: a failed write keeps the value in memory for this session (the previous file
+      // survives intact); the next set retries.
+      LOG.warn("Failed to persist desktop settings to ${file.path}: ${error.message}", error)
+    } catch (error: IllegalArgumentException) {
+      // Best-effort: a failed write keeps the value in memory for this session (the previous file
+      // survives intact); the next set retries.
+      LOG.warn("Failed to persist desktop settings to ${file.path}: ${error.message}", error)
+    } catch (error: SecurityException) {
       // Best-effort: a failed write keeps the value in memory for this session (the previous file
       // survives intact); the next set retries.
       LOG.warn("Failed to persist desktop settings to ${file.path}: ${error.message}", error)

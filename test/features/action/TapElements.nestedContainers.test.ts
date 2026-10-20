@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -8,7 +9,6 @@ import { ResolverElementSelector } from "../../../src/features/utility/ResolverE
 import type { ElementSelectionOptions } from "../../../src/utils/interfaces/ElementSelector";
 import type { ElementQuery } from "../../../src/models/ElementQuery";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { Element, TapOnElementOptions, ViewHierarchyResult } from "../../../src/models";
 import {
   encodeAndroidFlat,
@@ -122,12 +122,12 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
   };
   const action =
     kind === "tapOn"
-      ? new RecordingTapOn(device, adb as AdbClient, {
+      ? new RecordingTapOn(device, adb, {
           timer,
           elementSelector: selector,
           tapStrategy: new FakeTapStrategy(),
         })
-      : new TapAnyElement(device, adb as AdbClient, {
+      : new TapAnyElement(device, adb, {
           timer,
           elementSelector: selector,
           accessibilityDetector: detector,
@@ -138,12 +138,16 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
   if (action instanceof TapAnyElement) {
     action.testHooks.setRefreshViewHierarchy(async () => null);
   }
-  action.observedInteraction = (callback) =>
-    callback(
-      recordObservationRead(
-        buildObserveResult({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
-      ),
-    );
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: hierarchy,
+        screenSize: { width: 500, height: 500 },
+      }),
+    ),
+  );
   const execute = (options: Partial<TapOnElementOptions> = {}) => {
     const request = {
       elementId: "remove",
@@ -153,7 +157,13 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
       verification: { refresh: async () => null },
       ...options,
     };
-    return action.execute(request);
+    if (action instanceof RecordingTapOn) {
+      return action.execute(request);
+    }
+    if (request.action === "focus") {
+      throw new Error("tapAny does not support focus");
+    }
+    return action.execute({ ...request, action: request.action });
   };
   const taps = () =>
     action instanceof RecordingTapOn
@@ -408,7 +418,10 @@ test("unique ensureChecked refreshes the scoped toggle and skips an already-chec
       },
     },
   };
-  const result = await h.action.execute(request);
+  const result =
+    h.action instanceof RecordingTapOn
+      ? await h.action.execute(request)
+      : await h.action.execute(request);
   expect(result.success).toBe(true);
   expect(result.skipped).toBe("already-checked");
   expect(refreshes).toBe(1);
@@ -469,7 +482,7 @@ for (const action of ["tap", "longPress"] as const) {
     const driver = new FakeTalkBackNavigationDriver();
     const tap = new TapOnElement(
       { name: "fake", platform: "android", deviceId: "fake-native" },
-      adb as AdbClient,
+      adb,
       { timer, talkBackStrategy: talkBack, talkBackDriverFactory: { createDriver: () => driver } },
     );
     const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
@@ -479,16 +492,10 @@ for (const action of ["tap", "longPress"] as const) {
     if (!element) {
       throw new Error("Expected scoped target");
     }
-    await tap.executeAndroidTap(
-      action,
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      { action, container: scope, selectionStrategy: "unique" },
-      true,
-    );
+    await tap.executeAndroidTap(action, 50, 50, 500, element, {
+      options: { action, container: scope, selectionStrategy: "unique" },
+      isTalkBackEnabled: true,
+    });
     expect(talkBack.directActivationCalls).toHaveLength(0);
     expect(talkBack.longPressCalls).toHaveLength(0);
     expect(action === "tap" ? talkBack.preciseTapCalls : talkBack.fallbackCalls).toHaveLength(1);
@@ -519,11 +526,9 @@ test("tapAny scoped long press does not reselect a global native resource ID", a
 test("tapOn scoped long press does not reselect a global native resource ID", async () => {
   const adb = new FakeAdbClient();
   const timer = new FakeTimer();
-  const tap = new TapOnElement(
-    { name: "fake", platform: "android", deviceId: "fake-long" },
-    adb as AdbClient,
-    { timer },
-  );
+  const tap = new TapOnElement({ name: "fake", platform: "android", deviceId: "fake-long" }, adb, {
+    timer,
+  });
   const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
     container: scope,
     strategy: "unique",
@@ -540,16 +545,10 @@ test("tapOn scoped long press does not reselect a global native resource ID", as
     "requestAction",
   ).mockResolvedValue({ success: true, action: "long_click", totalTimeMs: 1 });
   try {
-    await tap.executeAndroidTap(
-      "longPress",
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      { action: "longPress", container: scope, selectionStrategy: "unique" },
-      false,
-    );
+    await tap.executeAndroidTap("longPress", 50, 50, 500, element, {
+      options: { action: "longPress", container: scope, selectionStrategy: "unique" },
+      isTalkBackEnabled: false,
+    });
     expect(native).not.toHaveBeenCalled();
     expect(adb.getCommandCalls().map(({ command }) => command)).toEqual([
       "shell input touchscreen swipe 50 50 50 50 500",
@@ -584,15 +583,16 @@ test.each([true, false])(
         timer,
         iosVoiceOverDetector: detector,
       });
-      tap.observedInteraction = (callback) =>
-        callback(
-          recordObservationRead(
-            buildObserveResult({
-              viewHierarchy: hierarchy,
-              screenSize: { width: 500, height: 500 },
-            }),
-          ),
-        );
+      tap.observedInteraction = runBlockWith(() =>
+        recordObservationRead(
+          buildObserveResult({
+            updatedAt: 0,
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: hierarchy,
+            screenSize: { width: 500, height: 500 },
+          }),
+        ),
+      );
       const result = await tap.execute({
         action: "tap",
         container: scope,
@@ -607,7 +607,7 @@ test.each([true, false])(
       }
       expect(result).toMatchObject({ success: true });
       expect(client.getActionHistory()).toHaveLength(0);
-      expect(client.getVoiceOverActivateHistory()).toEqual([
+      expect<unknown>(client.getVoiceOverActivateHistory()).toEqual([
         {
           label: "remove",
           action: "activate",

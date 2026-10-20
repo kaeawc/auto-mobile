@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { promises as fsPromises, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../../src/models";
@@ -15,6 +15,8 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { loadSignedApk, SIGNER_A, SIGNER_B } from "../../helpers/signedApkFixtures";
 
+afterEach(() => mock.restore());
+
 const PACKAGE = "dev.jasonpearson.automobile.playground";
 const APK_PATH = "/data/app/~~x/dev.jasonpearson.automobile.playground-y/base.apk";
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
@@ -25,7 +27,7 @@ const dump = (name: string) =>
     "utf8",
   );
 
-function setup(apk: string | Error, apiLevel = "36") {
+function setup(apk: Parameters<typeof loadSignedApk>[0] | Error, apiLevel = "36") {
   const adb = new FakeAdbClient();
   adb.setCommandResult("shell getprop ro.build.version.sdk", `${apiLevel}\n`);
   adb.setCommandResult(`shell pm path --user 0 '${PACKAGE}'`, `package:${APK_PATH}\n`);

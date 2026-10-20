@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { clipboardSchema, registerInteractionTools } from "../../src/server/interactionTools";
 import {
-  clipboardSchema,
   formatClipboardMessage,
   formatRecentAppsMessage,
-  registerInteractionTools,
-} from "../../src/server/interactionTools";
+} from "../../src/server/interactionToolHandlers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 

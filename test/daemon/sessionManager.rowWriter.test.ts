@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test, afterEach, mock } from "bun:test";
 import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SerializedSessionRowWriter } from "../../src/daemon/sessionRowWriter";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
@@ -6,6 +6,10 @@ import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalRelea
 import { FakeSessionRowWriter } from "../fakes/FakeSessionRowWriter";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { installSessionManagerCleanup, makeSessionManager } from "../helpers/sessionManagerSuite";
+
+afterEach(() => {
+  mock.restore();
+});
 
 installSessionManagerCleanup();
 

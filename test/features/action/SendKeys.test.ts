@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createAndroidTestClient } from "../../helpers/androidCtrlProxyClientSpies";
 import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { createExecResult } from "../../../src/utils/execResult";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -8,7 +10,7 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, mock, spyOn, test, afterEach } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -33,6 +35,9 @@ import {
   IME_COMMIT_READ_BACK_SETTLE_MS,
   SendKeys,
   type SendKeysCommandExecutor,
+  type SendKeysTypeCommand,
+  type SendKeysKeyCommand,
+  type SendKeysCommandResult,
   type SendKeysInputKey,
   type SendKeysObserver,
   type SendKeysTextClient,
@@ -58,6 +63,8 @@ import {
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+
+afterEach(() => mock.restore());
 
 describe("SendKeys iOS text transport", () => {
   test.each([5, 1000])("passes a scaled timeout for %s characters", async (length) => {
@@ -362,7 +369,11 @@ const unicodeCorpus = [
 ] as const;
 
 function createObserver(
-  result: ObserveResult = { timestamp: Date.now() } as ObserveResult,
+  result: ObserveResult = buildObserveResult({
+    updatedAt: Date.now(),
+    screenSize: { width: 500, height: 500 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+  }),
 ): SendKeysObserver & {
   calls: number;
   options: Array<Parameters<SendKeysObserver["execute"]>[0]>;
@@ -384,7 +395,11 @@ function focusedAndroidObservation(
   timestamp: number = Date.now(),
 ): ObserveResult {
   return {
-    timestamp,
+    updatedAt: timestamp,
+    screenSize: { width: 500, height: 500 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    observationId: "focused-observation",
     viewHierarchy: {
       hierarchy: {
         node: {
@@ -397,7 +412,7 @@ function focusedAndroidObservation(
         },
       },
     },
-  } as ObserveResult;
+  };
 }
 
 function createTextClient(
@@ -597,9 +612,10 @@ describe("SendKeys", () => {
     return { executor, timer, textClient, adb };
   }
 
-  test.each([false, true])(
-    "default replace reads a hinted empty field as empty with focusedElement=%s",
-    async (withFocusedElement) => {
+  describe("hinted empty field replacement", () => {
+    let observation: ObserveResult;
+    let fields: number;
+    beforeEach(() => {
       const fixture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
         readFileSync(
           resolve("test/fixtures/android-focus/playground-text-field-post-tap.json"),
@@ -607,8 +623,13 @@ describe("SendKeys", () => {
         ),
       );
       const parser = new DefaultElementParser();
-      const observation: ObserveResult = { timestamp: 0, viewHierarchy: fixture.viewHierarchy };
-      let fields = 0;
+      observation = buildObserveResult({
+        updatedAt: 0,
+        viewHierarchy: fixture.viewHierarchy,
+        screenSize: { width: 500, height: 500 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      });
+      fields = 0;
       for (const root of [
         ...parser.extractRootNodes(fixture.viewHierarchy),
         ...parser.extractWindowRootNodes(fixture.viewHierarchy),
@@ -620,34 +641,40 @@ describe("SendKeys", () => {
             properties.text = "Search settings";
             properties["hint-text"] = "Search settings";
             fields++;
-            if (withFocusedElement) {
-              observation.focusedElement = {
-                ...properties,
-                bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
-              };
-            }
+            observation.focusedElement = {
+              ...properties,
+              bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
+            };
           }
         });
       }
-      expect(fields).toBeGreaterThan(0);
-      if (withFocusedElement) {
-        expect(observation.focusedElement?.text).toBe("Search settings");
-      }
-      const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
-      const result = await executor.type({ action: "type", text: "Q", operation: "replace" });
-      expect(result).toMatchObject({
-        success: false,
-        partialApplication: true,
-        committedUnits: 1,
-        resolvedMode: "ime",
-      });
-      expect(result.error).toContain('the focused field holds ""');
-      expect(result.error).not.toContain("Search settings");
-      expect(textClient.calls).toContain("clearField");
-      expect(textClient.commitViaImeCalls).toHaveLength(1);
-      expect(timer.getSleepHistory()).toEqual([150, 150]);
-    },
-  );
+    });
+    test.each([false, true])(
+      "default replace reads a hinted empty field as empty with focusedElement=%s",
+      async (withFocusedElement) => {
+        if (!withFocusedElement) {
+          delete observation.focusedElement;
+        }
+        expect(fields).toBeGreaterThan(0);
+        if (withFocusedElement) {
+          expect(observation.focusedElement?.text).toBe("Search settings");
+        }
+        const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
+        const result = await executor.type({ action: "type", text: "Q", operation: "replace" });
+        expect(result).toMatchObject({
+          success: false,
+          partialApplication: true,
+          committedUnits: 1,
+          resolvedMode: "ime",
+        });
+        expect(result.error).toContain('the focused field holds ""');
+        expect(result.error).not.toContain("Search settings");
+        expect(textClient.calls).toContain("clearField");
+        expect(textClient.commitViaImeCalls).toHaveLength(1);
+        expect(timer.getSleepHistory()).toEqual([150, 150]);
+      },
+    );
+  });
 
   test("default replace still verifies non-hint replacement content", async () => {
     let fieldText = "Q";
@@ -856,7 +883,7 @@ describe("SendKeys", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("back and home do not require editable focus", async () => {
+  test("escape and tab do not require editable focus", async () => {
     const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
     const { textClient, adb, timer } = imeVerificationHarness(observer);
     const press = mock(async (_key: Parameters<SendKeysInputKey["press"]>[0]) => ({
@@ -868,10 +895,10 @@ describe("SendKeys", () => {
       observer,
       { textClient: textClient.client, inputKey: { press }, timer },
     );
-    for (const key of ["back", "home"] as const) {
+    for (const key of ["escape", "tab"] as const) {
       expect(await executor.key({ action: "key", key })).toMatchObject({ success: true });
     }
-    expect(press.mock.calls.map((call) => call[0])).toEqual(["back", "home"]);
+    expect(press.mock.calls.map((call) => call[0])).toEqual(["escape", "tab"]);
     expect(observer.calls).toBe(0);
     expect(textClient.calls).toEqual([]);
   });
@@ -942,7 +969,12 @@ describe("SendKeys", () => {
       observer,
       timer,
       lastRenderedObservation: () => observation,
-      displayTransitions: { revision: () => 0 },
+      displayTransitions: {
+        revision: () => 0,
+        identityRevision: () => 0,
+        sameIdentitySince: () => true,
+        currentObservedPanel: () => undefined,
+      },
       timestampProvider: { now: async () => 0 },
       focuser: { focus: async () => ({ success: true }) },
     });
@@ -1071,7 +1103,11 @@ describe("SendKeys", () => {
         execute: async () =>
           ++reads === 1
             ? focusedAndroidObservation("partial", {}, 0)
-            : ({ timestamp: 0 } as ObserveResult),
+            : buildObserveResult({
+                updatedAt: 0,
+                screenSize: { width: 500, height: 500 },
+                systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+              }),
       });
       expect(await executor.type({ action: "type", text, mode: "ime" })).toMatchObject({
         success: true,
@@ -1134,7 +1170,13 @@ describe("SendKeys", () => {
     };
     const sendKeys = new SendKeys(iosDevice, undefined, {
       executor,
-      observer: createObserver({ timestamp: 0 } as ObserveResult),
+      observer: createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       timestampProvider: { now: async () => 0 },
       timer,
     });
@@ -1169,7 +1211,13 @@ describe("SendKeys", () => {
     };
     const sendKeys = new SendKeys(iosDevice, undefined, {
       executor,
-      observer: createObserver({ timestamp: 0 } as ObserveResult),
+      observer: createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       timestampProvider: { now: async () => new Promise(() => {}) },
       timer,
     });
@@ -1213,7 +1261,7 @@ describe("SendKeys", () => {
   test("executes commands in order, stops on failure, and observes once", async () => {
     const calls: string[] = [];
     const executor: SendKeysCommandExecutor = {
-      type: mock(async (command) => {
+      type: mock(async (command: SendKeysTypeCommand): Promise<SendKeysCommandResult> => {
         calls.push(`type:${command.text}`);
         return {
           index: -1,
@@ -1225,7 +1273,7 @@ describe("SendKeys", () => {
           resolvedMode: "eventAll",
         };
       }),
-      key: mock(async (command) => {
+      key: mock(async (command: SendKeysKeyCommand): Promise<SendKeysCommandResult> => {
         calls.push(`key:${command.key}`);
         return { index: -1, action: "key", key: command.key, success: false, error: "blocked" };
       }),
@@ -1457,7 +1505,11 @@ describe("SendKeys", () => {
 
   test("accepts a hierarchy pushed before command delivery returns", async () => {
     let deviceTime = 1000;
-    const pushedObservation = { timestamp: 1001 } as ObserveResult;
+    const pushedObservation = buildObserveResult({
+      updatedAt: 1001,
+      screenSize: { width: 500, height: 500 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    });
     const sendKeys = new SendKeys(androidDevice, undefined, {
       timestampProvider: { now: async () => deviceTime },
       executor: {
@@ -1474,7 +1526,7 @@ describe("SendKeys", () => {
       },
       observer: {
         execute: async (options) => {
-          expect(options?.minTimestamp).toBeLessThanOrEqual(pushedObservation.timestamp);
+          expect(options?.minTimestamp).toBeLessThanOrEqual(Number(pushedObservation.updatedAt));
           return pushedObservation;
         },
       },
@@ -1572,33 +1624,36 @@ describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
 
-  test.each(unicodeCorpus)("iOS forwards Unicode corpus %s intact for every mode", async (text) => {
-    for (const mode of [
-      "auto",
-      "a11y",
-      "ime",
-      "eventAll",
-      "eventLast",
-      "eventOnly",
-      "imeKeyEvents",
-    ] as const) {
-      const textClient = createTextClient();
-      const executor = new DefaultSendKeysCommandExecutor(
-        iosDevice,
-        createAdbFactory(new FakeAdbExecutor()),
-        createObserver(),
-        { textClient: textClient.client },
-      );
-      expect(await executor.type({ action: "type", text, mode })).toMatchObject({
-        success: true,
-        resolvedMode: "xcuiTypeText",
-        textLength: Array.from(text).length,
-      });
-      expect(textClient.calls).toEqual([`insert:${text}`]);
-    }
-  });
+  test.each([...unicodeCorpus])(
+    "iOS forwards Unicode corpus %s intact for every mode",
+    async (text) => {
+      for (const mode of [
+        "auto",
+        "a11y",
+        "ime",
+        "eventAll",
+        "eventLast",
+        "eventOnly",
+        "imeKeyEvents",
+      ] as const) {
+        const textClient = createTextClient();
+        const executor = new DefaultSendKeysCommandExecutor(
+          iosDevice,
+          createAdbFactory(new FakeAdbExecutor()),
+          createObserver(),
+          { textClient: textClient.client },
+        );
+        expect(await executor.type({ action: "type", text, mode })).toMatchObject({
+          success: true,
+          resolvedMode: "xcuiTypeText",
+          textLength: Array.from(text).length,
+        });
+        expect(textClient.calls).toEqual([`insert:${text}`]);
+      }
+    },
+  );
 
-  test.each(unicodeCorpus)(
+  test.each([...unicodeCorpus])(
     "Android a11y and IME forward Unicode corpus %s intact",
     async (text) => {
       for (const mode of ["a11y", "ime", "auto"] as const) {
@@ -1627,7 +1682,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     },
   );
 
-  test.each(unicodeCorpus)(
+  test.each([...unicodeCorpus])(
     "Android ASCII-only modes reject Unicode corpus %s before mutation",
     async (text) => {
       for (const mode of ["eventOnly", "imeKeyEvents"] as const) {
@@ -1719,7 +1774,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const executor = new DefaultSendKeysCommandExecutor(
       iosDevice,
       createAdbFactory(adb),
-      createObserver({ timestamp: 0 } as ObserveResult),
+      createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       { textClient },
     );
 
@@ -1879,7 +1940,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
             if (++reads <= (operation === "clear" ? 2 : 1)) {
               return focusedAndroidObservation("first\nlater\nlines", {}, 0);
             }
-            return after === undefined ? { timestamp: 0 } : focusedAndroidObservation(after, {}, 0);
+            return after === undefined
+              ? buildObserveResult({
+                  updatedAt: 0,
+                  screenSize: { width: 500, height: 500 },
+                  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+                })
+              : focusedAndroidObservation(after, {}, 0);
           },
         };
         const executor = new DefaultSendKeysCommandExecutor(
@@ -2218,9 +2285,12 @@ describe("DefaultSendKeysCommandExecutor", () => {
         createObserver(focusedAndroidObservation("zQ9 X", { password: "true" })),
         { textClient: createTextClient().client },
       );
-      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
-        spyOn(logger, level).mockImplementation(() => {}),
-      );
+      const spies = [
+        spyOn(logger, "debug").mockImplementation(() => {}),
+        spyOn(logger, "info").mockImplementation(() => {}),
+        spyOn(logger, "warn").mockImplementation(() => {}),
+        spyOn(logger, "error").mockImplementation(() => {}),
+      ];
       try {
         const result = await executor.type({ action: "type", text: "Zq9 x", mode });
 
@@ -2252,11 +2322,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("eventAll splits a literal %s across two input text calls", async () => {
     const adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(31);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
       createObserver(focusedAndroidObservation()),
-      { textClient: createTextClient().client },
+      { textClient: createTextClient().client, timer },
     );
 
     const result = await executor.type({ action: "type", text: "50%s 1", mode: "eventAll" });
@@ -2506,16 +2578,16 @@ describe("DefaultSendKeysCommandExecutor", () => {
       };
       client.requestSetText = async (text) => {
         calls.push(`replace:${text}`);
-        return { success: true };
+        return { success: true, totalTimeMs: 1 };
       };
       client.requestInsertText = async (text) => {
         calls.push(`insert:${text}`);
-        return { success: true };
+        return { success: true, totalTimeMs: 1 };
       };
       client.requestInsertTextState = async () => ({ success: false });
       client.commitViaIme = async () => {
         calls.push("commit");
-        return { success: true };
+        return { success: true, totalTimeMs: 1 };
       };
       AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
       const executor = new DefaultSendKeysCommandExecutor(
@@ -2752,7 +2824,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const explicitImeExecutor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(new FakeAdbExecutor()),
-      createObserver({ timestamp: 0 } as ObserveResult),
+      createObserver(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 500, height: 500 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }),
+      ),
       { textClient: explicitImeClient.client },
     );
     const imeResult = await explicitImeExecutor.type({
@@ -2948,7 +3026,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
       ]);
       const observer = createObserver(
         fieldText === null
-          ? ({ timestamp: timer.now() } as ObserveResult)
+          ? buildObserveResult({
+              updatedAt: timer.now(),
+              screenSize: { width: 500, height: 500 },
+              systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            })
           : focusedAndroidObservation(fieldText, secure ? { password: "true" } : {}, timer.now()),
       );
       const textClient = createTextClient({
@@ -3036,7 +3118,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
     ]);
     const observer = createObserver(
       fieldText === null
-        ? ({ timestamp: timer.now() } as ObserveResult)
+        ? buildObserveResult({
+            updatedAt: timer.now(),
+            screenSize: { width: 500, height: 500 },
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          })
         : focusedAndroidObservation(fieldText, secure ? { password: "true" } : {}, timer.now()),
     );
     const textClient = createTextClient();
@@ -4395,6 +4481,7 @@ describe("SendKeys IME focus regression", () => {
     });
     const observation: ObserveResult = {
       observationId: "occluded-focus",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       updatedAt: 1,
       screenSize: { width: 400, height: 240 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -4426,7 +4513,7 @@ describe("SendKeys IME focus regression", () => {
       },
     );
     expect(
-      await sendKeys.execute([{ action: "key", key: "ENTER" }], { text: "Continue as Guest" }),
+      await sendKeys.execute([{ action: "key", key: "enter" }], { text: "Continue as Guest" }),
     ).toEqual({
       success: false,
       completedCommands: 0,
@@ -4459,7 +4546,7 @@ describe("SendKeys post-action capture boundary", () => {
           createSettleObserve: () => h.settleObserve,
         });
         expect(h.captures).toHaveLength(1);
-        const final = getStructuredPayload(response)!;
+        const final = getStructuredPayload<typeof result>(response)!;
         const captured = h.captures[0];
         const expectedId =
           scenario === "imeAction" ? "settle-2" : beforeGate.observation!.observationId;
@@ -4467,7 +4554,7 @@ describe("SendKeys post-action capture boundary", () => {
         expect(final.observation).toMatchObject({
           observationId: expectedId,
           screenshotPath: `${expectedId}.png`,
-          screenshotCapturedAt: 123,
+          screenshotCapturedAt: new Date(123).toISOString(),
           settled: scenario === "imeAction",
         });
         expect(final.commands).toEqual(beforeGate.commands);
@@ -4560,13 +4647,12 @@ describe("SendKeys post-action capture boundary", () => {
     const focus = new CapturingFocus(device, h.adb, timer);
     focus.observeScreen = observe;
     focus.window = new FakeWindow();
-    const capture = spyOn(observe, "captureScreenshot").mockImplementation(
-      async (_perf, _signal, chosen) => {
-        events.push(`capture:start:${chosen?.observationId}`);
-        await Promise.resolve();
-        events.push(`capture:end:${chosen?.observationId}`);
-      },
-    );
+    const capture = mock<typeof observe.captureScreenshot>(async (_perf, _signal, chosen) => {
+      events.push(`capture:start:${chosen?.observationId}`);
+      await Promise.resolve();
+      events.push(`capture:end:${chosen?.observationId}`);
+    });
+    observe.captureScreenshot = capture;
     const insert = h.client.insert;
     h.client.insert = async (...args) => {
       events.push("dispatch");
@@ -4594,7 +4680,7 @@ describe("SendKeys post-action capture boundary", () => {
               async () => ({ success: true, focusVerified: true }),
               { previousObservation: before, changeExpected: false, skipUiStability: true },
             );
-            expect(hasPendingTerminalScreenshot(result.observation)).toBe(true);
+            expect(hasPendingTerminalScreenshot(result.observation!)).toBe(true);
             expect(capture).not.toHaveBeenCalled();
             return { success: true, focusVerified: true };
           },
@@ -4631,7 +4717,7 @@ describe("SendKeys post-action capture boundary", () => {
         expect(h.capture).toHaveBeenCalledTimes(2);
         expect(h.capture.mock.calls[0][2]).toBe(h.before);
       } finally {
-        h.capture.mockRestore();
+        h.capture.mockReset();
       }
     },
   );
@@ -4809,7 +4895,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         }
         return pending;
       });
-      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(text);
+      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        createAndroidTestClient(android, {
+          requestImeAction: (...args) => text.requestImeAction(...args),
+        }),
+      );
       const observer = createObserver(focusedAndroidObservation("", {}, 1));
       const executor = new DefaultSendKeysCommandExecutor(
         android,
@@ -4897,7 +4987,10 @@ describe("Android adapter cancellation fence", () => {
         return pending;
       },
     };
-    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(facade);
+    const client = createAndroidTestClient(android);
+    client.requestInsertText = facade.requestInsertText;
+    client.requestImeAction = facade.requestImeAction;
+    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     const executor = new DefaultSendKeysCommandExecutor(
       android,
       createAdbFactory(new FakeAdbExecutor()),
@@ -4969,7 +5062,11 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         order.push("read");
         const text = texts[Math.min(options.length - 1, texts.length - 1)];
         return text === undefined
-          ? ({ timestamp: 0 } as ObserveResult)
+          ? buildObserveResult({
+              updatedAt: 0,
+              screenSize: { width: 500, height: 500 },
+              systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            })
           : focusedAndroidObservation(text, {}, 0);
       },
     };

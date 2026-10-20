@@ -11,6 +11,7 @@ import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DAEMON_LIVENESS_OWNER_IS_PROXY_CODE, type DaemonStatus } from "../../src/daemon/types";
 import * as debugTools from "../../src/daemon/debugTools";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
+import type { DaemonRestartResult, DaemonStartResult } from "../../src/daemon/manager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { CodedError } from "../helpers/CodedError";
 import { parseJsonUnknown } from "../helpers/parseJsonUnknown";
@@ -228,20 +229,24 @@ describe("daemon command characterization with fake I/O", () => {
   ])("%s dispatches only to the injected fake manager", async (command, args) => {
     const events: string[] = [];
     class Manager extends SafeDaemonManager {
-      override async start() {
+      override async start(): Promise<DaemonStartResult> {
         events.push("start");
+        return "started";
       }
       override async stop() {
         events.push("stop");
       }
-      override async restart() {
+      override async restart(): Promise<DaemonRestartResult> {
         events.push("restart");
+        return "restarted";
       }
-      override async restartAdmitted() {
+      override async restartAdmitted(): Promise<DaemonRestartResult> {
         events.push("restart-admitted");
+        return "restarted";
       }
-      override async restartAcceptanceSession() {
+      override async restartAcceptanceSession(): Promise<DaemonRestartResult> {
         events.push("restart-acceptance-session");
+        return "restarted";
       }
     }
     await runDaemonCommand(command, args, {}, Manager);

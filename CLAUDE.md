@@ -121,12 +121,22 @@ bun test <file>        # Run specific test file (no cache)
 Before pushing Node/TypeScript changes, run `bash scripts/prepush-node.sh`.
 Use `scripts/prepush.sh` (`--list` to preview, `--all`, `--changed`, or `--base`) to select per-lane gates from changed paths; per-lane scripts remain usable standalone and each records its own attestation, while the dispatcher does not.
 Use `bash scripts/prepush-node.sh --changed` for the faster affected-unit-test
-loop; `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, explicit cap fallbacks, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); formatting, typecheck, and lint intentionally remain full repository
-gates. It also runs the tool-free TypeScript subset of CI Fast Validation
+loop; early selection via `bun scripts/lib/affectedTests.ts` adds reference-only unit extras beyond Bun's import closure, affected safe integration coverage, and the cross-cutting source-scan tests in `test/always-run-tests.txt` (which always run, since moving code breaks them untouched); a unit cap fallback replaces the changed lane with the full unit lane and skips unit extras, while integration caps use the full safe lane. Formatting, typecheck, and lint intentionally remain full repository
+gates. Typecheck and lint stay strictly serial and separate because oxlint 1.88's experimental `--type-check` and tsgolint diagnostics do not replace the fail-closed typecheck parser, TS2688/`@types/bun` guard, or separate src/test tsconfig projects. It also runs the tool-free TypeScript subset of CI Fast Validation
 (`scripts/all_fast_validate_checks.sh --only ...`, ~10 s, including the offline
-lychee pass when `lychee` is installed), the `test/lint/` suites (including the
-Windows path-separator assertion guard), and, on Linux or with `--timing`, the
-100 ms unit budget. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
+lychee pass when `lychee` is installed), repository lint tests, and, on Linux or with `--timing`, the
+100 ms unit budget. The timing gate measures the unit lane's JUnit reports when
+source or runtime inputs changed; changed test files alone are still re-run
+individually. Changed mode without reports uses the timing validator's own
+affected-test selection. The separate repository lint gate runs only
+`test/lint/*.integration.test.ts` in full mode (unit files already run in the unit
+lane); `--changed` runs the whole `test/lint/` directory only when branch,
+worktree, or untracked paths touch `src/`, `test/`, `scripts/`, `oxlint-plugins/`,
+`android/`, `ios/`, `docs/`, `skills/`, `schemas/`, `.claude/`, `.github/`, or root
+`.oxlintrc.json`, `package.json`, `bun.lock`, `bunfig.toml`, `turbo.json`, or
+`tsconfig*.json`. After that directory runs, affected unit and integration extras
+omit `test/lint/` files already covered. Always-run unit extras still run when
+that gate skips. Shell, Kotlin, Swift, docs-syntax, bats and Windows/macOS
 matrix lanes are not covered: use `scripts/prepush-shell.sh` and the platform
 gates, and expect CI to be the only Windows run. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 `eqeqeq` are enforced directly by oxlint, not its warning-only ratchet, and
@@ -168,22 +178,17 @@ Two `tsgo --noEmit` passes run in CI (`scripts/typecheck-baseline.sh`):
 
 ```bash
 bun run typecheck             # src (tsconfig.json): NO baseline, any error fails
-bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json) vs the count baseline
-bun run typecheck:test:update # regenerate the test baseline after fixing errors
+bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json): NO baseline, any error fails
 ```
 
-The src baseline reached zero and was deleted (issues #3001, #11787). The test gate
-(`scripts/typecheck-test-baseline.txt`) is a count-only one-way ratchet of compact
-`<file> <TScode> <count>` rows: a count may shrink, a higher count or new file/code pair
-fails, and `typecheck:test:update` refuses to grow without
-`bash scripts/typecheck-baseline.sh --project=test --update --allow-grow`. Both projects
-resolve `bun:*` modules and the `Bun` global from `@types/bun` via the `types` list in
-their tsconfig; if it is missing the gate exits 4 on TS2688 / unresolved `bun:` modules in
-every mode (never baselined), so a broken install cannot pass silently. Run time is about
-2 s (src) and 6 s (test). The baseline is version-sensitive: `@typescript/native-preview`
-is a dated preview build, so regenerate it in the same PR that bumps it (the
-`# generated-with:` header records the version and the gate warns on drift). When you FIX
-test type errors, run `bun run typecheck:test:update` and commit the smaller baseline.
+Both baselines reached zero and were deleted (issues #3001, #11787): there is no
+type-error baseline and no `--update` path, so any type error in `src/` or `test/` fails.
+Both projects resolve `bun:*` modules and the `Bun` global from `@types/bun` via the
+`types` list in their tsconfig; if it is missing the gate exits 4 on TS2688 / unresolved
+`bun:` modules, so a broken install cannot pass silently. Run time is about 2 s (src) and
+6 s (test). `as any` and `as unknown as` in `test/` are hard `oxlint` errors
+(`auto-mobile/no-as-any`, `auto-mobile/no-unknown-cast`); the former test cast baselines
+are deleted too. Fix the code (typed fakes, `Pick<>` views, `satisfies`, type guards).
 
 ## oxlint ratchet baseline
 
@@ -201,10 +206,10 @@ bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 
 Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
-exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
-because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `max-classes-per-file`, `auto-mobile/max-class-lines`
-(1000 non-blank lines), and `auto-mobile/catch-convention`.
+exit non-zero). `complexity`, `max-depth`, `max-params`, `max-lines-per-function`,
+`max-classes-per-file`, `auto-mobile/max-class-lines` (1000 non-blank lines), and
+`auto-mobile/catch-convention` are fully burned down and are `error` too, so the ratchet's
+violation counts no longer cover them.
 `typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
 burned down and are `error` in `.oxlintrc.json`, but they need type information and
 the fast stage is not type-aware, so they are enforced by the ratchet stage
@@ -304,6 +309,25 @@ authoritative set of MCP tool names and schemas (regenerate it with
 interaction (tap/swipe/drag/pinch, key and text input, clipboard), app management
 (launch/terminate/install/uninstall), and device management (list/provision/kill
 devices, set the active device).
+
+## Android Lint
+
+Run `cd android && ./gradlew lintDebug --continue`. The Android pre-push gate
+runs lint for affected modules (all modules for Gradle/build-logic changes);
+the CI Detekt job runs it for every Android module. New warnings fail the build.
+Remaining findings live in each module's `lint-baseline.xml`; clean modules have
+no baseline. Baselines may only shrink, both in total and for each issue id per
+module. After fixing a module, remove its baseline and regenerate with
+`./gradlew :<module>:lintDebug -Dlint.baselines.continue=true`. Keep the generated
+file only if nonempty, then run `./gradlew :<module>:lintDebug --rerun-tasks` once
+to refresh AGP's cached baseline creation result. Never use `--allow-grow` when
+updating baselines. `scripts/android/check-lint-baseline-shrink.sh` checks
+HEAD against the merge-base with origin/main; pre-push includes local edits too.
+Checks that compare against what is published upstream (AndroidGradlePluginVersion,
+GradleDependency, NewerVersionAvailable, OldTargetApi) are disabled in the
+convention plugins: their findings change over time and cannot be baselined.
+Lint must never rewrite files (no autofix); a clean `git status` after a lint run
+is the check.
 
 # Android Notification Group Handling (Hard-Won Knowledge)
 

@@ -333,13 +333,18 @@ describe("TelemetryRecorder", () => {
     // before the repo write completes. Both DB write and push should use device-A.
     let resolveWrite: (() => void) | null = null;
     const slowRepo: TelemetryRepository = {
-      ...repo,
+      recordLogEvent: repo.recordLogEvent.bind(repo),
+      recordOsEvent: repo.recordOsEvent.bind(repo),
+      recordNavigationEvent: repo.recordNavigationEvent.bind(repo),
+      recordStorageEvent: repo.recordStorageEvent.bind(repo),
+      recordLayoutEvent: repo.recordLayoutEvent.bind(repo),
       recordNetworkEvent: async (input) => {
         repo.networkEvents.push(input);
         // Block until test resolves
         await new Promise<void>((r) => {
           resolveWrite = r;
         });
+        return 1;
       },
     };
     const slowRecorder = new TelemetryRecorder(slowRepo, () => pushTarget);
@@ -804,7 +809,11 @@ describe("TelemetryRecorder", () => {
       const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
       let resolveWrite: (() => void) | null = null;
       const slowRepo: TelemetryRepository = {
-        ...repo,
+        recordNetworkEvent: repo.recordNetworkEvent.bind(repo),
+        recordOsEvent: repo.recordOsEvent.bind(repo),
+        recordNavigationEvent: repo.recordNavigationEvent.bind(repo),
+        recordStorageEvent: repo.recordStorageEvent.bind(repo),
+        recordLayoutEvent: repo.recordLayoutEvent.bind(repo),
         recordLogEvent: async (input) => {
           repo.logEvents.push(input);
           await new Promise<void>((r) => {

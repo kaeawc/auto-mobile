@@ -1,3 +1,4 @@
+import { verifyBearerToken } from "./daemonHttpToken";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import type { Transport } from "@modelcontextprotocol/server";
@@ -8,7 +9,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { executionTracker } from "./executionTracker";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
+import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
 import type { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { MCP_STREAMABLE_PATH } from "./constants";
 import {
@@ -72,6 +73,7 @@ export interface HttpListener {
 
 /** What the daemon's HTTP listener needs from the daemon; everything is read lazily. */
 export interface DaemonHttpIngressDeps {
+  httpToken: () => string | undefined;
   httpServerFactory: () => HttpListener;
   timer: () => Timer;
   idGenerator: () => IdGenerator;
@@ -132,7 +134,7 @@ export class DaemonHttpIngress {
     createServer: (req, scope) => this.mcpRequestServerFactory(req, scope),
     cancelScopeExecutions: (requestScopeId, reason) =>
       executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
+    forgetScopeBindings: (requestScopeId) => forgetDaemonSessionBindingScope(requestScopeId),
     closeReason: () =>
       this.deps.isShutdownInProgress()
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
@@ -227,6 +229,9 @@ export class DaemonHttpIngress {
    * Start the HTTP MCP server (internal daemon transport, not exposed publicly)
    */
   async start(): Promise<void> {
+    if (!this.deps.httpToken()) {
+      throw new ActionableError("Daemon HTTP token is not configured");
+    }
     const { host, port } = this.deps.address();
     const server = this.deps.httpServerFactory();
     this.httpServer = server;
@@ -321,6 +326,24 @@ export class DaemonHttpIngress {
     if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+
+    const authorization = req.headers.authorization;
+    // Drop credentials from both Node header views before any downstream code runs.
+    delete req.headers.authorization;
+    for (let index = req.rawHeaders.length - 2; index >= 0; index -= 2) {
+      if (req.rawHeaders[index]?.toLowerCase() === "authorization") {
+        req.rawHeaders.splice(index, 2);
+      }
+    }
+    const expected = this.deps.httpToken();
+    if (!expected || !verifyBearerToken(authorization, expected)) {
+      res.writeHead(401, {
+        "Content-Type": "application/json",
+        "WWW-Authenticate": "Bearer",
+      });
+      res.end(JSON.stringify({ error: "Unauthorized" }));
       return;
     }
 

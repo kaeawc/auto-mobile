@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -229,6 +230,7 @@ const accessibilityTool = defineDeviceTool({
     throw new ActionableError(`Unsupported platform: ${device.platform}`);
   },
   options: {
+    ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: accessibilityStateSchema,
     // The check form (no talkback/voiceover) reads (#10965); a toggle is control.

@@ -147,9 +147,9 @@ test("adapter preserves actual request/token, holds boot permit, observes explic
   const c = "a-phone";
   const initial = renderClientRequest({ name: c, platform: "android" }, `batch-${c}-2`);
   const grant = {
-    contractVersion: 1,
+    contractVersion: 1 as const,
     requestId: initial.requestId,
-    outcome: "ready",
+    outcome: "ready" as const,
     sessionUuid: "session-1",
     profile: null,
     cleanupPending: false,

@@ -6,7 +6,7 @@ import {
   type HeartbeatKeeperPort,
 } from "../../../src/daemon/proxy/HeartbeatKeeper";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
-import { LifecycleConnectionInFlightError } from "../../../src/daemon/proxy/daemonErrors";
+import { LifecycleConnectionInFlightError } from "../../../src/daemon/proxy/LifecycleConnectionInFlightError";
 import { heartbeatRequestTimeoutMs } from "../../../src/daemon/proxy/heartbeatCadence";
 import {
   DAEMON_STALLED_CODE,
@@ -401,17 +401,19 @@ describe("HeartbeatKeeper", () => {
       timer: new FakeTimer(),
       daemonManager: new FakeDaemonManager(),
     });
-    const keeper = proxy["proxyHeartbeatKeeper"];
+    const keeper = proxy.getInternalsForTesting().proxyHeartbeatKeeper;
     const result = Promise.resolve();
     keeper.tick = () => result;
     keeper.heartbeatHeldSession = () => result;
     keeper.heartbeatWithStallDetection = () => result;
-    expect(proxy["runBoundSessionHeartbeatTick"]()).toBe(result);
-    expect(proxy["heartbeatHeldSession"]("held")).toBe(result);
-    expect(proxy["heartbeatWithStallDetection"]("held", () => result)).toBe(result);
+    expect(proxy.getInternalsForTesting().runBoundSessionHeartbeatTick()).toBe(result);
+    expect(proxy.getInternalsForTesting().heartbeatHeldSession("held")).toBe(result);
+    expect(proxy.getInternalsForTesting().heartbeatWithStallDetection("held", () => result)).toBe(
+      result,
+    );
     // The port was constructed before this replacement and must still look it up at call time.
     let called = false;
-    proxy["latestBindingKeeper"].runLatestBindingHeartbeatTick = () => {
+    proxy.getInternalsForTesting().latestBindingKeeper.runLatestBindingHeartbeatTick = () => {
       called = true;
       return result;
     };

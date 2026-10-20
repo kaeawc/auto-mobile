@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.models
 
 import android.graphics.Rect
+import android.util.Log
 import kotlinx.serialization.Serializable
 
 /**
@@ -66,7 +67,8 @@ data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom
 
         val (left, top, right, bottom) = matchResult.destructured
         ElementBounds(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
-      } catch (e: Exception) {
+      } catch (e: NumberFormatException) {
+        Log.w("ElementBounds", "Failed to parse element bounds", e)
         null
       }
     }

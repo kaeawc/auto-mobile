@@ -1,8 +1,14 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
-import { Visitor } from "oxc-parser";
-import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
+
+import {
+  parseGuardSource,
+  relativePosix,
+  typeScriptFiles,
+  readGuardFile,
+  GuardVisitor as Visitor,
+} from "./astGuard";
 
 /**
  * #11853: src/models is a types-and-pure-functions leaf. It may import only other
@@ -70,10 +76,7 @@ describe("src/models is a leaf", () => {
       ...new Set(
         escapes(
           new Map(
-            typeScriptFiles(MODELS).map((file) => [
-              relativePosix(ROOT, file),
-              readFileSync(file, "utf8"),
-            ]),
+            typeScriptFiles(MODELS).map((file) => [relativePosix(ROOT, file), readGuardFile(file)]),
           ),
         ),
       ),

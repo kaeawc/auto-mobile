@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk.events
 
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
+import dev.jasonpearson.automobile.sdk.TestFailureException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -118,7 +119,7 @@ class DropCounterTest {
       SdkEventBuffer(
         maxBufferSize = 2,
         flushIntervalMs = 60_000,
-        onFlush = { throw RuntimeException("boom") },
+        onFlush = { throw TestFailureException("boom") },
         executor = executor,
         dropCounter = counter,
       )

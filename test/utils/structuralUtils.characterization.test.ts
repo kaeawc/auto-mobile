@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import fs from "fs/promises";
 import path from "path";
 import { PNG } from "pngjs";
@@ -11,6 +11,14 @@ import { getMcpServerVersion, releaseVersion } from "../../src/utils/mcpVersion"
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeImageBackend } from "../fakes/FakeImageBackend";
+
+afterEach(() => mock.restore());
+
+// These spies cover the UTF-8 overloads used by PlanSerializer.
+const logFileSystem: {
+  readdir(path: string): Promise<string[]>;
+  readFile(path: string, encoding: BufferEncoding): Promise<string>;
+} = fs;
 
 const createdAt = "2026-01-01T00:00:00.000Z";
 const version = releaseVersion(getMcpServerVersion());
@@ -51,13 +59,13 @@ describe("Plan export characterization", () => {
         `${logEntry("observe", 5, false)}\n${logEntry("inputText", 2, false)}\n${logEntry("listDevices", 4)}\n`,
       ],
     ]);
-    const listing = spyOn(fs, "readdir").mockResolvedValue([
+    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue([
       "c.json",
       "ignored.txt",
       "b.json",
       "a.json",
     ]);
-    const reading = spyOn(fs, "readFile").mockImplementation(async (file) => {
+    const reading = spyOn(logFileSystem, "readFile").mockImplementation(async (file) => {
       const content = logs.get(String(file));
       if (content === undefined) {
         throw new Error("unreadable");
@@ -110,8 +118,8 @@ describe("Plan export characterization", () => {
     },
     { files: ["a.json"], content: logEntry("killDevice", 0), expected: { success: true } },
   ])("handles empty and omitted calls: $files $content", async ({ files, content, expected }) => {
-    const listing = spyOn(fs, "readdir").mockResolvedValue(files);
-    const reading = spyOn(fs, "readFile").mockResolvedValue(content);
+    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue([...files]);
+    const reading = spyOn(logFileSystem, "readFile").mockResolvedValue(content);
     const writing = spyOn(fs, "writeFile").mockResolvedValue(undefined);
     const date = spyOn(Date.prototype, "toISOString").mockReturnValue(createdAt);
     try {
@@ -140,8 +148,8 @@ describe("Plan export characterization", () => {
   });
 
   test.each(["readdir", "writeFile"] as const)("preserves %s errors", async (method) => {
-    const listing = spyOn(fs, "readdir").mockResolvedValue(["a.json"]);
-    const reading = spyOn(fs, "readFile").mockResolvedValue(logEntry("tapOn", 0));
+    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue(["a.json"]);
+    const reading = spyOn(logFileSystem, "readFile").mockResolvedValue(logEntry("tapOn", 0));
     const writing = spyOn(fs, "writeFile").mockResolvedValue(undefined);
     const errorLog = spyOn(logger, "error").mockImplementation(() => {});
     (method === "readdir" ? listing : writing).mockRejectedValue(new Error("denied"));
@@ -159,29 +167,27 @@ describe("Plan export characterization", () => {
 });
 
 function expectSummary(raw: Record<string, unknown>, texts: string[], ids: string[]): void {
-  const now = spyOn(Date, "now").mockReturnValue(123);
-  try {
-    const expected = {
-      capturedAtMs: 123,
-      activeWindow: raw.activeWindow,
-      awaitTimeout: typeof raw.awaitTimeout === "boolean" ? raw.awaitTimeout : undefined,
-      awaitedElement: raw.awaitedElement,
-      accessibilityState: raw.accessibilityState,
-      viewHierarchy: raw.viewHierarchy,
-      rawViewHierarchy: raw.rawViewHierarchy,
-      visibleTextsSample: texts,
-      resourceIdsSample: ids,
-      observeError: typeof raw.error === "string" ? raw.error : undefined,
-    };
-    const actual = summarizeObserveResultForFailure(raw);
-    expect(actual).toEqual(expected);
-    expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
-  } finally {
-    now.mockRestore();
-  }
+  const expected = {
+    capturedAtMs: 123,
+    activeWindow: raw.activeWindow,
+    awaitTimeout: typeof raw.awaitTimeout === "boolean" ? raw.awaitTimeout : undefined,
+    awaitedElement: raw.awaitedElement,
+    accessibilityState: raw.accessibilityState,
+    viewHierarchy: raw.viewHierarchy,
+    rawViewHierarchy: raw.rawViewHierarchy,
+    visibleTextsSample: texts,
+    resourceIdsSample: ids,
+    observeError: typeof raw.error === "string" ? raw.error : undefined,
+  };
+  const actual = summarizeObserveResultForFailure(raw);
+  expect(actual).toEqual(expected);
+  expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
 }
 
 describe("Failure summary characterization", () => {
+  beforeEach(() => {
+    spyOn(Date, "now").mockReturnValue(123);
+  });
   test("preserves complete payload, bucket order, deduplication, clipping and malformed entries", () => {
     const longText = "t".repeat(301);
     const longId = "i".repeat(201);
@@ -388,7 +394,7 @@ describe("Retry characterization", () => {
               totalTimeMs: sleeps.reduce((sum, delay) => sum + delay, 0),
             },
       );
-      expect(timer.getSleepHistory()).toEqual(sleeps);
+      expect(timer.getSleepHistory()).toEqual([...sleeps]);
       expect(calls).toEqual(Array.from({ length: attempts }, (_, i) => i + 1));
       const expectedEvents: string[] = [];
       for (let attempt = 1; attempt <= attempts; attempt++) {

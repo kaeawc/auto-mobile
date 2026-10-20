@@ -1,10 +1,12 @@
-import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
+import { beforeEach, afterEach, expect, mock, spyOn, test } from "bun:test";
 import type {
   ObserveResult,
   ScrollableCandidate,
   SwipeDirection,
   SwipeOnOptions,
 } from "../../../../src/models";
+import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import { frame, harness } from "./displaySwipeHarness";
 import { runSessionDisplayPin } from "../../../../src/server/sessionDisplayPin";
@@ -26,7 +28,14 @@ function tree({
     viewHierarchy: {
       ...observation.viewHierarchy,
       hierarchy: {
-        node: [observation.viewHierarchy?.hierarchy.node, ...nodes.map(($) => ({ $ }))],
+        node: createFlatNodeForTest({
+          node: [
+            ...(observation.viewHierarchy?.hierarchy.node
+              ? [createFlatNodeForTest({ ...observation.viewHierarchy.hierarchy.node })]
+              : []),
+            ...nodes.map(($) => ({ $ })),
+          ],
+        }),
       },
     },
   };
@@ -51,9 +60,7 @@ function optionsHarness({
     observationFor: ({ display, observation }) =>
       display ? tree({ observation, nodes }) : defaultObservation,
   });
-  const cached = spyOn(h.observe, "getMostRecentCachedObserveResult").mockResolvedValue(
-    defaultObservation,
-  );
+  const cached = cachedObservation.mockResolvedValue(defaultObservation);
   return { ...h, cached };
 }
 
@@ -273,7 +280,11 @@ for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
 for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
   test(`a11y failure has no adb fallback, search=${!!lookFor}`, async () => {
     const h = optionsHarness();
-    h.ctrl.setSwipeResult({ success: false, error: "CtrlProxy display dispatch failed" });
+    h.ctrl.setSwipeResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "CtrlProxy display dispatch failed",
+    });
     h.ctrl.setDragResult({
       success: false,
       error: "CtrlProxy display dispatch failed",
@@ -358,7 +369,7 @@ test("no display retains legacy autoTarget and gesture dispatch", async () => {
   expect(result.success).toBe(true);
   expect(result.warning).toContain('elementId="decoy"');
   expect(h.cached).toHaveBeenCalled();
-  expect(h.gesture.getSwipeCalls()).toEqual([
+  expect<unknown>(h.gesture.getSwipeCalls()).toEqual([
     {
       x1: 40,
       y1: 82,
@@ -537,4 +548,11 @@ test("fromEdge on a display still rejects a genuinely wrong-way direction (#1299
   expect(result.success).toBe(false);
   expect(result.error).toContain('finger direction must be "right"');
   expect(h.legs()).toHaveLength(0);
+});
+
+let cachedObservation: ReturnType<
+  typeof spyOn<typeof FakeObserveScreen.prototype, "getMostRecentCachedObserveResult">
+>;
+beforeEach(() => {
+  cachedObservation = spyOn(FakeObserveScreen.prototype, "getMostRecentCachedObserveResult");
 });

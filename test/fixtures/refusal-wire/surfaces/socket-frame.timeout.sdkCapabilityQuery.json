@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "timeout.sdkCapabilityQuery",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "SDK capability query timed out",
+    "code": "timeout",
+    "retryable": true
+  }
+}

@@ -264,35 +264,8 @@ export class SharedGestureDelegate {
    * pinch (start horizontal, end rotated) — a combined pinch+rotate, not a pinch along a fixed
    * rotated axis. `0` is a plain zoom. Same convention on Android and iOS. See issue #2911.
    */
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<GestureTimingResult> {
-    return sendCommand<GestureTimingResult>(
-      this.context,
-      this.pinchCommandOptions({
-        centerX,
-        centerY,
-        distanceStart,
-        distanceEnd,
-        rotationDegrees,
-        duration,
-        timeoutMs,
-        perf,
-        signal,
-        displayId,
-        beforeSend,
-      }),
-    );
+  async requestPinch(request: PinchRequest): Promise<GestureTimingResult> {
+    return sendCommand<GestureTimingResult>(this.context, this.pinchCommandOptions(request));
   }
 
   /** The wire request for a pinch; platform delegates reuse it to wrap their own dispatch contract. */

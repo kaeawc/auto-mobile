@@ -23,6 +23,9 @@ function makeHierarchy(marker: string): ViewHierarchyResult {
 
 function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
   return {
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     ...overrides,

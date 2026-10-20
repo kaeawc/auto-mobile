@@ -9,7 +9,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import {
   DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
   type Session,
@@ -294,7 +294,7 @@ for (const phase of ["suspect", "awaiting-reap", "disconnect"] as const) {
     const hint = s.daemon.pool.holderReleaseRemainingMs(id);
     expect(hint).toBeGreaterThan(0);
     const before = holderClocks(session);
-    const deadline = s.daemon.pool["ownerDisconnectRelease"].remainingMs(id);
+    const deadline = s.daemon.pool.testHooks.ownerDisconnectRelease.remainingMs(id);
     const error = await explicitImageRefusal(s);
     expect(error.toPayload()).toEqual({
       code: "device_owned_by_other_session",
@@ -306,7 +306,7 @@ for (const phase of ["suspect", "awaiting-reap", "disconnect"] as const) {
       freshStartAlreadyBoundError("emulator-5554", id, false, hint).message,
     );
     expect(holderClocks(session)).toEqual(before);
-    expect(s.daemon.pool["ownerDisconnectRelease"].remainingMs(id)).toBe(deadline);
+    expect(s.daemon.pool.testHooks.ownerDisconnectRelease.remainingMs(id)).toBe(deadline);
     expect(s.daemon.pool.holderReleaseRemainingMs(id)).toBe(hint);
   });
 }

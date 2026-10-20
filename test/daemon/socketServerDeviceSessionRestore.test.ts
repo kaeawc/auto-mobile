@@ -9,7 +9,7 @@ import {
 } from "../../src/daemon/constants";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -63,16 +63,13 @@ async function boundRecoveryHarness() {
       emulatorLossIncidentStore: incidents,
     }),
   );
-  const server = createTestUnixSocketServer(
-    "/fake/recovery.sock",
-    {
-      isInitialized: () => true,
-      getSessionManager: () => manager,
-      getDevicePool: () => pool,
-      getDeviceSessionRegistry: () => ({ list: () => [] }),
-    },
-    timer,
-  );
+  const state = {
+    isInitialized: () => true,
+    getSessionManager: () => manager,
+    getDevicePool: () => pool,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
+  };
+  const server = createTestUnixSocketServer("/fake/recovery.sock", state, timer);
   server["acceptingRequests"] = true;
   const socket = new FakeSocket();
   server["handleConnection"](socket);
@@ -136,6 +133,7 @@ async function boundRecoveryHarness() {
   await call(false);
   return {
     timer,
+    state,
     persistence,
     manager,
     pool,
@@ -247,7 +245,7 @@ test.each([undefined, "device-restart:Pixel", "daemon-shutdown"])(
       // The daemon that held the session is gone; the one answering never had it in memory.
       const restarted = new SessionManager(h.timer, h.persistence);
       restarted.stopCleanupTimer();
-      h.server["daemonState"].getSessionManager = () => restarted;
+      h.state.getSessionManager = () => restarted;
       h.timer.setCurrentTime(row!.expires_at_ms + 1);
 
       const reason = handoff === "device-restart:Pixel" ? "restart-recovery-timeout" : "expired";
@@ -374,7 +372,7 @@ test("never-issued bound identity retains ReleasedBoundSessionError and loss fen
   try {
     const args = { sessionUuid: "never-issued", [DAEMON_BOUND_SESSION_PARAM]: "never-issued" };
     const error = await Promise.resolve()
-      .then(() => h.server["getToolsCallForwardRoute"](args, h.socketId, "observe"))
+      .then(() => h.server.testHooks.routing.getToolsCallForwardRoute(args, h.socketId, "observe"))
       .catch((error: unknown) => error);
     expect(error).toMatchObject({
       name: "ReleasedBoundSessionError",
@@ -609,7 +607,7 @@ test("a token declaration after socket close leaves no inert identity or later m
   const other = h.connect();
   const entered = Promise.withResolvers<void>();
   const proceed = Promise.withResolvers<void>();
-  const startup = spyOn(h.server, "waitForStartup").mockImplementation(async () => {
+  const restoreStartup = h.server.testHooks.waitForStartup.intercept(() => async () => {
     entered.resolve();
     await proceed.promise;
   });
@@ -625,11 +623,11 @@ test("a token declaration after socket close leaves no inert identity or later m
     });
     await entered.promise;
     other.socket.destroy();
-    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    expect(h.pool.testHooks.mcpSessionLivenessOwnerTokens.has(other.id)).toBe(false);
     proceed.resolve();
     await request;
     await drainMicrotasks(16);
-    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    expect(h.pool.testHooks.mcpSessionLivenessOwnerTokens.has(other.id)).toBe(false);
     await h.manager.releaseSession("bound", "explicit-release");
     h.deviceManager.bootedDevices = [
       { name: "Pixel", deviceId: "emulator-5554", platform: "android" },
@@ -645,7 +643,7 @@ test("a token declaration after socket close leaves no inert identity or later m
     expect(h.manager.getSession("later-mint")?.livenessOwnerToken).toBeUndefined();
   } finally {
     proceed.resolve();
-    startup.mockRestore();
+    restoreStartup();
     other.socket.destroy();
     h.close();
   }

@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
 import type { DaemonNotification } from "../../src/daemon/types";
 
 /**

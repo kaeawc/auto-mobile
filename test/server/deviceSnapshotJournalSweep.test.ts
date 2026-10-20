@@ -19,7 +19,7 @@ import {
   STARTUP_SWEEP_DELAY_MS,
   SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES,
   SNAPSHOT_JOURNAL_SWEEP_MAX_SCOPE_DIRECTORIES,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";

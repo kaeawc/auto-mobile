@@ -16,14 +16,14 @@ import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
 } from "../../src/daemon/sessionManager";
 import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
-import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
+import { readDeviceCleanupInProgressRefusal } from "../../src/daemon/deviceSessionResult";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   RECORDING_TEARDOWN_RETRY_BUDGET_MS,
-} from "../../src/server/recordingSessionCleanup";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+} from "../../src/daemon/recordingSessionCleanup";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../../src/utils/NetworkState";
 import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/daemon/networkStateSessionCleanup";

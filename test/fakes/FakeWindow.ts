@@ -1,4 +1,4 @@
-import { ActiveWindow } from "../../src/models";
+import { ActiveWindowInfo } from "../../src/models";
 import type { Window } from "../../src/features/observe/interfaces/Window";
 import type { GetActiveOptions } from "../../src/features/observe/Window";
 import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
@@ -11,8 +11,8 @@ import { NodeCryptoService } from "../../src/utils/crypto";
  */
 export class FakeWindow implements Window {
   private executedOperations: string[] = [];
-  private configuredCachedActiveWindow: ActiveWindow | null = null;
-  private configuredActiveWindow: ActiveWindow | null = null;
+  private configuredCachedActiveWindow: ActiveWindowInfo | null = null;
+  private configuredActiveWindow: ActiveWindowInfo | null = null;
   private cachedActiveWindowCallCount: number = 0;
   private getActiveCallCount: number = 0;
   private getActiveForceRefreshes: boolean[] = [];
@@ -32,14 +32,14 @@ export class FakeWindow implements Window {
   /**
    * Configure the cached active window to be returned by getCachedActiveWindow
    */
-  configureCachedActiveWindow(window: ActiveWindow | null): void {
+  configureCachedActiveWindow(window: ActiveWindowInfo | null): void {
     this.configuredCachedActiveWindow = window;
   }
 
   /**
    * Configure the active window to be returned by getActive
    */
-  configureActiveWindow(window: ActiveWindow): void {
+  configureActiveWindow(window: ActiveWindowInfo): void {
     this.configuredActiveWindow = window;
   }
 
@@ -112,7 +112,7 @@ export class FakeWindow implements Window {
 
   // Implementation of Window interface
 
-  async getCachedActiveWindow(): Promise<ActiveWindow | null> {
+  async getCachedActiveWindow(): Promise<ActiveWindowInfo | null> {
     this.executedOperations.push("getCachedActiveWindow");
     this.cachedActiveWindowCallCount++;
     return this.configuredCachedActiveWindow;
@@ -122,7 +122,7 @@ export class FakeWindow implements Window {
     forceRefresh: boolean = false,
     _perf?: PerformanceTracker,
     options: GetActiveOptions = {},
-  ): Promise<ActiveWindow> {
+  ): Promise<ActiveWindowInfo> {
     this.executedOperations.push("getActive");
     this.getActiveCallCount++;
     this.getActiveForceRefreshes.push(forceRefresh);
@@ -159,7 +159,7 @@ export class FakeWindow implements Window {
     return NodeCryptoService.generateCacheKey(JSON.stringify(this.configuredActiveWindow));
   }
 
-  async setCachedActiveWindow(activeWindow: ActiveWindow): Promise<void> {
+  async setCachedActiveWindow(activeWindow: ActiveWindowInfo): Promise<void> {
     this.executedOperations.push("setCachedActiveWindow");
     this.configuredCachedActiveWindow = activeWindow;
   }

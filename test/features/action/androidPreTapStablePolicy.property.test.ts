@@ -10,7 +10,7 @@ import {
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
 const sibling = fc.constantFrom<boolean | undefined>(true, false, undefined);
-const optionsOf = (s: boolean | undefined): TapOnElementOptions => ({ sibling: s });
+const optionsOf = (s: boolean | undefined): TapOnElementOptions => ({ action: "tap", sibling: s });
 
 describe("androidPreTapConsecutiveStableMatchesRequired (property-based)", () => {
   test("always returns the strict count regardless of sibling", () => {

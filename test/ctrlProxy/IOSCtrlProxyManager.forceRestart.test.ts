@@ -40,12 +40,12 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
           "",
         ),
       );
-      return IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        executor,
-      );
+      return IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: executor,
+      });
     }
 
     test("replaces a joined startup when the runner exits during WebSocket initialization", async function () {
@@ -442,12 +442,12 @@ describe("IOSCtrlProxyManager service port and force restart", function () {
     test("does not mistake a forced-teardown responder that omits deviceId for our own runner", async function () {
       const fakeExecutor = new FakeProcessExecutor();
       fakeExecutor.setCommandHandler("curl -s", () => createExecResult('{"status":"ok"}', ""));
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
       spyOn(manager, "stop").mockResolvedValue();
       const start = spyOn(manager, "startAfterForceRestart").mockResolvedValue();
 

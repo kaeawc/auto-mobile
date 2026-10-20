@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import { ActionableError, type BootedDevice, type ExecResult } from "../../../src/models";
-import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import {
   DefaultEmulatorReadinessPoller,
   resolveEmulatorPollingInterval,
@@ -97,12 +96,9 @@ describe("DefaultEmulatorReadinessPoller", () => {
     const adb = readyAdb({ "shell getprop sys.boot_completed": "0\n" });
     const classified = new ActionableError("Emulator failed to start: corrupt image");
     const { poller } = setup(adb, (output) => (output.includes("corrupt") ? classified : null));
-    const stdout = new EventEmitter();
-    const child = Object.assign(new EventEmitter(), {
-      pid: 4242,
-      stdout,
-      stderr: new EventEmitter(),
-    }) as HostChildProcess;
+    const child = new FakeChildProcess();
+    child.pid = 4242;
+    const stdout = child.stdout;
 
     const pending = poller.waitForEmulatorReady("Pixel_9", 60_000, child, undefined, undefined, {
       skipWakeAndUnlock: true,

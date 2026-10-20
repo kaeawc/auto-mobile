@@ -49,42 +49,19 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * @property targetFps the rate the pane asked the relay for; a drop is measured relative to it.
  */
-class QualityController(
-  initialQuality: VideoStreamQuality,
-  val targetFps: Int,
-  autoAdjustEnabled: Boolean = true,
-  /** Trailing window the displayed [actualFps] is averaged over (frames ÷ elapsed). */
-  private val rateWindowMs: Long = 2_000,
-  /**
-   * Non-idle inter-frame samples needed before any decision, so an early estimate can't misfire.
-   */
-  private val minSamplesForDecision: Int = 5,
-  /**
-   * At/over this inter-frame interval a frame is treated as idle — consistent with a static screen
-   * (Android's ~100ms repeat cadence) or an iOS suppression / reconnect gap — and contributes no
-   * drop signal. Just under the on-device repeat cadence so a still screen never reads as a drop;
-   * genuine degradation the controller acts on shows up as intervals between the target and here.
-   */
-  private val idleIntervalMs: Long = 90,
-  /** Below this fraction of [targetFps] a (non-idle) sample counts as dropping. */
-  private val downgradeRatio: Double = 0.8,
-  /** At or above this fraction of [targetFps] a sample counts as healthy. */
-  private val upgradeRatio: Double = 0.95,
-  /** Consecutive dropping samples required before a downgrade (hysteresis). */
-  private val samplesToDowngrade: Int = 3,
-  /**
-   * Consecutive healthy samples required before an upgrade — larger, so quality climbs cautiously.
-   */
-  private val samplesToUpgrade: Int = 8,
-  /** Minimum frame-time spacing between two automatic changes. */
-  private val minDwellMs: Long = 2_000,
-  /**
-   * Notified only for an explicit [selectQuality] (a user's manual pick), for persistence.
-   * Automatic steps update [quality] (so the pane re-subscribes and the overlay updates) but do not
-   * notify.
-   */
-  private val onManualSelection: (VideoStreamQuality) -> Unit = {},
-) {
+class QualityController(options: QualityControllerOptions) {
+  private val initialQuality = options.initialQuality
+  val targetFps = options.targetFps
+  private val rateWindowMs = options.rateWindowMs
+  private val minSamplesForDecision = options.minSamplesForDecision
+  private val idleIntervalMs = options.idleIntervalMs
+  private val downgradeRatio = options.downgradeRatio
+  private val upgradeRatio = options.upgradeRatio
+  private val samplesToDowngrade = options.samplesToDowngrade
+  private val samplesToUpgrade = options.samplesToUpgrade
+  private val minDwellMs = options.minDwellMs
+  private val onManualSelection = options.onManualSelection
+
   private val _quality = MutableStateFlow(initialQuality)
   val quality: StateFlow<VideoStreamQuality> = _quality
 
@@ -103,7 +80,7 @@ class QualityController(
    * clears the decision streaks so a re-enable cannot complete a stale pre-disable streak on its
    * first frame and downgrade on history from before Auto was off.
    */
-  var autoAdjustEnabled: Boolean = autoAdjustEnabled
+  var autoAdjustEnabled: Boolean = options.autoAdjustEnabled
     set(value) {
       if (value != field) {
         samples = 0

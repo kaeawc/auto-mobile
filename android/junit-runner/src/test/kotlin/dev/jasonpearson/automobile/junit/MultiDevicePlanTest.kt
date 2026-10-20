@@ -445,12 +445,22 @@ class TwoDeviceCriticalSectionPlanTest {
 
 /** Target class for plain two-device plan tests. */
 class TwoDevicePlainTestTarget {
-  @Test fun testParallelDeviceOps() {}
+  private var invocations = 0
+
+  @Test
+  fun testParallelDeviceOps() {
+    invocations++
+  }
 }
 
 /** Target class for criticalSection two-device plan tests. */
 class TwoDeviceCriticalSectionTestTarget {
-  @Test fun testCriticalSectionCoordination() {}
+  private var invocations = 0
+
+  @Test
+  fun testCriticalSectionCoordination() {
+    invocations++
+  }
 }
 
 // Shared test infrastructure

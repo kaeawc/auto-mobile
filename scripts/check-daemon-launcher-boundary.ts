@@ -253,7 +253,7 @@ function violationsIn(
       isNamespaceReceiver &&
       executor !== undefined &&
       EXECUTION_FUNCTIONS.has(executor) &&
-      !namespaceExclusionsFor(receiver)?.has(executor)
+      !(receiver && ts.isIdentifier(receiver) && namespaceExclusionsFor(receiver)?.has(executor))
     );
   };
 
@@ -281,16 +281,12 @@ function violationsIn(
     if (isNamespaceExecutor(value, sourcePosition)) {
       addBinding(importedExecutors, identifier, timing);
       const memberAccess = unwrapTransparentExpression(value);
-      if (
-        (ts.isPropertyAccessExpression(memberAccess) ||
-          ts.isElementAccessExpression(memberAccess)) &&
-        ts.isIdentifier(unwrapTransparentExpression(memberAccess.expression))
-      ) {
-        recordSource(
-          executorSources,
-          identifier,
-          unwrapTransparentExpression(memberAccess.expression),
-        );
+      const receiver =
+        ts.isPropertyAccessExpression(memberAccess) || ts.isElementAccessExpression(memberAccess)
+          ? unwrapTransparentExpression(memberAccess.expression)
+          : undefined;
+      if (receiver && ts.isIdentifier(receiver)) {
+        recordSource(executorSources, identifier, receiver);
       }
     }
   };
@@ -382,7 +378,11 @@ function violationsIn(
     }
   };
   const countAssignments = (node: ts.Node): void => {
-    if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    ) {
       countAssignmentTarget(node.left, node.getEnd(), node.operatorToken.kind);
     }
     if (
@@ -402,9 +402,7 @@ function violationsIn(
   };
   countAssignments(sourceFile);
 
-  const functionOwnerDeclaration = (
-    functionLike: ts.FunctionLikeDeclaration,
-  ): ts.Node | undefined => {
+  const functionOwnerDeclaration = (functionLike: ts.SignatureDeclaration): ts.Node | undefined => {
     if (ts.isFunctionDeclaration(functionLike) || ts.isMethodDeclaration(functionLike)) {
       return functionLike;
     }
@@ -448,7 +446,7 @@ function violationsIn(
     return false;
   };
 
-  const functionMaySuspend = (functionLike: ts.FunctionLikeDeclaration): boolean =>
+  const functionMaySuspend = (functionLike: ts.SignatureDeclaration): boolean =>
     hasModifier(functionLike, ts.SyntaxKind.AsyncKeyword) ||
     ("asteriskToken" in functionLike && functionLike.asteriskToken !== undefined);
 
@@ -457,7 +455,7 @@ function violationsIn(
     if (ts.isIdentifier(callee)) {
       return symbolFor(callee)?.valueDeclaration;
     }
-    return ts.isPropertyAccessExpression(callee)
+    return ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name)
       ? symbolFor(callee.name)?.valueDeclaration
       : undefined;
   };
@@ -672,12 +670,13 @@ function violationsIn(
     if (value && ts.isIdentifier(value)) {
       return value;
     }
-    return value &&
+    const left =
+      value &&
       ts.isBinaryExpression(value) &&
-      value.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isIdentifier(unwrapTransparentExpression(value.left))
-      ? unwrapTransparentExpression(value.left)
-      : undefined;
+      value.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        ? unwrapTransparentExpression(value.left)
+        : undefined;
+    return left && ts.isIdentifier(left) ? left : undefined;
   };
 
   const registerObjectAssignment = (
@@ -823,7 +822,11 @@ function violationsIn(
       );
     }
 
-    if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    ) {
       const value = unwrapTransparentExpression(node.right);
       const target = unwrapTransparentExpression(node.left);
       if (
@@ -862,11 +865,11 @@ function violationsIn(
         hasBinding(importedExecutors, expression) &&
         (executionPositions === undefined ||
           bindingIsAvailableForExecution(expression, node, executionPositions, executorSources));
-      const indirectReceiver =
-        (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) &&
-        ts.isIdentifier(unwrapTransparentExpression(expression.expression))
+      const receiver =
+        ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)
           ? unwrapTransparentExpression(expression.expression)
           : undefined;
+      const indirectReceiver = receiver && ts.isIdentifier(receiver) ? receiver : undefined;
       const indirect =
         indirectReceiver !== undefined &&
         (staticMemberName(expression, staticStringValue) === "call" ||

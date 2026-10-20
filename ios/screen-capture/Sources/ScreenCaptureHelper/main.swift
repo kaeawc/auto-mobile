@@ -432,7 +432,8 @@ func runBlocking<T>(_ body: @escaping @Sendable () async -> T) -> T {
     }
     semaphore.wait()
     // box.value is set by the async body before semaphore.signal(); wait() blocks until then.
-    return box.value! // swiftlint:disable:this force_unwrapping
+    guard let value = box.value else { preconditionFailure("Async body did not produce a value before signaling") }
+    return value
 }
 
 // MARK: - Signal handling

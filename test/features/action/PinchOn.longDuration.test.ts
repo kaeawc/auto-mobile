@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
@@ -13,6 +15,8 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+
+afterEach(() => mock.restore());
 
 for (const platform of ["android", "ios"] as const) {
   describe(`PinchOn long duration (${platform})`, () => {
@@ -31,16 +35,16 @@ for (const platform of ["android", "ios"] as const) {
         name: "Fake device",
         platform,
       };
-      const screen: ObserveResult = {
+      const screen: ObserveResult = buildObserveResult({
         updatedAt: timer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         viewHierarchy: {
-          hierarchy: { node: [] },
+          hierarchy: { node: createFlatNodeForTest({ node: [] }) },
           packageName: "com.test.app",
           updatedAt: timer.now(),
         },
-      };
+      });
       const observe = new FakeObserveScreen();
       observe.setObserveResult(screen);
       const window = new FakeWindow();

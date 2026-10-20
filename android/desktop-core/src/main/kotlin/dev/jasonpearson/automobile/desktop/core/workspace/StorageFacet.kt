@@ -30,7 +30,9 @@ import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
+import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -89,79 +91,69 @@ private sealed interface StorageFacetState {
  * stream, panes in a multi-device workspace stay isolated (the dashboard also filters updates to
  * [column]'s device and app).
  */
-@Composable
-fun StorageFacet(
-  column: DeviceColumn,
-  loadInstalledApps: (suspend (String) -> Result<List<InstalledApp>>)? = null,
-  sessionUuidProvider: () -> String? = { null },
-  inputAllocation: DesktopInputAllocation? = null,
-  observationStreamFactory: (String) -> ObservationStream = {
+data class StorageFacetOptions(
+  val column: DeviceColumn,
+  val loadInstalledApps: (suspend (String) -> Result<List<InstalledApp>>)? = null,
+  val sessionUuidProvider: () -> String? = { null },
+  val inputAllocation: DesktopInputAllocation? = null,
+  val observationStreamFactory: (String) -> ObservationStream = {
     ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
   },
-  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
-  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
+  val backoffDelay: suspend (attempt: Int) -> Unit = { attempt ->
+    delay(reconnectBackoffMs(attempt))
+  },
+  val socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
+)
+
+@Composable
+fun StorageFacet(
+  options: StorageFacetOptions,
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
-  val graph = LocalAutoMobileGraph.current
-  val loader: suspend (String) -> Result<List<InstalledApp>> =
-    loadInstalledApps
-      ?: { deviceId ->
-        // Resolve off the UI thread: the app-list read hits the daemon and would otherwise block
-        // recomposition. Injected test loaders run inline (deterministic).
-        withContext(Dispatchers.IO) {
-          graph.dataSourceFactory
-            .createAppListDataSource(DataSourceMode.Real, { graph.autoMobileClient }, deviceId)
-            .getInstalledApps()
+  with(options) {
+    val graph = LocalAutoMobileGraph.current
+    val loader: suspend (String) -> Result<List<InstalledApp>> =
+      loadInstalledApps
+        ?: { deviceId ->
+          // Resolve off the UI thread: the app-list read hits the daemon and would otherwise block
+          // recomposition. Injected test loaders run inline (deterministic).
+          withContext(ioDispatcher) {
+            graph.dataSourceFactory
+              .createAppListDataSource(DataSourceMode.Real, { graph.autoMobileClient }, deviceId)
+              .getInstalledApps()
+          }
+        }
+    val latestSessionUuidProvider by rememberUpdatedState(sessionUuidProvider)
+    val storageClient =
+      remember(graph, inputAllocation) {
+        storageClientProvider({ graph.autoMobileClient }, inputAllocation) {
+          latestSessionUuidProvider()
         }
       }
-  val latestSessionUuidProvider by rememberUpdatedState(sessionUuidProvider)
-  val storageClient =
-    remember(graph, inputAllocation) {
-      storageClientProvider({ graph.autoMobileClient }, inputAllocation) {
-        latestSessionUuidProvider()
+    var attempt by remember(column.deviceId) { mutableStateOf(0) }
+    var state by
+      remember(column.deviceId, attempt) {
+        mutableStateOf<StorageFacetState>(StorageFacetState.Loading)
       }
+    LaunchedEffect(column.deviceId, attempt) {
+      state =
+        when (val result = loader(column.deviceId)) {
+          is Result.Success ->
+            resolveStoragePackage(result.data)?.let { StorageFacetState.Resolved(it) }
+              ?: StorageFacetState.NoApp
+          is Result.Error ->
+            StorageFacetState.Error(result.message ?: "Failed to load the device's apps")
+          // A one-shot app-list load resolves to Success/Error; treat a stray Loading as retryable
+          // rather than leaving the facet stuck on "Resolving app…".
+          Result.Loading -> StorageFacetState.Error("App list is still loading")
+        }
     }
-  var attempt by remember(column.deviceId) { mutableStateOf(0) }
-  var state by
-    remember(column.deviceId, attempt) {
-      mutableStateOf<StorageFacetState>(StorageFacetState.Loading)
-    }
-  LaunchedEffect(column.deviceId, attempt) {
-    state =
-      when (val result = loader(column.deviceId)) {
-        is Result.Success ->
-          resolveStoragePackage(result.data)?.let { StorageFacetState.Resolved(it) }
-            ?: StorageFacetState.NoApp
-        is Result.Error ->
-          StorageFacetState.Error(result.message ?: "Failed to load the device's apps")
-        // A one-shot app-list load resolves to Success/Error; treat a stray Loading as retryable
-        // rather than leaving the facet stuck on "Resolving app…".
-        Result.Loading -> StorageFacetState.Error("App list is still loading")
-      }
-  }
-  when (val current = state) {
-    StorageFacetState.Loading -> FacetNote("Resolving app…")
-    StorageFacetState.NoApp -> FacetNote("No app found on this device")
-    is StorageFacetState.Error -> FacetError(current.message) { attempt++ }
-    is StorageFacetState.Resolved -> {
-      // Per-pane, device-scoped stream with automatic reconnect; lives only while the dashboard is
-      // shown (disposed when this branch leaves composition or the device changes).
-      val stream =
-        rememberReconnectingObservationStream(
-          deviceId = column.deviceId,
-          deviceSessionUuid = column.deviceSessionUuid,
-          requireDeviceSessionUuid = true,
-          streamFactory = { observationStreamFactory(column.deviceId) },
-          backoffDelay = backoffDelay,
-          socketAvailable = socketAvailable,
-        )
-      StorageDashboard(
-        dataSourceMode = DataSourceMode.Real,
-        clientProvider = storageClient,
-        deviceId = column.deviceId,
-        packageName = current.packageName,
-        platform = column.platform.toStoragePlatform(),
-        observationStreamClient = stream,
-      )
+    when (val current = state) {
+      StorageFacetState.Loading -> FacetNote("Resolving app…")
+      StorageFacetState.NoApp -> FacetNote("No app found on this device")
+      is StorageFacetState.Error -> FacetError(current.message) { attempt++ }
+      is StorageFacetState.Resolved ->
+        ResolvedStorageFacet(options, storageClient, current.packageName)
     }
   }
 }
@@ -190,6 +182,39 @@ private fun FacetError(message: String, onRetry: () -> Unit) {
         Modifier.padding(top = 8.dp).clickable(onClick = onRetry).semantics {
           contentDescription = "Retry loading apps"
         },
+    )
+  }
+}
+
+@Composable
+private fun ResolvedStorageFacet(
+  options: StorageFacetOptions,
+  storageClient: () -> AutoMobileClient,
+  packageName: String,
+) {
+  with(options) {
+    // Per-pane stream lives only while the dashboard is shown, and reconnects automatically.
+    // It is disposed when this branch leaves composition or the device changes.
+    val stream =
+      rememberReconnectingObservationStream(
+        dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+          deviceId = column.deviceId,
+          deviceSessionUuid = column.deviceSessionUuid,
+          requireDeviceSessionUuid = true,
+          streamFactory = { observationStreamFactory(column.deviceId) },
+          backoffDelay = backoffDelay,
+          socketAvailable = socketAvailable,
+        ),
+      )
+    StorageDashboard(
+      StorageDashboardOptions(
+        dataSourceMode = DataSourceMode.Real,
+        clientProvider = storageClient,
+        deviceId = column.deviceId,
+        packageName = packageName,
+        platform = column.platform.toStoragePlatform(),
+        observationStreamClient = stream,
+      ),
     )
   }
 }

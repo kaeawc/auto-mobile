@@ -23,8 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -41,6 +41,8 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentOut
 import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,11 +60,14 @@ private data class NetworkResult(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NetworkTestScreen(onNavigateBack: () -> Unit) {
+fun NetworkTestScreen(
+  onNavigateBack: () -> Unit,
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) {
   TrackRecomposition(id = "screen.demo.network.test", composableName = "NetworkTestScreen") {
     val scope = rememberCoroutineScope()
     val results = remember { mutableStateListOf<NetworkResult>() }
-    val randomSeed = remember { mutableStateOf(1) }
+    val randomSeed = remember { mutableIntStateOf(1) }
 
     val client = remember {
       OkHttpClient.Builder()
@@ -76,29 +81,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
         .build()
     }
 
-    fun makeRequest(
-      label: String,
-      url: String,
-      method: String = "GET",
-      body: okhttp3.RequestBody? = null,
-    ) {
-      scope.launch {
-        val start = System.currentTimeMillis()
-        try {
-          val request = Request.Builder().url(url).method(method, body).build()
-          val response =
-            withContext(Dispatchers.IO) {
-              client.newCall(request).execute()
-            }
-          val duration = System.currentTimeMillis() - start
-          results.add(0, NetworkResult(label, response.code, duration, null))
-          response.close()
-        } catch (e: Exception) {
-          val duration = System.currentTimeMillis() - start
-          results.add(0, NetworkResult(label, 0, duration, e.message))
-        }
-      }
-    }
+    val requests = NetworkRequests(scope, client, results, ioDispatcher)
 
     Scaffold(
       topBar = {
@@ -115,186 +98,250 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
         )
       },
     ) { paddingValues ->
-      LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-      ) {
-        // Random user image
-        item {
-          AutoMobileContentCard(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-          ) {
-            Column(
-              modifier = Modifier.padding(16.dp),
-              horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-              Text("Random User", style = MaterialTheme.typography.titleMedium)
-              Spacer(Modifier.height(8.dp))
-              AsyncImage(
-                model = "https://randomuser.me/api/portraits/lego/${randomSeed.value % 10}.jpg",
-                contentDescription = "Random user avatar",
-                modifier = Modifier.size(120.dp).clip(CircleShape),
-                contentScale = ContentScale.Crop,
-              )
-              Spacer(Modifier.height(8.dp))
-              AutoMobileContentButton(
-                onClick = { randomSeed.value++ },
-                modifier = Modifier.semantics { testTag = "load_random_user" },
-              ) {
-                Text("Load Random User")
-              }
-            }
-          }
-        }
+      NetworkTestContent(paddingValues, randomSeed, requests, results)
+    }
+  }
+}
 
-        // HTTP test buttons
-        item {
-          AutoMobileContentCard(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-          ) {
-            Column(
-              modifier = Modifier.padding(16.dp),
-              verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-              Text("HTTP Requests", style = MaterialTheme.typography.titleMedium)
-
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-              ) {
-                AutoMobileContentButton(
-                  onClick = { makeRequest("GET 200", "https://httpbin.org/get") },
-                  modifier = Modifier.weight(1f).semantics { testTag = "http_get_200" },
-                  colors =
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                ) {
-                  Text("GET 200")
-                }
-
-                AutoMobileContentButton(
-                  onClick = {
-                    makeRequest(
-                      "POST 200",
-                      "https://httpbin.org/post",
-                      method = "POST",
-                      body =
-                        """{"message":"hello","timestamp":${System.currentTimeMillis()}}"""
-                          .toRequestBody("application/json".toMediaType()),
-                    )
-                  },
-                  modifier = Modifier.weight(1f).semantics { testTag = "http_post_200" },
-                  colors =
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                ) {
-                  Text("POST 200")
-                }
-              }
-
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-              ) {
-                AutoMobileContentOutlinedButton(
-                  onClick = { makeRequest("404", "https://httpbin.org/status/404") },
-                  modifier = Modifier.weight(1f).semantics { testTag = "http_404" },
-                ) {
-                  Text("404")
-                }
-
-                AutoMobileContentOutlinedButton(
-                  onClick = { makeRequest("500", "https://httpbin.org/status/500") },
-                  modifier = Modifier.weight(1f).semantics { testTag = "http_500" },
-                ) {
-                  Text("500")
-                }
-
-                AutoMobileContentOutlinedButton(
-                  onClick = { makeRequest("Timeout", "https://httpbin.org/delay/10") },
-                  modifier = Modifier.weight(1f).semantics { testTag = "http_timeout" },
-                ) {
-                  Text("Timeout")
-                }
-              }
-
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-              ) {
-                AutoMobileContentOutlinedButton(
-                  onClick = { makeRequest("DNS Fail", "https://doesnotexist.invalid/test") },
-                  modifier = Modifier.weight(1f).semantics { testTag = "http_dns_fail" },
-                ) {
-                  Text("DNS Fail")
-                }
-
-                AutoMobileContentOutlinedButton(
-                  onClick = { makeRequest("302", "https://httpbin.org/redirect/1") },
-                  modifier = Modifier.weight(1f).semantics { testTag = "http_302" },
-                ) {
-                  Text("Redirect")
-                }
-              }
-            }
-          }
-        }
-
-        // Results
-        if (results.isNotEmpty()) {
-          item {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Text("Results", style = MaterialTheme.typography.titleMedium)
-              AutoMobileContentOutlinedButton(onClick = { results.clear() }) {
-                Text("Clear")
-              }
-            }
-          }
-
-          items(results) { result ->
-            // Card tint colour-codes the status; the text uses a readable
-            // foreground so a bright status role (e.g. the yellow tertiary) does
-            // not become unreadable over its own 10% tint.
-            val tint =
-              when {
-                result.error != null || result.statusCode == 0 -> MaterialTheme.colorScheme.error
-                result.statusCode in 200..299 -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.tertiary
-              }
-            val textColor =
-              when {
-                result.error != null || result.statusCode == 0 -> MaterialTheme.colorScheme.error
-                result.statusCode in 200..299 -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.onSurface
-              }
-            AutoMobileContentCard(
-              modifier = Modifier.fillMaxWidth(),
-              colors = CardDefaults.cardColors(containerColor = tint.copy(alpha = 0.1f)),
-            ) {
-              Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                  "${result.label}: ${if (result.statusCode > 0) result.statusCode else "FAILED"} (${result.durationMs}ms)",
-                  style = MaterialTheme.typography.bodyMedium,
-                  color = textColor,
-                )
-                if (result.error != null) {
-                  Text(
-                    result.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                  )
-                }
-              }
-            }
-          }
-        }
-
-        item { Spacer(Modifier.height(16.dp)) }
+@Composable
+private fun NetworkResultCard(result: NetworkResult) {
+  // Card tint colour-codes the status; the text uses a readable
+  // foreground so a bright status role (e.g. the yellow tertiary) does
+  // not become unreadable over its own 10% tint.
+  val tint =
+    when {
+      result.error != null || result.statusCode == 0 -> MaterialTheme.colorScheme.error
+      result.statusCode in 200..299 -> MaterialTheme.colorScheme.primary
+      else -> MaterialTheme.colorScheme.tertiary
+    }
+  val textColor =
+    when {
+      result.error != null || result.statusCode == 0 -> MaterialTheme.colorScheme.error
+      result.statusCode in 200..299 -> MaterialTheme.colorScheme.primary
+      else -> MaterialTheme.colorScheme.onSurface
+    }
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth(),
+    colors = CardDefaults.cardColors(containerColor = tint.copy(alpha = 0.1f)),
+  ) {
+    Column(modifier = Modifier.padding(12.dp)) {
+      Text(
+        "${result.label}: ${if (result.statusCode > 0) result.statusCode else "FAILED"} (${result.durationMs}ms)",
+        style = MaterialTheme.typography.bodyMedium,
+        color = textColor,
+      )
+      if (result.error != null) {
+        Text(
+          result.error,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+        )
       }
     }
+  }
+}
+
+@Composable
+private fun RandomUserCard(randomSeed: Int, onLoad: () -> Unit) {
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth(),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+  ) {
+    Column(
+      modifier = Modifier.padding(16.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      Text("Random User", style = MaterialTheme.typography.titleMedium)
+      Spacer(Modifier.height(8.dp))
+      AsyncImage(
+        model = "https://randomuser.me/api/portraits/lego/${randomSeed % 10}.jpg",
+        contentDescription = "Random user avatar",
+        modifier = Modifier.size(120.dp).clip(CircleShape),
+        contentScale = ContentScale.Crop,
+      )
+      Spacer(Modifier.height(8.dp))
+      AutoMobileContentButton(
+        onClick = onLoad,
+        modifier = Modifier.semantics { testTag = "load_random_user" },
+      ) {
+        Text("Load Random User")
+      }
+    }
+  }
+}
+
+@Composable
+private fun NetworkRequestButtons(requests: NetworkRequests) {
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth(),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+  ) {
+    Column(
+      modifier = Modifier.padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text("HTTP Requests", style = MaterialTheme.typography.titleMedium)
+
+      NetworkSuccessButtons(requests)
+
+      NetworkFailureButtons(requests)
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        AutoMobileContentOutlinedButton(
+          onClick = { requests.makeRequest("DNS Fail", "https://doesnotexist.invalid/test") },
+          modifier = Modifier.weight(1f).semantics { testTag = "http_dns_fail" },
+        ) {
+          Text("DNS Fail")
+        }
+
+        AutoMobileContentOutlinedButton(
+          onClick = { requests.makeRequest("302", "https://httpbin.org/redirect/1") },
+          modifier = Modifier.weight(1f).semantics { testTag = "http_302" },
+        ) {
+          Text("Redirect")
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun NetworkSuccessButtons(requests: NetworkRequests) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    AutoMobileContentButton(
+      onClick = { requests.makeRequest("GET 200", "https://httpbin.org/get") },
+      modifier = Modifier.weight(1f).semantics { testTag = "http_get_200" },
+      colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+    ) {
+      Text("GET 200")
+    }
+
+    AutoMobileContentButton(
+      onClick = {
+        requests.makeRequest(
+          "POST 200",
+          "https://httpbin.org/post",
+          method = "POST",
+          body =
+            """{"message":"hello","timestamp":${System.currentTimeMillis()}}"""
+              .toRequestBody("application/json".toMediaType()),
+        )
+      },
+      modifier = Modifier.weight(1f).semantics { testTag = "http_post_200" },
+      colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+    ) {
+      Text("POST 200")
+    }
+  }
+}
+
+@Composable
+private fun NetworkFailureButtons(requests: NetworkRequests) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    AutoMobileContentOutlinedButton(
+      onClick = { requests.makeRequest("404", "https://httpbin.org/status/404") },
+      modifier = Modifier.weight(1f).semantics { testTag = "http_404" },
+    ) {
+      Text("404")
+    }
+
+    AutoMobileContentOutlinedButton(
+      onClick = { requests.makeRequest("500", "https://httpbin.org/status/500") },
+      modifier = Modifier.weight(1f).semantics { testTag = "http_500" },
+    ) {
+      Text("500")
+    }
+
+    AutoMobileContentOutlinedButton(
+      onClick = { requests.makeRequest("Timeout", "https://httpbin.org/delay/10") },
+      modifier = Modifier.weight(1f).semantics { testTag = "http_timeout" },
+    ) {
+      Text("Timeout")
+    }
+  }
+}
+
+private class NetworkRequests(
+  val scope: CoroutineScope,
+  val client: OkHttpClient,
+  val results: MutableList<NetworkResult>,
+  val ioDispatcher: CoroutineDispatcher,
+)
+
+private fun NetworkRequests.makeRequest(
+  label: String,
+  url: String,
+  method: String = "GET",
+  body: okhttp3.RequestBody? = null,
+) {
+  scope.launch {
+    val start = System.currentTimeMillis()
+    try {
+      val request = Request.Builder().url(url).method(method, body).build()
+      val response =
+        withContext(ioDispatcher) {
+          client.newCall(request).execute()
+        }
+      val duration = System.currentTimeMillis() - start
+      results.add(0, NetworkResult(label, response.code, duration, null))
+      response.close()
+    } catch (e: Exception) {
+      val duration = System.currentTimeMillis() - start
+      results.add(0, NetworkResult(label, 0, duration, e.message))
+    }
+  }
+}
+
+@Composable
+private fun NetworkTestContent(
+  paddingValues: androidx.compose.foundation.layout.PaddingValues,
+  randomSeed: androidx.compose.runtime.MutableState<Int>,
+  requests: NetworkRequests,
+  results: androidx.compose.runtime.snapshots.SnapshotStateList<NetworkResult>,
+) {
+  LazyColumn(
+    modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    // Random user image
+    item {
+      RandomUserCard(randomSeed.value) { randomSeed.value++ }
+    }
+
+    // HTTP test buttons
+    item {
+      NetworkRequestButtons(requests)
+    }
+
+    // Results
+    if (results.isNotEmpty()) {
+      item {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text("Results", style = MaterialTheme.typography.titleMedium)
+          AutoMobileContentOutlinedButton(onClick = { results.clear() }) {
+            Text("Clear")
+          }
+        }
+      }
+
+      items(results) { result ->
+        NetworkResultCard(result)
+      }
+    }
+
+    item { Spacer(Modifier.height(16.dp)) }
   }
 }

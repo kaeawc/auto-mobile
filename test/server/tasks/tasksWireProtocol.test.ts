@@ -1,3 +1,4 @@
+import { taskEligibleByName } from "../../../src/server/tasks/toolCallTasks";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
@@ -25,7 +26,7 @@ import { connect } from "../../helpers/mcpTaskWire";
 const ECHO = "__task_echo__";
 const WAIT = "__task_wait__";
 const UNKNOWN = "__task_unregistered__";
-const ELIGIBLE = new Set([ECHO, WAIT, UNKNOWN]);
+const ELIGIBLE = taskEligibleByName(new Set([ECHO, WAIT, UNKNOWN]));
 
 let releaseWait: (() => void) | undefined;
 const leaseHolds: TaskLeaseHoldRequest[] = [];

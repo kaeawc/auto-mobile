@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test } from "bun:test";
 import { SwipeAtCoordinate } from "../../../src/features/action/SwipeAtCoordinate";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
@@ -43,21 +45,22 @@ function setup(
   } = options;
   const gestureSwipes: Array<[number, number, number, number, boolean]> = [];
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout:
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 200}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 400 x 800}',
-    stderr: "",
-    toString: () => "",
-    trim: () => "",
-    includes: () => false,
-  });
+      "",
+    ),
+  );
   const ctrl = new FakeCtrlProxy();
   ctrl.setSupportedCommands(capable ? ["gesture_display_id_v1"] : []);
   const observe = new FakeObserveScreen();
-  observe.setObserveResult({
-    ...observation(width, height),
-    display: { key: panel, role: "external", generation: 7 },
-  });
+  observe.setObserveResult(
+    buildObserveResult({
+      ...observation(width, height),
+      display: { key: panel, role: "external", posture: "unknown", generation: 7 },
+    }),
+  );
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const transitions = new FakeDisplayTransitionReader();

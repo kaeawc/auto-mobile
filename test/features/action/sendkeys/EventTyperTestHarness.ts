@@ -7,6 +7,8 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 
 export function observation(text = "old"): ObserveResult {
   return {
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     updatedAt: 1,
     observationId: "test-observation",
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
@@ -41,7 +43,12 @@ export function eventHost() {
         calls.push({ replace: text });
         return { success: true };
       },
-      readInsertTextState: async () => ({ text: "old", selectionStart: 3, selectionEnd: 3 }),
+      readInsertTextState: async () => ({
+        text: "old",
+        isShowingHintText: false,
+        selectionStart: 3,
+        selectionEnd: 3,
+      }),
     },
     timer,
     insertText: async (text, options, signal) => {
@@ -54,7 +61,9 @@ export function eventHost() {
     },
     readPrecedingState: async (needed) => {
       calls.push({ precedingState: needed });
-      return needed ? { text: "old", selectionStart: 3, selectionEnd: 3 } : undefined;
+      return needed
+        ? { text: "old", isShowingHintText: false, selectionStart: 3, selectionEnd: 3 }
+        : undefined;
     },
     executeKeyEventPlanSafely: async (plan, mutated, signal) => {
       calls.push({ plan, mutated, signal });

@@ -13,6 +13,20 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 
+// A secondary display's real size differs from the service window's metrics, including on API 30+.
+@Suppress("DEPRECATION")
+private fun readRealDisplaySize(display: Display, size: Point) = display.getRealSize(size)
+
+// Window metrics are unavailable below API 30; preserve the default-display metrics lookup.
+@Suppress("DEPRECATION")
+private fun readLegacyDisplayMetrics(windowManager: WindowManager, metrics: DisplayMetrics) =
+  windowManager.defaultDisplay.getRealMetrics(metrics)
+
+// Preserve the WindowManager default-display lookup below API 30.
+@Suppress("DEPRECATION")
+private fun readLegacyDisplayRotation(windowManager: WindowManager): Int? =
+  windowManager.defaultDisplay?.rotation
+
 /**
  * Display facts: screen dimensions, rotation, insets, density and panel identity. Everything that
  * needs the live service context comes through [Host]. None of these reads touch the clock, so the
@@ -39,13 +53,12 @@ internal class DisplayController(private val host: Host) {
   }
 
   /** Get current screen dimensions for offscreen filtering. */
-  @Suppress("DEPRECATION")
   fun getScreenDimensions(displayId: Int = Display.DEFAULT_DISPLAY): ScreenDimensions? {
     return try {
       if (displayId != Display.DEFAULT_DISPLAY && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val display = host.displayManager()?.getDisplay(displayId) ?: return null
         val size = Point()
-        display.getRealSize(size)
+        readRealDisplaySize(display, size)
         return ScreenDimensions(size.x, size.y)
       }
       val windowManager = host.windowManager()
@@ -55,13 +68,20 @@ internal class DisplayController(private val host: Host) {
           ScreenDimensions(bounds.width(), bounds.height())
         } else {
           val displayMetrics = DisplayMetrics()
-          windowManager.defaultDisplay.getRealMetrics(displayMetrics)
+          readLegacyDisplayMetrics(windowManager, displayMetrics)
           ScreenDimensions(displayMetrics.widthPixels, displayMetrics.heightPixels)
         }
       } else {
         null
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get screen dimensions", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get screen dimensions", e)
+      null
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to get screen dimensions", e)
       null
     }
@@ -88,16 +108,22 @@ internal class DisplayController(private val host: Host) {
    * control fail closed, unlike the older diagnostic hierarchy/device-info fields that retain their
    * 0 fallback.
    */
-  @Suppress("DEPRECATION")
   fun getRotationOrNull(displayId: Int = Display.DEFAULT_DISPLAY): Int? {
     return try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         // Use DisplayManager for AccessibilityService context (can't use context.display)
         host.displayManager()?.getDisplay(displayId)?.rotation
       } else {
-        host.windowManager()?.defaultDisplay?.rotation
+        host.windowManager()?.let(::readLegacyDisplayRotation)
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get rotation", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get rotation", e)
+      null
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to get rotation", e)
       null
     }
@@ -129,7 +155,32 @@ internal class DisplayController(private val host: Host) {
           displayCutoutInfo = DisplayCutoutInfo.unknown(),
         )
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get system insets", e)
+      ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get system insets", e)
+      ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Failed to get system insets", e)
+      ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
+    } catch (e: android.content.res.Resources.NotFoundException) {
       Log.w(TAG, "Failed to get system insets", e)
       ObservationInsetsInfo(
         available = false,
@@ -144,7 +195,11 @@ internal class DisplayController(private val host: Host) {
   fun getDensity(): Int {
     return try {
       host.densityDpi()
-    } catch (e: Exception) {
+    } catch (e: android.content.res.Resources.NotFoundException) {
+      Log.w(TAG, "Failed to get density", e)
+      0
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.w(TAG, "Failed to get density", e)
       0
     }

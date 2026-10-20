@@ -2,15 +2,9 @@
 import Foundation
 import XCTest
 
-// Test fixtures fail-fast on malformed setup data, so force-unwrap is idiomatic here
-// (blanket-allowed for force_unwrapping in test targets — see .swiftlint.yml).
-// swiftlint:disable force_unwrapping
-
 final class SdkDatabaseClientTests: XCTestCase {
-    private let baseURL = URL(string: "http://localhost:8766")!
-
-    private func makeClient(_ stub: StubHTTPTransport) -> SdkDatabaseClient {
-        SdkDatabaseClient(baseURL: baseURL, transport: stub)
+    private func makeClient(_ stub: StubHTTPTransport) throws -> SdkDatabaseClient {
+        try SdkDatabaseClient(baseURL: XCTUnwrap(URL(string: "http://localhost:8766")), transport: stub)
     }
 
     /// Assert an async database call throws a `SdkDatabaseError` matching `predicate`.
@@ -67,7 +61,9 @@ final class SdkDatabaseClientTests: XCTestCase {
         let stub = StubHTTPTransport([.respond(status: 400, body: Data(#"{"error":"no such table: ghost"}"#.utf8))])
         await assertThrows(
             { _ = try await self.makeClient(stub).executeSQL(databasePath: "/db", query: "x", sessionId: nil) },
-            { if case let .unavailable(m) = $0 { return m.contains("no such table: ghost") } else { return false } },
+            {
+                if case let .unavailable(message) = $0 { return message.contains("no such table: ghost") }
+                else { return false } },
             "non-2xx with payload must carry the SDK error message"
         )
     }
@@ -76,14 +72,14 @@ final class SdkDatabaseClientTests: XCTestCase {
         let stub = StubHTTPTransport([.respond(status: 503, body: Data("{}".utf8))])
         await assertThrows(
             { _ = try await self.makeClient(stub).executeSQL(databasePath: "/db", query: "x", sessionId: nil) },
-            { if case let .unavailable(m) = $0 { return m.contains("HTTP 503") } else { return false } },
+            { if case let .unavailable(message) = $0 { return message.contains("HTTP 503") } else { return false } },
             "non-2xx without payload must fall back to HTTP <code>"
         )
     }
 
     func testBusyLockIsReportedAsBusyNotAsAMissingSdk() async {
         let busy = Data(#"{"error":"busy_lock","diagnostic":{"code":"busy_lock","message":"busy_lock"}}"#.utf8)
-        let client = { self.makeClient(StubHTTPTransport([.respond(status: 503, body: busy)])) }
+        let client = { try self.makeClient(StubHTTPTransport([.respond(status: 503, body: busy)])) }
         await assertThrows(
             { _ = try await client().executeSQL(databasePath: "/db", query: "SELECT 1", sessionId: nil) },
             { if case .busy = $0 { return true } else { return false } },
@@ -104,8 +100,9 @@ final class SdkDatabaseClientTests: XCTestCase {
         await assertThrows(
             { _ = try await self.makeClient(stub).getTableData(databasePath: "/db", table: "t", limit: 1, offset: 0) },
             {
-                if case let .unavailable(m) = $0 { return m.hasSuffix(": unknown_table") && m.contains("embed") }
-                else { return false } },
+                if case let .unavailable(message) = $0 {
+                    return message.hasSuffix(": unknown_table") && message.contains("embed")
+                } else { return false } },
             "codes other than busy_lock keep the existing wrapper text the host parses"
         )
     }
@@ -136,7 +133,7 @@ final class SdkDatabaseClientTests: XCTestCase {
         await assertThrows(
             { _ = try await self.makeClient(stub).listTables(databasePath: "/db") },
             {
-                if case let .unavailable(m) = $0 { return m.hasPrefix("database inspection unavailable") }
+                if case let .unavailable(message) = $0 { return message.hasPrefix("database inspection unavailable") }
                 else { return false } },
             "idempotent reads keep the existing unavailable mapping"
         )

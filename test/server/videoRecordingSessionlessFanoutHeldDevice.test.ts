@@ -23,7 +23,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import type { BootedDevice } from "../../src/models";
@@ -274,8 +274,6 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
               holder: "session_broker",
               scopeKey: "scope",
               bindingIndex: 0,
-              scopeState: "valid",
-              execSessionUuid: HOLDER,
             });
           }
         },

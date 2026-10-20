@@ -97,33 +97,39 @@ fun Activity.enableAnalyticsTracking() {
         }
 
         MotionEvent.ACTION_MOVE -> {
-          // Track swipe gestures
-          if (event.historySize > 0) {
-            val deltaX = event.x - event.getHistoricalX(0)
-            val deltaY = event.y - event.getHistoricalY(0)
-
-            if (abs(deltaX) > 50f || abs(deltaY) > 50f) {
-              val direction =
-                when {
-                  abs(deltaX) > abs(deltaY) && deltaX > 0 -> "right"
-                  abs(deltaX) > abs(deltaY) && deltaX < 0 -> "left"
-                  abs(deltaY) > abs(deltaX) && deltaY > 0 -> "down"
-                  abs(deltaY) > abs(deltaX) && deltaY < 0 -> "up"
-                  else -> "unknown"
-                }
-
-              tracker.trackSwipe(
-                elementId = view.id.toString(),
-                elementType = view.javaClass.simpleName,
-                direction = direction,
-                coordinates = event.x to event.y,
-              )
-            }
-          }
+          trackSwipeGesture(tracker, view, event)
         }
       }
       false // Don't consume the event
     }
+  }
+}
+
+private fun trackSwipeGesture(tracker: AnalyticsTracker, view: View, event: MotionEvent) {
+  if (event.historySize > 0) {
+    val deltaX = event.x - event.getHistoricalX(0)
+    val deltaY = event.y - event.getHistoricalY(0)
+
+    if (abs(deltaX) > 50f || abs(deltaY) > 50f) {
+      val direction = swipeDirection(deltaX, deltaY)
+
+      tracker.trackSwipe(
+        elementId = view.id.toString(),
+        elementType = view.javaClass.simpleName,
+        direction = direction,
+        coordinates = event.x to event.y,
+      )
+    }
+  }
+}
+
+private fun swipeDirection(deltaX: Float, deltaY: Float): String {
+  return when {
+    abs(deltaX) > abs(deltaY) && deltaX > 0 -> "right"
+    abs(deltaX) > abs(deltaY) && deltaX < 0 -> "left"
+    abs(deltaY) > abs(deltaX) && deltaY > 0 -> "down"
+    abs(deltaY) > abs(deltaX) && deltaY < 0 -> "up"
+    else -> "unknown"
   }
 }
 

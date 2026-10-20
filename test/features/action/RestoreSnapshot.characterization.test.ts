@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test, spyOn, afterEach, mock } from "bun:test";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
@@ -6,6 +6,8 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+afterEach(() => mock.restore());
 
 describe("RestoreSnapshot settings command ordering", () => {
   for (const mode of ["success", "failure", "throw"] as const) {
@@ -84,7 +86,7 @@ describe("RestoreSnapshot settings command ordering", () => {
         ]);
         expect(result.failures).toEqual([
           {
-            kind: "android_setting",
+            kind: "android_setting" as const,
             namespace: "global",
             key: "invalid key",
             reason: "invalid settings key",
@@ -93,8 +95,8 @@ describe("RestoreSnapshot settings command ordering", () => {
             ? []
             : [
                 {
-                  kind: "android_setting",
-                  namespace: "secure",
+                  kind: "android_setting" as const,
+                  namespace: "secure" as const,
                   key: "android_id",
                   reason: "device rejected setting",
                 },

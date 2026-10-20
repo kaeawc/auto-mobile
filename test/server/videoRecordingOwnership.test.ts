@@ -15,7 +15,7 @@ import {
   setVideoRecordingManagerDependencies,
   startVideoRecording,
   stopVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

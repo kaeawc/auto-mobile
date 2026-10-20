@@ -1,17 +1,21 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import {
   clampedIosCoordinateSwipeDuration,
   iosSwipeDurationReport,
   withSwipeOnVelocity,
 } from "../../../../src/features/action/swipeon/swipeDurationReport";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
-import type { BootedDevice, Element } from "../../../../src/models";
+import type { BootedDevice, Element, SwipeResult } from "../../../../src/models";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 describe("clampedIosCoordinateSwipeDuration (#12987)", () => {
   test("a slow request is clamped to the 100 pt/s floor", () => {
@@ -41,15 +45,19 @@ describe("TalkBack semantic scroll route reports an ignored duration (#12987)", 
     scrollable: true,
   } as Element;
 
+  let proxy: FakeCtrlProxy;
+  beforeEach(() => {
+    proxy = new FakeCtrlProxy();
+    spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
+      hierarchy: { node: { $: { "resource-id": "test:id/scrollView" } } },
+    });
+  });
+
   function executor() {
     const detector = new FakeAccessibilityDetector();
     detector.setTalkBackEnabled(true);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const proxy = new FakeCtrlProxy();
-    spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
-      hierarchy: { node: { $: { "resource-id": "test:id/scrollView" } } },
-    });
     return new TalkBackSwipeExecutor({
       device,
       executeGesture: new FakeGestureExecutor(),
@@ -94,7 +102,7 @@ describe("TalkBack semantic scroll route reports an ignored duration (#12987)", 
 });
 
 describe("withSwipeOnVelocity (#12968)", () => {
-  const base = { success: true, x1: 0, y1: 0, x2: 300, y2: 400, duration: 500 };
+  const base: SwipeResult = { success: true, x1: 0, y1: 0, x2: 300, y2: 400, duration: 500 };
 
   test("a dispatched swipe reports distance over duration, same as swipeAt", () => {
     expect(withSwipeOnVelocity(base, {}).velocityPxPerSecond).toBe(1000);
@@ -126,7 +134,15 @@ describe("iosSwipeDurationReport (#13145)", () => {
       effectiveDurationMs: 50,
     });
     expect(report.effectiveDurationMs).toBe(50);
-    const swipe = { success: true, x1: 0, y1: 0, x2: 500, y2: 0, duration: 10, ...report };
+    const swipe: SwipeResult = {
+      success: true,
+      x1: 0,
+      y1: 0,
+      x2: 500,
+      y2: 0,
+      duration: 10,
+      ...report,
+    };
     // 500 pt over the dispatched 50 ms, not the requested 10 ms (50000 px/s).
     expect(withSwipeOnVelocity(swipe, {}).velocityPxPerSecond).toBe(10_000);
   });

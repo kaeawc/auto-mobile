@@ -8,8 +8,15 @@ REPO="kaeawc/auto-mobile"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIGNATURES="$SCRIPT_DIR/known-flakes.txt"
 RETRY_MARKER='Starting emulator retry attempt 2.'
-# shellcheck disable=SC2016 # The jq program intentionally contains jq variables.
-FAILURE_CONCLUSIONS_JQ_DEF='def is_failed_conclusion: ((. // "") | ascii_downcase) as $conclusion | ($conclusion == "failure" or $conclusion == "cancelled" or $conclusion == "timed_out" or $conclusion == "startup_failure");'
+FAILURE_CONCLUSIONS_JQ_DEF="def is_failed_conclusion: ((. // \"\") | ascii_downcase) as \$conclusion | (\$conclusion == \"failure\" or \$conclusion == \"cancelled\" or \$conclusion == \"timed_out\" or \$conclusion == \"startup_failure\");"
+
+# Preserve conditional-call semantics while exposing the status as data.
+RUN_STATUS=0
+run_capture_status() {
+  local run_rc=0
+  "$@" || run_rc=$?
+  RUN_STATUS="$run_rc"
+}
 
 usage() {
   echo "Usage: scripts/ci/classify-failure.sh <run-id> [--attempt N]" >&2
@@ -54,7 +61,7 @@ match_signature() {
     [[ "$job_pattern" == \#* ]] && continue
     job_pattern="$(lowercase "$job_pattern")"
     message_pattern="$(lowercase "$message_pattern")"
-    # shellcheck disable=SC2053 # Signature fields deliberately use shell globs.
+    # shellcheck disable=SC2053 # Signature fields are glob patterns; quoting would change classifier matches.
     if [[ "$job_lc" == $job_pattern && "$annotation_lc" == $message_pattern ]]; then
       printf '%s — %s' "$verdict" "$note"
       return 0
@@ -90,8 +97,8 @@ terminal_attempt_evidence() {
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
   local line normalized in_group=0 after_marker=0 terminal=''
 
-  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
-  if executed_retry_marker_present "$evidence"; then
+  run_capture_status executed_retry_marker_present "$evidence"
+  if (( RUN_STATUS == 0 )); then
     while IFS= read -r line || [[ -n "$line" ]]; do
       if [[ "$line" == *'##[group]Run'* ]]; then
         in_group=1
@@ -123,9 +130,8 @@ ambiguous_terminal_attempt() {
   local evidence="$1"
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
 
-  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
-  [[ "$evidence" == *"$diagnostics_marker"* ]] \
-    && ! executed_retry_marker_present "$evidence"
+  run_capture_status executed_retry_marker_present "$evidence"
+  [[ "$evidence" == *"$diagnostics_marker"* && "$RUN_STATUS" != 0 ]]
 }
 
 # Gate outcomes are emitted only when every failed upstream job in this run is
@@ -155,7 +161,7 @@ advisory_only_gate() {
     'Node Tests')
       [[ -n "$failures" ]] \
         && grep -Eq '^Node Unit Timing Budget$' <<< "$failures" \
-        && ! grep -Eq '^(Node Unit Tests|Node Host Integration Tests)' <<< "$failures"
+        && ! grep -Eq '^(Node Unit Tests|Node Host Integration Tests|TypeScript Code Coverage)' <<< "$failures"
       ;;
     WebRTC)
       [[ -n "$failures" ]] \
@@ -349,13 +355,18 @@ while IFS=$'\t' read -r job_id job_name steps; do
     log_text="$(fetch_artifact_logs "$job_name")"
   fi
 
-  # shellcheck disable=SC2310 # A non-match is expected classifier control flow.
-  if advisory_only_gate "$job_name"; then
+  run_capture_status advisory_only_gate "$job_name"
+  advisory_status=$RUN_STATUS
+  run_capture_status executed_retry_marker_present "${head_branch} ${annotation_text} ${log_text}"
+  retry_marker_status=$RUN_STATUS
+  run_capture_status ambiguous_terminal_attempt "${head_branch} ${annotation_text} ${log_text}"
+  ambiguous_status=$RUN_STATUS
+  if (( advisory_status == 0 )); then
     verdict='CHECK-UPSTREAM-FIRST — aggregator is red because of an advisory (non-required) lane; inspect the upstream rows above before rerunning or filing an issue'
   elif [[ "${head_branch} ${annotation_text} ${log_text}" == *"$RETRY_MARKER"* ]] \
-    && ! executed_retry_marker_present "${head_branch} ${annotation_text} ${log_text}"; then
+    && (( retry_marker_status != 0 )); then
     verdict='UNKNOWN — retry attempt never executed; echoed retry marker is not terminal-attempt evidence'
-  elif ambiguous_terminal_attempt "${head_branch} ${annotation_text} ${log_text}"; then
+  elif (( ambiguous_status == 0 )); then
     verdict='UNKNOWN — log predates the retry marker; attempt-one diagnostics are not authoritative for the terminal attempt'
   else
     evidence="$(terminal_attempt_evidence "${head_branch} ${annotation_text} ${log_text}")"

@@ -1,3 +1,5 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import {
@@ -136,6 +138,38 @@ describe("ToolRegistry device-aware pipeline", () => {
     expect(tool.supportsProgress).toBe(true);
     expect(tool.debugOnly).toBe(true);
     expect(tool.outputSchema).toBeDefined();
+  });
+
+  test("registry unwraps a transport refusal before the actionable-error catch", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      device.deviceId,
+      new Error("device offline"),
+    );
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async (input) => ({
+          args: input.args,
+          device,
+          internalCall: false,
+          baseSessionUuid: undefined,
+          sessionUuid: undefined,
+          shouldResolveDevice: true,
+        }),
+      },
+      auditRunner: {
+        run: async () => {
+          throw new ActionableError("outer", { cause: typed });
+        },
+      },
+      planLifecycleManager: { afterExecution: async () => {} },
+    });
+    ToolRegistry.registerDeviceAware("transportProbe", "probe", z.object({}), async () => ({
+      success: true,
+    }));
+    await expect(ToolRegistry.getTool("transportProbe")!.handler({})).rejects.toBe(typed);
   });
 
   test("wrapped handler delegates to fakeable pipeline collaborators in order", async () => {
@@ -589,6 +623,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           format: "json" as const,
           payload: input.payload,
           bytes: 123,
+          resourceUri: "automobile:tool-output/fixture",
           tool: input.tool,
         },
       };
@@ -619,6 +654,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const handler = new DefaultAfterToolCallHandler(() => new FakeObservationArtifactWriter());
     try {
       await handler.handle({
+        outputSchema: undefined,
         name: "observe",
         args: { display: "all" },
         device: undefined,
@@ -680,6 +716,8 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     startToolCallRecording({ connectionId: "A", timer });
     const handler = new DefaultAfterToolCallHandler();
     await handler.handle({
+      outputSchema: undefined,
+      sessionUuid: undefined,
       name: "tapOn",
       args: { text: "Only B", __mcpSessionId: "B" },
       device: undefined,
@@ -699,8 +737,11 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const handler = new DefaultAfterToolCallHandler();
     for (const connectionId of ["A", "B", "A", "B"]) {
       await handler.handle({
+        outputSchema: undefined,
+        sessionUuid: undefined,
         name: "tapOn",
         args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
+        traits: PLAN_RELEVANT,
         device: undefined,
         internalCall: false,
         response: createStructuredToolResponse({ success: true }),
@@ -741,6 +782,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     // Skeleton is the default observe projection now; this test inspects the
     // written full view hierarchy, so request the full projection per-call.
     const result = await handler.handle({
+      outputSchema: undefined,
       name: "observe",
       args: { project: "full" },
       device: undefined,
@@ -771,6 +813,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         format: "json",
         payload: "ObserveResult",
         bytes: 123,
+        resourceUri: "automobile:tool-output/fixture",
         tool: "observe",
       },
     });
@@ -798,6 +841,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     try {
       const result = await handler.handle({
+        outputSchema: undefined,
         name: "observe",
         // Skeleton is the default projection; this test inspects the written full
         // view hierarchy, so request the full projection per-call.
@@ -837,6 +881,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           format: "json",
           payload: "ObserveResult",
           bytes: 123,
+          resourceUri: "automobile:tool-output/fixture",
           tool: "observe",
         },
       });
@@ -852,6 +897,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     serverConfig.setToolOutputsDir(undefined);
 
     const result = await handler.handle({
+      outputSchema: undefined,
       name: "observe",
       // Skeleton is the default projection; this test asserts the served full
       // view hierarchy stays inline, so request the full projection per-call.
@@ -887,6 +933,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     serverConfig.setToolOutputsDir("/tmp/artifacts");
 
     const result = await handler.handle({
+      outputSchema: undefined,
       name: "observe",
       // Skeleton is the default projection; this test asserts the full view
       // hierarchy is preserved for internal callers, so request it per-call.
@@ -912,6 +959,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   describe("artifact writer reuse across tool calls (#10079)", () => {
     const handleObserve = (handler: DefaultAfterToolCallHandler, timer: FakeTimer) =>
       handler.handle({
+        outputSchema: undefined,
         name: "observe",
         args: { project: "full" },
         device: undefined,
@@ -950,6 +998,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       serverConfig.setToolOutputsDir("/tmp/artifacts");
 
       await handler.handle({
+        outputSchema: undefined,
         name: "observe",
         args: { project: "full" },
         device: undefined,
@@ -1023,6 +1072,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
       await expect(
         handler.handle({
+          outputSchema: undefined,
           name: "observe",
           args: {},
           device: undefined,
@@ -1043,7 +1093,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   });
 
   test("records a structured tool error as its code:message, not [object Object]", async () => {
-    const telemetryEvents: Array<{ success: boolean; error: unknown }> = [];
+    const telemetryEvents: Array<{ success: boolean; error?: unknown }> = [];
     const recordToolCallEvent = spyOn(
       TelemetryRecorder.getInstance(),
       "recordToolCallEvent",
@@ -1075,6 +1125,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       };
 
       await handler.handle({
+        outputSchema: undefined,
         name: "killDevice",
         args: {},
         device: undefined,

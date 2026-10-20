@@ -7,11 +7,11 @@ ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 
 # Pinned ktfmt version -- single source of truth shared with install_ktfmt.sh so
 # the installer and this validator's fingerprint gate can never drift apart.
-# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Shared VCS file-selection + install-when-missing helpers (issue #2823).
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
+# shellcheck source=scripts/lib/file-selection.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
 
 # Colors for output
@@ -22,11 +22,22 @@ NC='\033[0m' # No Color
 
 PROJECT_ROOT="$(pwd)"
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
 # Check for required commands and install missing commands if allowed
 echo -e "${YELLOW}Checking for required commands...${NC}"
 
 # Check if ktfmt is installed (install-when-missing gate + re-verify).
-if ! ensure_tool ktfmt "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh" "${INSTALL_KTFMT_WHEN_MISSING}"; then
+run_capture_status ensure_tool ktfmt "$PROJECT_ROOT/scripts/ktfmt/install_ktfmt.sh" "${INSTALL_KTFMT_WHEN_MISSING}"
+if (( RUN_STATUS != 0 )); then
     exit 1
 fi
 
@@ -39,7 +50,7 @@ for cmd in find xargs; do
         exit 1
     fi
 done
-if vcs_uses_jj; then
+if [[ -d .jj && ! -e .git ]]; then
     required_vcs_command="jj"
 else
     required_vcs_command="git"
@@ -71,7 +82,6 @@ fi
 echo -e "${YELLOW}Starting ktfmt validation...${NC}"
 
 # Function to find all Kotlin files
-# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 find_all_kotlin_files() {
     # Scope hidden-file exclusion to the project itself. A generic `*/.*`
     # pattern also matches hidden parent directories such as
@@ -86,6 +96,8 @@ find_all_kotlin_files() {
         -not -path "*/.gradle/*" \
         | sort | uniq
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then find_all_kotlin_files "$@"; fi
 
 # Per-tool file regex for the shared collectors (issue #2823).
 KOTLIN_FILE_REGEX='^.*\.(kt|kts)$'
@@ -99,18 +111,7 @@ if builtin help mapfile >/dev/null 2>&1; then
     supports_mapfile=true
 fi
 
-# Run a command the way an `if` condition would (errexit is ignored inside it)
-# and record its exit status in RUN_STATUS, so callers can branch on it without
-# a function name in a condition.
-RUN_STATUS=0
-run_capture_status() {
-local run_rc=0
-"$@" || run_rc=$?
-RUN_STATUS="${run_rc}"
-}
-
 # Print the Kotlin files for a validated collection mode (changed|touched|all).
-# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 collect_kotlin_files() {
     local mode="$1"
     local base_sha="$2"
@@ -126,6 +127,8 @@ collect_kotlin_files() {
             ;;
     esac
 }
+# Static reference for indirect callers; this branch never executes.
+if false; then collect_kotlin_files "$@"; fi
 
 load_files_to_process() {
     local mode="$1"
@@ -166,8 +169,12 @@ load_files_to_process() {
 # guards the SHA, and load_files_to_process checks producer failures in the main
 # shell, but this up-front branch preserves the intended CI behavior: scoped
 # mode degrades to a full-tree validation when a fetched base is unavailable.
-if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
-    && ! vcs_base_exists "$ONLY_CHANGED_SINCE_SHA"; then
+base_status=0
+if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]]; then
+    run_capture_status vcs_base_exists "$ONLY_CHANGED_SINCE_SHA"
+    base_status=$RUN_STATUS
+fi
+if (( base_status != 0 )); then
     echo -e "${YELLOW}Base SHA '${ONLY_CHANGED_SINCE_SHA}' does not resolve; falling back to a full-tree ktfmt check.${NC}"
     ONLY_CHANGED_SINCE_SHA=""
     ONLY_TOUCHED_FILES=false
@@ -176,13 +183,16 @@ fi
 # A changed formatter, its file-selection helper, or its CI runtime can change
 # the result for files outside a PR's Kotlin diff. Run the full tree for those
 # changes rather than relying on the post-merge backstop to discover drift.
-if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]] \
-    && [[ -n "$(vcs_diff_since_merge_base "$ONLY_CHANGED_SINCE_SHA" \
+formatter_input_changes=""
+if [[ -n "$ONLY_CHANGED_SINCE_SHA" ]]; then
+    formatter_input_changes=$(run_capture_status vcs_diff_since_merge_base "$ONLY_CHANGED_SINCE_SHA" \
         scripts/ktfmt \
         scripts/lib/file-selection.sh \
         scripts/lib/vcs-diff.sh \
         .github/workflows/pull_request.yml \
-        .github/workflows/merge.yml)" ]]; then
+        .github/workflows/merge.yml)
+fi
+if [[ -n "$formatter_input_changes" ]]; then
     echo -e "${YELLOW}Ktfmt inputs changed since the base SHA; running a full-tree ktfmt check.${NC}"
     ONLY_CHANGED_SINCE_SHA=""
     ONLY_TOUCHED_FILES=false

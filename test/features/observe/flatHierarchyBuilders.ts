@@ -1,4 +1,6 @@
+import { parseBounds } from "../../../src/utils/bounds";
 import type {
+  ElementBounds,
   Hierarchy,
   ObserveResult,
   ViewHierarchyNode,
@@ -51,4 +53,38 @@ export function createObserveResultForTest(overrides: ObserveResultOverrides = {
  */
 export function flatNodeAttributes(node: object | undefined): Record<string, unknown> {
   return node === undefined ? {} : Object.fromEntries(Object.entries(node));
+}
+
+/** Captured legacy nodes may use compact bounds and singleton children. */
+interface CapturedHierarchyNode {
+  [attribute: string]: unknown;
+  bounds?: ElementBounds | readonly number[];
+  node?: CapturedHierarchyNode | readonly CapturedHierarchyNode[];
+}
+
+/** Normalize legacy capture geometry and children before deriving typed test fixtures. */
+export function capturedFlatNodeForTest(
+  captured: CapturedHierarchyNode | readonly CapturedHierarchyNode[],
+): FlatHierarchyNode {
+  if (isCapturedNodeArray(captured)) {
+    return createFlatNodeForTest({ node: captured.map(capturedFlatNodeForTest) });
+  }
+  const { bounds, node, ...attributes } = captured;
+  const normalizedBounds = bounds === undefined ? undefined : parseBounds(bounds);
+  if (normalizedBounds === null) {
+    throw new Error("Captured bounds must contain four finite coordinates");
+  }
+  return createFlatNodeForTest({
+    ...attributes,
+    ...(normalizedBounds === undefined ? {} : { bounds: normalizedBounds }),
+    ...(node === undefined
+      ? {}
+      : { node: (isCapturedNodeArray(node) ? node : [node]).map(capturedFlatNodeForTest) }),
+  });
+}
+
+function isCapturedNodeArray(
+  value: CapturedHierarchyNode | readonly CapturedHierarchyNode[],
+): value is readonly CapturedHierarchyNode[] {
+  return Array.isArray(value);
 }

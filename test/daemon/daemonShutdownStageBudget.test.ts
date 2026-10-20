@@ -12,7 +12,7 @@ import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadc
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import * as shutdownCleanupModule from "../../src/shutdownCleanup";
 import {
   DAEMON_SHUTDOWN_BUDGET_RESERVE_MS,

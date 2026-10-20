@@ -1,3 +1,4 @@
+import { rethrowDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
@@ -73,15 +74,19 @@ export async function createToolExecutionContext(
   sessionManager: SessionManager,
   devicePool: DevicePool,
   sessionOptions: SessionOptions = {},
-  execution?: SessionExecutionMetadata,
-  admittedSession?: Session,
-  // #6069: set by the device-tool path so the getOrCreateSession fallback below
-  // cannot mint a brand-new pooled session for a never-issued sessionUuid. Only a
-  // live session (resolved via admittedSession / getSessionForNewExecution) or a
-  // persisted, non-terminal row (restart recovery) is admissible. Internal callers
-  // that intentionally mint fresh derived sessions (device labels) leave it false.
-  requireIssuedSession = false,
-  signal?: AbortSignal,
+  {
+    execution,
+    admittedSession,
+    requireIssuedSession = false,
+    signal,
+  }: {
+    execution?: SessionExecutionMetadata;
+    admittedSession?: Session;
+    // #6069: device-tool admission must not mint a session for a never-issued UUID.
+    // Internal callers that intentionally mint derived sessions leave this false.
+    requireIssuedSession?: boolean;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};
@@ -719,6 +724,7 @@ async function handleSetupFailure(
     return;
   }
 
+  rethrowDeviceTransportUnavailable(setupResult.cause);
   throw new ActionableError(
     `Failed to setup accessibility service for device ${ctx.deviceId} (session ${ctx.sessionId}): ${errorMsg}`,
     isDeviceLostError(setupResult.cause) ? { cause: setupResult.cause } : undefined,

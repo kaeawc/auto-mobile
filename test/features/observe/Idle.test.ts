@@ -683,7 +683,7 @@ describe("Idle - Unit Tests", function () {
       { pkg: "com.samsung.android.app.launcher", expected: true, why: "exact samsung launcher" },
       { pkg: "com.miui.home", expected: true, why: "exact miui home" },
       { pkg: "com.oneplus.launcher", expected: true, why: "exact oneplus" },
-      { pkg: "com.android.settings", expected: true, why: "exact settings" },
+      { pkg: "com.android.settings", expected: false, why: "Settings provides real gfxinfo" },
       // Sub-packages of a known system package (prefix match).
       { pkg: "com.miui.home.settings", expected: true, why: "sub-package of miui.home" },
       { pkg: "com.android.launcher3.dev", expected: true, why: "sub-package of launcher3" },
@@ -801,11 +801,11 @@ describe("Idle - Unit Tests", function () {
         timer.setCurrentTime(493);
         const device: BootedDevice = { deviceId: "d", name: "d", platform: "android" };
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, {
-          stdout,
-          stderr: "",
-        });
-        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND, { stdout, stderr: "" });
+        adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult(stdout, ""));
+        adb.setCommandResponse(
+          WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+          createExecResult(stdout, ""),
+        );
         const executeCommand = adb.executeCommand.bind(adb);
         adb.executeCommand = async (...args) => {
           const result = await executeCommand(...args);

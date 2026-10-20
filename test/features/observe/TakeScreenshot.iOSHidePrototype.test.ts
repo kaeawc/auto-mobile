@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import {
@@ -14,6 +14,10 @@ import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosDevice } from "./takeScreenshotTestHelpers";
+
+afterEach(() => {
+  mock.restore();
+});
 
 // A 1x1-header PNG: enough for the header-size read and the unencoded PNG path.
 const PNG = Buffer.alloc(24);
@@ -43,16 +47,16 @@ describe("iOS screenshot with the prototype hidden (#9305)", () => {
   beforeEach(() => {
     captures = [];
     captureFails = false;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: async () => {
-        captures.push("capture");
-        if (captureFails) {
-          throw new Error("simctl screenshot failed");
-        }
-        return { success: true, data: PNG.toString("base64") };
-      },
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    const client = screenshotClient();
+    spyOn(client, "ensureConnected").mockResolvedValue(true);
+    spyOn(client, "requestScreenshot").mockImplementation(async () => {
+      captures.push("capture");
+      if (captureFails) {
+        throw new Error("simctl screenshot failed");
+      }
+      return { success: true, data: PNG.toString("base64") };
+    });
+    IOSCtrlProxyClient.getInstance = () => client;
   });
 
   afterEach(() => {
@@ -184,3 +188,15 @@ describe("iosAgentHidesPrototypeForCapture (#9305)", () => {
     expect(iosAgentHidesPrototypeForCapture(DEVICE_ID, resolverFor(undefined))).toBe(false);
   });
 });
+
+function screenshotClient(): IOSCtrlProxyClient {
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "screenshot-stub", name: "iPhone", platform: "ios" },
+    8765,
+    () => {
+      throw new Error("Unexpected socket connection");
+    },
+    new FakeTimer(),
+  );
+  return client;
+}

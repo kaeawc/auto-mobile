@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { classifyAndroidUser, type AndroidUser, type ExecResult } from "../../../src/models";
+import { AdbDeviceReadings } from "../../../src/utils/android-cmdline-tools/AdbDeviceReadings";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const owner: AndroidUser = {
   userId: 0,
@@ -188,13 +192,31 @@ Users:
 ];
 
 describe("AdbClient.listUsers", () => {
+  test.each(["shell dumpsys user", "shell pm list users"])(
+    "preserves transport refusal from %s instead of reporting no users",
+    async (command: string) => {
+      const adb = new FakeAdbExecutor();
+      const error = new AdbDeviceTransportUnavailableError("device", new Error("offline"));
+      adb.setCommandError(command, error);
+      const readings = new AdbDeviceReadings({
+        executeCommand: (cmd, options) => adb.executeCommand(cmd, options),
+        timer: new FakeTimer(),
+      });
+
+      await expect(readings.listUsers()).rejects.toBe(error);
+      expect(adb.getExecutedCommands()).toEqual(
+        command === "shell dumpsys user" ? [command] : ["shell dumpsys user", command],
+      );
+    },
+  );
+
   test("stops state lookup at the next UserInfo even when its flags are malformed", async () => {
     const captured = String(cases[1].outcomes[0]);
     const output = captured
       .replace("    State: RUNNING_UNLOCKED", "")
       .replace("Work profile:30", "Work profile:invalid");
     const commands: string[] = [];
-    const client = new AdbClient(null, async (command) => {
+    const client = new AdbClient(null, async (command: string) => {
       commands.push(command);
       return execResult(output);
     });
@@ -217,7 +239,7 @@ describe("AdbClient.listUsers", () => {
   test.each(cases)("$name", async ({ outcomes, expectedUsers, expectedCommandFragments }) => {
     const commands: string[] = [];
     let outcomeIndex = 0;
-    const client = new AdbClient(null, async (command) => {
+    const client = new AdbClient(null, async (command: string) => {
       commands.push(command);
       const outcome = outcomes[outcomeIndex++];
       if (outcome instanceof Error) {

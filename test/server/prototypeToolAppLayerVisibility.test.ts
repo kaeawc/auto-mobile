@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import type {
   HierarchyCapture,
@@ -101,7 +102,7 @@ async function call(layer?: "app", device = android, action = "show", signal?: A
     undefined,
     signal,
   );
-  return prototypeOutputSchema.parse(response.structuredContent);
+  return prototypeOutputSchema.parse(toolStructured(response));
 }
 test("successful hidden app-layer show keeps success and validates its visibility warning", async () => {
   const result = await call("app");
@@ -237,7 +238,7 @@ test("inspect and host status surface hidden reason and clear absent device fiel
     for (const action of ["inspect", "status"]) {
       const response = await tool(android, { action }, undefined);
       expect(
-        prototypeOutputSchema.parse(response.structuredContent).prototypes?.[0].hiddenReason,
+        prototypeOutputSchema.parse(toolStructured(response)).prototypes?.[0].hiddenReason,
       ).toBe(hiddenReason);
     }
   }
@@ -245,7 +246,7 @@ test("inspect and host status surface hidden reason and clear absent device fiel
   for (const action of ["inspect", "status"]) {
     const response = await tool(android, { action }, undefined);
     expect(
-      prototypeOutputSchema.parse(response.structuredContent).prototypes?.[0],
+      prototypeOutputSchema.parse(toolStructured(response)).prototypes?.[0],
     ).not.toHaveProperty("hiddenReason");
   }
 });

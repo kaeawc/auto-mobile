@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { afterEach, describe, expect, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
@@ -45,7 +46,14 @@ function gestureHarness(reason: string, fold = false) {
   const tap = new TapAtCoordinate(selectedDisplayDevice, h.adb, {
     timer: h.timer,
     androidClient: client,
-    iosClient: client,
+    iosClient: {
+      requestTapCoordinates: async () => {
+        throw new Error("Unexpected iOS tap");
+      },
+      requestDoubleTapCoordinates: async () => {
+        throw new Error("Unexpected iOS double tap");
+      },
+    },
     lastRenderedObservation: () => ({
       display: { key: "inner", generation: 0 },
       displayRevision: 0,
@@ -61,7 +69,7 @@ function gestureHarness(reason: string, fold = false) {
       throw new Error("Expected the target capture");
     }
     expect(options.previousObservation.viewHierarchy?.frameContext).toBe("second-capture");
-    return block(options.previousObservation);
+    return runBlockWith(options.previousObservation)(block, options);
   };
   return { ...h, tap, dispatches };
 }

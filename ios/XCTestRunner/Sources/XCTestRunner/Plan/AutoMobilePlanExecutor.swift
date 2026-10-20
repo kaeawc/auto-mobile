@@ -256,18 +256,7 @@ public final class AutoMobilePlanExecutor: Sendable {
         try Task.checkCancellation()
         PerfTimer
             .log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
-        let planContent: String
-        do {
-            planContent = try PerfTimer.measure("loadPlan") {
-                try planLoader.loadPlan(at: configuration.planPath, bundle: configuration.planBundle)
-            }
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as PlanLoaderError {
-            throw ExecutorError.planNotFound(error.description)
-        } catch {
-            throw ExecutorError.planNotFound(error.localizedDescription)
-        }
+        let planContent = try loadPlanContent()
         PerfTimer.log("planContent loaded, length=\(planContent.count) chars")
 
         let substituted = try PerfTimer.measure("substituteParameters") {
@@ -388,6 +377,20 @@ public final class AutoMobilePlanExecutor: Sendable {
         } catch {
             PerfTimer.log("executeAttempt ERROR: \(error.localizedDescription)")
             throw ExecutorError.executionFailed(error.localizedDescription)
+        }
+    }
+
+    private func loadPlanContent() throws -> String {
+        do {
+            return try PerfTimer.measure("loadPlan") {
+                try planLoader.loadPlan(at: configuration.planPath, bundle: configuration.planBundle)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as PlanLoaderError {
+            throw ExecutorError.planNotFound(error.description)
+        } catch {
+            throw ExecutorError.planNotFound(error.localizedDescription)
         }
     }
 

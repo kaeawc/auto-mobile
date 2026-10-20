@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 // Structural checks on the committed file-size baseline (#11784). The ratchet itself is
@@ -9,7 +10,7 @@ const CAP = 1000;
 
 function rows(): Array<{ count: number; file: string }> {
   // Windows checkouts are CRLF; split on either line ending so file names carry no "\r".
-  return readFileSync(join(ROOT, "scripts/file-size-baseline.txt"), "utf8")
+  return readGuardFile(join(ROOT, "scripts/file-size-baseline.txt"))
     .split(/\r?\n/)
     .filter((line) => line !== "" && !line.startsWith("#"))
     .map((line) => {
@@ -34,7 +35,7 @@ describe("file-size baseline", () => {
 
   test("recorded counts are at least the current non-blank line counts", () => {
     for (const { count, file } of rows()) {
-      const actual = readFileSync(join(ROOT, file), "utf8")
+      const actual = readGuardFile(join(ROOT, file))
         .split(/\r?\n/)
         .filter((line) => /\S/.test(line)).length;
       expect({ file, ok: actual <= count }).toEqual({ file, ok: true });
@@ -42,10 +43,10 @@ describe("file-size baseline", () => {
   });
 
   test("lint.sh runs the ratchet and package.json exposes the update command", () => {
-    expect(readFileSync(join(ROOT, "scripts/lint.sh"), "utf8")).toContain(
+    expect(readGuardFile(join(ROOT, "scripts/lint.sh"))).toContain(
       "bash scripts/file-size-baseline.sh",
     );
-    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+    const pkg = JSON.parse(readGuardFile(join(ROOT, "package.json"))) as {
       scripts: Record<string, string>;
     };
     expect(pkg.scripts["lint:file-size:baseline"]).toBe(

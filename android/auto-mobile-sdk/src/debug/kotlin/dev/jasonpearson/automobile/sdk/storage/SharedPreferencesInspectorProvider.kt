@@ -64,40 +64,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
         return result
       }
 
-      // DataStore-backed preferences are served through this same storage inspection surface via
-      // the read-only application-provided adapter contract (issue #5192). They reuse the existing
-      // StorageResponse shapes (no path is exposed) and are handled before the SharedPreferences
-      // driver is resolved, since they do not use it.
-      val responseJson =
-        if (method == "listDataStores") {
-          handleListDataStores(extras)
-        } else if (method == "getDataStore") {
-          handleGetDataStore(extras)
-        } else {
-          val driver = SharedPreferencesInspector.getDriver(extras?.getString("storeName"))
-          when (method) {
-            "listFiles" -> handleListFiles(driver)
-            "getPreferences" -> handleGetPreferences(driver, extras)
-            "getPreference" -> handleGetPreference(driver, extras)
-            "setValue" -> {
-              requireMutationsAllowed()
-              handleSetValue(driver, extras)
-            }
-            "removeValue" -> {
-              requireMutationsAllowed()
-              handleRemoveValue(driver, extras)
-            }
-            "clearFile" -> {
-              requireMutationsAllowed()
-              handleClearFile(driver, extras)
-            }
-            "subscribeToFile" -> handleSubscribeToFile(driver, extras)
-            "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
-            "getChanges" -> handleGetChanges(driver, extras)
-            "getListenedFiles" -> handleGetListenedFiles(driver)
-            else -> throw IllegalArgumentException("Unknown method: $method")
-          }
-        }
+      val responseJson = dispatchCall(method, extras)
       result.putBoolean("success", true)
       result.putString("result", responseJson)
     } catch (e: SharedPreferencesError) {
@@ -116,6 +83,49 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
 
     return result
   }
+
+  private fun dispatchCall(method: String, extras: Bundle?): String {
+    // DataStore-backed preferences are served through this same storage inspection surface via
+    // the read-only application-provided adapter contract (issue #5192). They reuse the existing
+    // StorageResponse shapes (no path is exposed) and are handled before the SharedPreferences
+    // driver is resolved, since they do not use it.
+    return if (method == "listDataStores") {
+      handleListDataStores(extras)
+    } else if (method == "getDataStore") {
+      handleGetDataStore(extras)
+    } else {
+      val driver = SharedPreferencesInspector.getDriver(extras?.getString("storeName"))
+      dispatchPreferences(method, driver, extras)
+    }
+  }
+
+  private fun dispatchPreferences(
+    method: String,
+    driver: SharedPreferencesDriver,
+    extras: Bundle?,
+  ): String =
+    when (method) {
+      "listFiles" -> handleListFiles(driver)
+      "getPreferences" -> handleGetPreferences(driver, extras)
+      "getPreference" -> handleGetPreference(driver, extras)
+      "setValue" -> {
+        requireMutationsAllowed()
+        handleSetValue(driver, extras)
+      }
+      "removeValue" -> {
+        requireMutationsAllowed()
+        handleRemoveValue(driver, extras)
+      }
+      "clearFile" -> {
+        requireMutationsAllowed()
+        handleClearFile(driver, extras)
+      }
+      "subscribeToFile" -> handleSubscribeToFile(driver, extras)
+      "unsubscribeFromFile" -> handleUnsubscribeFromFile(driver, extras)
+      "getChanges" -> handleGetChanges(driver, extras)
+      "getListenedFiles" -> handleGetListenedFiles(driver)
+      else -> throw IllegalArgumentException("Unknown method: $method")
+    }
 
   /**
    * Handles listDataStores - lists the DataStore instances exposed by a registered adapter.
@@ -286,7 +296,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
       try {
         KeyValueType.valueOf(typeStr)
       } catch (e: IllegalArgumentException) {
-        throw IllegalArgumentException("Invalid type: $typeStr")
+        throw IllegalArgumentException("Invalid type: $typeStr", e)
       }
 
     val value = deserializeValue(valueStr, type)
@@ -447,7 +457,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
   private fun handleGetChanges(driver: SharedPreferencesDriver, extras: Bundle?): String {
     val fileName =
       extras?.getString("fileName") ?: throw IllegalArgumentException("fileName required")
-    val sinceSequence = extras?.getLong("sinceSequence", 0L) ?: 0L
+    val sinceSequence = extras.getLong("sinceSequence", 0L)
 
     val driverImpl =
       driver as? SharedPreferencesDriverImpl

@@ -104,8 +104,11 @@ class TwoDeviceCompareViewTest {
         TwoDeviceCompareView(
           columnA = columnA(),
           columnB = columnB(),
-          observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
-          sideContent = { column, _ -> Text(column.name) },
+          options =
+            DeviceCompareOptions(
+              observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+              sideContent = { column, _ -> Text(column.name) },
+            ),
         )
       }
     }
@@ -128,10 +131,13 @@ class TwoDeviceCompareViewTest {
           TwoDeviceCompareView(
             columnA = columnA(),
             columnB = columnB(),
-            observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
-            backoffDelay = { backoff.await() },
-            socketAvailable = { true },
-            sideContent = { column, _ -> Text(column.name) },
+            options =
+              DeviceCompareOptions(
+                observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+                backoffDelay = { backoff.await() },
+                socketAvailable = { true },
+                sideContent = { column, _ -> Text(column.name) },
+              ),
           )
         }
       }
@@ -155,8 +161,11 @@ class TwoDeviceCompareViewTest {
         TwoDeviceCompareView(
           columnA = columnA(),
           columnB = columnB(),
-          observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
-          sideContent = { column, _ -> Text(column.name) },
+          options =
+            DeviceCompareOptions(
+              observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+              sideContent = { column, _ -> Text(column.name) },
+            ),
         )
       }
     }
@@ -175,8 +184,11 @@ class TwoDeviceCompareViewTest {
         TwoDeviceCompareView(
           columnA = columnA(),
           columnB = columnB(),
-          observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
-          sideContent = { column, _ -> Text(column.name) },
+          options =
+            DeviceCompareOptions(
+              observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+              sideContent = { column, _ -> Text(column.name) },
+            ),
         )
       }
     }
@@ -200,8 +212,11 @@ class TwoDeviceCompareViewTest {
           TwoDeviceCompareView(
             columnA = columnA(),
             columnB = columnB(),
-            observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
-            sideContent = { column, _ -> Text(column.name) },
+            options =
+              DeviceCompareOptions(
+                observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+                sideContent = { column, _ -> Text(column.name) },
+              ),
           )
         }
       }
@@ -238,12 +253,15 @@ class TwoDeviceCompareViewTest {
           TwoDeviceCompareView(
             columnA = columnA(),
             columnB = columnB(),
-            observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
-            sideContent = { column, _ -> Text(column.name) },
-            parseHierarchy = { json ->
-              if (json.toString().contains("gated")) gate.await()
-              parseHierarchyFromJson(json)
-            },
+            options =
+              DeviceCompareOptions(
+                observationStreamFactory = QueuedStreamFactory(fakeA, fakeB),
+                sideContent = { column, _ -> Text(column.name) },
+                parseHierarchy = { json ->
+                  if (json.toString().contains("gated")) gate.await()
+                  parseHierarchyFromJson(json)
+                },
+              ),
           )
         }
       }

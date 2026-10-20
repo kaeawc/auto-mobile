@@ -13,7 +13,7 @@ import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettle
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { BootedDevice } from "../../src/models";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
 import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
@@ -38,7 +38,7 @@ const OWNER_CONNECTION = "typed-cancellation-owner";
 function stubPoolDiscovery(devicePool: DevicePool): void {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
 }
 
 function expectTerminalRefusal(execution: ActiveExecution, reason: string): void {
@@ -271,7 +271,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       const devicePool = daemon.getDevicePool();
       const deviceManager = new FakeDeviceManager();
       deviceManager.bootedDevices = [DEVICE, DERIVED_DEVICE];
-      Object.assign(devicePool, { deviceManager });
+      devicePool.testHooks.deviceManager = deviceManager;
       await devicePool.initializeWithDevices([DEVICE, DERIVED_DEVICE]);
       await devicePool.bindOrReuseDeviceSession({
         sessionId: BASE,

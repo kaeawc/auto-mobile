@@ -1,7 +1,10 @@
 import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
-import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { SessionOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   SessionRecoveryIdentityLossError,
   SessionTerminalReleaseInProgressError,
@@ -19,10 +22,7 @@ import {
   DaemonToolOutcomeUnknownError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
-  DaemonBoundSessionLostError,
   DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
 } from "../../src/daemon/client";
@@ -4629,7 +4629,7 @@ describe("DaemonMcpProxy", () => {
 
         // A read only watches the session it names: unlike a control call in flight, it does not
         // keep that session's idle window from running out.
-        expect(proxy["hasSessionCallInFlight"]("session-a")).toBe(false);
+        expect(proxy.getInternalsForTesting().hasSessionCallInFlight("session-a")).toBe(false);
         doctorRunning.resolve();
         await doctor;
       } finally {
@@ -5013,7 +5013,7 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("getAndroid", {});
         await proxy.callTool("getAndroid", {});
-        const owned = Reflect.get(proxy, "ownedDeviceSessions") as Set<string>;
+        const owned = proxy.getInternalsForTesting().ownedDeviceSessions as Set<string>;
         expect(owned.has("earlier-session")).toBe(true);
         expect(owned.has("latest-session")).toBe(true);
         client.emitNotification(
@@ -5473,7 +5473,7 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
-        const before = Reflect.get(proxy, "boundSessionUuidAt");
+        const before = proxy.getInternalsForTesting().boundSessionUuidAt;
         expect(before).toBe(timer.now());
         timer.advanceTime(1_000);
         const error = await proxy.callTool("tapAt", { sessionUuid: "session-b", x: 1, y: 1 }).then(
@@ -5488,10 +5488,10 @@ describe("DaemonMcpProxy", () => {
           boundSessionUuid: "session-a",
           requestedSessionUuid: "session-b",
         });
-        expect(Reflect.get(proxy, "boundSessionUuidAt")).toBe(before);
+        expect(proxy.getInternalsForTesting().boundSessionUuidAt).toBe(before);
         expect(fakeClient.callToolCalls).toHaveLength(0);
         await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
-        expect(Reflect.get(proxy, "boundSessionUuid")).toBe("session-a");
+        expect(proxy.getInternalsForTesting().boundSessionUuid).toBe("session-a");
         await proxy.callTool("tapAt", { sessionUuid: "session-a", x: 2, y: 2 });
         expect(fakeClient.callToolCalls.map((call) => call.params.sessionUuid)).toEqual([
           "session-b",

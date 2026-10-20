@@ -138,7 +138,7 @@ final class PrototypeSpecDecodingTests: XCTestCase {
         XCTAssertEqual(children.map(\.type), ["switch", "checkbox", "button", "text", "bottomSheet"])
         XCTAssertEqual(children[0].label, "Wi-Fi")
         XCTAssertEqual(children[2].variant, "outlined")
-        XCTAssertEqual(children[2].onTap?.last?.by, 2)
+        XCTAssertEqual(children[2].onTap?.last?.incrementAmount, 2)
         XCTAssertEqual(children[3].visibleWhen, .notEquals(key: "n", value: .number(0)))
         XCTAssertEqual(children[4].detents, [.half, .points(120), .full])
     }

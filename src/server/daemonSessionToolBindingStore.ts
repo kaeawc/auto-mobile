@@ -1,3 +1,4 @@
+import { installDaemonSessionBindingScopes } from "../daemon/daemonSessionBindingScopes";
 import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { SessionToolBindingStore } from "./sessionToolBindingStore";
 import { ToolRegistry } from "./toolRegistry";
@@ -43,3 +44,5 @@ export function daemonSessionToolBindingStore(): SessionToolBindingStore {
   daemonBindingStore ??= createReleaseSubscribedBindingStore();
   return daemonBindingStore;
 }
+
+installDaemonSessionBindingScopes(daemonSessionToolBindingStore);

@@ -23,7 +23,7 @@ import {
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
-import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
+import { defaultRecordingSessionCleanupDeps } from "../../src/daemon/recordingSessionCleanup";
 import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -80,7 +80,7 @@ import {
   type WireEnvelope,
 } from "./inMemoryDaemonWire";
 import { drainMicrotasks } from "./fakeTimerStepping";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import {
   registerDeviceTools,
   setDeviceToolsDependencies,
@@ -252,7 +252,6 @@ const HOST_TOUCHING_DAEMON_METHODS = [
   "writeEarlyOwnerRecord",
   "writePidFile",
   "persistPidFileData",
-  "startHttpIngress",
   "bindControlSocket",
   "startServicesAfterSocketBind",
   "startAuxiliarySocket",
@@ -689,7 +688,7 @@ export class LivenessScenario {
         }),
         avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
         bindingExclusionFactory: () => NO_BINDINGS,
-        foreignCtrlProxyForwardEvidence: () => undefined,
+        foreignCtrlProxyForwardEvidence: { read: async () => ({ kind: "none" }) },
       },
     );
     const exitFiles = new FakeDaemonExitRecordFileSystem();
@@ -752,6 +751,8 @@ export class LivenessScenario {
         });
       },
       startHttpIngress: async () => void steps.push("startHttpIngress"),
+      prepareHttpToken: () => void steps.push("prepareHttpToken"),
+      publishHttpToken: () => void steps.push("publishHttpToken"),
       sweepStaleAppearanceConfigs: async () => void steps.push("sweepStaleAppearanceConfigs"),
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
@@ -866,10 +867,11 @@ export class LivenessScenario {
           return;
         }
         if (stall.lateAckDelayMs === undefined || stall.lateAckTaken) {
-          await new Promise<void>(() => {});
+          return await new Promise<void>(() => {});
         }
+        const delayMs = stall.lateAckDelayMs;
         stall.lateAckTaken = true;
-        await new Promise<void>((resolve) => this.timer.setTimeout(resolve, stall.lateAckDelayMs));
+        await new Promise<void>((resolve) => this.timer.setTimeout(resolve, delayMs));
       },
       delivered: (params: Record<string, unknown>) => {
         if (typeof params.livenessOwnerToken === "string") {
@@ -967,10 +969,14 @@ export class LivenessScenario {
         });
       }
       // Acquisition prepared the device, as getAndroid's readiness setup records.
-      manager.setDeviceReadiness(this.minted, "automationReady");
+      const minted = this.minted;
+      if (!minted) {
+        throw new Error("Scenario acquisition did not mint a session");
+      }
+      manager.setDeviceReadiness(minted, "automationReady");
       return tool === "provisionDevice"
-        ? provisionDeviceResult(this.minted, deviceId)
-        : deviceStartResult(this.minted);
+        ? provisionDeviceResult(minted, deviceId)
+        : deviceStartResult(minted);
     }
     try {
       return await this.tools.call(tool, args, requestSignal);
@@ -1063,7 +1069,7 @@ export class LivenessScenario {
       PLATFORM,
       this.deviceIds.map((id) => ({ ...this.device(id), source: "local", isRunning: false })),
     );
-    await pool.removeDevice(deviceId, true, pool.getDevice(deviceId));
+    await pool.removeDevice(deviceId, true, pool.getDevice(deviceId) ?? undefined);
     await drainMicrotasks(TURNS_PER_EVENT);
   }
 

@@ -1,16 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import {
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../../src/daemon/client";
+import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
+import { DaemonUnavailableError, type DaemonClientLike } from "../../../src/daemon/client";
 import {
   ConnectionRecovery,
   type ConnectionRecoveryPort,
 } from "../../../src/daemon/proxy/ConnectionRecovery";
 import { DaemonErrorClassifier } from "../../../src/daemon/proxy/DaemonErrorClassifier";
-import { DaemonToolOutcomeUnknownError } from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonToolOutcomeUnknownError } from "../../../src/daemon/proxy/DaemonToolOutcomeUnknownError";
 
 function harness() {
   const events: string[] = [];

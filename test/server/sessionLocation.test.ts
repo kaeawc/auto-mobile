@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { describe, expect, spyOn, test } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -233,7 +234,9 @@ describe("session location admission", () => {
       await manager.releaseSession("session");
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
       expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
-      expect(simctl.getMethodCalls("executeCommandArgs")[0].args[2]).toBe("set");
+      expect(
+        z.array(z.string()).parse(simctl.getMethodCalls("executeCommandArgs")[0].args)[2],
+      ).toBe("set");
     } finally {
       markSet.mockRestore();
       manager.stopCleanupTimer();
@@ -387,19 +390,20 @@ describe("session route cleanup", () => {
       await mutation;
       await flush();
       expect(markSet).not.toHaveBeenCalled();
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear"]);
       const pending = manager.getPendingDeviceCleanup(device.deviceId);
       expect(pending).not.toBeNull();
       timer.advanceTime(250);
       await pending;
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear", "clear"]);
     } finally {
       markSet.mockRestore();
       finished.resolve();
@@ -468,11 +472,11 @@ describe("session route cleanup", () => {
       await flush();
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
       expect(pool.getDevice(device.deviceId)?.status).toBe("idle");
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-        "clear",
-      ]);
+      expect(
+        simctl
+          .getMethodCalls("executeCommandArgs")
+          .map((call) => z.array(z.string()).parse(call.args)[2]),
+      ).toEqual(["set", "clear", "clear"]);
     } finally {
       clears.retireDevice(device.deviceId);
       await manager.getPendingDeviceCleanup(device.deviceId);

@@ -1,3 +1,4 @@
+import { runIosRunnerSetup } from "./runIosRunnerSetup";
 import {
   READINESS_RETRY_DELAY_MS,
   CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS,
@@ -39,6 +40,7 @@ import {
   RunnerReadinessDependencies,
 } from "./RunnerReadinessDependencies";
 import { RunnerReadinessError } from "./RunnerReadinessError";
+import { IosPostSetupReadinessProbe } from "./IosPostSetupReadinessProbe";
 import { SYSTEM_UI_ANR_RECOVERY_POLL_MS, SystemUiAnrRecovery } from "./SystemUiAnrRecovery";
 import { SystemUiAnrRecoveryRequiredError } from "./SystemUiAnrRecoveryRequiredError";
 import { isTerminalLeaseConflict } from "./readinessLeaseConflict";
@@ -59,9 +61,11 @@ export type { AndroidCompatibilityResult, RunnerReadinessPhase, RunnerReadinessR
 export class RunnerReadinessService {
   private readonly phases: ReadinessPhaseRunner;
   private readonly anrRecovery: SystemUiAnrRecovery;
+  private readonly iosPostSetupProbe: IosPostSetupReadinessProbe;
 
   constructor(private readonly dependencies: RunnerReadinessDependencies) {
     this.phases = new ReadinessPhaseRunner(dependencies.timer);
+    this.iosPostSetupProbe = new IosPostSetupReadinessProbe(dependencies, this.phases);
     this.anrRecovery = new SystemUiAnrRecovery(dependencies.timer, this.phases);
   }
 
@@ -496,19 +500,7 @@ export class RunnerReadinessService {
     // matching the Android path (see :265) and the connected branch above
     // (:613) — otherwise setup() can report "already running" against a
     // runner that died without a local child-exit event (#6416).
-    manager.resetSetupState();
-    const setup = await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.setup(
-        false,
-        context.perf,
-        signal,
-        this.phases.remainingForPhase(context, "runner-setup"),
-      ),
-    );
-    context.onRunnerSetup?.();
-    if (!setup.success) {
-      this.phases.fail(context, "runner-setup", 1, setup.error ?? setup.message);
-    }
+    await runIosRunnerSetup(context, manager, this.phases, this.dependencies.iosSetupMaxAttempts);
     // Setup can reallocate a busy port or adopt the runner's actual listener.
     // Resolve the client after launch, just as the force-restart path does.
     client = this.dependencies.getIosClient(context.device, manager.getServicePort());
@@ -558,44 +550,28 @@ export class RunnerReadinessService {
     manager: ReadinessIosManager,
     initialClient: ReadinessIosClient,
   ): Promise<void> {
-    // setup()/start() may deliberately preserve an existing xcodebuild process
-    // that is alive but whose CtrlProxy endpoint never came up. Give that
-    // process one real WebSocket + hierarchy readiness attempt, then restart it
-    // instead of spending the entire health window polling a dead listener.
+    // A single slow first snapshot is not evidence that a just-launched runner
+    // needs replacing. Retry unless liveness checks establish that it is dead.
     this.phases.startHealthWindow(context);
-    if (await this.isResponsiveClientOnce(context, initialClient)) {
+    if (await this.iosPostSetupProbe.isResponsive(context, manager, initialClient)) {
       return;
     }
 
     manager.resetSetupState();
-    await this.phases.runPhase(context, "runner-health", 1, (signal) =>
+    await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
       manager.forceRestart({
         signal,
-        minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-health"),
+        minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-setup"),
       }),
     );
+    // A cold restart can outlast the original health window. Probe the new
+    // process in a fresh window, still capped by the total deadline.
+    context.healthDeadlineMs = null;
     const restartedClient = this.dependencies.getIosClient(
       context.device,
       manager.getServicePort(),
     );
     await this.waitForResponsiveClient(context, restartedClient);
-  }
-
-  private async isResponsiveClientOnce(
-    context: ReadinessAttemptContext,
-    client: ReadinessIosClient,
-  ): Promise<boolean> {
-    const connected =
-      client.isConnected() ||
-      (await this.phases.runPhase(context, "runner-connect", 1, (signal) =>
-        client.connectWithoutSetup(signal),
-      ));
-    if (!connected) {
-      return false;
-    }
-    return await this.phases.runPhase(context, "runner-health", 1, () =>
-      client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
-    );
   }
 
   private async waitForResponsiveClient(

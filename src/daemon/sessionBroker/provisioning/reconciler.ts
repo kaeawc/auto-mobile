@@ -1,3 +1,4 @@
+import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import type { DeviceInfo } from "../../../models/index";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -110,12 +111,14 @@ export class BindingReconciler {
     this.creation = new BindingDeviceCreation(
       {
         registry: deps.registry,
+        inventory: deps.inventory,
         provisioner: deps.provisioner,
         resolver: deps.resolver,
         claims: deps.claims,
         capacity: deps.capacity,
         resourceBudget: deps.resourceBudget,
         idGenerator: this.idGenerator,
+        timer: deps.timer,
         journal: this.journal,
       },
       {
@@ -766,7 +769,9 @@ export class BindingReconciler {
     assignment: BindingAssignmentRecord,
     disposition: "created" | "replaced",
     replacing?: BindingJournalEntry,
-    options: { capacityAsserted?: boolean } = {},
+    options: {
+      bootReservation?: BootSlotReservation;
+    } = {},
   ): Promise<ReadyResult> {
     return this.creation.createAndCommit(context, assignment, disposition, replacing, options);
   }

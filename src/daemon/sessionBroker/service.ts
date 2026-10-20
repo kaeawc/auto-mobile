@@ -30,6 +30,7 @@ import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig
 import { IosBaselineReset } from "./iosBaselineReset";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import type { BrokerResourceRecord } from "./store";
+import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "./timing";
 
 export interface SessionBrokerHostLock {
   acquire(): void;
@@ -181,9 +182,7 @@ async function isCurrentReset(
   store: SqliteSessionBrokerStore,
   expected: BrokerResourceRecord,
 ): Promise<boolean> {
-  const current = (await store.listResources()).find(
-    (resource) => resource.resourceId === expected.resourceId,
-  );
+  const current = await store.getResource(expected.resourceId);
   return (
     current?.state === "resetting" &&
     current.revision === expected.revision &&
@@ -221,7 +220,7 @@ async function assertBrokerInventoryOwned(
   registry: SqliteBindingRegistry,
   scopeKey: string,
 ): Promise<void> {
-  const resources = await registry.sessionBrokerStore(scopeKey).listResources();
+  const resources = await registry.sessionBrokerStore(scopeKey).listLiveResources();
   const occupied = new Set(
     resources
       .filter((resource) => resource.state !== "destroyed")
@@ -328,7 +327,7 @@ export class SessionBrokerService {
         this.wake = undefined;
         resolve();
       };
-      const timeout = this.timer.setTimeout(done, 5_000);
+      const timeout = this.timer.setTimeout(done, SESSION_BROKER_RECOVERY_INTERVAL_MS);
       this.wake = () => {
         this.timer.clearTimeout(timeout);
         done();

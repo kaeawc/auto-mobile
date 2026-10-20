@@ -1,7 +1,7 @@
 import { ActionableError } from "../../models/ActionableError";
+import { SESSION_BROKER_RETRY_AFTER_MS } from "./timing";
 
-/** Retry after the provider has had another opportunity to install or adopt its broker. */
-export const SESSION_BROKER_RETRY_AFTER_MS = 1_000;
+export { SESSION_BROKER_RETRY_AFTER_MS } from "./timing";
 
 export class SessionRequestOwnerMismatchError extends ActionableError {
   readonly code: "session_restart_handoff_pending" | "session_owner_mismatch";

@@ -97,6 +97,7 @@ export interface DeviceDataStreamMessage extends ScreenshotMetadata {
     | "subscription_response"
     | "hierarchy_update"
     | "screenshot_update"
+    | "frames_dropped"
     | "navigation_update"
     | "device_build_context"
     | "performance_update"
@@ -107,6 +108,8 @@ export interface DeviceDataStreamMessage extends ScreenshotMetadata {
     | "ping"
     | "pong"
     | "error";
+  /** Congestion notice; no screenshot bytes are carried in this message. */
+  droppedType?: "screenshot_update";
   success?: boolean;
   error?: string;
   packageName?: string;
@@ -124,7 +127,7 @@ export interface DeviceDataStreamMessage extends ScreenshotMetadata {
   deviceSessionUuid?: string | null;
   /** New epoch's uuid when a `device_session_ended` frame represents replacement. */
   successorSessionUuid?: string;
-  reason?: DeviceSessionRetireReason;
+  reason?: DeviceSessionRetireReason | "backpressure";
   /** Device platform. Carried on `device_session_started`/`device_session_ended` frames. */
   platform?: Platform;
   timestamp?: number;
@@ -174,6 +177,16 @@ export interface DeviceDataStreamMessage extends ScreenshotMetadata {
   nativeScale?: number;
   /** Opaque device-authored UI identity used by input validation. */
   frameContext?: string;
+}
+
+/** Additive congestion notice preserving the dropped frame's device attribution. */
+export interface FramesDroppedMessage extends Pick<
+  DeviceDataStreamMessage,
+  "subscriptionId" | "deviceId" | "deviceSessionUuid"
+> {
+  type: "frames_dropped";
+  droppedType: "screenshot_update";
+  reason: "backpressure";
 }
 
 /**

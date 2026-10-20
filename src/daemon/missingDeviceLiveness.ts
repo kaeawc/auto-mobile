@@ -11,7 +11,7 @@ import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discov
 import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";
 import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
 
-/** Consecutive successful discovery sweeps required to confirm absence. */
+/** Missing observations required to confirm absence without intervening presence. */
 export const MISSING_DEVICE_MISS_THRESHOLD = 3;
 
 export function classifyMissingDeviceObservation(
@@ -21,13 +21,16 @@ export function classifyMissingDeviceObservation(
   return !sourceSucceeded ? "source-unavailable" : devicePresent ? "present" : "missing";
 }
 
-/** A failed source supplies no evidence of absence and breaks the miss streak. */
+/** A failed source supplies no evidence either way: hold until presence or another miss. */
 export function observeMissingDevice(
   missesByDevice: Map<string, number>,
   deviceId: string,
   observation: "present" | "missing" | "source-unavailable",
 ): { misses: number; confirmedGone: boolean } {
-  if (observation !== "missing") {
+  if (observation === "source-unavailable") {
+    return { misses: missesByDevice.get(deviceId) ?? 0, confirmedGone: false };
+  }
+  if (observation === "present") {
     missesByDevice.delete(deviceId);
     return { misses: 0, confirmedGone: false };
   }

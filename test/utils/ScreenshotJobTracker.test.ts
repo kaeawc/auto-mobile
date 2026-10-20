@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -665,15 +665,21 @@ describe("ScreenshotJobTracker", () => {
 
   test("removes its abort listener from the long-lived parent signal once the job settles", async () => {
     const listeners = new Set<EventListenerOrEventListenerObject>();
-    const parentSignal = {
-      aborted: false,
-      addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.add(cb);
+    const parentSignal = new AbortController().signal;
+    spyOn(parentSignal, "addEventListener").mockImplementation(
+      (_type: string, cb: EventListenerOrEventListenerObject | null) => {
+        if (cb) {
+          listeners.add(cb);
+        }
       },
-      removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.delete(cb);
+    );
+    spyOn(parentSignal, "removeEventListener").mockImplementation(
+      (_type: string, cb: EventListenerOrEventListenerObject | null) => {
+        if (cb) {
+          listeners.delete(cb);
+        }
       },
-    } as unknown as AbortSignal;
+    );
 
     const job = ScreenshotJobTracker.startJob("device-d", async () => ({ success: true }), {
       parentSignal,
@@ -690,15 +696,21 @@ describe("ScreenshotJobTracker", () => {
 
   test("clear aborts every pending job, removes their parent-signal listeners, and empties the tracker", async () => {
     const listeners = new Set<EventListenerOrEventListenerObject>();
-    const parentSignal = {
-      aborted: false,
-      addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.add(cb);
+    const parentSignal = new AbortController().signal;
+    spyOn(parentSignal, "addEventListener").mockImplementation(
+      (_type: string, cb: EventListenerOrEventListenerObject | null) => {
+        if (cb) {
+          listeners.add(cb);
+        }
       },
-      removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.delete(cb);
+    );
+    spyOn(parentSignal, "removeEventListener").mockImplementation(
+      (_type: string, cb: EventListenerOrEventListenerObject | null) => {
+        if (cb) {
+          listeners.delete(cb);
+        }
       },
-    } as unknown as AbortSignal;
+    );
 
     const hang = (signal: AbortSignal) =>
       new Promise<{ success: boolean; error?: string }>((resolve) => {

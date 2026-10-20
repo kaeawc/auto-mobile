@@ -8,9 +8,10 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -33,6 +34,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
+@OptIn(ExperimentalCoroutinesApi::class)
 class GestureControllerTest {
   private class FakeTimer : TimeProvider {
     var now = 1_000L
@@ -109,7 +111,7 @@ class GestureControllerTest {
   }
 
   private val events = mutableListOf<String>()
-  private val scope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+  private val scope = CoroutineScope(UnconfinedTestDispatcher() + SupervisorJob())
   private val timer = FakeTimer()
   private val host = FakeHost(scope, events)
   private val sender = FakeSender(events)

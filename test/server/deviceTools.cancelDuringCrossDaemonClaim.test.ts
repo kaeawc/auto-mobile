@@ -199,9 +199,9 @@ describe.each([
 
     function arrangedEach<T>(table: readonly T[]) {
       return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-        test.each(table)(
+        test.each(table.map((row) => ({ row })))(
           name,
-          async (row: T) => {
+          async ({ row }) => {
             await arrangeHarness();
             await fn(row);
           },
@@ -210,11 +210,15 @@ describe.each([
       };
     }
 
-    function arrangedEachRow<T extends readonly [unknown, ...unknown[]]>(table: readonly T[]) {
-      return (name: string, fn: (...row: T) => void | Promise<void>, timeout?: number): void => {
+    function arrangedEachRow(table: Array<[string, Record<string, unknown>, string]>) {
+      return (
+        name: string,
+        fn: (...row: [string, Record<string, unknown>, string]) => void | Promise<void>,
+        timeout?: number,
+      ): void => {
         test.each(table)(
           name,
-          async (...row: T) => {
+          async (...row: [string, Record<string, unknown>, string]) => {
             await arrangeHarness();
             await fn(...row);
           },
@@ -332,7 +336,7 @@ describe.each([
       ["getAndroid", { avdName: avd.name }, AVD_SERIAL],
       ["startDevice", { platform: "ios", deviceId: SIM_UDID }, SIM_UDID],
       ["startDevice", { platform: "android", name: avd.name }, AVD_SERIAL],
-    ] as const)(
+    ])(
       "%s %j: the cancelled cold boot leaves no session bound and no claim published",
       async (tool, args, deviceId) => {
         const cancelled = await cancelledAtClaim(tool, args);

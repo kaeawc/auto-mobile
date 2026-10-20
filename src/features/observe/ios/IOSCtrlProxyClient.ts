@@ -499,6 +499,43 @@ export function getRequiredIosRunnerFeatureFlags(
  * Extends DeviceServiceClient for shared connection lifecycle management.
  */
 export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements IosCtrlProxy {
+  /** Typed access to lifecycle and observation state for deterministic tests. */
+  get testHooks() {
+    const client = this;
+    return {
+      getWebSocketUrl: () => this.getWebSocketUrl(),
+      updatePort: (port: number) => this.updatePort(port),
+      connectWebSocket: () => this.connectWebSocket(),
+      onConnectAttemptFailed: () => this.onConnectAttemptFailed(),
+      scheduleReconnect: () => this.scheduleReconnect(),
+      onConnectionClosed: () => this.onConnectionClosed(),
+      processMessage: (message: WebSocketMessage) => this.processMessage(message),
+      messageEffects: this.messageEffects,
+      requestManager: this.requestManager,
+      screenGeometry: this.screenGeometry,
+      pushHierarchyToObservationStream: (
+        ...args: Parameters<CtrlProxyObservationStream["pushHierarchyToObservationStream"]>
+      ) => this.pushHierarchyToObservationStream(...args),
+      pushScreenshotToObservationStream: (options: ScreenshotObservationStreamOptions) =>
+        this.pushScreenshotToObservationStream(options),
+      retainScaleMetadataFrom: (
+        hierarchy: { nativeScale?: number; pixelWidth?: number; pixelHeight?: number } | null,
+      ) => this.retainScaleMetadataFrom(hierarchy),
+      get cachedHierarchy() {
+        return client.cachedHierarchy;
+      },
+      set cachedHierarchy(value: typeof client.cachedHierarchy) {
+        client.cachedHierarchy = value;
+      },
+      get pendingConnectSocket() {
+        return client.pendingConnectAbort?.socket ?? null;
+      },
+      get recoveryPromise() {
+        return client.recoveryPromise;
+      },
+    };
+  }
+
   protected get cacheFreshTtlMs(): number {
     return IOSCtrlProxyClient.CACHE_FRESH_TTL_MS;
   }

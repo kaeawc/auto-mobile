@@ -38,7 +38,10 @@ function harness(patch: () => Promise<PrototypePatchReply>) {
 
 describe("performPrototypePatch spec settlement", () => {
   test("settles as landed when the device accepts the patch", async () => {
-    const { dependencies, settled } = harness(async () => ({ success: true }));
+    const { dependencies, settled } = harness(async () => ({
+      success: true,
+      delivery: "answered",
+    }));
     const out = await performPrototypePatch(dependencies, "d", { id: "p", ops });
     expect(out.error).toBeUndefined();
     expect(out.success).toBe(true);
@@ -46,14 +49,21 @@ describe("performPrototypePatch spec settlement", () => {
   });
 
   test("settles as not landed when the device refuses the patch", async () => {
-    const { dependencies, settled } = harness(async () => ({ success: false, error: "no" }));
+    const { dependencies, settled } = harness(async () => ({
+      success: false,
+      error: "no",
+      delivery: "answered",
+    }));
     const out = await performPrototypePatch(dependencies, "d", { id: "p", ops });
     expect(out.success).toBe(false);
     expect(settled).toEqual([false]);
   });
 
   test("settles as not landed when the call aborts after staging", async () => {
-    const { dependencies, settled } = harness(async () => ({ success: true }));
+    const { dependencies, settled } = harness(async () => ({
+      success: true,
+      delivery: "answered",
+    }));
     const controller = new AbortController();
     // The call is aborted after the spec was staged, before the patch is sent.
     dependencies.specRefusal = async () => {
@@ -67,7 +77,10 @@ describe("performPrototypePatch spec settlement", () => {
   });
 
   test("settles as not landed when the spec is refused", async () => {
-    const { dependencies, settled } = harness(async () => ({ success: true }));
+    const { dependencies, settled } = harness(async () => ({
+      success: true,
+      delivery: "answered",
+    }));
     dependencies.specRefusal = async () => "unsupported";
     const out = await performPrototypePatch(dependencies, "d", { id: "p", ops });
     expect(out.success).toBe(false);

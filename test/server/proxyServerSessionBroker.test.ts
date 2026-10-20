@@ -75,9 +75,9 @@ describe("session broker MCP exposure", () => {
   test("initialize exposes the flat result while pending serves no tools", async () => {
     const { client, fake } = await serve(pending);
 
-    expect(client.getServerCapabilities()?.experimental?.[SESSION_EXPERIMENTAL_CAPABILITY]).toEqual(
-      pending,
-    );
+    expect<unknown>(
+      client.getServerCapabilities()?.experimental?.[SESSION_EXPERIMENTAL_CAPABILITY],
+    ).toEqual(pending);
     expect((await client.listResources()).resources).toEqual([]);
     expect((await client.listTools()).tools).toEqual([]);
     const call = await client.callTool({ name: "getAndroid", arguments: {} });

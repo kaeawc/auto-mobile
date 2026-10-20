@@ -74,39 +74,27 @@ internal object MemoryMonitor {
     val label = threadLabel.get() ?: "$className#$methodName"
     threadLabel.remove()
 
+    reportGrowth(label, startSnapshot, success, errorMessage)
+  }
+
+  private fun reportGrowth(
+    label: String,
+    startSnapshot: MemorySnapshot,
+    success: Boolean,
+    errorMessage: String?,
+  ) {
     val endSnapshot = MemoryDiagnostics.captureSnapshot()
     val deltaBytes = endSnapshot.heapUsedBytes - startSnapshot.heapUsedBytes
     val deltaMb = deltaBytes.toDouble() / BYTES_PER_MB
 
-    if (logEnabled) {
-      val status = if (success) "PASS" else "FAIL"
-      val message =
-        "AutoMobileRunner: Memory $status $label heapUsedDelta=${formatMemoryDeltaMb(deltaMb)} MiB " +
-          "(start=${formatBytes(startSnapshot.heapUsedBytes)}, end=${formatBytes(endSnapshot.heapUsedBytes)})"
-      println(message)
-    }
+    logGrowth(label, startSnapshot, endSnapshot, success, deltaMb)
 
     val thresholdBreached = maxGrowthBytes > 0 && deltaBytes > maxGrowthBytes
     val shouldCaptureDiagnostics = diagnosticsEnabled && (!success || thresholdBreached)
     val shouldDumpHeap = (dumpOnFailure && !success) || (dumpOnThreshold && thresholdBreached)
 
     if (shouldCaptureDiagnostics || shouldDumpHeap) {
-      val reason = buildString {
-        if (!success) {
-          append("test failure")
-          if (!errorMessage.isNullOrBlank()) {
-            append(": ").append(errorMessage)
-          }
-        }
-        if (thresholdBreached) {
-          if (isNotEmpty()) {
-            append("; ")
-          }
-          append(
-            "heap growth ${formatBytes(deltaBytes.absoluteValue)} exceeded limit ${formatBytes(maxGrowthBytes)}",
-          )
-        }
-      }
+      val reason = diagnosticReason(success, errorMessage, thresholdBreached, deltaBytes)
 
       val diagnosticLabel = if (success) "memory_threshold_$label" else "test_failure_$label"
       if (shouldCaptureDiagnostics) {
@@ -125,4 +113,46 @@ internal object MemoryMonitor {
   }
 
   private fun formatBytes(bytes: Long): String = formatMebibytes(bytes, showNegative = true)
+
+  private fun diagnosticReason(
+    success: Boolean,
+    errorMessage: String?,
+    thresholdBreached: Boolean,
+    deltaBytes: Long,
+  ): String {
+    val reason = buildString {
+      if (!success) {
+        append("test failure")
+        if (!errorMessage.isNullOrBlank()) {
+          append(": ").append(errorMessage)
+        }
+      }
+      if (thresholdBreached) {
+        if (isNotEmpty()) {
+          append("; ")
+        }
+        append(
+          "heap growth ${formatBytes(deltaBytes.absoluteValue)} exceeded limit ${formatBytes(maxGrowthBytes)}",
+        )
+      }
+    }
+
+    return reason
+  }
+
+  private fun logGrowth(
+    label: String,
+    startSnapshot: MemorySnapshot,
+    endSnapshot: MemorySnapshot,
+    success: Boolean,
+    deltaMb: Double,
+  ) {
+    if (logEnabled) {
+      val status = if (success) "PASS" else "FAIL"
+      val message =
+        "AutoMobileRunner: Memory $status $label heapUsedDelta=${formatMemoryDeltaMb(deltaMb)} MiB " +
+          "(start=${formatBytes(startSnapshot.heapUsedBytes)}, end=${formatBytes(endSnapshot.heapUsedBytes)})"
+      println(message)
+    }
+  }
 }

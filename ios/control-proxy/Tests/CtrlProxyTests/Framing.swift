@@ -5,6 +5,14 @@ import Foundation
 /// (`WireError`) helpers. `@testable` reaches the internal
 /// namespaces.
 enum Framing {
+    struct AccumulationResult {
+        let tag: String
+        let data: Data?
+        let reason: String?
+        let buffer: Data
+        let inProgress: UInt8?
+    }
+
     static func createFrame(data: Data, opcode: UInt8) -> Data {
         WebSocketFraming.createWebSocketFrame(data: data, opcode: opcode)
     }
@@ -59,8 +67,8 @@ enum Framing {
 
     static func frameAction(opcode: UInt8, unmaskedPayload: Data) -> (tag: String, data: Data?) {
         switch WebSocketFraming.frameAction(opcode: opcode, unmaskedPayload: unmaskedPayload) {
-        case let .deliver(d): return ("deliver", d)
-        case let .pong(d): return ("pong", d)
+        case let .deliver(data): return ("deliver", data)
+        case let .pong(data): return ("pong", data)
         case .ignore: return ("ignore", nil)
         }
     }
@@ -71,10 +79,8 @@ enum Framing {
         isFinal: Bool,
         payload: Data,
         inProgressOpcode: UInt8?
-        // Module-agnostic parity tuple mirroring the framing result's five fields.
     )
-        // swiftlint:disable:next large_tuple
-        -> (tag: String, data: Data?, reason: String?, buffer: Data, inProgress: UInt8?)
+        -> AccumulationResult
     {
         var buf = buffer
         var inProg = inProgressOpcode
@@ -86,9 +92,27 @@ enum Framing {
             inProgressOpcode: &inProg
         )
         switch result {
-        case let .deliver(d): return ("deliver", d, nil, buf, inProg)
-        case .buffered: return ("buffered", nil, nil, buf, inProg)
-        case let .protocolError(reason): return ("protocolError", nil, reason, buf, inProg)
+        case let .deliver(data): return AccumulationResult(
+                tag: "deliver",
+                data: data,
+                reason: nil,
+                buffer: buf,
+                inProgress: inProg
+            )
+        case .buffered: return AccumulationResult(
+                tag: "buffered",
+                data: nil,
+                reason: nil,
+                buffer: buf,
+                inProgress: inProg
+            )
+        case let .protocolError(reason): return AccumulationResult(
+                tag: "protocolError",
+                data: nil,
+                reason: reason,
+                buffer: buf,
+                inProgress: inProg
+            )
         }
     }
 

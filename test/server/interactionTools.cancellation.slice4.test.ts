@@ -1,3 +1,7 @@
+import type {
+  ObservedActionResult,
+  ObservedEnvelope,
+} from "../../src/features/action/observedInteractionTypes";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { cancellationHandlers, cancellationTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
@@ -44,6 +48,8 @@ const captured = JSON.parse(
 ) as Pick<ObserveResult, "viewHierarchy">;
 // Keep the captured notification rows; adapt only the platform's tray identity.
 const observation: ObserveResult = {
+  observationId: "test-observation",
+  display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: 0,
   screenSize: { width: 1080, height: 2316 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -256,9 +262,12 @@ test.each(["open", "close", "detect", "close follow-up detect"] as const)(
 );
 
 class UnobservedOpenURL extends OpenURL {
+  override observedInteraction<R extends ObservedActionResult>(
+    block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+  ): Promise<R & ObservedEnvelope>;
   override async observedInteraction(
-    block: Parameters<OpenURL["observedInteraction"]>[0],
-  ): Promise<unknown> {
+    block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+  ): Promise<ObservedActionResult & ObservedEnvelope> {
     return block(observation);
   }
 }
@@ -403,7 +412,7 @@ test("homeScreen cancels during iOS foreground verification", async () => {
     };
   });
   const observe = spyOn(HomeScreen.prototype, "observedInteraction").mockImplementation(
-    async (block) => block(observation),
+    unobservedInteraction,
   );
   restores.push(
     () => press.mockRestore(),
@@ -419,3 +428,12 @@ test("homeScreen cancels during iOS foreground verification", async () => {
   expect(press).toHaveBeenCalledTimes(1);
   expect(hierarchy).toHaveBeenCalledTimes(1);
 });
+
+function unobservedInteraction<R extends ObservedActionResult>(
+  block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+): Promise<R & ObservedEnvelope>;
+async function unobservedInteraction(
+  block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+): Promise<ObservedActionResult & ObservedEnvelope> {
+  return block(observation);
+}

@@ -44,8 +44,8 @@ private final class ExpiryHarness {
     var events: [PrototypeEvent] = []
     var tracker = PrototypeClientTracker<Int>()
     let clock = ExpiryClock()
-    lazy var timer = PrototypeIdleTimer(clock: clock) { [unowned self] in
-        dismiss(.ttl)
+    lazy var timer = PrototypeIdleTimer(clock: clock) { [weak self] in
+        self?.dismiss(.ttl)
     }
 
     func show(_ spec: PrototypeSpec) {

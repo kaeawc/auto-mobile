@@ -85,6 +85,10 @@ const androidArgs: AcceptanceArgs = {
   timeoutMs: 10_000,
   confirmLive: false,
   testOwnedDevices: false,
+  operatorKey: Buffer.from("test-only-operator-key-material-32-bytes"),
+  operatorKeyPath: "test-only.key",
+  ownershipManifestPath: "test-only.manifest",
+  build: { entryScript: "/test/dist/src/index.js", buildId: "test-build" },
 };
 
 const iosArgs: AcceptanceArgs = {
@@ -251,6 +255,8 @@ function deviceDescriptionFixture({
 
 function createHarness(
   options: {
+    activeSessions?: number;
+    activeExecutions?: number;
     failObserveFor?: string;
     failReleaseFor?: string;
     failClientCloseFor?: string[];
@@ -786,13 +792,13 @@ function createHarness(
           androidSiblingPresent = !(options.removeAndroidSiblingAfterDuplicateCleanup ?? false);
         } else if (device.deviceId === androidTargetSerial && !options.unchangedAndroidIdentity) {
           if (restartedSessionUuid) {
-            persistedStates.set(restartedSessionUuid, "absent");
+            persistedStates.set(restartedSessionUuid, "target-absent");
             androidTargetPresent = false;
           } else {
             androidTargetSerial = "emulator-5560";
           }
         } else if (device.deviceId === IOS_UDID && restartedSessionUuid) {
-          persistedStates.set(restartedSessionUuid, "absent");
+          persistedStates.set(restartedSessionUuid, "target-absent");
           iosTargetPresent = false;
         }
         return { structuredContent: { killed: true } };
@@ -2188,7 +2194,7 @@ describe("live device acceptance harness", () => {
       writeFile: async (_path, _content, signal) => {
         started.resolve();
         await new Promise<void>((resolve) => {
-          signal.addEventListener("abort", resolve, { once: true });
+          signal.addEventListener("abort", () => resolve(), { once: true });
         });
         lateSuccess = !signal.aborted;
       },
@@ -3740,7 +3746,7 @@ describe("private broker acceptance lane", () => {
         },
       },
     });
-    expect(result.dryRun).toBe(true);
+    expect("dryRun" in result && result.dryRun).toBe(true);
     expect(JSON.parse(logs[0]).plan.filter((p: { crash: boolean }) => p.crash)).toEqual([
       { name: "daemon-restart-with-live-sessions", crash: true },
     ]);

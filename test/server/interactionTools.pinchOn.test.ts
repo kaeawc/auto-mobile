@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   type InteractionToolDependencies,
@@ -96,7 +97,7 @@ describe("pinchOnHandler (registered handler wiring)", () => {
     expect(message).not.toBe("Pinched in");
     // The MCP envelope must agree with the message (#6163): a failed pinch must
     // not read as an ordinary successful result to a conforming client.
-    expect(response.isError).toBe(true);
+    expect(readToolResponse(response).isError).toBe(true);
     const payload = JSON.parse(response.content[0].text) as { success: boolean };
     expect(payload.success).toBe(false);
   });
@@ -108,7 +109,7 @@ describe("pinchOnHandler (registered handler wiring)", () => {
 
     const response = await pinchOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(parseMessage(response)).toBe("Pinched in");
-    expect(response.isError).toBeUndefined();
+    expect(readToolResponse(response).isError).toBeUndefined();
   });
 
   test("forwards the registry signal to pinchOn", async () => {

@@ -43,7 +43,7 @@ function harness(
   adb.setDevices(platform === "android" ? [device] : []);
   devices.setBootedDevices(platform, [device]);
   simctl.setBootedSimulators(platform === "ios" ? [device] : []);
-  simctl.setAvailableSimulators([device]);
+  simctl.setAvailableSimulators([{ ...device, isRunning: true }]);
   simctl.setDeviceInfo(device.deviceId, {
     udid: device.deviceId,
     name: device.name,

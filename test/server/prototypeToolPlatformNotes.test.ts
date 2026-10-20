@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { prototypePlatformNotes } from "../../src/features/prototype/prototypePlatformNotes";
@@ -21,7 +22,7 @@ const android: BootedDevice = {
 };
 const spec: PrototypeSpec = {
   id: "panel",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   state: { open: true },
   root: {
     type: "column",
@@ -83,11 +84,11 @@ describe("prototype tool platform notes", () => {
     unsubscribe();
     restore();
   });
-  async function call(input: unknown, device = ios) {
+  async function call(input: Record<string, unknown>, device = ios) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
     return {
-      raw: response.structuredContent,
-      payload: prototypeOutputSchema.parse(response.structuredContent),
+      raw: readToolResponse(response).structuredContent,
+      payload: prototypeOutputSchema.parse(readToolResponse(response).structuredContent),
     };
   }
   test("successful iOS show returns all five typed notes", async () => {

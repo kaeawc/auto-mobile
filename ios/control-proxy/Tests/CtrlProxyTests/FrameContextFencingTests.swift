@@ -43,14 +43,20 @@ final class FrameContextFencingTests: XCTestCase {
         case .requestMultiFingerSwipe: gestures.multiFingerSwipeCalls
         case .requestPinch: gestures.pinchCalls
         case .requestPathGesture: gestures.pathCalls.count
+        case .requestShake: gestures.shakeCalls
+        case .requestAction: gestures.actionCalls
+        case .requestActivateAccessibilityLink: gestures.activateAccessibilityLinkCalls + gestures.tapCalls
+        default: textInputCalls(for: type, on: gestures)
+        }
+    }
+
+    private func textInputCalls(for type: RequestType, on gestures: FakeGesturePerformer) -> Int {
+        switch type {
         case .requestSetText: gestures.setTextCalls
         case .requestClearText: gestures.clearTextCalls
         case .requestImeAction: gestures.imeActionCalls
         case .requestSelectAll: gestures.selectAllCalls
         case .requestPressKey: gestures.keyCalls.count
-        case .requestShake: gestures.shakeCalls
-        case .requestAction: gestures.actionCalls
-        case .requestActivateAccessibilityLink: gestures.activateAccessibilityLinkCalls + gestures.tapCalls
         default: 0
         }
     }

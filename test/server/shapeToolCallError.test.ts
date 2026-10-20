@@ -99,8 +99,6 @@ describe("shapeToolCallError", () => {
         holder: "session_broker",
         scopeKey: "scope",
         bindingIndex: 0,
-        scopeState: "valid",
-        execSessionUuid: null,
       }),
       new BindingDiscoveryIncompleteError("registry busy"),
       new BindingOwnershipUnconfirmedError("session"),

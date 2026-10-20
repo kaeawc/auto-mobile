@@ -20,8 +20,10 @@ import dev.jasonpearson.automobile.sdk.events.DropCounter
 import dev.jasonpearson.automobile.sdk.events.DropReason
 import dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 
@@ -164,7 +166,13 @@ internal class FileEventPersistence(
     batch.count
       ?: try {
         JSONArray(batch.file.readText()).length()
-      } catch (_: Exception) {
+      } catch (_: IOException) {
+        // Unreadable legacy batches have no count metadata; account for at least one lost event.
+        1
+      } catch (_: JSONException) {
+        // Unreadable legacy batches have no count metadata; account for at least one lost event.
+        1
+      } catch (_: SecurityException) {
         // Unreadable legacy batches have no count metadata; account for at least one lost event.
         1
       }
@@ -237,8 +245,24 @@ internal class FileEventPersistence(
       pendingFiles().mapNotNull { batch ->
         try {
           deserializePendingBatch(batch.batchId, batch.file.readText())
-        } catch (_: Exception) {
+        } catch (_: IOException) {
           // Corrupt files cannot replay; count only a file actually removed.
+          deleteDropped(batch, DropReason.DELIVERY_FAILED)
+          null
+        } catch (_: JSONException) {
+          // Corrupt files cannot replay; count only a file actually removed.
+          deleteDropped(batch, DropReason.DELIVERY_FAILED)
+          null
+        } catch (_: SecurityException) {
+          // Corrupt files cannot replay; count only a file actually removed.
+          deleteDropped(batch, DropReason.DELIVERY_FAILED)
+          null
+        } catch (_: IllegalArgumentException) {
+          // Corrupt files cannot replay; count only a file actually removed.
+          deleteDropped(batch, DropReason.DELIVERY_FAILED)
+          null
+        } catch (_: IllegalStateException) {
+          // A scalar JSON root is rejected by deserializePendingBatch via error().
           deleteDropped(batch, DropReason.DELIVERY_FAILED)
           null
         }
@@ -470,7 +494,7 @@ internal class FileEventPersistence(
         val source =
           try {
             NavigationSourceType.valueOf(sourceName)
-          } catch (_: Exception) {
+          } catch (_: IllegalArgumentException) {
             NavigationSourceType.CUSTOM
           }
         SdkNavigationEvent(
@@ -556,13 +580,13 @@ internal class FileEventPersistence(
         val direction =
           try {
             WebSocketFrameDirection.valueOf(obj.optString("direction"))
-          } catch (_: Exception) {
+          } catch (_: IllegalArgumentException) {
             WebSocketFrameDirection.RECEIVED
           }
         val frameType =
           try {
             WebSocketFrameType.valueOf(obj.optString("frameType"))
-          } catch (_: Exception) {
+          } catch (_: IllegalArgumentException) {
             WebSocketFrameType.TEXT
           }
         SdkWebSocketFrameEvent(

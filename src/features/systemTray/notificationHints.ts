@@ -153,7 +153,7 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
-export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
+export const nodeHasIosNotificationCenterHint = (node: ViewHierarchyNode | null): boolean => {
   const props = getNodeProperties(node);
   if (!props) {
     return false;
@@ -161,6 +161,21 @@ export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
   const className = String(props.className ?? props.class ?? "");
   const contentDesc = rawNodeString(props, ["content-desc", "ios-accessibility-label"]);
   const identifier = rawResourceId(props, ["identifier"]);
+  // iOS 27's captured empty Notification Center exposes generic UIKit classes.
+  // Require the notification list INSIDE its cover-sheet window: the date/clock,
+  // a generic ListCell, or a cover sheet without the list is insufficient.
+  // Evidence: fixtures/ios-notification-center/ios27-notification-center-hierarchy.json.
+  if (
+    className === "UIWindow" &&
+    identifier === "SBCoverSheetWindow" &&
+    traverseForHint(
+      node,
+      (descendant: ViewHierarchyNode) =>
+        rawResourceId(getNodeProperties(descendant)) === "combined-list-view",
+    )
+  ) {
+    return true;
+  }
   return IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
     (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),
   );

@@ -161,7 +161,7 @@ advisory_only_gate() {
     'Node Tests')
       [[ -n "$failures" ]] \
         && grep -Eq '^Node Unit Timing Budget$' <<< "$failures" \
-        && ! grep -Eq '^(Node Unit Tests|Node Host Integration Tests)' <<< "$failures"
+        && ! grep -Eq '^(Node Unit Tests|Node Host Integration Tests|TypeScript Code Coverage)' <<< "$failures"
       ;;
     WebRTC)
       [[ -n "$failures" ]] \

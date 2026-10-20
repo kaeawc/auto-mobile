@@ -73,6 +73,38 @@ describe("BaseVisualChange UI stability platform guard", () => {
     expect(fakeAwaitIdle.getInitializeSignal()).toBe(controller.signal);
   });
 
+  test.each([true, false])(
+    "changed cached window=%s selects the destination only after dispatch",
+    async (changed) => {
+      const instance = createVisualChange("android");
+      const previous = createObserveResult();
+      previous.viewHierarchy!.packageName = "com.android.settings";
+      fakeObserveScreen.setObserveResult(previous);
+      const destination = "com.example.destination";
+      await instance.observedInteraction(
+        async () => {
+          if (changed) {
+            fakeWindow.configureCachedActiveWindow({
+              appId: destination,
+              activityName: "Destination",
+              layoutSeqSum: 2,
+            });
+          }
+          return { success: true };
+        },
+        { changeExpected: false, packageName: "com.android.settings" },
+      );
+      const expected = changed ? destination : "com.android.settings";
+      expect(fakeAwaitIdle.getExecutedOperations()).toContain(
+        `initializeUiStabilityTracking(${expected}, 12000)`,
+      );
+      expect(fakeAwaitIdle.getExecutedOperations()).toContain(
+        `waitForUiStabilityWithState(${expected}, 12000)`,
+      );
+      expect(fakeWindow.getGetActiveCallCount()).toBe(0);
+    },
+  );
+
   test("the default gfxinfo stability wait polls on the injected timer, not the wall clock", async () => {
     const device: BootedDevice = {
       name: "test-device",

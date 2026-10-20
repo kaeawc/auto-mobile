@@ -1,4 +1,5 @@
 import { inheritWrongWindowEvidence } from "../observationFreshness";
+import { inheritSkeletonProjectionValidation } from "../output/ObserveResultOutput";
 import { mkdirSync } from "node:fs";
 import path from "path";
 import {
@@ -613,6 +614,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 /** Return deadlines describe publication, never a cache entry's original capture. */
 function cloneWithoutScreenshotDeadlines(result: ObserveResult): ObserveResult {
   const copy = inheritWrongWindowEvidence(result, structuredClone(result));
+  inheritSkeletonProjectionValidation(result, copy);
   delete copy.screenshotExpiresAt;
   for (const panel of copy.displays ?? []) {
     delete panel.screenshotExpiresAt;

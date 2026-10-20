@@ -10,9 +10,11 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -22,6 +24,7 @@ import { join } from "node:path";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
+import { ActionableError } from "../../src/models/ActionableError";
 import {
   daemonHttpAuthHeaders,
   FileDaemonHttpTokenStore,
@@ -127,21 +130,129 @@ describe("daemon HTTP token runtime file", () => {
     expect(store.read()).toBeUndefined();
   });
 
-  test("atomically replaces a stale file, preserving an already-open reader", () => {
+  test("replaces a stale file after its reader closes", () => {
     writeFileSync(path, "stale");
     const fd = openSync(path, "r");
     try {
-      store.write(TOKEN);
       expect(readFileSync(fd, "utf8")).toBe("stale");
-      expect(store.read()).toBe(TOKEN);
-      expect(readdirSync(directory)).toEqual(["daemon.token"]);
-      if (process.platform !== "win32") {
-        expect(statSync(path).mode & 0o7777).toBe(0o600);
-      }
     } finally {
       closeSync(fd);
     }
+    store.write(TOKEN);
+    expect(store.read()).toBe(TOKEN);
+    expect(readdirSync(directory)).toEqual(["daemon.token"]);
   });
+
+  test.each(["EPERM", "EBUSY", "EACCES"])(
+    "retries transient %s on Windows with synchronous backoff",
+    (code) => {
+      writeFileSync(path, "stale");
+      const sleeps: number[] = [];
+      let attempts = 0;
+      const retrying = new FileDaemonHttpTokenStore(path, new CountingIdGenerator("temporary"), {
+        platform: "win32",
+        sleep: (ms) => {
+          sleeps.push(ms);
+        },
+        renameFile: (source, destination) => {
+          expect(readFileSync(source, "utf8")).toBe(TOKEN);
+          if (process.platform !== "win32") {
+            expect(statSync(source).mode & 0o7777).toBe(0o600);
+          }
+          if (++attempts <= 2) {
+            throw Object.assign(new Error("sharing violation"), { code });
+          }
+          renameSync(source, destination);
+        },
+      });
+      retrying.write(TOKEN);
+      expect(attempts).toBe(3);
+      expect(sleeps).toEqual([10, 20]);
+      expect(retrying.read()).toBe(TOKEN);
+      expect(readdirSync(directory)).toEqual(["daemon.token"]);
+      retrying.remove();
+      expect(existsSync(path)).toBe(false);
+    },
+  );
+
+  test.each([
+    ["win32", "EPERM", 5, [10, 20, 40, 80]],
+    ["darwin", "EPERM", 1, []],
+    ["win32", "ENOENT", 1, []],
+  ] as const)(
+    "bounds rename failure on %s for %s",
+    (platform, code, expectedAttempts, expectedSleeps) => {
+      writeFileSync(path, "stale");
+      const sleeps: number[] = [];
+      let attempts = 0;
+      const failing = new FileDaemonHttpTokenStore(path, new CountingIdGenerator("temporary"), {
+        platform,
+        sleep: (ms) => {
+          sleeps.push(ms);
+        },
+        renameFile: () => {
+          attempts++;
+          throw Object.assign(new Error("rename failed"), { code });
+        },
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(() => failing.write(TOKEN)).toThrow(ActionableError);
+        expect(JSON.stringify(warn.mock.calls)).not.toContain(TOKEN);
+      } finally {
+        warn.mockRestore();
+      }
+      expect(attempts).toBe(expectedAttempts);
+      expect(sleeps).toEqual([...expectedSleeps]);
+      expect(readFileSync(path, "utf8")).toBe("stale");
+      expect(readdirSync(directory)).toEqual(["daemon.token"]);
+      failing.remove();
+      expect(readFileSync(path, "utf8")).toBe("stale");
+    },
+  );
+
+  test("rechecks an unsafe target before retrying a Windows rename", () => {
+    writeFileSync(path, "stale");
+    let attempts = 0;
+    const sleeps: number[] = [];
+    const retrying = new FileDaemonHttpTokenStore(path, new CountingIdGenerator("temporary"), {
+      platform: "win32",
+      renameFile: () => {
+        attempts++;
+        throw Object.assign(new Error("sharing violation"), { code: "EPERM" });
+      },
+      sleep: (ms) => {
+        sleeps.push(ms);
+        rmSync(path);
+        // A directory is unsafe on every platform, without requiring symlink privileges.
+        mkdirSync(path);
+      },
+    });
+    expect(() => retrying.write(TOKEN)).toThrow("Unable to persist daemon HTTP token");
+    expect(attempts).toBe(1);
+    expect(sleeps).toEqual([10]);
+    expect(statSync(path).isDirectory()).toBe(true);
+    expect(readdirSync(directory)).toEqual(["daemon.token"]);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "atomically replaces a stale file, preserving an already-open reader",
+    () => {
+      writeFileSync(path, "stale");
+      const fd = openSync(path, "r");
+      try {
+        store.write(TOKEN);
+        expect(readFileSync(fd, "utf8")).toBe("stale");
+        expect(store.read()).toBe(TOKEN);
+        expect(readdirSync(directory)).toEqual(["daemon.token"]);
+        if (process.platform !== "win32") {
+          expect(statSync(path).mode & 0o7777).toBe(0o600);
+        }
+      } finally {
+        closeSync(fd);
+      }
+    },
+  );
 
   test("creates temporary files exclusively and preserves stale content on failure", () => {
     const collision = `${path}.temporary-1.tmp`;

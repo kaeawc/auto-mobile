@@ -1,8 +1,7 @@
-import {
-  AndroidCtrlProxyServices,
-  defaultAndroidServiceManagerFactory,
-} from "./AndroidCtrlProxyServices";
-import { AndroidObservationStream } from "./AndroidObservationStream";
+import { AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
+import { AndroidCtrlProxyObservationClient } from "./AndroidCtrlProxyObservationClient";
+import { defaultAndroidServiceManagerFactory } from "./AndroidCtrlProxyServices";
+export { type AndroidCtrlProxyClientDeps } from "./AndroidCtrlProxyClientDeps";
 export type {
   AndroidDisplayTransition,
   InteractionEvent,
@@ -37,32 +36,38 @@ export { CTRL_PROXY_CONNECT_ATTEMPTS } from "./AndroidCtrlProxyPortForwarder";
  * - CtrlProxyHighlights: Visual highlight overlays
  */
 
+/**
+ * AndroidCtrlProxyClient - Main client for Android accessibility service.
+ *
+ * This client provides a unified interface to the Android accessibility service
+ * via WebSocket connection. It uses composition with delegate modules to handle
+ * specific functionality:
+ *
+ * - CtrlProxyGestures: Swipe, tap, drag, pinch operations
+ * - CtrlProxyText: setText, clearText, IME actions, select all
+ * - CtrlProxyHierarchy: Hierarchy retrieval, caching, conversion
+ * - CtrlProxyStorage: SharedPreferences operations
+ * - CtrlProxyCertificates: CA cert install/remove, permissions
+ * - CtrlProxyFocus: TalkBack focus, traversal order
+ * - CtrlProxyHighlights: Visual highlight overlays
+ */
 import WebSocket from "ws";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { logger, type Logger } from "../../../utils/logger";
+import { logger } from "../../../utils/logger";
 
 import {
   MapDeviceClientRegistry,
   type DeviceClientRegistry,
 } from "../../../ctrlProxy/deviceClientRegistry";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
-import { InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
-import {
-  ActionableError,
-  BootedDevice,
-  ScreenScaleMetadata,
-  ViewHierarchyResult,
-  toActionableError,
-} from "../../../models";
-import { type IdGenerator } from "../../../utils/IdGenerator";
+import { ActionableError, BootedDevice, toActionableError } from "../../../models";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { PortManager } from "../../../utils/PortManager";
-import { serverConfig } from "../../../utils/ServerConfig";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { daemonDeviceAdmissionGate } from "../../../utils/deviceAdmissionGate";
@@ -70,33 +75,18 @@ import {
   deviceIncarnationToken,
   registerDeviceIncarnationListener,
 } from "../../../utils/deviceIncarnation";
-import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import {
   NETWORK_MOCK_REPORT_TIMEOUT_MS,
   type NetworkMockPushResult,
   type NetworkMockRuleSync,
 } from "../../../utils/networkMockRules";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import { RetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { shellQuote } from "../../../utils/shellQuote";
-import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
-import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import type { StorageSubscription } from "../../storage/storageTypes";
-import { type DeviceConnectionLostNotifier } from "../DeviceConnectionLostNotifier";
 import { WebSocketFactory } from "../DeviceServiceClient";
 import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
-import { ScreenshotBackoffScheduler, ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
-import {
-  ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-  type ScreenshotMetadata,
-} from "../ScreenshotMetadata";
-import { type ScreenGeometryBinding } from "../TrackedScreenGeometry";
-import { AndroidSdkEventIngestor } from "./AndroidSdkEventIngestor";
-import {
-  OBSERVE_RECOVERY_WAIT_MS,
-  type AndroidServiceManagerFactory,
-} from "./AndroidServiceRecovery";
-import { type CtrlProxyForwardLease } from "./CtrlProxyForwardLease";
+import { ScreenshotBackoffScheduler } from "../ScreenshotBackoffScheduler";
+import { OBSERVE_RECOVERY_WAIT_MS } from "./AndroidServiceRecovery";
 import {
   forwardLeaseActivity,
   heldForwardLeaseDeviceIds,
@@ -108,23 +98,13 @@ import {
 } from "./CtrlProxyForwardLeaseRegistry";
 import { NoForwardClientConnectionProbe } from "./NoForwardClientConnectionProbe";
 import { NoOpCtrlProxyForwardLease } from "./NoOpCtrlProxyForwardLease";
-import {
-  ANDROID_CAPABILITY_GATED_COMMANDS,
-  ANDROID_FULL_COMMAND_SET_CAPABILITY,
-  MULTI_FINGER_GESTURE_CAPABILITY,
-  PROTOTYPE_DISPLAY_CAPABILITY,
-  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
-  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
-  PROTOTYPE_STORAGE_CAPABILITY,
-  PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
-  ctrlProxyRequests,
-  serializeCtrlProxyRequest,
-} from "./ctrlProxyProtocol";
+import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { pushNetworkMockRules } from "./networkMockRulesPush";
 
 // Import delegates
-import { type CertificateFileSystem } from "./CtrlProxyCertificates";
 
+// Import types
+// Import delegates
 // Import types
 import type { AndroidCtrlProxy } from "./AndroidCtrlProxy";
 import type { AndroidCtrlProxyClientTestHooks } from "./AndroidCtrlProxyClientTestHooks";
@@ -139,35 +119,6 @@ export type {
   AndroidServiceRecoveryManager,
 } from "./AndroidServiceRecovery";
 
-export interface AndroidCtrlProxyClientDeps {
-  /** Creates the client's WebSocket transport. */
-  webSocketFactory?: WebSocketFactory;
-  /** Schedules connection and request deadlines. */
-  timer?: Timer;
-  /** Stores installed-app metadata. */
-  installedAppsRepository?: InstalledAppsStore;
-  /** Executes retryable operations. */
-  retryExecutor?: RetryExecutor;
-  /** Records app crash events. */
-  crashEventSink?: CrashEventSink;
-  /** Reports lost device connections. */
-  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
-  /** Ingests SDK telemetry, crash, and ANR events. */
-  sdkEventIngestor?: AndroidSdkEventIngestor;
-  /** Logs client lifecycle and cleanup events. */
-  logger?: Logger;
-  /** Provides certificate file operations. */
-  certificateFileSystem?: CertificateFileSystem;
-  /** Coordinates ownership of the device's CtrlProxy forward. */
-  ctrlProxyForwardLease?: CtrlProxyForwardLease;
-  /** Creates the accessibility-service recovery manager. */
-  serviceManagerFactory?: AndroidServiceManagerFactory;
-  /** Generates client and request identifiers. */
-  idGenerator?: IdGenerator;
-  /** Creates a detached observer without service recovery or auto-reconnect. */
-  transientObserver?: boolean;
-}
-
 /**
  * Client for interacting with the AutoMobile Accessibility Service via WebSocket.
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
@@ -175,7 +126,10 @@ export interface AndroidCtrlProxyClientDeps {
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
-export class AndroidCtrlProxyClient extends AndroidCtrlProxyServices implements AndroidCtrlProxy {
+export class AndroidCtrlProxyClient
+  extends AndroidCtrlProxyObservationClient
+  implements AndroidCtrlProxy
+{
   protected getLiveLocalPorts(): ReadonlySet<number> {
     return new Set(
       [
@@ -185,30 +139,6 @@ export class AndroidCtrlProxyClient extends AndroidCtrlProxyServices implements 
         .filter((other) => other.device.deviceId === this.device.deviceId && !other.closed)
         .map((other) => other.localPort),
     );
-  }
-
-  private observationStream: AndroidObservationStream | undefined;
-  private getObservationStream(): AndroidObservationStream {
-    const client = this;
-    return (this.observationStream ??= new AndroidObservationStream({
-      get device() {
-        return client.device;
-      },
-      get hierarchy() {
-        return client.hierarchy;
-      },
-      screenGeometry: client.screenGeometry,
-      isCommandSupported: (messageType) => client.isCommandSupported(messageType),
-      sendMessage: (message) => client.sendMessage(message),
-      captureScreenshotForObservationStream: () => client.captureScreenshotForObservationStream(),
-      startScreenshotBackoff: () => client.startScreenshotBackoff(),
-      pushScreenshotToObservationStream: (...args) =>
-        client.pushScreenshotToObservationStream(...args),
-      createScreenshotBackoffScheduler: (...args) =>
-        client.createScreenshotBackoffScheduler(...args),
-      forwardHierarchyToObservationStream: (...args) =>
-        client.forwardHierarchyToObservationStream(...args),
-    }));
   }
 
   protected override get clientLogTag(): string {
@@ -918,11 +848,6 @@ export class AndroidCtrlProxyClient extends AndroidCtrlProxyServices implements 
       display,
     );
   }
-  convertToViewHierarchyResult(
-    accessibilityHierarchy: AccessibilityHierarchy,
-  ): ViewHierarchyResult {
-    return this.getObservationStream().convertToViewHierarchyResult(accessibilityHierarchy);
-  }
 
   async subscribeStorage(
     packageName: string,
@@ -960,69 +885,6 @@ export class AndroidCtrlProxyClient extends AndroidCtrlProxyServices implements 
   /** Send stop_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStopped(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
-  }
-
-  // ===========================================================================
-  // Hierarchy Navigation Detector
-  // ===========================================================================
-
-  getHierarchyNavigationDetector(): HierarchyNavigationDetector {
-    if (!this.hierarchyNavigationDetector) {
-      this.hierarchyNavigationDetector = new HierarchyNavigationDetector(
-        this.getNavigationGraphManager(),
-        { timer: this.timer },
-      );
-
-      this.hierarchyNavigationDetector.setNavigationCallback((info) => {
-        if (info.packageName && info.screenFingerprint) {
-          if (!serverConfig.isNavigationScreenshotsEnabled()) {
-            return;
-          }
-          const appId = info.packageName;
-          const screenName = `screen_${info.screenFingerprint.substring(0, 12)}`;
-          NavigationScreenshotManager.getInstance()
-            .captureAndStore(this.device, this.adb, appId, screenName)
-            .then((screenshotPath) => {
-              if (screenshotPath) {
-                this.getNavigationGraphManager()
-                  .updateNodeScreenshot(appId, screenName, screenshotPath)
-                  .catch((err) =>
-                    logger.warn(`[CTRL_PROXY] Failed to update hierarchy screenshot: ${err}`),
-                  );
-              }
-            })
-            .catch((err) =>
-              logger.debug(`[CTRL_PROXY] Hierarchy screenshot capture skipped: ${err}`),
-            );
-        }
-      });
-    }
-    return this.hierarchyNavigationDetector;
-  }
-
-  resetHierarchyNavigationDetector(): void {
-    if (this.hierarchyNavigationDetector) {
-      this.hierarchyNavigationDetector.reset();
-    }
-  }
-
-  // ===========================================================================
-  // Screenshot Backoff
-  // ===========================================================================
-
-  cancelScreenshotBackoff(): void {
-    if (this.screenshotBackoffScheduler) {
-      // Fully quiesce (including the trailing throttle capture) — this is a teardown/quiesce path
-      // (disconnect, pre-action), not a sequence restart, so nothing should survive (issue #4927).
-      this.screenshotBackoffScheduler.stop();
-    }
-  }
-
-  refreshObservationStreamScreenshotCadence(): void {
-    this.screenshotBackoffScheduler?.rescheduleKeepAlive();
-  }
-  refreshObservationStreamHierarchyCadence(intervalMs?: number | null): void {
-    return this.getObservationStream().refreshObservationStreamHierarchyCadence(intervalMs);
   }
 
   // ===========================================================================
@@ -1137,96 +999,6 @@ export class AndroidCtrlProxyClient extends AndroidCtrlProxyServices implements 
         buildPayload(message as Message & { requestId: string }),
       );
     }
-  }
-  protected pushHierarchyToObservationStream(
-    wireHierarchy: AccessibilityHierarchy,
-    frameContext?: string,
-  ): void {
-    return this.getObservationStream().pushHierarchyToObservationStream(
-      wireHierarchy,
-      frameContext,
-    );
-  }
-
-  recordInitialObservationStreamHierarchy(
-    hierarchy: ViewHierarchyResult,
-    captureSequence: number | null,
-  ): void {
-    return this.getObservationStream().recordInitialObservationStreamHierarchy(
-      hierarchy,
-      captureSequence,
-    );
-  }
-
-  pushScreenshotToObservationStream(
-    screenshotBase64: string,
-    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
-  ): void {
-    return this.getObservationStream().pushScreenshotToObservationStream(
-      screenshotBase64,
-      metadata,
-      binding,
-      frameContext,
-      rotation,
-    );
-  }
-
-  protected updateCachedScreenDimensions(
-    hierarchy: Pick<
-      AccessibilityHierarchy,
-      "windows" | "nativeScale" | "pixelWidth" | "pixelHeight"
-    >,
-  ): void {
-    return this.getObservationStream().updateCachedScreenDimensions(hierarchy);
-  }
-
-  getScreenScaleMetadata(): ScreenScaleMetadata | null {
-    return this.getObservationStream().getScreenScaleMetadata();
-  }
-
-  protected getScreenshotBackoffScheduler(): ScreenshotBackoffScheduler {
-    return this.getObservationStream().getScreenshotBackoffScheduler();
-  }
-
-  async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
-    return this.getScreenshotCapture().captureForObservationStream();
-  }
-  startScreenshotBackoff(): void {
-    return this.getObservationStream().startScreenshotBackoff();
-  }
-
-  protected isCommandSupported(messageType: string): boolean {
-    if (this.rejectedCommands.has(messageType)) {
-      return false;
-    }
-    if (this.supportedCommands?.has(ANDROID_FULL_COMMAND_SET_CAPABILITY)) {
-      return this.supportedCommands.has(messageType);
-    }
-    // Legacy behavior for services that predate full_command_set_v1 (older APKs).
-    if (
-      [
-        "gesture_display_id_v1",
-        "tap_double_v1",
-        MULTI_FINGER_GESTURE_CAPABILITY,
-        PROTOTYPE_DISPLAY_CAPABILITY,
-        PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
-        PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
-        PROTOTYPE_MULTI_SURFACE_CAPABILITY,
-        PROTOTYPE_STORAGE_CAPABILITY,
-      ].includes(messageType)
-    ) {
-      return this.supportedCommands?.has(messageType) === true;
-    }
-    if (this.supportedCommands === null) {
-      return true;
-    }
-    if (ANDROID_CAPABILITY_GATED_COMMANDS.has(messageType)) {
-      return this.supportedCommands.has(messageType);
-    }
-    return true;
   }
 
   // Cancel only this caller's wait; connection establishment is shared with other operations.

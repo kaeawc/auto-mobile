@@ -48,7 +48,7 @@ import {
   type McpToolCallResult,
   type ToolCall,
 } from "./toolCallDispatch";
-import { shapeToolCallError } from "./shapeToolCallError";
+import { shapeToolCallError } from "../daemon/shapeToolCallError";
 import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
 import { SESSION_EXPERIMENTAL_CAPABILITY } from "../devices/sessionConfig";
 import type { SessionBrokerResult } from "../devices/sessionBrokerResult";

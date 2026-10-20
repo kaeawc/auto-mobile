@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { suspendedRefusal } from "../helpers/prototypeSuspendedCapture";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
-import { shapeToolCallError, isTypedToolRefusal } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError, isTypedToolRefusal } from "../../src/daemon/shapeToolCallError";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 
 test("prototype suspension uses the shared MCP and socket typed refusal fields", () => {

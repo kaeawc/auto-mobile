@@ -101,6 +101,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
 import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import dev.jasonpearson.automobile.protocol.RequestGlobalAction
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
@@ -1068,24 +1069,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   private val caCertificateController by lazy {
     CaCertificateController(
-      devicePolicy =
-        object : CaCertificateController.DevicePolicy {
-          override fun isDeviceOwnerApp(packageName: String) =
-            devicePolicyManager.isDeviceOwnerApp(packageName)
+      dependencies =
+        CaCertificateDependencies(
+          devicePolicy =
+            object : CaCertificateController.DevicePolicy {
+              override fun isDeviceOwnerApp(packageName: String) =
+                devicePolicyManager.isDeviceOwnerApp(packageName)
 
-          override fun isAdminActive() = devicePolicyManager.isAdminActive(deviceAdminComponent)
+              override fun isAdminActive() = devicePolicyManager.isAdminActive(deviceAdminComponent)
 
-          override fun installCaCert(certBytes: ByteArray) =
-            devicePolicyManager.installCaCert(deviceAdminComponent, certBytes)
+              override fun installCaCert(certBytes: ByteArray) =
+                devicePolicyManager.installCaCert(deviceAdminComponent, certBytes)
 
-          override fun uninstallCaCert(certBytes: ByteArray) =
-            devicePolicyManager.uninstallCaCert(deviceAdminComponent, certBytes)
+              override fun uninstallCaCert(certBytes: ByteArray) =
+                devicePolicyManager.uninstallCaCert(deviceAdminComponent, certBytes)
 
-          override fun getInstalledCaCerts(): List<ByteArray> =
-            devicePolicyManager.getInstalledCaCerts(deviceAdminComponent)
-        },
-      packageName = packageName,
-      filesDir = { filesDir },
+              override fun getInstalledCaCerts(): List<ByteArray> =
+                devicePolicyManager.getInstalledCaCerts(deviceAdminComponent)
+            },
+          packageName = packageName,
+          filesDir = { filesDir },
+        ),
       perfProvider = perfProvider,
       timeProvider = timeProvider,
       resultBroadcaster = resultBroadcaster,
@@ -1260,9 +1264,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       serviceScope = serviceScope,
       viewHierarchyExtractor = viewHierarchyExtractor,
       displayController = displayController,
-      perfProvider = perfProvider,
-      timeProvider = timeProvider,
-      workStats = workStats,
+      diagnostics =
+        HierarchyDiagnosticsDependencies(
+          perfProvider = perfProvider,
+          timeProvider = timeProvider,
+          workStats = workStats,
+        ),
       jsonCompact = jsonCompact,
     )
   }
@@ -1464,26 +1471,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       serviceScope = serviceScope,
       perfProvider = perfProvider,
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      jsonCompact = jsonCompact,
-      responseSender =
-        object : TextInputController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+      responses =
+        TextInputResponseDependencies(
+          resultBroadcaster = resultBroadcaster,
+          jsonCompact = jsonCompact,
+          responseSender =
+            object : TextInputController.ResponseSender {
+              override fun isRunning() =
+                ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
-          override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
-          }
+              override suspend fun broadcastWithPerf(
+                messageBuilder: (perfTiming: JsonElement?) -> String,
+              ) {
+                webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+              }
 
-          override suspend fun broadcastWithPerfSync(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
-          }
+              override suspend fun broadcastWithPerfSync(
+                messageBuilder: (perfTiming: JsonElement?) -> String,
+              ) {
+                webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
+              }
 
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+              override fun connectionCount() = webSocketServer.getConnectionCount()
+            },
+        ),
     )
   /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
   private val imeController by lazy {
@@ -1602,19 +1613,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)
         },
       scope = { serviceScope },
-      perfProvider = perfProvider,
-      timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      responseSender =
-        object : GestureController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+      reporting =
+        GestureReportingDependencies(
+          perfProvider = perfProvider,
+          timeProvider = timeProvider,
+          resultBroadcaster = resultBroadcaster,
+          responseSender =
+            object : GestureController.ResponseSender {
+              override fun isRunning() =
+                ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
-          override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) = webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+              override suspend fun broadcastWithPerf(
+                messageBuilder: (perfTiming: JsonElement?) -> String,
+              ) = webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
 
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+              override fun connectionCount() = webSocketServer.getConnectionCount()
+            },
+        ),
       gestureThreadFactory = { gestureThreadFactory() },
     )
   @Volatile private var lastWindowClassName: String? = null
@@ -2291,15 +2306,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         scope = scope,
         dispatcher = dispatcher,
         delegate = delegate,
-        reply = ::replyToQueuedCommand,
-        hasRequestOwner = { requestId ->
-          ::webSocketServer.isInitialized &&
-            webSocketServer.isRunning() &&
-            webSocketServer.hasRequestOwner(requestId)
-        },
-        logError = { message, error -> Log.e(TAG, message, error) },
-        logWarning = { message -> Log.w(TAG, message) },
-        logDebug = { message -> Log.d(TAG, message) },
+        replies =
+          ConnectionReplyDependencies(
+            reply = ::replyToQueuedCommand,
+            hasRequestOwner = { requestId ->
+              ::webSocketServer.isInitialized &&
+                webSocketServer.isRunning() &&
+                webSocketServer.hasRequestOwner(requestId)
+            },
+          ),
+        logging =
+          ConnectionLogDependencies(
+            logError = { message, error -> Log.e(TAG, message, error) },
+            logWarning = { message -> Log.w(TAG, message) },
+            logDebug = { message -> Log.d(TAG, message) },
+          ),
         capacity = capacity,
       )
     return QueuedWebSocketMessageHandler(delegate, commands)
@@ -2355,13 +2376,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
     gestureController.performTapCoordinates(
-      requestId,
-      x,
-      y,
-      50L,
-      frameContext,
-      displayId,
-      doubleTap = true,
+      RequestTapCoordinates(
+        requestId = requestId,
+        x = x,
+        y = y,
+        duration = 50L,
+        frameContext = frameContext,
+        displayId = displayId,
+        doubleTap = true,
+      ),
     )
   }
 
@@ -2374,7 +2397,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    gestureController.performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
+    gestureController.performTapCoordinates(
+      RequestTapCoordinates(
+        requestId = requestId,
+        x = x,
+        y = y,
+        duration = duration,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
+    )
   }
 
   override suspend fun requestSwipe(request: RequestSwipe) {
@@ -2388,7 +2420,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
-    gestureController.performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
+    gestureController.performSwipe(
+      RequestSwipe(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        duration = duration,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
+    )
   }
 
   override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
@@ -2402,15 +2445,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     gestureController.performTwoFingerSwipe(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      offset,
-      displayId,
-      request.fingerCount,
+      RequestTwoFingerSwipe(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        duration = duration,
+        offset = offset,
+        displayId = displayId,
+        fingerCount = request.fingerCount,
+      ),
     )
   }
 
@@ -2428,16 +2473,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
     gestureController.performDrag(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      frameContext,
-      displayId,
+      RequestDrag(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        pressDurationMs = pressDurationMs,
+        dragDurationMs = dragDurationMs,
+        holdDurationMs = holdDurationMs,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
     )
   }
 
@@ -2452,25 +2499,29 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     gestureController.performPinch(
-      requestId,
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      displayId,
+      RequestPinch(
+        requestId = requestId,
+        centerX = centerX,
+        centerY = centerY,
+        distanceStart = distanceStart,
+        distanceEnd = distanceEnd,
+        rotationDegrees = rotationDegrees,
+        duration = duration,
+        displayId = displayId,
+      ),
     )
   }
 
   override suspend fun requestGestureStart(request: RequestGestureStart) {
     gestureController.startStream(
-      request.requestId,
-      request.gestureId,
-      request.x,
-      request.y,
-      request.displayId,
-      CommandOriginContext.currentClient(),
+      RequestGestureStart(
+        requestId = request.requestId,
+        gestureId = request.gestureId,
+        x = request.x,
+        y = request.y,
+        displayId = request.displayId,
+      ),
+      requester = CommandOriginContext.currentClient(),
     )
   }
 
@@ -2491,11 +2542,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     cancel: Boolean,
   ) {
     gestureController.endStream(
-      requestId,
-      gestureId,
-      x,
-      y,
-      cancel,
+      RequestGestureEnd(
+        requestId = requestId,
+        gestureId = gestureId,
+        x = x,
+        y = y,
+        cancel = cancel,
+      ),
       requester = CommandOriginContext.currentClient(),
     )
   }
@@ -3106,10 +3159,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val eventPackage = event.packageName?.toString()
     val ownWindowDecision =
       ownWindowEventDecision(
-        eventPackage,
-        packageName,
-        event.windowId,
-        ownWindowTypeMemo,
+        OwnWindowEvent(eventPackage, packageName, event.windowId),
+        memo = ownWindowTypeMemo,
         appLayerShowing = {
           ::prototypeController.isInitialized && prototypeController.isAppLayerShowing
         },

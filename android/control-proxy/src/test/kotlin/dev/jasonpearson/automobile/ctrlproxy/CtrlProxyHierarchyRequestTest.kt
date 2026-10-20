@@ -51,7 +51,13 @@ class CtrlProxyHierarchyRequestTest {
           checkNotNull(oldScope.coroutineContext[kotlinx.coroutines.CoroutineExceptionHandler]),
       )
     val debouncer =
-      HierarchyDebouncer(scope = scope, extractHierarchy = { _, options -> extract(options) })
+      HierarchyDebouncer(
+        scope = scope,
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, options -> extract(options) },
+          ),
+      )
     private val handler =
       proxy.queuedMessageHandler(CtrlProxyMessageHandler(proxy), scope, dispatcher)
     val server =

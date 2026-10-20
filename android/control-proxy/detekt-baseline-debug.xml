@@ -103,37 +103,10 @@
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSelectAll</ID>
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performSetText</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
-    <ID>LongParameterList:CaCertificateController.kt:CaCertificateController</ID>
-    <ID>LongParameterList:ConnectionCommandQueue.kt:ConnectionCommandQueue</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastActionResult</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun handledExceptionEventResponse: HandledExceptionEvent</ID>
     <ID>LongParameterList:CtrlProxyActions.kt:CtrlProxyActions$suspend fun showPrototype</ID>
-    <ID>LongParameterList:CtrlProxyIme.kt:CtrlProxyIme$private fun awaitInputConnection</ID>
-    <ID>LongParameterList:DragStrokeSession.kt:DragStrokeSession</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$fun endStream</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$fun performDrag</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$fun performPinch</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$fun performSwipe</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$fun performTapCoordinates</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$fun performTwoFingerSwipe</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$fun startStream</ID>
-    <ID>LongParameterList:GestureController.kt:GestureController$private fun dispatchGestureWithResult</ID>
-    <ID>LongParameterList:GestureStreamRouter.kt:GestureStreamRouter$fun end</ID>
-    <ID>LongParameterList:GestureStreamRouter.kt:GestureStreamRouter$fun start</ID>
-    <ID>LongParameterList:HierarchyController.kt:HierarchyController</ID>
-    <ID>LongParameterList:HierarchyDebouncer.kt:HierarchyDebouncer</ID>
-    <ID>LongParameterList:HighlightAnimator.kt:HighlightAnimator</ID>
-    <ID>LongParameterList:ImeCommitDriver.kt:ImeCommitDriver$fun commit</ID>
-    <ID>LongParameterList:ImeCommitDriver.kt:ImeCommitDriver.Companion$internal fun reconcileDecision: Reconciliation</ID>
-    <ID>LongParameterList:ImeController.kt:ImeController</ID>
-    <ID>LongParameterList:InsertTextPlanner.kt:internal fun planInsertText: InsertTextPlan</ID>
-    <ID>LongParameterList:InsertTextSettle.kt:internal suspend fun awaitPrecedingInput: Boolean</ID>
-    <ID>LongParameterList:MultiFingerGeometry.kt:internal fun computeMultiFingerStrokes: List&lt;FingerStroke&gt;</ID>
-    <ID>LongParameterList:NavigationEventAccumulator.kt:NavigationEventAccumulator$fun addEvent: TimestampedNavigationEvent</ID>
-    <ID>LongParameterList:OwnWindowTypeMemo.kt:internal fun ownWindowEventDecision: OwnWindowEventDecision</ID>
-    <ID>LongParameterList:PinchGeometry.kt:internal fun computePinchFingerPositions: PinchFingerPositions</ID>
     <ID>LongParameterList:PrototypeCarousel.kt:internal fun pagerIndicatorDots: List&lt;PrototypeDot&gt;</ID>
     <ID>LongParameterList:PrototypeController.kt:PrototypeController</ID>
     <ID>LongParameterList:PrototypeController.kt:PrototypeController$suspend fun show</ID>
@@ -155,9 +128,6 @@
     <ID>LongParameterList:SavedPrototypeController.kt:SavedPrototypeController</ID>
     <ID>LongParameterList:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore</ID>
     <ID>LongParameterList:SavedPrototypeStore.kt:SavedPrototypeLoadResult.Loaded</ID>
-    <ID>LongParameterList:SdkEventBatchProcessor.kt:SdkEventBatchProcessor$fun enqueueNavigationEvent: Boolean</ID>
-    <ID>LongParameterList:StorageSubscriptionManager.kt:StorageSubscriptionManager</ID>
-    <ID>LongParameterList:TextInputController.kt:TextInputController</ID>
     <ID>NestedBlockDepth:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$override fun pin: PinOutcome</ID>
     <ID>RedundantSuspendModifier:PrototypeTrace.kt:PrototypeTrace$suspend</ID>
     <ID>RedundantSuspendModifier:SavedPrototypeScreenState.kt:suspend</ID>

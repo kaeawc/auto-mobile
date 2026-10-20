@@ -1,4 +1,5 @@
 import { taskEligibleByName } from "../../src/server/tasks/toolCallTasks";
+import "../../src/server";
 import {
   afterAll,
   afterEach,

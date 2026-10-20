@@ -102,6 +102,8 @@ export const SIGNAL_RULES: readonly SignalRule[] = [
  * leaks, cross-file state that the static signals miss.
  */
 export const SHARED_PROCESS_EXCLUSIONS: Readonly<Record<string, string>> = {
+  "test/daemon/statelessMcpServerFactory.test.ts":
+    "asserts the daemon factory port's unregistered default before src/server loads",
   "test/daemon/deviceSnapshotIncarnationInvalidator.test.ts":
     "asserts the daemon port's no-op default before the server registers its invalidator",
   "test/features/action/ClearAppData.test.ts":

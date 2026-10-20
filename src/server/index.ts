@@ -11,7 +11,11 @@ import { logger } from "../utils/logger";
 
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
-import type { SessionToolBindingStore } from "./sessionToolBindingStore";
+import {
+  registerMcpServerFactory,
+  type McpServerFactoryOptions,
+  type McpSessionToolBindingStore,
+} from "../daemon/mcpServerFactoryPort";
 import {
   createReleaseSubscribedBindingStore,
   daemonSessionToolBindingStore,
@@ -26,7 +30,6 @@ import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
 import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
 import { installTasksProtocol } from "./tasks/installTasksProtocol";
 import type { TaskManager } from "../daemon/tasks/TaskManager";
-import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
 import {
   createTaskAwareToolCallExecutor,
   TASK_ELIGIBILITY,
@@ -91,45 +94,8 @@ import {
   type ToolSelectionProfileRegistry,
 } from "../daemon/toolSelectionProfileRegistry";
 
-export interface McpServerOptions {
-  iosDependencies?: IosDoctorDependencies;
-  debug?: boolean;
-  sessionContext?: {
-    sessionId?: string;
-    initialSessionToolBinding?: string;
-    initialReleasedSession?: string;
-    initialToolSelectionProfile?: string;
-  };
+export interface McpServerOptions extends McpServerFactoryOptions {
   planExecutionLock?: PlanExecutionLock;
-  daemonMode?: boolean;
-  /**
-   * The request's session key (#4678): the `MCP_SESSION_KEY_HEADER` value the
-   * daemon's HTTP endpoint read for this request. Session-tool bindings are keyed
-   * on it, so a binding survives across per-request servers that present the same key.
-   * The header wins over an in-band `__mcpSessionId` unless {@link trustForwardedMcpSessionId}
-   * is set (#13315).
-   */
-  requestMcpSessionId?: string;
-  /**
-   * The server answers the daemon's own in-process forward (stdio proxy / socket-forwarded
-   * calls): the in-band `__mcpSessionId` it carries names the originating client and takes
-   * precedence over {@link requestMcpSessionId}, the connection key. Never set for direct HTTP
-   * clients, whose in-band id is only a fallback when they sent no header (#13315).
-   */
-  trustForwardedMcpSessionId?: boolean;
-  /**
-   * The server answers a single request and is closed after it (#4678). Keyed
-   * bindings then live in the daemon-scoped {@link daemonSessionToolBindingStore}
-   * instead of a store private to this server.
-   */
-  stateless?: boolean;
-  /** Overrides where keyed bindings live; tests share one store across servers. */
-  sessionToolBindingStore?: SessionToolBindingStore;
-  /**
-   * Per-daemon live-acceptance capability captured at startup. Unlike tool
-   * arguments, this is a server-construction boundary clients cannot set.
-   */
-  acceptanceDiscoveryCapability?: string;
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled"> &
     Partial<Pick<SessionToolSelectionService, "setEnabled" | "deleteSession" | "getOverride">>;
   toolSelectionSessionManager?: ToolSelectionSessionManager;
@@ -149,14 +115,7 @@ export interface McpServerOptions {
    * direct stdio does not. Tests inject a manager, the eligible tools and the keepalive.
    */
   taskManager?: TaskManager;
-  /**
-   * Who owns the tasks this server creates and serves, when not the request's session key: a
-   * control-socket forward from the stdio proxy names the proxy, so its tasks survive the proxy's
-   * reconnects (a socket session id does not).
-   */
-  taskOwnerKey?: string;
   taskEligibleTools?: TaskEligibility;
-  taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
 
 // `formatToolParamError` lives in its own module so non-server callers (e.g.
@@ -297,7 +256,7 @@ function installTasks(
 }
 
 function resolveBindingStore(options: McpServerOptions): {
-  store: SessionToolBindingStore;
+  store: McpSessionToolBindingStore;
   owned: boolean;
 } {
   if (options.sessionToolBindingStore) {
@@ -513,3 +472,5 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 export function refreshMcpResourceList(): Promise<void> {
   return ResourceRegistry.refreshBeforeList();
 }
+
+registerMcpServerFactory({ createMcpServer, refreshMcpResourceList });

@@ -1,3 +1,4 @@
+import "../../src/server";
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";

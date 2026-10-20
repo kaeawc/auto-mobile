@@ -1,3 +1,4 @@
+import "../../src/server/daemonSessionToolBindingStore";
 import { makeSessionManager } from "../helpers/sessionManagerSuite";
 import { unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
 import { z } from "zod/v4";

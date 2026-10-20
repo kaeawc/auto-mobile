@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import "../../src/server";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
@@ -38,6 +39,7 @@ import {
   createStatelessMcpServer,
 } from "../../src/daemon/statelessMcpServerFactory";
 import type { DaemonRequest } from "../../src/daemon/types";
+import { createIosDoctorDependencies } from "../../src/doctor/checks/ios";
 import {
   getToolSelectionContext,
   runWithToolSelectionContext,
@@ -190,7 +192,12 @@ async function startHarness(
 ): Promise<Harness> {
   const store = new SessionToolBindingStore();
   const scopeIds = new CountingIdGenerator("scope");
-  const serverBase = { sessionToolBindingStore: store };
+  // Match DaemonMcpServices: one doctor dependency set per daemon, shared by its requests.
+  // Recreating it per refusal would rebuild every resource registry on every HTTP request.
+  const serverBase = {
+    sessionToolBindingStore: store,
+    iosDependencies: createIosDoctorDependencies(),
+  };
   const cancelScopeExecutions = (
     scope: string,
     reason: Parameters<typeof executionTracker.cancelSessionExecutions>[1],

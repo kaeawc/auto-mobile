@@ -1,3 +1,4 @@
+import "../../src/server";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Daemon } from "../../src/daemon/daemon";

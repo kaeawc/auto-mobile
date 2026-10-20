@@ -257,10 +257,9 @@ path (`UPDATE_*` env var, `--update`) and any allow-list plumbing, and make the 
 assert "no violations" outright (a warn-level oxlint rule becomes `error` and leaves
 the ratchet's rule list in `scripts/oxlint-baseline.sh`). Named `EXEMPT_*` lists that
 encode deliberate, reasoned exceptions are not baselines and stay. Import-direction
-tiers follow the same rule: only tiers marked `baselined: true` in
-`scripts/check-tier-import-direction.ts` keep a file under
-`scripts/import-direction-baselines/`; `scripts/check-utils-import-direction.ts` has
-no baseline at all.
+tiers enforce no upward imports outright through
+`scripts/check-tier-import-direction.ts` and `scripts/check-utils-import-direction.ts`;
+neither guard has a baseline or regeneration path.
 
 ## DaemonState.getInstance() guard
 

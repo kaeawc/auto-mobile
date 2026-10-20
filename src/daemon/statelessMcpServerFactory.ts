@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { createMcpServer, type McpServerOptions } from "../server";
+import { createMcpServer, type McpServerFactoryOptions } from "./mcpServerFactoryPort";
 import { daemonTaskLeaseKeepalive } from "./tasks/daemonTaskManager";
 import {
   DAEMON_RELEASED_SESSION_HEADER,
@@ -27,7 +27,7 @@ export type McpRequestContextSource =
   | { readonly headers: IncomingHttpHeaders }
   | McpForwardRequestContext;
 
-/** The request-derived part of `McpServerOptions.sessionContext`. */
+/** The request-derived part of `McpServerFactoryOptions.sessionContext`. */
 export interface McpRequestSessionContext {
   initialSessionToolBinding?: string;
   initialReleasedSession?: string;
@@ -36,7 +36,7 @@ export interface McpRequestSessionContext {
 
 /** The daemon-wide part of a request server's options, fixed when the daemon starts. */
 export type StatelessMcpServerBase = Pick<
-  McpServerOptions,
+  McpServerFactoryOptions,
   "iosDependencies" | "debug" | "acceptanceDiscoveryCapability" | "sessionToolBindingStore"
 >;
 
@@ -111,4 +111,4 @@ export function createStatelessMcpServer(
 }
 
 /** The resource-list freshness hook shared by the MCP handler and control discovery cache. */
-export { refreshMcpResourceList } from "../server";
+export { refreshMcpResourceList } from "./mcpServerFactoryPort";

@@ -4,6 +4,7 @@ import {
   SessionOutsideBoundSessionError,
 } from "../daemon/deviceOutsideBoundSessionRefusal";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import type { McpSessionToolBindingStore } from "../daemon/mcpServerFactoryPort";
 import {
   SessionToolBindingStore,
   type SessionToolBindingLocalState,
@@ -43,7 +44,7 @@ export class SessionToolBinding implements SessionToolBindingLocalState {
       boundSessionUuid: string,
     ) => boolean = () => false,
     /** Where keyed bindings live; a private store keeps them to this instance. */
-    private readonly store: SessionToolBindingStore = new SessionToolBindingStore(),
+    private readonly store: McpSessionToolBindingStore = new SessionToolBindingStore(),
   ) {
     this.initialSessionUuid = initialSessionUuid;
     this.initialToolSelectionProfileUuid = initialToolSelectionProfileUuid;

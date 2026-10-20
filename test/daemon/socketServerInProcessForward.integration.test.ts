@@ -1,3 +1,4 @@
+import "../../src/server";
 import {
   afterAll,
   afterEach,

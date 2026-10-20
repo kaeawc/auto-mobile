@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { TIER_RULES, isViolation } from "../../scripts/check-tier-import-direction";
+import {
+  TIER_RULES,
+  isViolation,
+  checkTierImports,
+} from "../../scripts/check-tier-import-direction";
 
 const rule = (tier: string) => TIER_RULES.find((r) => r.tier === tier)!;
 
@@ -32,5 +36,17 @@ describe("tier import direction rules (#11789)", () => {
     expect(isViolation(daemon, "src/db/database")).toBe(false);
     expect(isViolation(daemon, "src/features/video")).toBe(false);
     expect(isViolation(daemon, "src/server/appearanceManager")).toBe(true);
+  });
+
+  test("a daemon -> server edge fails outright without a baseline", () => {
+    const errors: string[] = [];
+    const edge = "src/daemon/fixture.ts -> src/server";
+    expect(
+      checkTierImports(rule("daemon"), [edge], {
+        error: (message: string) => errors.push(message),
+        log: () => {},
+      }),
+    ).toBe(false);
+    expect(errors).toEqual(["error: daemon import direction violations:", edge]);
   });
 });

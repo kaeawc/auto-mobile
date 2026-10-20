@@ -388,7 +388,6 @@ test/daemon/socketServerToolUnavailableCode.test.ts
 test/daemon/socketServerTypedRefusal.test.ts
 test/daemon/startupLockHolderGeneration.test.ts
 test/daemon/startupPrologue.test.ts
-test/daemon/statelessMcpServerFactory.test.ts
 test/daemon/streamSocketAuth.test.ts
 test/daemon/streamSubscriptionPolicy.test.ts
 test/daemon/strokeSurvivesHolderRebind.test.ts

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { IncomingHttpHeaders } from "node:http";
 import {
   DAEMON_RELEASED_SESSION_HEADER,
@@ -7,12 +7,101 @@ import {
 } from "../../src/daemon/constants";
 import {
   buildMcpRequestContext,
+  createStatelessMcpServer,
+  refreshMcpResourceList,
   type McpForwardRequestContext,
 } from "../../src/daemon/statelessMcpServerFactory";
+import {
+  registerMcpServerFactory,
+  type McpServerFactoryOptions,
+} from "../../src/daemon/mcpServerFactoryPort";
+import { daemonTaskLeaseKeepalive } from "../../src/daemon/tasks/daemonTaskManager";
+import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 
 const BOUND = "11111111-2222-4333-8444-555555555555";
 const RELEASED = "66666666-7777-4888-8999-aaaaaaaaaaaa";
 const PROFILE = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+
+describe("daemon MCP factory port", () => {
+  let server: ReturnType<typeof createSdkMcpServer>;
+  beforeAll(() => {
+    server = createSdkMcpServer({ name: "factory-port-test", version: "1.0.0" }, {});
+  });
+
+  test("fails clearly before registration and resource refresh is safe", async () => {
+    expect(() =>
+      createStatelessMcpServer({}, {}, { requestScopeId: "scope", requestMcpSessionId: "key" }),
+    ).toThrow("The MCP server factory is not registered");
+    await refreshMcpResourceList();
+  });
+
+  test("forwards request options and resolves late registrations and restores", async () => {
+    const seen: McpServerFactoryOptions[] = [];
+    let refreshed = 0;
+    const restore = registerMcpServerFactory({
+      createMcpServer: (options) => {
+        seen.push(options);
+        return server;
+      },
+      refreshMcpResourceList: async () => {
+        refreshed++;
+      },
+    });
+    try {
+      expect(
+        createStatelessMcpServer(
+          { debug: true, acceptanceDiscoveryCapability: "capability" },
+          { initialSessionToolBinding: BOUND },
+          {
+            requestScopeId: "scope",
+            requestMcpSessionId: "key",
+            trustedForwarder: true,
+            taskOwnerKey: "proxy",
+          },
+        ),
+      ).toBe(server);
+      expect(seen).toEqual([
+        {
+          debug: true,
+          acceptanceDiscoveryCapability: "capability",
+          sessionContext: { initialSessionToolBinding: BOUND, sessionId: "scope" },
+          daemonMode: true,
+          requestMcpSessionId: "key",
+          trustForwardedMcpSessionId: true,
+          taskOwnerKey: "proxy",
+          stateless: true,
+          taskLeaseKeepalive: daemonTaskLeaseKeepalive(),
+        },
+      ]);
+      const restoreNested = registerMcpServerFactory({
+        createMcpServer: () => {
+          throw new Error("nested factory");
+        },
+        refreshMcpResourceList: async () => {
+          refreshed += 10;
+        },
+      });
+      try {
+        expect(() =>
+          createStatelessMcpServer({}, {}, { requestScopeId: "scope", requestMcpSessionId: "key" }),
+        ).toThrow("nested factory");
+        await refreshMcpResourceList();
+      } finally {
+        restoreNested();
+      }
+      createStatelessMcpServer({}, {}, { requestScopeId: "direct", requestMcpSessionId: "key" });
+      expect(seen[1].trustForwardedMcpSessionId).toBeUndefined();
+      expect(seen[1].taskOwnerKey).toBeUndefined();
+      await refreshMcpResourceList();
+      expect(refreshed).toBe(11);
+    } finally {
+      restore();
+    }
+    expect(() =>
+      createStatelessMcpServer({}, {}, { requestScopeId: "scope", requestMcpSessionId: "key" }),
+    ).toThrow("The MCP server factory is not registered");
+  });
+});
 
 /**
  * The headers the loopback HTTP client sends for a forward (#11820): a header only for a

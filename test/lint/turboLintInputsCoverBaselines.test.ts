@@ -18,10 +18,6 @@ const LINT_READ_FILES = {
   "turbo.json": "oxfmt formats the task configuration",
   "scripts/oxlint-baseline.txt": "oxlint-baseline.sh",
   "scripts/file-size-baseline.txt": "file-size-baseline.sh",
-  "scripts/import-direction-baselines/ctrlProxy.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/daemon.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
   "test/features/element-resolution/observeContractGaps.json":
     "check-element-resolution-ratchet.sh",
   "test/features/element-resolution/observeContractGapSignatures.json":

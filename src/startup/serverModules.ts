@@ -10,6 +10,7 @@ type LoadedLogger = Awaited<typeof import("../utils/logger")>["logger"];
 export async function loadServerModules(onLoggerLoaded: (logger: LoadedLogger) => void) {
   const { createStdioServerTransport } = await import("../server/stdioServerTransport");
   const { OutputGatedTransport } = await import("../server/outputGatedTransport");
+  // Registers the daemon MCP factory port before the daemon can serve its first request.
   const { createMcpServer, registerMcpTools } = await import("../server");
   const { createDaemonMcpProxy, createProxyMcpServer } = await import("../server/proxyServer");
   const { logger, LogLevel } = await import("../utils/logger");

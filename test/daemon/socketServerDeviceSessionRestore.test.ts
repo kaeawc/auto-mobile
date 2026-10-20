@@ -1,3 +1,4 @@
+import "../../src/server/daemonSessionToolBindingStore";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { DevicePool } from "../../src/daemon/devicePool";

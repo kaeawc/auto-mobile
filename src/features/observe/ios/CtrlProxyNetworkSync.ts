@@ -1,9 +1,14 @@
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import type { BootedDevice } from "../../../models";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { BaseResult } from "../shared/types";
 import type { DelegateContext } from "./types";
-import type { CtrlProxySdkCapabilities } from "./CtrlProxySdkCapabilities";
+import {
+  sdkCapabilityQueryOptions,
+  type SdkCapabilityQueryOptions,
+  type CtrlProxySdkCapabilities,
+} from "./CtrlProxySdkCapabilities";
 import { sendCommand } from "../DeviceServiceUtils";
 import { serverConfig } from "../../../utils/ServerConfig";
 import {
@@ -104,10 +109,22 @@ export class CtrlProxyNetworkSync {
    * runner replies without the field, and a late reply times out: both are `unconfirmed`, not a
    * failure. `ok:false` (the runner could not reach the SDK) is a failed push.
    */
-  private async pushNetworkMockRulesToDevice(): Promise<IosMockRuleSyncResult> {
+  private async pushNetworkMockRulesToDevice(
+    options: SdkCapabilityQueryOptions,
+  ): Promise<IosMockRuleSyncResult> {
     const blocker = this.mockRuleSyncBlocker();
     if (blocker !== null) {
       return { outcome: blocker };
+    }
+    const context = this.host.createDelegateContext();
+    const timeoutMs = Math.min(
+      NETWORK_MOCK_REPORT_TIMEOUT_MS,
+      options.deadlineMs === undefined
+        ? Infinity
+        : Math.max(0, options.deadlineMs - context.timer.now()),
+    );
+    if (options.abortSignal?.aborted || timeoutMs <= 0) {
+      return { outcome: "failed" };
     }
     const requestId = this.host.requestManager.generateId("mockRules");
     try {
@@ -118,7 +135,7 @@ export class CtrlProxyNetworkSync {
       const reply = this.host.requestManager.register<IosMockRulesReply>(
         requestId,
         "set_network_mock_rules_result",
-        NETWORK_MOCK_REPORT_TIMEOUT_MS,
+        timeoutMs,
         (_id, _type, timeoutMs) => ({ success: false, timedOut: true, totalTimeMs: timeoutMs }),
       );
       // sendMessage returns false (and logs) when the socket is not open.
@@ -131,11 +148,19 @@ export class CtrlProxyNetworkSync {
         );
         return { outcome: "failed" };
       }
-      return interpretIosMockRulesReply(await reply);
+      return interpretIosMockRulesReply(
+        await raceWithDeadline(reply, {
+          timer: context.timer,
+          signal: options.abortSignal,
+          label: "Network mock rules",
+        }),
+      );
     } catch (e) {
       this.host.requestManager.reject(requestId, new Error("set_network_mock_rules send failed"));
       logger.warn(`[IOSCtrlProxyClient] Failed to push network mock rules: ${e}`);
       return { outcome: "failed" };
+    } finally {
+      this.host.requestManager.reject(requestId, new Error("Network mock rule sync ended"));
     }
   }
 
@@ -210,10 +235,16 @@ export class CtrlProxyNetworkSync {
    * delivered so `mockNetwork`/`clearMockNetwork` can warn like the Android path
    * (#9918) instead of claiming a sync that never happened.
    */
-  public async syncNetworkMockRulesIfAvailable(): Promise<IosMockRuleSyncResult> {
+  public async syncNetworkMockRulesIfAvailable(
+    options: SdkCapabilityQueryOptions = sdkCapabilityQueryOptions(
+      this.host.createDelegateContext().timer,
+    ),
+  ): Promise<IosMockRuleSyncResult> {
     try {
-      if (await this.host.sdkCapability.ensureSdkCapability("network_mocking")) {
-        return await this.pushNetworkMockRulesToDevice();
+      if (
+        await this.host.sdkCapability.ensureSdkCapability("network_mocking", undefined, options)
+      ) {
+        return await this.pushNetworkMockRulesToDevice(options);
       }
       return { outcome: "noCapability" };
     } catch (error) {
@@ -232,7 +263,11 @@ export class CtrlProxyNetworkSync {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
   ): Promise<BaseResult> {
-    const gate = await this.host.sdkCapability.sdkCapabilityGate("network_error_simulation");
+    const options = sdkCapabilityQueryOptions(this.host.createDelegateContext().timer, timeoutMs);
+    const gate = await this.host.sdkCapability.sdkCapabilityGate(
+      "network_error_simulation",
+      options,
+    );
     if (gate !== null) {
       return gate;
     }
@@ -248,6 +283,7 @@ export class CtrlProxyNetworkSync {
         remainingMs: config.remainingMs ?? null,
       },
       timeoutMs,
+      ...options,
       perf,
       cancelScreenshotBackoff: false,
       errorLabel: "Network error simulation",

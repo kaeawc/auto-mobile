@@ -1,3 +1,4 @@
+import { SdkCapabilityProbeSupersededError } from "./SdkCapabilityProbeSupersededError";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { ViewHierarchyResult } from "../../../models";
@@ -191,8 +192,15 @@ export class CtrlProxyInboundMessages {
     }
     this.host.sdkCapability.invalidateSdkCapabilities();
     void this.host.sdkCapability.refreshSdkCapabilitiesAndSync().catch((error) => {
-      // SDK absence/version skew is expected; this trace is diagnostic only.
-      logger.debug(`[IOSCtrlProxyClient] SDK capability refresh failed: ${error}`);
+      if (error instanceof SdkCapabilityProbeSupersededError) {
+        // The newer foreground generation refreshes its own capabilities.
+        logger.debug(`[IOSCtrlProxyClient] SDK capability refresh superseded: ${error.message}`);
+        return;
+      }
+      logger.warn(
+        `[IOSCtrlProxyClient] SDK capability refresh failed: ${errorMessage(error)}`,
+        error,
+      );
     });
     logger.info(`[IOSCtrlProxyClient] Received connected message`);
     return;

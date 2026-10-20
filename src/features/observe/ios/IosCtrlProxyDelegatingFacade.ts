@@ -1,8 +1,10 @@
+import { SdkCapabilityProbeSupersededError } from "./SdkCapabilityProbeSupersededError";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import type { ScreenScaleMetadata } from "../../../models";
 import { CtrlProxyInboundMessages } from "./CtrlProxyInboundMessages";
 
-import { CtrlProxySdkCapabilities } from "./CtrlProxySdkCapabilities";
+import { CtrlProxySdkCapabilities, sdkCapabilityQueryOptions } from "./CtrlProxySdkCapabilities";
 
 import type { PinchRequest, TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
 import type { IosActivateAccessibilityLinkRequest } from "./CtrlProxyVoiceOver";
@@ -359,11 +361,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyHighlightResult> {
-    const gate = await this.sdkCapability.sdkCapabilityGate("highlight");
+    const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
+    const gate = await this.sdkCapability.sdkCapabilityGate("highlight", options);
     if (gate !== null) {
       return gate;
     }
-    return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
+    return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf, options);
   }
 
   // ===========================================================================
@@ -566,6 +569,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     coldBoot?: boolean,
     signal?: AbortSignal,
   ): Promise<CtrlProxyLaunchAppResult> {
+    const launchBudget = sdkCapabilityQueryOptions(this.timer, timeoutMs, signal);
     this.sdkCapability.invalidateSdkCapabilities();
     const result = await this.navigation.requestLaunchApp(
       bundleId,
@@ -575,10 +579,24 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
       signal,
     );
     if (result.success) {
-      await this.sdkCapability.refreshSdkCapabilitiesAndSync().catch((error) => {
-        // A launched app without AutoMobileSDK is normal; the launch itself succeeded.
-        logger.debug(`[IOSCtrlProxyClient] SDK capability refresh after launch failed: ${error}`);
-      });
+      await this.sdkCapability
+        .refreshSdkCapabilitiesAndSync({
+          ...launchBudget,
+          deadlineMs: Math.min(launchBudget.deadlineMs ?? Infinity, this.timer.now() + 1000),
+        })
+        .catch((error) => {
+          if (error instanceof SdkCapabilityProbeSupersededError) {
+            // The newer foreground generation refreshes its own capabilities.
+            logger.debug(
+              `[IOSCtrlProxyClient] SDK capability refresh superseded: ${error.message}`,
+            );
+            return;
+          }
+          logger.warn(
+            `[IOSCtrlProxyClient] SDK capability refresh after launch failed: ${errorMessage(error)}`,
+            error,
+          );
+        });
     }
     return result;
   }
@@ -797,8 +815,9 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     timeoutMs?: number,
     readOnly?: boolean,
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
-    await this.sdkCapability.requireSdkCapability("database", appId);
-    return this.database.executeSQL(appId, databasePath, query, timeoutMs, {
+    const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
+    await this.sdkCapability.requireSdkCapability("database", appId, options);
+    return this.database.executeSQL(appId, databasePath, query, options, {
       sessionId: this.boundSessionId ?? undefined,
       mutationToken: iosMutationTokens.get(this.device.deviceId, appId),
       readOnly,
@@ -809,16 +828,18 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     appId: string,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
-    await this.sdkCapability.requireSdkCapability("database", appId);
-    return this.database.listDatabases(appId, timeoutMs);
+    const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
+    await this.sdkCapability.requireSdkCapability("database", appId, options);
+    return this.database.listDatabases(appId, options);
   }
 
   async getStorageCapabilitiesForIos(
     appId: string,
     timeoutMs?: number,
   ): Promise<import("./CtrlProxyDatabase").StorageCapabilities> {
-    await this.sdkCapability.requireSdkCapability("database", appId);
-    return this.database.storageCapabilities(appId, timeoutMs);
+    const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
+    await this.sdkCapability.requireSdkCapability("database", appId, options);
+    return this.database.storageCapabilities(appId, options);
   }
 
   async listTablesForIos(
@@ -826,8 +847,9 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     databasePath: string,
     timeoutMs?: number,
   ): Promise<string[]> {
-    await this.sdkCapability.requireSdkCapability("database", appId);
-    return this.database.listTables(appId, databasePath, timeoutMs);
+    const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
+    await this.sdkCapability.requireSdkCapability("database", appId, options);
+    return this.database.listTables(appId, databasePath, options);
   }
 
   async getTableDataForIos(
@@ -838,8 +860,9 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     offset?: number,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").TableDataResult> {
-    await this.sdkCapability.requireSdkCapability("database", appId);
-    return this.database.getTableData(appId, databasePath, table, limit, offset, timeoutMs);
+    const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
+    await this.sdkCapability.requireSdkCapability("database", appId, options);
+    return this.database.getTableData(appId, databasePath, table, limit, offset, options);
   }
 
   async getTableStructureForIos(
@@ -848,8 +871,9 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     table: string,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").TableStructureResult> {
-    await this.sdkCapability.requireSdkCapability("database", appId);
-    return this.database.getTableStructure(appId, databasePath, table, timeoutMs);
+    const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
+    await this.sdkCapability.requireSdkCapability("database", appId, options);
+    return this.database.getTableStructure(appId, databasePath, table, options);
   }
 
   // Runner-reported scale metadata from the most recent forwarded hierarchy (#4548). Retained for

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { ObserveResult, SwipeOnOptions } from "../../../../src/models";
@@ -39,7 +39,7 @@ function harness(
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const ctrl = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
+  clientSpy.mockReturnValue(ctrl);
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();
   const observation = deviceObservation(hierarchy, screenSize);
@@ -70,14 +70,17 @@ const swipe = (options: SwipeOnOptions): SwipeOnOptions => options;
 afterEach(() => mock.restore());
 
 describe("swipeOn layer (#9305)", () => {
-  // CI's per-test time excludes only beforeAll: one throwaway swipe pays the resolver's one-time
-  // module/JIT cost over the captured hierarchy here, not in the first timed test.
-  beforeAll(async () => {
+  // Warm the resolver once after the per-test spy has been installed.
+  let warmed = false;
+  beforeEach(async () => {
+    if (warmed) {
+      return;
+    }
+    warmed = true;
     const { action } = harness();
     await action.execute(
       swipe({ direction: "up", container: { elementId: "coverBox" }, layer: "app" }),
     );
-    mock.restore();
   });
 
   test('"app" excludes prototype nodes from container resolution', async () => {
@@ -210,4 +213,9 @@ describe("swipeOn layer (#9305)", () => {
     expect(result.error).toContain("layer is not supported with `display`");
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 });

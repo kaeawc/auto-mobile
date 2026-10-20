@@ -35,4 +35,3 @@
 2185	src/server/videoRecordingManager.ts
 1427	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
-2055	src/utils/fileLock.ts

@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { ActionableError } from "../../src/models";
 import {
@@ -104,4 +104,8 @@ describe("prepareFileSource", () => {
     expect(files.writeFileBuffer).not.toHaveBeenCalled();
     expect(files.rm).not.toHaveBeenCalled();
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

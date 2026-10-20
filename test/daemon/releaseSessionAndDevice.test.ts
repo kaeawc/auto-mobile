@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
 import {
   lazySessionReleasePool,
   releasePoolDevice,
@@ -122,9 +122,11 @@ describe("lazySessionReleasePool", () => {
 });
 
 describe("releaseSessionAndDevice", () => {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  afterEach(() => warn.mockClear());
-  afterAll(() => warn.mockRestore());
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  beforeEach(() => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => warn.mockRestore());
   test.each([
     ["explicit-release", true, "Failed to persist terminal release"],
     ["device-restart:Pixel_8", false, "Failed to persist non-terminal release"],
@@ -246,4 +248,8 @@ describe("releaseSessionAndDevice", () => {
     expect(manager.calls).toEqual([["session", undefined]]);
     expect(pool.calls).toEqual([["device", "session"]]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -1,5 +1,12 @@
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { NodeCryptoService } from "../../../src/utils/crypto";
+import type { TapOnCall } from "../../../src/features/action/ActionCall";
+import { SetUIState } from "../../../src/features/action/SetUIState";
+import {
+  FakeFieldTypeDetector,
+  FakeObserveScreenForSetUIState,
+} from "../../fakes/FakeSetUIStateDependencies";
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { RealWaitForCondition } from "../../../src/features/observe/WaitForCondition";
@@ -150,7 +157,7 @@ describe("Android post-tap wait with the real CtrlProxy cache (#9618)", () => {
     });
   });
 
-  test.each([
+  const scenarios = [
     { name: "already still", elapsed: 1040, reads: 7 },
     { name: "350ms transition", changeAt: 350, elapsed: 1550, reads: 10 },
     { name: "800ms late transition", changeAt: 800, elapsed: 1890, reads: 12 },
@@ -199,7 +206,9 @@ describe("Android post-tap wait with the real CtrlProxy cache (#9618)", () => {
       elapsed: 4900,
       reads: 30,
     },
-  ])("$name", async (scenario) => {
+  ];
+
+  test.each(scenarios)("$name", async (scenario) => {
     const h = await harness(scenario.changeAt, scenario.neverStable);
     try {
       const result = await h.tap.deriveTapEffectAfterPostTapObservation(
@@ -225,6 +234,135 @@ describe("Android post-tap wait with the real CtrlProxy cache (#9618)", () => {
       h.restore();
     }
   });
+
+  test.each(scenarios)("$name without effect settling", async (scenario) => {
+    const h = await harness(scenario.changeAt, scenario.neverStable);
+    try {
+      const result = await h.tap.deriveTapEffectAfterPostTapObservation(
+        scenario.unchanged ? h.current : h.previous,
+        h.current,
+        undefined,
+        { settlePostTapEffect: false },
+      );
+      expect({ elapsed: h.elapsed(), reads: h.extractions() }).toEqual({ elapsed: 0, reads: 0 });
+      expect(result.observation).toBe(h.current);
+      expect(result.effect?.screenChanged).toBe(!scenario.unchanged);
+    } finally {
+      h.restore();
+    }
+  });
+
+  test.each([undefined, false] as const)(
+    "execute forwards settling policy %s after dispatch and retry verification",
+    async (settlePostTapEffect) => {
+      const h = await harness();
+      const strategy = new FakeTapStrategy();
+      strategy.retryTapIfNoChange = true;
+      const tap = new TapOnElement(h.device, h.adb, {
+        timer: h.timer,
+        tapStrategy: strategy,
+        waitForCondition: new RealWaitForCondition(h.screen, h.timer),
+        selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+      });
+      tap.observedInteraction = runBlockWithEnvelope(h.current, { observation: h.current });
+      tap.refreshViewHierarchy = async () => h.current.viewHierarchy ?? null;
+      tap.testHooks.setTerminalScreenshotCapture(async () => {});
+      tap.testHooks.setDeferredPredictionRecorder(async () => {});
+      const dispatch = spyOn(tap, "executeAndroidTap").mockResolvedValue(undefined);
+      const retry = spyOn(tap, "retryTapIfNoChange").mockResolvedValue(undefined);
+      try {
+        const result = await tap.execute(
+          { text: "B", action: "tap", retryIfNoChange: true },
+          { settlePostTapEffect },
+        );
+        expect(result.success).toBe(true);
+        expect(result.observation).toBeDefined();
+        expect(dispatch).toHaveBeenCalledTimes(1);
+        expect(retry).toHaveBeenCalledTimes(1);
+        expect(retry.mock.calls[0]?.[5].options.retryIfNoChange).toBe(true);
+        expect(dispatch.mock.invocationCallOrder[0]).toBeLessThan(
+          retry.mock.invocationCallOrder[0]!,
+        );
+        expect({ elapsed: h.elapsed(), reads: h.extractions() }).toEqual(
+          settlePostTapEffect === false ? { elapsed: 0, reads: 0 } : { elapsed: 2500, reads: 15 },
+        );
+      } finally {
+        dispatch.mockRestore();
+        retry.mockRestore();
+        h.restore();
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "three-field setUIState with real effect polling, emulate old caller: %s",
+    async (emulateOldCaller) => {
+      const h = await harness();
+      const observe = new FakeObserveScreenForSetUIState();
+      const detector = new FakeFieldTypeDetector();
+      const fields = ["first", "second", "third"];
+      observe.setViewHierarchy({
+        hierarchy: {
+          node: {
+            node: fields.map((id, index) => ({
+              $: {
+                "resource-id": id,
+                class: "android.widget.EditText",
+                text: "",
+                editable: true,
+                bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
+              },
+            })),
+          },
+        },
+      });
+      let focused = "";
+      const calls: TapOnCall[] = [];
+      const setUIState = new SetUIState(h.device, null, {
+        timer: h.timer,
+        observeScreen: observe,
+        fieldTypeDetector: detector,
+        tapOnElement: {
+          execute: async (options, call) => {
+            focused = options.elementId ?? "";
+            calls.push(call ?? {});
+            // Charge the real CtrlProxy-backed settler, rather than a scripted delay.
+            const postTap = await h.tap.deriveTapEffectAfterPostTapObservation(
+              h.previous,
+              h.current,
+              call?.signal,
+              emulateOldCaller ? {} : call,
+            );
+            return { success: true, focusVerified: true, observation: postTap.observation };
+          },
+        },
+        clearText: { execute: async () => ({ success: true }) },
+        inputText: {
+          execute: async (text) => {
+            detector.setTextValue(focused, text);
+            return { success: true, text };
+          },
+        },
+      });
+      try {
+        const result = await setUIState.execute({
+          fields: fields.map((id) => ({
+            selector: { elementId: id },
+            value: `value for ${id}`,
+          })),
+        });
+        expect(result.success).toBe(true);
+        expect(result.fields.every((field) => field.verified)).toBe(true);
+        expect(calls).toHaveLength(3);
+        expect({ elapsed: h.elapsed(), reads: h.extractions() }).toEqual(
+          emulateOldCaller ? { elapsed: 3 * 1040, reads: 3 * 7 } : { elapsed: 0, reads: 0 },
+        );
+        expect(calls.every((call) => call.settlePostTapEffect === false)).toBe(true);
+      } finally {
+        h.restore();
+      }
+    },
+  );
 
   test("retryIfNoChange dispatches exactly one tap for a 1500ms effect with real wait verification", async () => {
     const h = await harness(1500);

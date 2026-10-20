@@ -50,6 +50,7 @@ enum PrototypeRequestResolver {
                 }
             }
         }
+        if let problem = PrototypeHttpHeaderCheck.problem(in: headers) { return .failure(problem) }
         var body: JSONValue?
         if let binding = action.body {
             switch PrototypeDataWrite.resolveValue(binding, inputs: inputs) {

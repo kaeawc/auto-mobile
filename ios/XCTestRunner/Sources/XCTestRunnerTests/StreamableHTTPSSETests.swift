@@ -25,7 +25,7 @@ final class StreamableHTTPSSETests: XCTestCase {
     private func makeClient(_ performer: AsyncFakeHTTPPerformer) throws -> StreamableHTTPMCPClient {
         try StreamableHTTPMCPClient(
             endpoint: XCTUnwrap(URL(string: "http://unused/auto-mobile/streamable")), performer: performer,
-            options: .init(scheduler: VirtualDeadlineScheduler())
+            options: .init(scheduler: VirtualDeadlineScheduler(), tokenProvider: FakeDaemonHTTPTokenProvider())
         )
     }
 

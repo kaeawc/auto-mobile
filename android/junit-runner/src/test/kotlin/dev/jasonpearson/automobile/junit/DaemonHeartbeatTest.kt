@@ -331,7 +331,11 @@ class DaemonHeartbeatTest {
     ) { url ->
       val error =
         assertThrows(DaemonSessionReleasedException::class.java) {
-          DaemonHeartbeat.sendHeartbeat(url, "s1")
+          HeartbeatTransport.sendHeartbeat(
+            url,
+            "s1",
+            tokenProvider = DaemonHttpTokenProvider { null },
+          )
         }
       assertEquals("s1", error.sessionId)
       assertEquals("heartbeat-timeout", error.releaseReason)
@@ -340,15 +344,25 @@ class DaemonHeartbeatTest {
     withHeartbeatServer(404, """{"error":"Session not found: s2"}""") { url ->
       val error =
         assertThrows(DaemonSessionReleasedException::class.java) {
-          DaemonHeartbeat.sendHeartbeat(url, "s2")
+          HeartbeatTransport.sendHeartbeat(
+            url,
+            "s2",
+            tokenProvider = DaemonHttpTokenProvider { null },
+          )
         }
       assertNull(error.releaseReason)
     }
     withHeartbeatServer(200, """{"status":"ok"}""") { url ->
-      DaemonHeartbeat.sendHeartbeat(url, "s3")
+      HeartbeatTransport.sendHeartbeat(url, "s3", tokenProvider = DaemonHttpTokenProvider { null })
     }
     withHeartbeatServer(500, """{"error":"boom"}""") { url ->
-      assertThrows(java.io.IOException::class.java) { DaemonHeartbeat.sendHeartbeat(url, "s4") }
+      assertThrows(java.io.IOException::class.java) {
+        HeartbeatTransport.sendHeartbeat(
+          url,
+          "s4",
+          tokenProvider = DaemonHttpTokenProvider { null },
+        )
+      }
     }
   }
 
@@ -357,8 +371,17 @@ class DaemonHeartbeatTest {
     val bodies = ConcurrentLinkedQueue<String>()
     withHeartbeatServer(HttpURLConnection.HTTP_OK, """{"status":"ok"}""", { bodies.add(it) }) { url
       ->
-      DaemonHeartbeat.sendHeartbeat(url, "default-session")
-      DaemonHeartbeat.sendHeartbeat(url, "injected-session", "injected-owner")
+      HeartbeatTransport.sendHeartbeat(
+        url,
+        "default-session",
+        tokenProvider = DaemonHttpTokenProvider { null },
+      )
+      HeartbeatTransport.sendHeartbeat(
+        url,
+        "injected-session",
+        "injected-owner",
+        DaemonHttpTokenProvider { null },
+      )
     }
     val default = Json.parseToJsonElement(bodies.remove()).jsonObject
     val injected = Json.parseToJsonElement(bodies.remove()).jsonObject

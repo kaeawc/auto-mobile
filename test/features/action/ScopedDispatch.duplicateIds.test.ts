@@ -1,7 +1,7 @@
 import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test, afterEach, mock } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
@@ -175,3 +175,7 @@ for (const row of rows) {
     });
   }
 }
+
+afterEach(() => {
+  mock.restore();
+});

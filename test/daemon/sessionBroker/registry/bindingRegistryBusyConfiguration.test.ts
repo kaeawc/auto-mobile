@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
 import { spyOnDatabasePrepare } from "../../../helpers/sqlitePrepareSpy";
 import { Database } from "bun:sqlite";
 import {
@@ -17,7 +17,7 @@ describe("registry busy configuration", () => {
   let registry: SqliteBindingRegistry;
   let busyTimeout: number | undefined;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const exec = Database.prototype.exec;
     const capture = spyOn(Database.prototype, "exec").mockImplementation(function (
       this: Database,
@@ -34,7 +34,7 @@ describe("registry busy configuration", () => {
       capture.mockRestore();
     }
   });
-  afterAll(async () => {
+  afterEach(async () => {
     await registry?.close();
   });
 
@@ -95,4 +95,8 @@ describe("registry busy configuration", () => {
       warn.mockRestore();
     }
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

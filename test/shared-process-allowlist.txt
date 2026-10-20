@@ -52,6 +52,7 @@ test/ctrlProxy/ForcedRestartBudget.test.ts
 test/ctrlProxy/IosCtrlProxyPrefetcher.test.ts
 test/ctrlProxy/deviceClientRegistry.test.ts
 test/ctrlProxy/deviceInstanceRegistry.test.ts
+test/ctrlProxy/ios/IosAppBundleGuard.test.ts
 test/ctrlProxy/ios/IosCtrlProxyHealthClient.test.ts
 test/ctrlProxy/ios/IosCtrlProxyProcessClient.test.ts
 test/ctrlProxy/runnerQueryTimeoutEnv.test.ts
@@ -77,6 +78,7 @@ test/daemon/appearanceSyncSettingDefaults.test.ts
 test/daemon/autolockProxyHeartbeatIdle.test.ts
 test/daemon/auxiliarySocketDegradation.test.ts
 test/daemon/boundSessionLossMessage.test.ts
+test/daemon/buildIdentity.test.ts
 test/daemon/canonicalPixels.property.test.ts
 test/daemon/canonicalPixels.test.ts
 test/daemon/childProcessCleanup.test.ts
@@ -110,6 +112,9 @@ test/daemon/daemonHttpTokenLifecycle.test.ts
 test/daemon/daemonIsolationPaths.test.ts
 test/daemon/daemonMcpProxyCancellation.test.ts
 test/daemon/daemonMcpProxyLazyToolList.test.ts
+test/daemon/daemonMcpProxyNeverWrittenCall.test.ts
+test/daemon/daemonMcpProxyOneShotCli.test.ts
+test/daemon/daemonMcpProxySessionBinding.test.ts
 test/daemon/daemonMcpProxyTaskRelay.test.ts
 test/daemon/daemonNamespaceMarker.test.ts
 test/daemon/daemonObservationStreamCallbacks.test.ts
@@ -128,6 +133,7 @@ test/daemon/databaseHealthLateness.test.ts
 test/daemon/debugToolsNonDestructive.test.ts
 test/daemon/derivedLabelLivenessClaim.test.ts
 test/daemon/derivedLabelSessionReleaseCascade.test.ts
+test/daemon/derivedSessionOwnershipTable.test.ts
 test/daemon/desktopWireContract.test.ts
 test/daemon/deviceBinding.test.ts
 test/daemon/deviceBindingReaders.test.ts
@@ -157,6 +163,7 @@ test/daemon/devicePool.bootCapacityRefusal.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
 test/daemon/devicePool.crossDaemonExplicitBind.test.ts
 test/daemon/devicePool.crossDaemonIdleLeaseRelinquish.test.ts
+test/daemon/devicePool.evictionCatch.test.ts
 test/daemon/devicePool.heartbeatExpiry.test.ts
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts
 test/daemon/devicePool.incompleteScanStart.test.ts
@@ -198,6 +205,7 @@ test/daemon/deviceTable.test.ts
 test/daemon/directModeStartup.test.ts
 test/daemon/disconnectMonitor-offlineRecovery.test.ts
 test/daemon/disconnectMonitor-physicalImmediate.test.ts
+test/daemon/disconnectMonitor-sourceUnavailable.test.ts
 test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/emulatorLossIncident.test.ts
 test/daemon/emulatorLossIncidentLedger.test.ts
@@ -220,6 +228,7 @@ test/daemon/heartbeatAcceptedLog.test.ts
 test/daemon/heartbeatActivityWriteFailure.test.ts
 test/daemon/heartbeatExpiryPersistence.test.ts
 test/daemon/heartbeatMonitorCredibleStallCap.test.ts
+test/daemon/heartbeatMonitorWedgedReap.test.ts
 test/daemon/heartbeatReapUpgradesNonTerminalRelease.test.ts
 test/daemon/heartbeatSocketHttpParity.test.ts
 test/daemon/heldSessionsLateRehydration.test.ts
@@ -309,6 +318,7 @@ test/daemon/proxy/proxySessionState.test.ts
 test/daemon/proxyBoundSessionLongCall.test.ts
 test/daemon/proxyCleanCloseReleasesOwnedSessions.test.ts
 test/daemon/proxyDaemonAuthoritativeIdle.test.ts
+test/daemon/proxyDaemonStallResume.test.ts
 test/daemon/proxyFailedConnectCleanup.test.ts
 test/daemon/proxyFencesRecoverableReleaseFromHeartbeat.test.ts
 test/daemon/proxyFinalizedRecordingRetrieval.test.ts
@@ -323,13 +333,16 @@ test/daemon/proxyLivenessHeldSessionKeeperOrphan.test.ts
 test/daemon/proxyLivenessOwnerToken.test.ts
 test/daemon/proxyLivenessRecovery.test.ts
 test/daemon/proxyLivenessRejectedCallStopsHeldHeartbeat.test.ts
+test/daemon/proxyOwnSessionPlatformSelector.test.ts
 test/daemon/proxyReleaseReasonClassification.test.ts
+test/daemon/proxyResultMintedDiscoveryInteractions.test.ts
 test/daemon/proxyResumedNoticeRoutedSession.test.ts
 test/daemon/proxyResumedSessionReleaseSurfaced.test.ts
 test/daemon/proxySelectorRoutedSessionActivity.test.ts
 test/daemon/proxySessionEventLeavesSiblingCallInFlight.test.ts
 test/daemon/proxySessionNamingResourceFence.test.ts
 test/daemon/proxyStableTokenMultiSessionResume.test.ts
+test/daemon/proxyStableTokenStallRestart.test.ts
 test/daemon/proxyStallHandoverListsHandedOverSessions.test.ts
 test/daemon/proxyStallHandoverReleaseGate.test.ts
 test/daemon/proxyToolErrorCodeClassification.test.ts
@@ -350,6 +363,7 @@ test/daemon/releaseCallerOrderingConsumers.test.ts
 test/daemon/releaseCallerOrderingRecovery.test.ts
 test/daemon/releaseCallerOrderingUnknownSession.test.ts
 test/daemon/releaseReasons.test.ts
+test/daemon/releaseSessionAndDevice.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/requestTimeoutOnce.test.ts
 test/daemon/restartAdmission.test.ts
@@ -371,6 +385,7 @@ test/daemon/sessionBroker/handlers.test.ts
 test/daemon/sessionBroker/hostConfig.test.ts
 test/daemon/sessionBroker/iosBaselineReset.test.ts
 test/daemon/sessionBroker/persistedIdentity.test.ts
+test/daemon/sessionBroker/provisioning/androidProfileValidatedBeforeReplace.test.ts
 test/daemon/sessionBroker/provisioning/bindingBudgetEnforcement.test.ts
 test/daemon/sessionBroker/provisioning/bindingBudgetSinglePlatformHost.test.ts
 test/daemon/sessionBroker/provisioning/bindingExclusion.test.ts
@@ -389,10 +404,12 @@ test/daemon/sessionBroker/provisioning/deviceAcquisition.test.ts
 test/daemon/sessionBroker/provisioning/deviceDeleter.test.ts
 test/daemon/sessionBroker/provisioning/deviceFamilyConstraint.test.ts
 test/daemon/sessionBroker/provisioning/executionLiveness.test.ts
+test/daemon/sessionBroker/provisioning/executionRelease.test.ts
 test/daemon/sessionBroker/provisioning/executionReleaseBusyRegistry.test.ts
 test/daemon/sessionBroker/provisioning/iosBindingDeviceUnexcludedWhileCreating.test.ts
 test/daemon/sessionBroker/provisioning/iosDeviceTypeNewest.test.ts
 test/daemon/sessionBroker/provisioning/managedExecutionDaemonRestart.test.ts
+test/daemon/sessionBroker/provisioning/managedOwnershipRelease.test.ts
 test/daemon/sessionBroker/provisioning/ownExecutionRetainedSnapshot.test.ts
 test/daemon/sessionBroker/provisioning/reconciler.test.ts
 test/daemon/sessionBroker/provisioning/reconcilerPorts.test.ts
@@ -411,6 +428,7 @@ test/daemon/sessionBroker/registry/bindingJournalHungDelete.test.ts
 test/daemon/sessionBroker/registry/bindingJournalRemovalNeverAdopted.test.ts
 test/daemon/sessionBroker/registry/bindingOwnerLiveness.test.ts
 test/daemon/sessionBroker/registry/bindingRegistryBusyCallers.test.ts
+test/daemon/sessionBroker/registry/bindingRegistryBusyConfiguration.test.ts
 test/daemon/sessionBroker/registry/bindingRegistryMigrations.test.ts
 test/daemon/sessionBroker/registry/brokerResourceIndexes.test.ts
 test/daemon/sessionBroker/registry/platformLegacySlotDeviceStopper.test.ts
@@ -429,6 +447,7 @@ test/daemon/sessionHoldDiagnostics.test.ts
 test/daemon/sessionInfoWallClock.test.ts
 test/daemon/sessionLivenessLease.test.ts
 test/daemon/sessionManager.appCleanupRecovery.test.ts
+test/daemon/sessionManager.cache.test.ts
 test/daemon/sessionManager.cancelledClientChosenId.test.ts
 test/daemon/sessionManager.deviceRestoration.test.ts
 test/daemon/sessionManager.displayPin.test.ts
@@ -436,9 +455,11 @@ test/daemon/sessionManager.findSession.test.ts
 test/daemon/sessionManager.getOrCreateSession.test.ts
 test/daemon/sessionManager.heartbeat.test.ts
 test/daemon/sessionManager.rebindSession.test.ts
+test/daemon/sessionManager.rebindTtlRestoreShield.test.ts
 test/daemon/sessionManager.recorderTeardown.test.ts
 test/daemon/sessionManager.release.test.ts
 test/daemon/sessionManager.releaseDeviceHold.test.ts
+test/daemon/sessionManager.releaseRowRetry.test.ts
 test/daemon/sessionManager.releaseSnapshots.test.ts
 test/daemon/sessionManager.restartRecovery.test.ts
 test/daemon/sessionManager.rowWriter.test.ts
@@ -506,6 +527,7 @@ test/daemon/streamDeviceLifecycleEvents.test.ts
 test/daemon/streamSocketAuth.test.ts
 test/daemon/streamSubscriptionPolicy.test.ts
 test/daemon/strokeSurvivesHolderRebind.test.ts
+test/daemon/stuckReapHiddenByIdleDeadline.test.ts
 test/daemon/supersededRowReasserts.test.ts
 test/daemon/swipeOnCancelThroughDaemon.test.ts
 test/daemon/telemetryBackfillBounds.test.ts
@@ -516,6 +538,7 @@ test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/toolCallDeviceIdentity.test.ts
 test/daemon/toolListPoller.test.ts
 test/daemon/toolRegistryPort.test.ts
+test/daemon/transitionalAdbBindWait.test.ts
 test/daemon/undeliveredRebindRevertsOverrides.test.ts
 test/daemon/undeliveredRebindStrandedByOwnRestore.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
@@ -537,6 +560,7 @@ test/db/databaseFailureClassification.test.ts
 test/db/dbWriteBarrierTrackExistingNonPromise.test.ts
 test/db/dropDeviceTeardownOperationsMigration.test.ts
 test/db/dropProvisionDeviceOperationsMigration.test.ts
+test/db/failureTimelineBuckets.test.ts
 test/db/kyselySqliteAdapterContract.test.ts
 test/db/migrationDependencyIntegrity.test.ts
 test/db/migrationFilenameOrdering.test.ts
@@ -585,6 +609,7 @@ test/fakes/FakeIOSCtrlProxy.test.ts
 test/fakes/FakeImageBackend.test.ts
 test/fakes/FakeIosVoiceOverDetector.test.ts
 test/fakes/FakeNavigationGraphManager.test.ts
+test/fakes/FakePrototypeAgentClient.test.ts
 test/fakes/FakeSystemConfigurationAdapter.test.ts
 test/fakes/FakeTimer.test.ts
 test/fakes/adbStdout.test.ts
@@ -614,6 +639,7 @@ test/features/action/CaptureSnapshot.test.ts
 test/features/action/ClearText.searchable.test.ts
 test/features/action/Clipboard.iosEmptyFieldBaseline.test.ts
 test/features/action/Clipboard.test.ts
+test/features/action/DefaultDisplayFence.test.ts
 test/features/action/DisplayTransitionGesture.test.ts
 test/features/action/DragPath.test.ts
 test/features/action/ExecuteGesture.iosSwipe.test.ts
@@ -635,16 +661,20 @@ test/features/action/LongPressMetadataDetector.test.ts
 test/features/action/MultiTouchGesture.test.ts
 test/features/action/OffscreenCheckCrossPath.test.ts
 test/features/action/OffscreenCheckSecondaryPanel.test.ts
+test/features/action/OpenURL.foreground.test.ts
 test/features/action/OrientationReader.test.ts
 test/features/action/PressButton.test.ts
 test/features/action/RecentApps.test.ts
 test/features/action/ResetKeychain.test.ts
 test/features/action/RestoreSnapshot.iosVersion.test.ts
+test/features/action/ScopedDispatch.duplicateIds.test.ts
 test/features/action/SelectAllText.hierarchyLayer.test.ts
+test/features/action/SelectAllText.test.ts
 test/features/action/SelectedDisplayReadRetry.test.ts
 test/features/action/SendKeys.budget.test.ts
 test/features/action/SendKeys.capturedMultiDisplayFocus.test.ts
 test/features/action/SendKeys.display.test.ts
+test/features/action/SendKeys.focusRecovery.test.ts
 test/features/action/SendKeys.hierarchyLayer.test.ts
 test/features/action/SendKeys.iosClearVerification.test.ts
 test/features/action/SendKeys.iosTypedTextVerification.test.ts
@@ -1973,6 +2003,7 @@ test/utils/ios-cmdline-tools/simctl-client.runtimeResolution.test.ts
 test/utils/ios-cmdline-tools/simctl-client.uninstallBound.test.ts
 test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
 test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
+test/utils/ios-cmdline-tools/simctlCommandBounds.test.ts
 test/utils/ios-cmdline-tools/simctlRuntimes.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
 test/utils/ios-cmdline-tools/simulatorLaunchHandle.test.ts

@@ -40,6 +40,7 @@ import dev.jasonpearson.automobile.desktop.core.layout.DiffKeyMode
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiff
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiffEntry
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorOptions
 import dev.jasonpearson.automobile.desktop.core.layout.NodeDiffStatus
 import dev.jasonpearson.automobile.desktop.core.layout.ParsedHierarchy
 import dev.jasonpearson.automobile.desktop.core.layout.diffHierarchies
@@ -86,10 +87,13 @@ fun TwoDeviceCompareView(
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
   sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit = { column, stream ->
     LayoutInspectorDashboard(
-      dataSourceMode = DataSourceMode.Real,
+      options =
+        LayoutInspectorOptions(
+          dataSourceMode = DataSourceMode.Real,
+          deviceId = column.deviceId,
+          platform = if (column.platform == Platform.Ios) "ios" else "android",
+        ),
       observationStream = stream,
-      deviceId = column.deviceId,
-      platform = if (column.platform == Platform.Ios) "ios" else "android",
     )
   },
   // Parses a hierarchy stream frame off the main thread. Injected so a test can deterministically

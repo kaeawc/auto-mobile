@@ -4,12 +4,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -19,23 +16,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.jasonpearson.automobile.desktop.core.formatUiNumber
-
-// JSON syntax colors
-private val JSON_KEY_COLOR = Color(0xFF82AAFF) // light blue
-private val JSON_STRING_COLOR = Color(0xFFC3E88D) // green
-private val JSON_NUMBER_COLOR = Color(0xFFF78C6C) // orange
-private val JSON_BOOLEAN_COLOR = Color(0xFFFF5370) // red-pink
-private val JSON_NULL_COLOR = Color(0xFF676E95) // grey
-private val JSON_BRACE_COLOR = Color(0xFFBBBBBB) // light grey
 
 /** Renders a network body with content-type-aware formatting. */
 @Composable
@@ -46,58 +32,37 @@ fun NetworkBodyContent(
   textColor: Color,
 ) {
   if (body.isNullOrBlank()) {
-    val ct = contentType?.substringBefore(';')?.trim() ?: "unknown"
-    val sizeText = formatByteSize(bodySize)
-    if (bodySize > 0) {
-      Text(
-        "Binary content ($ct, $sizeText)",
-        fontSize = 9.sp,
-        color = textColor.copy(alpha = 0.4f),
-      )
-    } else {
-      Text("No body", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
-    }
+    EmptyBodyContent(contentType, bodySize, textColor)
     return
   }
 
   val baseContentType = contentType?.substringBefore(';')?.trim()?.lowercase() ?: ""
 
-  when {
-    // Image: try to decode and display inline
-    baseContentType.startsWith("image/") -> ImageBodyBlock(body, baseContentType, textColor)
-    // JSON: pretty-print with syntax highlighting
-    baseContentType.contains("json") || looksLikeJson(body) -> JsonBodyBlock(body, textColor)
-    // XML / HTML: syntax-aware monospace
-    baseContentType.contains("xml") ||
-      baseContentType.contains("html") ||
-      body.trimStart().startsWith("<") -> XmlBodyBlock(body, textColor)
-    // Form data: key-value table
-    baseContentType == "application/x-www-form-urlencoded" -> FormDataTable(body, textColor)
-    // YAML
-    baseContentType.contains("yaml") || baseContentType.contains("yml") ->
-      YamlBodyBlock(body, textColor)
-    // Check if content looks like binary garbage (non-printable chars)
-    looksLikeBinary(body) -> {
+  when (networkBodyKind(body, baseContentType)) {
+    NetworkBodyKind.Image -> ImageBodyBlock(body, baseContentType, textColor)
+    NetworkBodyKind.Json -> JsonBodyBlock(body, textColor)
+    NetworkBodyKind.Xml -> XmlBodyBlock(body, textColor)
+    NetworkBodyKind.Form -> FormDataTable(body, textColor)
+    NetworkBodyKind.Yaml -> YamlBodyBlock(body, textColor)
+    NetworkBodyKind.Binary ->
       Text(
         "Binary content ($baseContentType, ${formatByteSize(body.length.toLong())})",
         fontSize = 9.sp,
         color = textColor.copy(alpha = 0.4f),
       )
-    }
-    // Fallback: plain monospace
-    else -> PlainBodyBlock(body, textColor)
+    NetworkBodyKind.Plain -> PlainBodyBlock(body, textColor)
   }
 }
 
 /** Heuristic: if >20% of first 200 chars are non-printable, it's likely binary */
-private fun looksLikeBinary(text: String): Boolean {
+internal fun looksLikeBinary(text: String): Boolean {
   val sample = text.take(200)
   val nonPrintable = sample.count { it < ' ' && it != '\n' && it != '\r' && it != '\t' }
   return nonPrintable > sample.length * 0.2
 }
 
 /** Heuristic: starts with { or [ after trimming whitespace */
-private fun looksLikeJson(text: String): Boolean {
+internal fun looksLikeJson(text: String): Boolean {
   val trimmed = text.trimStart()
   return trimmed.startsWith("{") || trimmed.startsWith("[")
 }
@@ -276,139 +241,25 @@ private fun FormDataTable(body: String, textColor: Color) {
   HeaderDataTable(pairs.toMap(), textColor)
 }
 
-/** Two-column data table for headers or form data with alternating row backgrounds. */
-@Composable
-fun HeaderDataTable(headers: Map<String, String>, textColor: Color) {
-  if (headers.isEmpty()) {
-    Text("No data", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
-    return
-  }
-
-  Column(
-    modifier =
-      Modifier.fillMaxWidth().background(textColor.copy(alpha = 0.03f), RoundedCornerShape(4.dp)),
-  ) {
-    headers.entries.forEachIndexed { index, (key, value) ->
-      Row(
-        modifier =
-          Modifier.fillMaxWidth()
-            .then(
-              if (index % 2 == 0) Modifier.background(textColor.copy(alpha = 0.04f)) else Modifier,
-            )
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-      ) {
-        Text(
-          key,
-          fontSize = 9.sp,
-          fontWeight = FontWeight.SemiBold,
-          fontFamily = FontFamily.Monospace,
-          color = textColor.copy(alpha = 0.6f),
-          modifier = Modifier.width(140.dp),
-          maxLines = 1,
-        )
-        Text(
-          value,
-          fontSize = 9.sp,
-          fontFamily = FontFamily.Monospace,
-          color = textColor.copy(alpha = 0.85f),
-          modifier = Modifier.weight(1f),
-        )
-      }
-    }
-  }
+private enum class NetworkBodyKind {
+  Image,
+  Json,
+  Xml,
+  Form,
+  Yaml,
+  Binary,
+  Plain,
 }
 
-/** Format byte size to human-readable string. */
-fun formatByteSize(bytes: Long): String =
+private fun networkBodyKind(body: String, baseContentType: String): NetworkBodyKind =
   when {
-    bytes < 0 -> "unknown"
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "${formatUiNumber("%.1f", bytes / 1024.0)} kB"
-    else -> "${formatUiNumber("%.1f", bytes / (1024.0 * 1024.0))} MB"
+    baseContentType.startsWith("image/") -> NetworkBodyKind.Image
+    baseContentType.contains("json") || looksLikeJson(body) -> NetworkBodyKind.Json
+    baseContentType.contains("xml") ||
+      baseContentType.contains("html") ||
+      body.trimStart().startsWith("<") -> NetworkBodyKind.Xml
+    baseContentType == "application/x-www-form-urlencoded" -> NetworkBodyKind.Form
+    baseContentType.contains("yaml") || baseContentType.contains("yml") -> NetworkBodyKind.Yaml
+    looksLikeBinary(body) -> NetworkBodyKind.Binary
+    else -> NetworkBodyKind.Plain
   }
-
-// --- JSON syntax colorizer ---
-
-private fun colorizeJson(raw: String): AnnotatedString {
-  val pretty =
-    try {
-      val json = kotlinx.serialization.json.Json { prettyPrint = true }
-      val element = json.parseToJsonElement(raw)
-      json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), element)
-    } catch (_: Exception) {
-      return AnnotatedString(raw)
-    }
-
-  return buildAnnotatedString {
-    var i = 0
-    while (i < pretty.length) {
-      val c = pretty[i]
-      when {
-        c == '"' -> {
-          // Find end of string
-          val end = findStringEnd(pretty, i)
-          val str = pretty.substring(i, end + 1)
-          // Check if this is a key (followed by colon after optional whitespace)
-          val afterStr = pretty.substring(end + 1).trimStart()
-          if (afterStr.startsWith(":")) {
-            // JSON key
-            withStyle(SpanStyle(color = JSON_KEY_COLOR)) { append(str) }
-          } else {
-            // JSON string value
-            withStyle(SpanStyle(color = JSON_STRING_COLOR)) { append(str) }
-          }
-          i = end + 1
-        }
-        c.isDigit() || c == '-' -> {
-          val start = i
-          while (
-            i < pretty.length &&
-              (pretty[i].isDigit() ||
-                pretty[i] == '.' ||
-                pretty[i] == '-' ||
-                pretty[i] == 'e' ||
-                pretty[i] == 'E' ||
-                pretty[i] == '+')
-          ) {
-            i++
-          }
-          withStyle(SpanStyle(color = JSON_NUMBER_COLOR)) { append(pretty.substring(start, i)) }
-        }
-        pretty.startsWith("true", i) -> {
-          withStyle(SpanStyle(color = JSON_BOOLEAN_COLOR)) { append("true") }
-          i += 4
-        }
-        pretty.startsWith("false", i) -> {
-          withStyle(SpanStyle(color = JSON_BOOLEAN_COLOR)) { append("false") }
-          i += 5
-        }
-        pretty.startsWith("null", i) -> {
-          withStyle(SpanStyle(color = JSON_NULL_COLOR)) { append("null") }
-          i += 4
-        }
-        c == '{' || c == '}' || c == '[' || c == ']' || c == ':' || c == ',' -> {
-          withStyle(SpanStyle(color = JSON_BRACE_COLOR)) { append(c.toString()) }
-          i++
-        }
-        else -> {
-          append(c.toString())
-          i++
-        }
-      }
-    }
-  }
-}
-
-private fun findStringEnd(s: String, start: Int): Int {
-  var i = start + 1
-  while (i < s.length) {
-    if (s[i] == '\\') {
-      i += 2
-    } else if (s[i] == '"') {
-      return i
-    } else {
-      i++
-    }
-  }
-  return s.length - 1
-}

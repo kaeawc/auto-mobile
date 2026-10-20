@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
+import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorOptions
 import dev.jasonpearson.automobile.desktop.core.rememberLiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
@@ -93,12 +94,15 @@ fun LayoutFacet(
     )
   observation.stream?.let { activeStream ->
     LayoutInspectorDashboard(
-      dataSourceMode = DataSourceMode.Real,
+      options =
+        LayoutInspectorOptions(
+          dataSourceMode = DataSourceMode.Real,
+          deviceId = column.deviceId,
+          platform = if (column.platform == Platform.Ios) "ios" else "android",
+          liveFrame = liveFrame?.bitmap,
+          connectionGeneration = observation.connectionGeneration,
+        ),
       observationStream = activeStream,
-      deviceId = column.deviceId,
-      platform = if (column.platform == Platform.Ios) "ios" else "android",
-      liveFrame = liveFrame?.bitmap,
-      connectionGeneration = observation.connectionGeneration,
     )
   }
 }

@@ -148,7 +148,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
           ),
         commandExecutor = commands,
         timer = timer,
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -195,7 +198,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.41", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -218,7 +224,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("/opt/homebrew/bin/bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("/opt/homebrew/bin/bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -245,7 +254,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
           ),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -277,7 +289,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -319,8 +334,11 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.39", "0.0.39")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = timer,
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
-        verificationAttempts = 2,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+            verificationAttempts = 2,
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -340,7 +358,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(exitCode = 1, output = ""),
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -358,7 +379,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = ThrowingDaemonCommandExecutor("Cannot run program \"bunx\""),
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -378,9 +402,12 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver =
-          FakeDaemonPackageRunnerResolver(listOf(null, "/home/dev/.bun/bin/bunx")),
-        bunInstaller = installer,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver =
+              FakeDaemonPackageRunnerResolver(listOf(null, "/home/dev/.bun/bin/bunx")),
+            bunInstaller = installer,
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -411,8 +438,11 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
-        bunInstaller = installer,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+            bunInstaller = installer,
+          ),
       )
 
     assertIs<DaemonLifecycleResult.Ready>(lifecycle.ensureVersionMatchedDaemon())
@@ -429,8 +459,11 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver(null),
-        bunInstaller = installer,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver(null),
+            bunInstaller = installer,
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -450,8 +483,11 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver(null),
-        bunInstaller = FakeDesktopBunInstaller(exitCode = 1, output = "download failed"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver(null),
+            bunInstaller = FakeDesktopBunInstaller(exitCode = 1, output = "download failed"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -470,7 +506,10 @@ internal class DesktopDaemonLifecycleTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(exitCode = -1, timedOut = true),
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -747,7 +786,10 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = FakeDaemonRetryTimer(),
-        phaseListener = phases::add,
+        options =
+          DesktopDaemonLifecycleOptions(
+            phaseListener = phases::add,
+          ),
       )
 
     lifecycle.ensureVersionMatchedDaemon()
@@ -769,9 +811,12 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver(listOf(null, "bunx")),
-        bunInstaller = installer,
-        phaseListener = phases::add,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver(listOf(null, "bunx")),
+            bunInstaller = installer,
+            phaseListener = phases::add,
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -800,7 +845,10 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null)),
         commandExecutor = FakeDaemonCommandExecutor(),
         timer = FakeDaemonRetryTimer(),
-        phaseListener = phases::add,
+        options =
+          DesktopDaemonLifecycleOptions(
+            phaseListener = phases::add,
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -824,8 +872,11 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40", "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
-        healthProbe = healthProbe,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+            healthProbe = healthProbe,
+          ),
       )
 
     val result = lifecycle.ensureHealthyDaemon()
@@ -852,8 +903,11 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
-        healthProbe = healthProbe,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+            healthProbe = healthProbe,
+          ),
       )
 
     val result = lifecycle.ensureHealthyDaemon()
@@ -876,8 +930,11 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
-        healthProbe = FakeDaemonHealthProbe(DaemonHealth.UNKNOWN),
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+            healthProbe = FakeDaemonHealthProbe(DaemonHealth.UNKNOWN),
+          ),
       )
 
     val result = lifecycle.ensureHealthyDaemon()
@@ -902,8 +959,11 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
-        healthProbe = healthProbe,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+            healthProbe = healthProbe,
+          ),
       )
 
     val result = lifecycle.ensureVersionMatchedDaemon()
@@ -927,8 +987,11 @@ internal class DesktopDaemonEnvironmentTest : DesktopDaemonLifecycleFixture() {
         pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
         commandExecutor = commands,
         timer = FakeDaemonRetryTimer(),
-        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
-        healthProbe = healthProbe,
+        options =
+          DesktopDaemonLifecycleOptions(
+            packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+            healthProbe = healthProbe,
+          ),
       )
 
     val result = lifecycle.ensureHealthyDaemon()

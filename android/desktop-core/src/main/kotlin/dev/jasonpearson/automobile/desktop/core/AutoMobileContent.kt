@@ -147,6 +147,7 @@ import dev.jasonpearson.automobile.desktop.core.shell.SearchCategory
 import dev.jasonpearson.automobile.desktop.core.shell.SearchResult
 import dev.jasonpearson.automobile.desktop.core.shell.SearchResultProvider
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
+import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShellOptions
 import dev.jasonpearson.automobile.desktop.core.shell.buildDefaultCommands
 import dev.jasonpearson.automobile.desktop.core.shell.toSidebarDeviceInfo
 import dev.jasonpearson.automobile.desktop.core.snapshot.SnapshotsDashboard
@@ -155,9 +156,11 @@ import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTabBar
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboard
+import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.matchesSearch
 import dev.jasonpearson.automobile.desktop.core.test.TestDashboard
+import dev.jasonpearson.automobile.desktop.core.test.TestDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCanvas
@@ -1924,463 +1927,502 @@ fun AutoMobileContent(
       },
   ) {
     ThreePaneShell(
-      showLeftPane = showLeftPane,
-      onToggleLeftPane = { showLeftPane = !showLeftPane },
-      showRightPane = showRightPane,
-      onToggleRightPane = { showRightPane = !showRightPane },
-      showBottomPane = showBottomPane,
-      onToggleBottomPane = { showBottomPane = !showBottomPane },
-      deviceName = realDevice?.name,
-      foregroundApp =
-        realDevice?.foregroundApp ?: installedApps.find { it.isForeground }?.packageName,
-      crashCount = crashCount,
-      anrCount = anrCount,
-      nonFatalCount = nonFatalCount,
-      toolFailureCount = toolFailureCount,
-      currentFps = currentFps,
-      currentMemoryMb = currentMemoryMb,
-      isDaemonConnected = connectedMcpProcess != null,
-      onNavigateUp = { if (selectedEventIndex > 0) selectedEventIndex-- },
-      onNavigateDown = { selectedEventIndex++ },
-      onSelectEvent = {
-        // Opens the inspector for the currently focused event
-        if (selectedEventIndex >= 0) showRightPane = true
-      },
-      onDeselectEvent = {
-        if (showRightPane) {
-          showRightPane = false
-        } else {
-          selectedEventIndex = -1
-        }
-      },
-      onJumpToTop = { selectedEventIndex = 0 },
-      onJumpToBottom = { /* No-op until event list size is known */ },
-      onQuickJump = { /* Timestamp jump placeholder */ },
-      menuBarActions = menuBarActions,
-      vimModeEnabled = vimModeEnabled,
-      // The shell's navigation shortcuts run in a PREVIEW handler, so without this they consume
-      // Tab / arrows / Enter / Escape before the focused device canvas ever sees them — and Escape
-      // is the client's only device-button binding (issue #3351). Evaluated PER EVENT with the same
-      // policy the canvas applies: Compose never reruns a preview handler while an unconsumed
-      // event bubbles up, so standing down for a keystroke the canvas then declines (a printable
-      // key on iOS, a shifted device key) would leave it with neither the device nor the shell.
-      deviceControlCapturesKeys = { event ->
-        deviceCanvasFocused &&
-          deviceControlSession.interactionSnapshot != null &&
-          deviceControlSession.wouldForwardKey(DeviceKeyboardEventTranslator.translate(event))
-      },
-      centerContent = { mod ->
-        if (isLiveLayoutMode) {
-          // Live layout mode: center shows device screenshot with element overlays.
-          //
-          // Device control resolves to exactly one atomic snapshot (issue #3348). Every condition
-          // #3347 gated inline here — opt-in, Real mode, an explicit selection, an input-capable
-          // transport, stream liveness, screenshot AND hierarchy device identity, and geometry —
-          // is now a rule inside the Compose-free DeviceControlPolicy, which additionally pairs
-          // the screenshot and hierarchy by daemon *provenance* and bounds how old the displayed
-          // frame may be. Control is available only when that policy can build a snapshot; the
-          // view then maps clicks through that snapshot and hands it back with each tap, so a
-          // snapshot swap between click and dispatch cannot change what the daemon receives.
-          //
-          // Re-evaluated on a slow ticker as well as on source updates, because a stalled
-          // observation stream produces no updates at all — its staleness is only visible as time
-          // passing.
-          controlFreshnessTick
-          val deviceControlDecision =
-            deviceControlSession.evaluate(
-              DeviceControlInputs(
-                enabled = enableDeviceControl && !liveVideoReadOnly,
-                realDeviceMode = dataSourceMode == DataSourceMode.Real,
-                selectedDeviceId = activeDeviceId,
-                transportSupportsInput =
-                  connectedMcpProcess?.connectionType?.supportsDaemonInput == true,
-                observationStreamConnected =
-                  layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
-                screenshot = layoutInspectorState.screenshotFacts,
-                hierarchy = layoutInspectorState.hierarchyFacts,
-                // Control maps and renders the paired observation screenshot. WebRTC has no
-                // capture identity, so it is only an Inspector-mode rendering source and must not
-                // decide whether the independently paired screenshot is actionable.
-                liveFrame = null,
-              ),
-            )
-          // What a CLICK acts through. While a post-input refresh is pending this is the retained
-          // frame rather than the live decision, so the coherent frame on screen stays clickable
-          // instead of silently flipping to Inspector between a tap and its successor (#3348).
-          val controlSnapshot = deviceControlSession.interactionSnapshot
-          // What the inspector RENDERS, which is not always what control may act through: after a
-          // successful tap the clicked snapshot is retained until a genuinely superseding one
-          // arrives (issue #3348's refresh policy). A screenshot-only update in the meantime does
-          // not pair with the retained hierarchy, so it produces no snapshot and must not replace
-          // the coherent picture on screen.
-          //
-          // EVERYTHING the view draws and maps through comes from this one snapshot — pixels,
-          // dimensions and tree together. Taking the bytes from newest-independent state while
-          // retaining the hierarchy would put new pixels on screen against the clicked snapshot's
-          // old tree, which is the half-updated frame this policy exists to prevent. Falls back to
-          // live state only before the first snapshot exists.
-          val renderSnapshot = deviceControlSession.renderSnapshot
-          Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
-            DeviceScreenView(
-              screenshotData =
-                renderSnapshot?.screenshotData ?: layoutInspectorState.screenshotData,
-              // WebRTC frames have no capture identity. In control mode render the paired
-              // observation screenshot instead, so the pixels the user clicks carry the same
-              // frameContext as the hierarchy and input request.
-              liveFrame = if (controlSnapshot == null) liveVideoFrame?.bitmap else null,
-              screenWidth = renderSnapshot?.deviceWidth ?: layoutInspectorState.screenWidth,
-              screenHeight = renderSnapshot?.deviceHeight ?: layoutInspectorState.screenHeight,
-              rotation = layoutInspectorState.rotation,
-              hierarchy = renderSnapshot?.hierarchy?.root ?: layoutInspectorState.hierarchy,
-              selectedElementId = layoutInspectorState.selectedElementId,
-              hoveredElementId = layoutInspectorState.hoveredElementId,
-              onElementSelected = { layoutInspectorState.selectElement(it) },
-              onElementHovered = { layoutInspectorState.hoverElement(it) },
-              showTapTargetIssues = layoutInspectorState.showTapTargetIssues,
-              onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
-              connectionStatus = layoutInspectorState.connectionStatus,
-              socketExists = true,
-              elementMap =
-                (renderSnapshot?.hierarchy?.elementMap ?: layoutInspectorState.currentElementMap)
-                  .takeIf { it.isNotEmpty() },
-              modifier = Modifier.fillMaxSize(),
-              // Device control (issues #3347, #3348): the reference desktop app opts in via
-              // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only.
-              // Every other condition is decided by DeviceControlPolicy above — control mode is on
-              // exactly when it produced a snapshot, and off (inspector) otherwise.
-              controlMode =
-                if (controlSnapshot != null) DeviceScreenControlMode.Control
-                else DeviceScreenControlMode.Inspector,
-              // The snapshot the view maps clicks through. Passing it here — rather than letting
-              // the view derive bounds from whatever live state it last recomposed with — is what
-              // makes an equal-aspect resolution change unable to mis-scale a tap.
-              controlSnapshot = controlSnapshot,
-              // The view maps a click through `snapshot` and hands both back atomically; the
-              // session forwards it to the daemon input/tap helper off the UI thread and never
-              // crashes on failure — the daemon's actionable error surfaces in
-              // deviceControlTapError instead.
-              onControlTap = { snapshot, point -> deviceControlSession.tap(snapshot, point) },
-              // A control-mode drag (issue #3350) travels the SAME session — the same bounded
-              // ordered queue, the same error claim, the same post-input refresh tracker — so a
-              // tap-then-swipe sequence reaches the device in the order the user made it. The
-              // threshold and out-of-bounds rules live in the session's pure drag policy, not
-              // here.
-              onControlSwipe = { snapshot, start, end, durationMs ->
-                deviceControlSession.swipe(snapshot, start, end, durationMs)
-              },
-              // Streaming (real-time) drag on the SAME session: a non-null handle streams live,
-              // null keeps the atomic onControlSwipe above (flag off / unsupported).
-              onControlGestureStreamBegin = { snapshot, downPoint ->
-                deviceControlSession.beginGestureStream(snapshot, downPoint)
-              },
-              // Keyboard, text and device buttons (issue #3351) travel that SAME session too, so a
-              // tap-then-type sequence reaches the device in order. The session answers whether it
-              // forwarded anything, and the view returns that as its onKeyEvent result — so a chord
-              // the policy leaves to the host is not consumed here and still reaches this app's own
-              // shortcuts.
-              onControlKey = { snapshot, stroke -> deviceControlSession.key(snapshot, stroke) },
-              onControlFocusChanged = { focused -> deviceCanvasFocused = focused },
-            )
-
-            ScreenshotMetadataOverlay(
-              fallback = layoutInspectorState.screenshotFallback,
-              fallbackReason = layoutInspectorState.screenshotFallbackReason,
-              format = layoutInspectorState.screenshotFormat,
-              captureSource = layoutInspectorState.screenshotCaptureSource,
-              modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
-            )
-
-            // Bottom notices share one Column so they stack instead of overlapping when both are
-            // visible (a lingering tap-error banner plus a block that outlasts the debounce).
-            Column(
-              modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-              horizontalAlignment = Alignment.CenterHorizontally,
-              verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-              val noticeDeviceId = activeDeviceId
-              // An input was refused because another session holds the device: the pane keeps
-              // watching and never takes it on its own (#10660, #10730). Take control is the one
-              // explicit bind attempt.
-              if (
-                noticeDeviceId != null &&
-                  desktopSessionState.heldElsewhereDeviceId == noticeDeviceId
-              ) {
-                DeviceViewingNotice(
-                  onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
-                )
-              }
-              // Released after inactivity: still controllable; the next input allocates it again.
-              if (
-                noticeDeviceId != null && desktopSessionState.idleReleasedDeviceId == noticeDeviceId
-              ) {
-                DeviceIdleReleasedNotice(
-                  reason = desktopSessionState.releaseReason,
-                  onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
-                )
-              }
-              // A bind that failed for another reason is an error, not held elsewhere (#10682).
-              val bindError = desktopSessionState.bindErrorMessage
-              if (
-                noticeDeviceId != null &&
-                  bindError != null &&
-                  desktopSessionState.bindErrorDeviceId == noticeDeviceId
-              ) {
-                DeviceBindErrorNotice(
-                  message = bindError,
-                  onRetry = { desktopSessionState.requestControl(noticeDeviceId) },
-                )
-              }
-
-              // Why control is unavailable (issue #4531). The policy's reason is surfaced only
-              // when no interaction snapshot exists — while a post-input refresh retains one,
-              // clicks still actuate the device, so a "blocked" notice would contradict what the
-              // user experiences. The notice itself debounces, so the transient reasons that come
-              // and go during normal streaming never flicker into view.
-              DeviceControlBlockedNotice(
-                reason =
-                  if (controlSnapshot == null) {
-                    (deviceControlDecision as? DeviceControlDecision.Blocked)?.reason
-                  } else {
-                    null
-                  },
-              )
-
-              deviceControlTapError?.let { message ->
-                DeviceControlTapErrorBanner(
-                  message = message,
-                  onDismiss = { deviceControlTapError = null },
-                )
-              }
+      options =
+        ThreePaneShellOptions(
+          showLeftPane = showLeftPane,
+          onToggleLeftPane = { showLeftPane = !showLeftPane },
+          showRightPane = showRightPane,
+          onToggleRightPane = { showRightPane = !showRightPane },
+          showBottomPane = showBottomPane,
+          onToggleBottomPane = { showBottomPane = !showBottomPane },
+          deviceName = realDevice?.name,
+          foregroundApp =
+            realDevice?.foregroundApp ?: installedApps.find { it.isForeground }?.packageName,
+          crashCount = crashCount,
+          anrCount = anrCount,
+          nonFatalCount = nonFatalCount,
+          toolFailureCount = toolFailureCount,
+          currentFps = currentFps,
+          currentMemoryMb = currentMemoryMb,
+          isDaemonConnected = connectedMcpProcess != null,
+          onNavigateUp = { if (selectedEventIndex > 0) selectedEventIndex-- },
+          onNavigateDown = { selectedEventIndex++ },
+          onSelectEvent = {
+            // Opens the inspector for the currently focused event
+            if (selectedEventIndex >= 0) showRightPane = true
+          },
+          onDeselectEvent = {
+            if (showRightPane) {
+              showRightPane = false
+            } else {
+              selectedEventIndex = -1
             }
-          }
-        } else {
-          Column(mod) {
-            // Telemetry is the primary center content
-            TelemetryDashboard(
-              telemetryPushClient = telemetryPushClient,
-              dataSourceMode = dataSourceMode,
-              activeDeviceId = activeDeviceId,
-              selectedEvent = selectedTelemetryEvent,
-              onEventSelected = { event ->
-                selectedTelemetryEvent = event
-                if (event != null && !showRightPane) showRightPane = true
-              },
-              timelineState = timelineState,
-              onFilterChanged = { categoryKey ->
-                filteredTimelineCategories =
-                  if (categoryKey != null) {
-                    TimelineCategory.entries.filter { it.name != categoryKey }.toSet()
-                  } else {
-                    emptySet()
+          },
+          onJumpToTop = { selectedEventIndex = 0 },
+          onJumpToBottom = { /* No-op until event list size is known */ },
+          onQuickJump = { /* Timestamp jump placeholder */ },
+          menuBarActions = menuBarActions,
+          vimModeEnabled = vimModeEnabled,
+          // The shell's navigation shortcuts run in a PREVIEW handler, so without this they consume
+          // Tab / arrows / Enter / Escape before the focused device canvas ever sees them — and
+          // Escape
+          // is the client's only device-button binding (issue #3351). Evaluated PER EVENT with the
+          // same
+          // policy the canvas applies: Compose never reruns a preview handler while an unconsumed
+          // event bubbles up, so standing down for a keystroke the canvas then declines (a
+          // printable
+          // key on iOS, a shifted device key) would leave it with neither the device nor the shell.
+          deviceControlCapturesKeys = { event ->
+            deviceCanvasFocused &&
+              deviceControlSession.interactionSnapshot != null &&
+              deviceControlSession.wouldForwardKey(DeviceKeyboardEventTranslator.translate(event))
+          },
+          centerContent = { mod ->
+            if (isLiveLayoutMode) {
+              // Live layout mode: center shows device screenshot with element overlays.
+              //
+              // Device control resolves to exactly one atomic snapshot (issue #3348). Every
+              // condition
+              // #3347 gated inline here — opt-in, Real mode, an explicit selection, an
+              // input-capable
+              // transport, stream liveness, screenshot AND hierarchy device identity, and geometry
+              // —
+              // is now a rule inside the Compose-free DeviceControlPolicy, which additionally pairs
+              // the screenshot and hierarchy by daemon *provenance* and bounds how old the
+              // displayed
+              // frame may be. Control is available only when that policy can build a snapshot; the
+              // view then maps clicks through that snapshot and hands it back with each tap, so a
+              // snapshot swap between click and dispatch cannot change what the daemon receives.
+              //
+              // Re-evaluated on a slow ticker as well as on source updates, because a stalled
+              // observation stream produces no updates at all — its staleness is only visible as
+              // time
+              // passing.
+              controlFreshnessTick
+              val deviceControlDecision =
+                deviceControlSession.evaluate(
+                  DeviceControlInputs(
+                    enabled = enableDeviceControl && !liveVideoReadOnly,
+                    realDeviceMode = dataSourceMode == DataSourceMode.Real,
+                    selectedDeviceId = activeDeviceId,
+                    transportSupportsInput =
+                      connectedMcpProcess?.connectionType?.supportsDaemonInput == true,
+                    observationStreamConnected =
+                      layoutInspectorState.connectionStatus == ConnectionStatus.Connected,
+                    screenshot = layoutInspectorState.screenshotFacts,
+                    hierarchy = layoutInspectorState.hierarchyFacts,
+                    // Control maps and renders the paired observation screenshot. WebRTC has no
+                    // capture identity, so it is only an Inspector-mode rendering source and must
+                    // not
+                    // decide whether the independently paired screenshot is actionable.
+                    liveFrame = null,
+                  ),
+                )
+              // What a CLICK acts through. While a post-input refresh is pending this is the
+              // retained
+              // frame rather than the live decision, so the coherent frame on screen stays
+              // clickable
+              // instead of silently flipping to Inspector between a tap and its successor (#3348).
+              val controlSnapshot = deviceControlSession.interactionSnapshot
+              // What the inspector RENDERS, which is not always what control may act through: after
+              // a
+              // successful tap the clicked snapshot is retained until a genuinely superseding one
+              // arrives (issue #3348's refresh policy). A screenshot-only update in the meantime
+              // does
+              // not pair with the retained hierarchy, so it produces no snapshot and must not
+              // replace
+              // the coherent picture on screen.
+              //
+              // EVERYTHING the view draws and maps through comes from this one snapshot — pixels,
+              // dimensions and tree together. Taking the bytes from newest-independent state while
+              // retaining the hierarchy would put new pixels on screen against the clicked
+              // snapshot's
+              // old tree, which is the half-updated frame this policy exists to prevent. Falls back
+              // to
+              // live state only before the first snapshot exists.
+              val renderSnapshot = deviceControlSession.renderSnapshot
+              Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
+                DeviceScreenView(
+                  screenshotData =
+                    renderSnapshot?.screenshotData ?: layoutInspectorState.screenshotData,
+                  // WebRTC frames have no capture identity. In control mode render the paired
+                  // observation screenshot instead, so the pixels the user clicks carry the same
+                  // frameContext as the hierarchy and input request.
+                  liveFrame = if (controlSnapshot == null) liveVideoFrame?.bitmap else null,
+                  screenWidth = renderSnapshot?.deviceWidth ?: layoutInspectorState.screenWidth,
+                  screenHeight = renderSnapshot?.deviceHeight ?: layoutInspectorState.screenHeight,
+                  rotation = layoutInspectorState.rotation,
+                  hierarchy = renderSnapshot?.hierarchy?.root ?: layoutInspectorState.hierarchy,
+                  selectedElementId = layoutInspectorState.selectedElementId,
+                  hoveredElementId = layoutInspectorState.hoveredElementId,
+                  onElementSelected = { layoutInspectorState.selectElement(it) },
+                  onElementHovered = { layoutInspectorState.hoverElement(it) },
+                  showTapTargetIssues = layoutInspectorState.showTapTargetIssues,
+                  onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
+                  connectionStatus = layoutInspectorState.connectionStatus,
+                  socketExists = true,
+                  elementMap =
+                    (renderSnapshot?.hierarchy?.elementMap
+                        ?: layoutInspectorState.currentElementMap)
+                      .takeIf { it.isNotEmpty() },
+                  modifier = Modifier.fillMaxSize(),
+                  // Device control (issues #3347, #3348): the reference desktop app opts in via
+                  // enableDeviceControl; the IDE plugin leaves it false and stays inspector-only.
+                  // Every other condition is decided by DeviceControlPolicy above — control mode is
+                  // on
+                  // exactly when it produced a snapshot, and off (inspector) otherwise.
+                  controlMode =
+                    if (controlSnapshot != null) DeviceScreenControlMode.Control
+                    else DeviceScreenControlMode.Inspector,
+                  // The snapshot the view maps clicks through. Passing it here — rather than
+                  // letting
+                  // the view derive bounds from whatever live state it last recomposed with — is
+                  // what
+                  // makes an equal-aspect resolution change unable to mis-scale a tap.
+                  controlSnapshot = controlSnapshot,
+                  // The view maps a click through `snapshot` and hands both back atomically; the
+                  // session forwards it to the daemon input/tap helper off the UI thread and never
+                  // crashes on failure — the daemon's actionable error surfaces in
+                  // deviceControlTapError instead.
+                  onControlTap = { snapshot, point -> deviceControlSession.tap(snapshot, point) },
+                  // A control-mode drag (issue #3350) travels the SAME session — the same bounded
+                  // ordered queue, the same error claim, the same post-input refresh tracker — so a
+                  // tap-then-swipe sequence reaches the device in the order the user made it. The
+                  // threshold and out-of-bounds rules live in the session's pure drag policy, not
+                  // here.
+                  onControlSwipe = { snapshot, start, end, durationMs ->
+                    deviceControlSession.swipe(snapshot, start, end, durationMs)
+                  },
+                  // Streaming (real-time) drag on the SAME session: a non-null handle streams live,
+                  // null keeps the atomic onControlSwipe above (flag off / unsupported).
+                  onControlGestureStreamBegin = { snapshot, downPoint ->
+                    deviceControlSession.beginGestureStream(snapshot, downPoint)
+                  },
+                  // Keyboard, text and device buttons (issue #3351) travel that SAME session too,
+                  // so a
+                  // tap-then-type sequence reaches the device in order. The session answers whether
+                  // it
+                  // forwarded anything, and the view returns that as its onKeyEvent result — so a
+                  // chord
+                  // the policy leaves to the host is not consumed here and still reaches this app's
+                  // own
+                  // shortcuts.
+                  onControlKey = { snapshot, stroke -> deviceControlSession.key(snapshot, stroke) },
+                  onControlFocusChanged = { focused -> deviceCanvasFocused = focused },
+                )
+
+                ScreenshotMetadataOverlay(
+                  fallback = layoutInspectorState.screenshotFallback,
+                  fallbackReason = layoutInspectorState.screenshotFallbackReason,
+                  format = layoutInspectorState.screenshotFormat,
+                  captureSource = layoutInspectorState.screenshotCaptureSource,
+                  modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                )
+
+                // Bottom notices share one Column so they stack instead of overlapping when both
+                // are
+                // visible (a lingering tap-error banner plus a block that outlasts the debounce).
+                Column(
+                  modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally,
+                  verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                  val noticeDeviceId = activeDeviceId
+                  // An input was refused because another session holds the device: the pane keeps
+                  // watching and never takes it on its own (#10660, #10730). Take control is the
+                  // one
+                  // explicit bind attempt.
+                  if (
+                    noticeDeviceId != null &&
+                      desktopSessionState.heldElsewhereDeviceId == noticeDeviceId
+                  ) {
+                    DeviceViewingNotice(
+                      onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                    )
                   }
-              },
-              modifier = Modifier.weight(1f),
-            )
-            // Bottom tabs for secondary views
-            HorizontalTabBar(
-              tabs = horizontalTabs,
-              selectedTabId = selectedHorizontalTabId,
-              onTabSelected = { selectedHorizontalTabId = it },
-            )
-            if (selectedHorizontalTabId != null) {
-              Box(Modifier.fillMaxWidth().weight(0.5f)) {
-                when (selectedHorizontalTabId) {
-                  "test_runs" ->
-                    TestDashboard(
-                      onNavigateToGraph = { screens ->
-                        testFlowScreens = screens
-                        isReplaying = true
-                        currentReplayIndex = 0
-                        showNavigationView = true
+                  // Released after inactivity: still controllable; the next input allocates it
+                  // again.
+                  if (
+                    noticeDeviceId != null &&
+                      desktopSessionState.idleReleasedDeviceId == noticeDeviceId
+                  ) {
+                    DeviceIdleReleasedNotice(
+                      reason = desktopSessionState.releaseReason,
+                      onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                    )
+                  }
+                  // A bind that failed for another reason is an error, not held elsewhere (#10682).
+                  val bindError = desktopSessionState.bindErrorMessage
+                  if (
+                    noticeDeviceId != null &&
+                      bindError != null &&
+                      desktopSessionState.bindErrorDeviceId == noticeDeviceId
+                  ) {
+                    DeviceBindErrorNotice(
+                      message = bindError,
+                      onRetry = { desktopSessionState.requestControl(noticeDeviceId) },
+                    )
+                  }
+
+                  // Why control is unavailable (issue #4531). The policy's reason is surfaced only
+                  // when no interaction snapshot exists — while a post-input refresh retains one,
+                  // clicks still actuate the device, so a "blocked" notice would contradict what
+                  // the
+                  // user experiences. The notice itself debounces, so the transient reasons that
+                  // come
+                  // and go during normal streaming never flicker into view.
+                  DeviceControlBlockedNotice(
+                    reason =
+                      if (controlSnapshot == null) {
+                        (deviceControlDecision as? DeviceControlDecision.Blocked)?.reason
+                      } else {
+                        null
                       },
-                      dataSourceMode = dataSourceMode,
-                      clientProvider = clientProvider,
-                      observationStreamClient = observationStreamClient,
+                  )
+
+                  deviceControlTapError?.let { message ->
+                    DeviceControlTapErrorBanner(
+                      message = message,
+                      onDismiss = { deviceControlTapError = null },
                     )
-                  "storage" ->
-                    StorageDashboard(
+                  }
+                }
+              }
+            } else {
+              Column(mod) {
+                // Telemetry is the primary center content
+                TelemetryDashboard(
+                  options =
+                    TelemetryDashboardOptions(
+                      telemetryPushClient = telemetryPushClient,
                       dataSourceMode = dataSourceMode,
-                      clientProvider = deviceActingClientProvider,
-                      deviceId = activeDeviceId,
-                      packageName = selectedAppId,
-                      platform = storagePlatform,
-                      observationStreamClient = observationStreamClient,
-                    )
-                  "snapshots" ->
-                    SnapshotsDashboard(
-                      actions = snapshotActions,
-                      configClient = snapshotConfigClient,
                       activeDeviceId = activeDeviceId,
-                    )
-                  "device_controls" ->
-                    DeviceControlsDashboard(
-                      appearanceClient = appearanceClient,
-                      recordingActions = recordingActions,
-                      recordingConfigClient = recordingConfigClient,
-                      streamClient = webRtcStreamClient,
-                      activeDeviceId = activeDeviceId,
-                      activeRecordings = activeRecordings,
-                      sessionUuidProvider = desktopSessionState.sessionUuidProvider,
-                      releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
-                    )
-                  "diagnostics" ->
-                    DiagnosticsDashboard(
-                      connectedMcpProcess = connectedMcpProcess,
-                      dataSourceMode = dataSourceMode,
-                    )
+                      selectedEvent = selectedTelemetryEvent,
+                      onEventSelected = { event ->
+                        selectedTelemetryEvent = event
+                        if (event != null && !showRightPane) showRightPane = true
+                      },
+                      timelineState = timelineState,
+                      onFilterChanged = { categoryKey ->
+                        filteredTimelineCategories =
+                          if (categoryKey != null) {
+                            TimelineCategory.entries.filter { it.name != categoryKey }.toSet()
+                          } else {
+                            emptySet()
+                          }
+                      },
+                    ),
+                  modifier = Modifier.weight(1f),
+                )
+                // Bottom tabs for secondary views
+                HorizontalTabBar(
+                  tabs = horizontalTabs,
+                  selectedTabId = selectedHorizontalTabId,
+                  onTabSelected = { selectedHorizontalTabId = it },
+                )
+                if (selectedHorizontalTabId != null) {
+                  Box(Modifier.fillMaxWidth().weight(0.5f)) {
+                    when (selectedHorizontalTabId) {
+                      "test_runs" ->
+                        TestDashboard(
+                          options =
+                            TestDashboardOptions(
+                              onNavigateToGraph = { screens ->
+                                testFlowScreens = screens
+                                isReplaying = true
+                                currentReplayIndex = 0
+                                showNavigationView = true
+                              },
+                              dataSourceMode = dataSourceMode,
+                              clientProvider = clientProvider,
+                              observationStreamClient = observationStreamClient,
+                            ),
+                        )
+                      "storage" ->
+                        StorageDashboard(
+                          dataSourceMode = dataSourceMode,
+                          clientProvider = deviceActingClientProvider,
+                          deviceId = activeDeviceId,
+                          packageName = selectedAppId,
+                          platform = storagePlatform,
+                          observationStreamClient = observationStreamClient,
+                        )
+                      "snapshots" ->
+                        SnapshotsDashboard(
+                          actions = snapshotActions,
+                          configClient = snapshotConfigClient,
+                          activeDeviceId = activeDeviceId,
+                        )
+                      "device_controls" ->
+                        DeviceControlsDashboard(
+                          appearanceClient = appearanceClient,
+                          recordingActions = recordingActions,
+                          recordingConfigClient = recordingConfigClient,
+                          streamClient = webRtcStreamClient,
+                          activeDeviceId = activeDeviceId,
+                          activeRecordings = activeRecordings,
+                          sessionUuidProvider = desktopSessionState.sessionUuidProvider,
+                          releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
+                        )
+                      "diagnostics" ->
+                        DiagnosticsDashboard(
+                          connectedMcpProcess = connectedMcpProcess,
+                          dataSourceMode = dataSourceMode,
+                        )
+                    }
+                  }
                 }
               }
             }
-          }
-        }
-      },
-      leftPaneContent = {
-        val sidebarDevices =
-          if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else realDevices
-        LeftSidebarPanel(
-          dataSourceMode = dataSourceMode,
-          onDataSourceModeChanged = { mode ->
-            dataSourceMode = mode
-            userSelectedDeviceId = null
-            if (mode == DataSourceMode.Real) {
-              activeDeviceId = null
-              isDevicePanelExpanded = true
-            } else if (mockBootedDevices.isNotEmpty()) {
-              activeDeviceId = mockBootedDevices.first().id
-              isDevicePanelExpanded = false
-            }
           },
-          connectedProcess = connectedMcpProcess,
-          onProcessConnected = { connectedMcpProcess = it },
-          onRetryDetection = { mcpConnectRetryCounter++ },
-          activeDeviceId = activeDeviceId,
-          suppressAutoSelect = true,
-          bootedDevices = sidebarDevices.map { it.toSidebarDeviceInfo() },
-          onDeviceSelected = { deviceId, _ ->
-            sidebarDevices
-              .firstOrNull { it.id == deviceId }
-              ?.let { device ->
-                userSelectedDeviceId = device.id
-                activeDeviceId = device.id
-                realDevice = device
-                isDevicePanelExpanded = false
-              }
-          },
-          onKillDevice = { deviceId ->
-            sidebarDevices
-              .firstOrNull { it.id == deviceId }
-              ?.let { device ->
-                killDeviceErrors = killDeviceErrors - device.id
-                screenshotScope.launch(Dispatchers.IO) {
-                  try {
-                    // On a Unix daemon this is the desktop session's client, so a device the
-                    // desktop holds is stopped as its holder; without a session (MCP HTTP) the
-                    // call is sessionless and a held device refuses it, shown on the row below.
-                    val client = clientProvider?.invoke()
-                    val platform = device.toSidebarDeviceInfo().platform
-                    LOG.info(
-                      "Killing device ${device.name} (${device.id}) via ${client?.transportName}",
-                    )
-                    val result = client?.killDevice(device.name, device.id, platform)
-                    if (result?.success == false) {
-                      LOG.warn("Failed to kill device: ${result.message}")
-                      killDeviceErrors =
-                        killDeviceErrors + (device.id to (result.message ?: "Failed to kill"))
-                      if (result.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
-                        desktopSessionState.reportHeldElsewhere(device.id)
+          leftPaneContent = {
+            val sidebarDevices =
+              if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else realDevices
+            LeftSidebarPanel(
+              dataSourceMode = dataSourceMode,
+              onDataSourceModeChanged = { mode ->
+                dataSourceMode = mode
+                userSelectedDeviceId = null
+                if (mode == DataSourceMode.Real) {
+                  activeDeviceId = null
+                  isDevicePanelExpanded = true
+                } else if (mockBootedDevices.isNotEmpty()) {
+                  activeDeviceId = mockBootedDevices.first().id
+                  isDevicePanelExpanded = false
+                }
+              },
+              connectedProcess = connectedMcpProcess,
+              onProcessConnected = { connectedMcpProcess = it },
+              onRetryDetection = { mcpConnectRetryCounter++ },
+              activeDeviceId = activeDeviceId,
+              suppressAutoSelect = true,
+              bootedDevices = sidebarDevices.map { it.toSidebarDeviceInfo() },
+              onDeviceSelected = { deviceId, _ ->
+                sidebarDevices
+                  .firstOrNull { it.id == deviceId }
+                  ?.let { device ->
+                    userSelectedDeviceId = device.id
+                    activeDeviceId = device.id
+                    realDevice = device
+                    isDevicePanelExpanded = false
+                  }
+              },
+              onKillDevice = { deviceId ->
+                sidebarDevices
+                  .firstOrNull { it.id == deviceId }
+                  ?.let { device ->
+                    killDeviceErrors = killDeviceErrors - device.id
+                    screenshotScope.launch(Dispatchers.IO) {
+                      try {
+                        // On a Unix daemon this is the desktop session's client, so a device the
+                        // desktop holds is stopped as its holder; without a session (MCP HTTP) the
+                        // call is sessionless and a held device refuses it, shown on the row below.
+                        val client = clientProvider?.invoke()
+                        val platform = device.toSidebarDeviceInfo().platform
+                        LOG.info(
+                          "Killing device ${device.name} (${device.id}) via ${client?.transportName}",
+                        )
+                        val result = client?.killDevice(device.name, device.id, platform)
+                        if (result?.success == false) {
+                          LOG.warn("Failed to kill device: ${result.message}")
+                          killDeviceErrors =
+                            killDeviceErrors + (device.id to (result.message ?: "Failed to kill"))
+                          if (result.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
+                            desktopSessionState.reportHeldElsewhere(device.id)
+                          }
+                        }
+                      } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                      } catch (e: Exception) {
+                        LOG.warn("Failed to kill device ${device.name}", e)
+                        killDeviceErrors =
+                          killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
                       }
                     }
-                  } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                  } catch (e: Exception) {
-                    LOG.warn("Failed to kill device ${device.name}", e)
-                    killDeviceErrors =
-                      killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
                   }
-                }
-              }
-          },
-          killDeviceErrors = killDeviceErrors,
-          installedApps = installedApps,
-          selectedAppId = selectedAppId,
-          onAppSelected = { selectedAppId = it },
-          onOpenSettings = { showSettings = true },
-          daemonStatusProvider = { clientProvider?.invoke()?.getDaemonStatus() },
-          daemonSocketPath = connectedMcpProcess?.socketPath,
-          availableDevicesContent = {
-            AvailableDeviceImagesSection(
-              images = deviceImages,
-              bootedDevices = sidebarDevices,
-              onBootDevice = { image ->
-                screenshotScope.launch(Dispatchers.IO) {
-                  try {
-                    clientProvider
-                      ?.invoke()
-                      ?.startDevice(image.name, image.platform, image.identity.stableId)
-                  } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                  } catch (e: Exception) {
-                    LOG.warn("Failed to start device ${image.name}", e)
-                  }
-                }
+              },
+              killDeviceErrors = killDeviceErrors,
+              installedApps = installedApps,
+              selectedAppId = selectedAppId,
+              onAppSelected = { selectedAppId = it },
+              onOpenSettings = { showSettings = true },
+              daemonStatusProvider = { clientProvider?.invoke()?.getDaemonStatus() },
+              daemonSocketPath = connectedMcpProcess?.socketPath,
+              availableDevicesContent = {
+                AvailableDeviceImagesSection(
+                  images = deviceImages,
+                  bootedDevices = sidebarDevices,
+                  onBootDevice = { image ->
+                    screenshotScope.launch(Dispatchers.IO) {
+                      try {
+                        clientProvider
+                          ?.invoke()
+                          ?.startDevice(image.name, image.platform, image.identity.stableId)
+                      } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                      } catch (e: Exception) {
+                        LOG.warn("Failed to start device ${image.name}", e)
+                      }
+                    }
+                  },
+                )
               },
             )
           },
-        )
-      },
-      rightPaneContent = {
-        RightInspectorPanel(
-          selectedEvent = selectedTelemetryEvent,
-          onClose = {
-            if (isLiveLayoutMode) isLiveLayoutMode = false else selectedTelemetryEvent = null
-          },
-          isLiveMode = isLiveLayoutMode,
-          onToggleLiveMode = { live ->
-            isLiveLayoutMode = live
-            if (live && !showRightPane) showRightPane = true
-          },
-          layoutInspectorState = layoutInspectorState,
-          hasDevice = observationStreamClient != null,
-          onOpenSource = onOpenSource,
-          screenshotLoader =
-            remember(clientProvider, dataSourceMode) {
-              if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
-                NavigationScreenshotLoader(clientProvider)
-              else null
-            },
-        )
-      },
-      bottomPaneContent = {
-        val spans =
-          remember(
-            telemetryEventCache.size,
-            telemetryEventCache.lastOrNull()?.timestamp,
-            filteredTimelineCategories,
-          ) {
-            buildTimelineSpans(telemetryEventCache.toList(), filteredTimelineCategories)
-          }
-        val lanes = remember(spans) { activeLanes(spans) }
-        if (spans.isEmpty()) {
-          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-              "Event Timeline",
-              color = colors.text.normal.copy(alpha = 0.5f),
-              fontSize = 12.sp,
+          rightPaneContent = {
+            RightInspectorPanel(
+              selectedEvent = selectedTelemetryEvent,
+              onClose = {
+                if (isLiveLayoutMode) isLiveLayoutMode = false else selectedTelemetryEvent = null
+              },
+              isLiveMode = isLiveLayoutMode,
+              onToggleLiveMode = { live ->
+                isLiveLayoutMode = live
+                if (live && !showRightPane) showRightPane = true
+              },
+              layoutInspectorState = layoutInspectorState,
+              hasDevice = observationStreamClient != null,
+              onOpenSource = onOpenSource,
+              screenshotLoader =
+                remember(clientProvider, dataSourceMode) {
+                  if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
+                    NavigationScreenshotLoader(clientProvider)
+                  else null
+                },
             )
-          }
-        } else {
-          TimelineCanvas(
-            spans = spans,
-            activeLanes = lanes,
-            state = timelineState,
-            onEventClicked = { event ->
-              selectedTelemetryEvent = event
-              if (!showRightPane) showRightPane = true
-            },
-            modifier = Modifier.fillMaxSize(),
-          )
-        }
-      },
+          },
+          bottomPaneContent = {
+            val spans =
+              remember(
+                telemetryEventCache.size,
+                telemetryEventCache.lastOrNull()?.timestamp,
+                filteredTimelineCategories,
+              ) {
+                buildTimelineSpans(telemetryEventCache.toList(), filteredTimelineCategories)
+              }
+            val lanes = remember(spans) { activeLanes(spans) }
+            if (spans.isEmpty()) {
+              Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                  "Event Timeline",
+                  color = colors.text.normal.copy(alpha = 0.5f),
+                  fontSize = 12.sp,
+                )
+              }
+            } else {
+              TimelineCanvas(
+                spans = spans,
+                activeLanes = lanes,
+                state = timelineState,
+                onEventClicked = { event ->
+                  selectedTelemetryEvent = event
+                  if (!showRightPane) showRightPane = true
+                },
+                modifier = Modifier.fillMaxSize(),
+              )
+            }
+          },
+        ),
     )
 
     // Command palette overlay

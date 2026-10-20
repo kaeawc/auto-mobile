@@ -608,6 +608,9 @@ imports Bun's public scanner can fold away in dead code. References and
 resolutions, parse errors, and unsupported graph loaders conservatively select
 the complete unit list. Thus this is intentionally a **superset**, rather than
 an exact emulation of Bun's private bundler graph. No changes selects zero files.
+Selection has its own wall-clock budget of 120 seconds, configurable with
+`AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS` (a positive integer). A timeout
+returns 124 before any test workers start; shard wall budgets are unchanged.
 The reference behavior was checked against
 [Bun 1.3.14's changed-file filter](https://github.com/oven-sh/bun/blob/bun-v1.3.14/src/cli/test/ChangedFilesFilter.zig).
 
@@ -615,7 +618,7 @@ The sorted selection is split round-robin across the capped worker count. Each
 shard uses the unit lane's shared/isolated group runner under its existing
 watchdog and process-group cleanup. Both groups in changed mode are split into
 processes of at most `AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE` files (default 30;
-an explicit 0 retains the existing unbounded opt-out). Allow-listed files still
+changed mode also treats an explicit 0 as 30). Allow-listed files still
 share a process within each shared chunk. JUnit uses the unit chunk names
 (`shard-N.xml`, `shard-N-iso-K.xml`, and `shard-N-shared[-K].xml`). Empty selection
 succeeds without workers. Changed shards retain their existing no-retry policy.

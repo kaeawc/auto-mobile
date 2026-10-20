@@ -1,7 +1,10 @@
 #!/usr/bin/env bats
 # bats file_tags=parallel-within-file
 load test-ts-process-helpers
-setup() { setup_test_ts_stubs; }
+setup() {
+  REAL_BUN="$(command -v bun)"
+  setup_test_ts_stubs
+}
 teardown() { teardown_test_ts_stubs; }
 
 @test "changed selection runs once and every file runs once in bounded processes" {
@@ -46,4 +49,64 @@ teardown() { teardown_test_ts_stubs; }
   [ "$(awk '{n+=$1} END {print n}' "$BATS_TEST_TMPDIR/counts")" -eq 125 ]
   [ "$(wc -l < "$STUB_CALLS")" -eq 6 ]
   printf 'Observed default changed process file counts: %s\n' "$(tr '\n' ' ' < "$BATS_TEST_TMPDIR/counts")" >&3
+}
+
+@test "zero changed chunk size uses 30 for isolated and shared groups" {
+  export STUB_SELECTED_COUNT=125 AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=0
+  local shared_count i
+  for shared_count in 0 125; do
+    : > "$AUTOMOBILE_UNIT_SHARED_ALLOWLIST"
+    for ((i=0; i<shared_count; i+=1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done > "$AUTOMOBILE_UNIT_SHARED_ALLOWLIST"
+    rm -f "$STUB_CALLS"
+    run bash scripts/test-ts.sh changed
+    [ "$status" -eq 0 ]
+    awk '{n=0; for(i=1;i<=NF;i++) if($i ~ /\.test\.ts$/) n++; print n; if(n<1 || n>30) exit 1}' \
+      "$STUB_CALLS" > "$BATS_TEST_TMPDIR/counts"
+    [ "$(awk '{n+=$1} END {print n}' "$BATS_TEST_TMPDIR/counts")" -eq 125 ]
+    [ "$(wc -l < "$STUB_CALLS")" -eq 6 ]
+    printf 'Observed zero changed chunk size (%s shared) process file counts: %s\n' \
+      "$shared_count" "$(tr '\n' ' ' < "$BATS_TEST_TMPDIR/counts")" >&3
+  done
+}
+
+@test "changed calibration CLI slowdowns match zero-based chunk report keys" {
+  export AUTOMOBILE_RUNNER_CALIBRATION=1 STUB_SELECTED_COUNT=125
+  export AUTOMOBILE_UNIT_JUNIT_DIR="$BATS_TEST_TMPDIR/reports"
+  run bash scripts/test-ts.sh changed
+  [ "$status" -eq 0 ]
+  grep -q 'shard-0-iso-1.xml' "$STUB_CALLS"
+  grep -q 'shard-1-iso-1.xml' "$STUB_CALLS"
+  run "$REAL_BUN" scripts/lib/runner-calibration.ts shard-slowdowns "$AUTOMOBILE_UNIT_JUNIT_DIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'shard-0\t3.00\nshard-1\t3.00')" ]
+  printf 'Observed changed shard slowdowns:\n%s\n' "$output" >&3
+}
+
+@test "changed selection has a separate configurable timeout" {
+  run bash scripts/test-ts.sh changed
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB_CALLS.selection-timeout")" -eq 120 ]
+  export AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS=7
+  run bash scripts/test-ts.sh changed
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB_CALLS.selection-timeout")" -eq 7 ]
+  [ "$(sort -u "$STUB_CALLS.test-timeout")" = 600 ]
+}
+
+@test "changed selection timeout fails closed before tests or slots" {
+  export AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS=1 STUB_SELECTION_HOLD=1
+  run bash scripts/test-ts.sh changed
+  [ "$status" -eq 124 ]
+  [ ! -f "$STUB_CALLS" ]
+  [ ! -d "$AUTOMOBILE_COORDINATION_DIR/test-slots" ]
+}
+
+@test "changed selection rejects invalid timeouts before invoking the selector" {
+  local value
+  for value in 0 -1 01 1.5 invalid; do
+    run env AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS="$value" bash scripts/test-ts.sh changed
+    [ "$status" -eq 2 ]
+    [[ "$output" == *'AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS must be a positive integer'* ]]
+    [ ! -f "$STUB_CALLS.selection" ]
+  done
 }

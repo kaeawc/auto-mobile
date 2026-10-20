@@ -528,6 +528,10 @@ configure_unit_shard_groups() {
     AUTOMOBILE_UNIT_SHARED_FILE_COUNT=$(((shared_total - shard + worker_count - 1) / worker_count))
   fi
   if [[ "$shard_mode" == changed ]]; then
+    if [[ "$isolated_chunk_size" -eq 0 ]]; then
+      isolated_chunk_size="$UNIT_ISOLATED_CHUNK_DEFAULT"
+    fi
+    export AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE="$isolated_chunk_size"
     export AUTOMOBILE_UNIT_SHARED_CHUNK_SIZE="$isolated_chunk_size"
   fi
   # Nightly-chunked shards split inside bun-unit-chunks.sh. Other shards run
@@ -635,7 +639,7 @@ run_unit_shard_attempt() {
   shard_started="$(date +%s)"
   timing_log="$shard_root/timing-shard-${shard}.ndjson"
   local calibration_file="${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}/calibration-${shard_mode}-shard-${shard}.tsv"
-  local calibration_label="${shard_mode} shard ${shard_number} attempt ${attempt}"
+  local calibration_label="${shard_mode} shard ${shard} attempt ${attempt}"
   shard_args=("${BUN_UNIT_TEST_COMMAND[@]}")
   if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
     shard_args+=(
@@ -1040,7 +1044,10 @@ run_unit_shards() {
     # Resolve once before sharding. The selector unions a parse-only Bun graph
     # with affectedTests' reference/always-run extras; uncertain edges select
     # all units rather than silently narrowing Bun --changed coverage (#13909).
-    TEST_TS_PRINT_CMD=0 run_test_command bun "$ROOT/scripts/lib/changedUnitTests.ts" "$changed_ref" > "$unit_selection_file"
+    local select_timeout="${AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS:-120}"
+    validate_positive_integer "AUTOMOBILE_CHANGED_SELECT_TIMEOUT_SECONDS" "$select_timeout"
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$select_timeout" TEST_TS_PRINT_CMD=0 \
+      run_test_command bun "$ROOT/scripts/lib/changedUnitTests.ts" "$changed_ref" > "$unit_selection_file"
   fi
   while IFS= read -r file; do
     shared_files+=("$file")

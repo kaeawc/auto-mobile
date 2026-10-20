@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it } from "bun:test";
 import { createSimulatorLaunchHandle } from "../../../src/utils/ios-cmdline-tools/simulatorLaunchHandle";
 
@@ -22,6 +23,9 @@ describe("createSimulatorLaunchHandle", () => {
     handle.once("exit", () => {
       exits++;
     });
+    if (!(handle instanceof EventEmitter)) {
+      throw new Error("Expected an event-emitting launch handle");
+    }
     handle.emit("exit");
     expect(exits).toBe(1);
   });

@@ -52,7 +52,7 @@ test("detached managers leave the registry untouched", () => {
   const live = AndroidCtrlProxyManager.getInstance(device, liveFactory);
   const detached = AndroidCtrlProxyManager.createDetached(device, new FakeAdbExecutor());
   expect(detached).not.toBe(live);
-  expect(AndroidCtrlProxyManager.getExistingInstance(device.deviceId)).toBe(live);
+  expect(AndroidCtrlProxyManager.getExistingInstance(device.deviceId) === live).toBe(true);
   const other = { ...device, deviceId: "other" };
   AndroidCtrlProxyManager.createDetached(other, liveFactory);
   expect(AndroidCtrlProxyManager.getExistingInstance("other")).toBeUndefined();

@@ -131,7 +131,7 @@ describe("device-client admission seam", () => {
   test("current quarantine refusal preserves selection and never discovers a replacement", async () => {
     const refusal = new DeviceIdentityQuarantinedError("identity unresolved");
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(),
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
       new FakeAdbClientFactory(),
       {
         admissionGate: {

@@ -22,7 +22,10 @@ function listingWithStates(states: string[]): { payload: string; udids: string[]
   const entries = Object.values(captured.devices)
     .flat()
     .filter((device) => device.isAvailable !== false);
-  const flipped = states.map((state, index) => ({ ...entries[index], state }));
+  const flipped = states.map((state, index): Record<string, unknown> => ({
+    ...entries[index],
+    state,
+  }));
   return {
     payload: JSON.stringify({
       ...captured,

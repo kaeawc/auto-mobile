@@ -1,5 +1,9 @@
+import { logger } from "../logger";
+import { raceWithDeadline } from "../raceWithDeadline";
+import { defaultTimer, type Timer } from "../SystemTimer";
+import { ActionableError } from "../../models/ActionableError";
 import { runExecSeam } from "../ExecSeam";
-import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
+import { execFileAsync as sharedExecFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
 
 /**
  * Result of running `codesign`/`spctl` against the downloaded CtrlProxy runner
@@ -19,6 +23,8 @@ export interface CodesignVerificationOutcome {
   teamId: string | null;
   /** Human-readable detail (tool stderr summaries) for logging on failure. */
   detail: string;
+  /** A partial inspection (including a failed Team-ID display) must be retried. */
+  cacheable?: false;
 }
 
 /**
@@ -44,30 +50,60 @@ export interface CodesignExecOutput {
  * command. Resolves with the exit code (rather than throwing) because both
  * `codesign --verify` and `spctl --assess` signal failure via a non-zero exit.
  */
-export type CodesignExec = (file: string, args: readonly string[]) => Promise<CodesignExecOutput>;
+export type CodesignExec = (
+  file: string,
+  args: readonly string[],
+  options: { timeoutMs: number },
+) => Promise<CodesignExecOutput>;
+
+export const CTRL_PROXY_CODESIGN_TIMEOUT_MS = 15_000;
+export const CTRL_PROXY_SPCTL_TIMEOUT_MS = 15_000;
 
 const CODESIGN = "codesign";
 const SPCTL = "spctl";
 
-const defaultExec: CodesignExec = async (file, args) => {
-  try {
-    const result = await runExecSeam(
-      (options) => sharedExecFileAsync(file, [...args], options),
-      { maxBuffer: 16 * 1024 * 1024 },
-      { command: file, args: [...args] },
-      { preserveError: true },
-    );
-    return { code: 0, stdout: result.stdout, stderr: result.stderr };
-  } catch (error) {
-    // This verifier reports command failures as structured outcomes for the caller.
-    const commandError = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
-    return {
-      code: typeof commandError.code === "number" ? commandError.code : 1,
-      stdout: String(commandError.stdout ?? ""),
-      stderr: String(commandError.stderr ?? ""),
-    };
+// Node also sets killed for maxBuffer overflow; it is not a timeout marker alone.
+function isCodesignTimeout(error: unknown, elapsedMs: number, timeoutMs: number): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
   }
-};
+  const code = "code" in error ? error.code : undefined;
+  const killed = "killed" in error && error.killed === true;
+  return (
+    code === "ETIMEDOUT" ||
+    (code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" && killed && elapsedMs >= timeoutMs)
+  );
+}
+
+/** Adapt the shared exec leaf; injectable so error mapping never needs native tools in tests. */
+export const createCodesignExec =
+  (execFile: ExecFileAsync = sharedExecFileAsync, timer: Timer = defaultTimer): CodesignExec =>
+  async (file, args, { timeoutMs }) => {
+    const startedAt = timer.now();
+    try {
+      const result = await runExecSeam(
+        (options) => execFile(file, [...args], options),
+        { maxBuffer: 16 * 1024 * 1024, timeoutMs },
+        { command: file, args: [...args] },
+        { preserveError: true },
+      );
+      return { code: 0, stdout: result.stdout, stderr: result.stderr };
+    } catch (error) {
+      if (isCodesignTimeout(error, timer.now() - startedAt, timeoutMs)) {
+        throw new ActionableError(`${file} ${args[0]} timed out after ${timeoutMs}ms`, {
+          cause: error,
+        });
+      }
+      // This verifier reports command failures as structured outcomes for the caller.
+      logger.warn(`[CtrlProxyCodesignVerifier] ${file} ${args[0]} failed`, error);
+      const commandError = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
+      return {
+        code: typeof commandError.code === "number" ? commandError.code : 1,
+        stdout: String(commandError.stdout ?? ""),
+        stderr: String(commandError.stderr ?? ""),
+      };
+    }
+  };
 
 const TEAM_ID_PATTERN = /^TeamIdentifier=(.+)$/m;
 
@@ -96,17 +132,44 @@ export function parseTeamIdentifier(codesignDisplayOutput: string): string | nul
  * is applied by the caller.
  */
 export class DefaultCtrlProxyCodesignVerifier implements CtrlProxyCodesignVerifier {
-  constructor(private readonly exec: CodesignExec = defaultExec) {}
+  constructor(
+    private readonly exec: CodesignExec = createCodesignExec(),
+    private readonly timer: Timer = defaultTimer,
+  ) {}
+
+  private run(
+    file: string,
+    args: readonly string[],
+    timeoutMs: number,
+  ): Promise<CodesignExecOutput> {
+    return raceWithDeadline(() => this.exec(file, args, { timeoutMs }), {
+      timer: this.timer,
+      timeoutMs,
+      label: `${file} ${args[0]}`,
+    });
+  }
 
   public async verifyAppBundle(appBundlePath: string): Promise<CodesignVerificationOutcome> {
-    const verify = await this.exec(CODESIGN, ["--verify", "--deep", "--strict", appBundlePath]);
+    const verify = await this.run(
+      CODESIGN,
+      ["--verify", "--deep", "--strict", appBundlePath],
+      CTRL_PROXY_CODESIGN_TIMEOUT_MS,
+    );
     const verified = verify.code === 0;
 
-    const display = await this.exec(CODESIGN, ["-dvv", appBundlePath]);
+    const display = await this.run(
+      CODESIGN,
+      ["-dvv", appBundlePath],
+      CTRL_PROXY_CODESIGN_TIMEOUT_MS,
+    );
     // `codesign -dvv` prints its human-readable dump to stderr.
     const teamId = parseTeamIdentifier(`${display.stderr}\n${display.stdout}`);
 
-    const assess = await this.exec(SPCTL, ["--assess", "--type", "execute", appBundlePath]);
+    const assess = await this.run(
+      SPCTL,
+      ["--assess", "--type", "execute", appBundlePath],
+      CTRL_PROXY_SPCTL_TIMEOUT_MS,
+    );
     const notarized = assess.code === 0 ? true : false;
 
     const detailParts: string[] = [];
@@ -122,6 +185,7 @@ export class DefaultCtrlProxyCodesignVerifier implements CtrlProxyCodesignVerifi
       notarized,
       teamId,
       detail: detailParts.join(" | "),
+      ...(display.code !== 0 ? { cacheable: false as const } : {}),
     };
   }
 }

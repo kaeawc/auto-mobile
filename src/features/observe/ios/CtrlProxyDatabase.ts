@@ -1,3 +1,5 @@
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import type { SdkCapabilityQueryOptions } from "./CtrlProxySdkCapabilities";
 /**
  * CtrlProxy iOS Database - Delegate for SQLite database inspection operations.
  *
@@ -5,7 +7,7 @@
  * so SQLite access happens inside the app process.
  */
 
-import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
+import { sendCommand } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import type {
   DatabaseInfo,
@@ -80,7 +82,7 @@ export class CtrlProxyDatabase {
     appId: string,
     databasePath: string,
     query: string,
-    timeoutMs: number = 5000,
+    timeout: number | SdkCapabilityQueryOptions = 5000,
     { sessionId, mutationToken, readOnly }: ExecuteSqlOptions = {},
   ): Promise<SQLResult> {
     const result = await this.request<ExecuteSqlResult>(
@@ -94,7 +96,7 @@ export class CtrlProxyDatabase {
         ...(mutationToken ? { mutationToken } : {}),
         ...(readOnly ? { readOnly: true } : {}),
       },
-      timeoutMs,
+      timeout,
       "Execute SQL",
     );
 
@@ -114,23 +116,29 @@ export class CtrlProxyDatabase {
         };
   }
 
-  async listDatabases(appId: string, timeoutMs: number = 5000): Promise<DatabaseInfo[]> {
+  async listDatabases(
+    appId: string,
+    timeout: number | SdkCapabilityQueryOptions = 5000,
+  ): Promise<DatabaseInfo[]> {
     const result = await this.request<ListDatabasesResult>(
       "list_databases",
       "list_databases_result",
       { appId },
-      timeoutMs,
+      timeout,
       "List databases",
     );
     return result.databases ?? [];
   }
 
-  async storageCapabilities(appId: string, timeoutMs: number = 5000): Promise<StorageCapabilities> {
+  async storageCapabilities(
+    appId: string,
+    timeout: number | SdkCapabilityQueryOptions = 5000,
+  ): Promise<StorageCapabilities> {
     const result = await this.request<StorageCapabilitiesResult>(
       "storage_capabilities",
       "storage_capabilities_result",
       { appId },
-      timeoutMs,
+      timeout,
       "Get storage capabilities",
     );
     return (
@@ -147,13 +155,13 @@ export class CtrlProxyDatabase {
   async listTables(
     appId: string,
     databasePath: string,
-    timeoutMs: number = 5000,
+    timeout: number | SdkCapabilityQueryOptions = 5000,
   ): Promise<string[]> {
     const result = await this.request<ListTablesResult>(
       "list_tables",
       "list_tables_result",
       { appId, databasePath },
-      timeoutMs,
+      timeout,
       "List tables",
     );
     return result.tables ?? [];
@@ -165,13 +173,13 @@ export class CtrlProxyDatabase {
     table: string,
     limit: number = 50,
     offset: number = 0,
-    timeoutMs: number = 5000,
+    timeout: number | SdkCapabilityQueryOptions = 5000,
   ): Promise<TableDataResult> {
     const result = await this.request<TableDataResponseResult>(
       "get_table_data",
       "table_data_result",
       { appId, databasePath, table, limit, offset },
-      timeoutMs,
+      timeout,
       "Get table data",
     );
     return {
@@ -186,13 +194,13 @@ export class CtrlProxyDatabase {
     appId: string,
     databasePath: string,
     table: string,
-    timeoutMs: number = 5000,
+    timeout: number | SdkCapabilityQueryOptions = 5000,
   ): Promise<TableStructureResult> {
     const result = await this.request<TableStructureResponseResult>(
       "get_table_structure",
       "table_structure_result",
       { appId, databasePath, table },
-      timeoutMs,
+      timeout,
       "Get table structure",
     );
     return { columns: result.columns ?? [], diagnostic: result.diagnostic };
@@ -202,15 +210,17 @@ export class CtrlProxyDatabase {
     type: string,
     responseType: string,
     payload: Record<string, unknown>,
-    timeoutMs: number,
+    timeout: number | SdkCapabilityQueryOptions,
     operationName: string,
   ): Promise<T> {
     const startTime = this.context.timer.now();
-
-    if (!(await this.context.ensureConnected())) {
-      throw new Error("Failed to connect to CtrlProxy");
-    }
-
+    // A bare timeout never attaches ambient cancellation: a dispatched database request
+    // completes even if its caller is cancelled. Callers that gate on SDK capability pass
+    // explicit options carrying the budget and signal they share with the gate.
+    const options: SdkCapabilityQueryOptions =
+      typeof timeout === "number" ? { deadlineMs: startTime + Math.max(0, timeout) } : timeout;
+    const timeoutMs =
+      options.deadlineMs === undefined ? 5000 : Math.max(0, options.deadlineMs - startTime);
     const requestId = this.context.requestManager.generateId(type);
     const promise = sendCommand<T>(this.context, {
       idPrefix: type,
@@ -219,10 +229,11 @@ export class CtrlProxyDatabase {
       messageType: type,
       params: payload,
       timeoutMs,
-      requireExistingConnection: true,
+      ...options,
       cancelScreenshotBackoff: false,
       notConnectedError: () => {
-        throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
+        options.abortSignal?.throwIfAborted();
+        throw new Error("Failed to connect to CtrlProxy");
       },
       unsupportedCommandError: (_type, error) => {
         throw new Error(error);
@@ -236,7 +247,18 @@ export class CtrlProxyDatabase {
     });
     logger.debug(`[CTRL_PROXY_IOS] Sent ${type} request (requestId: ${requestId})`);
 
-    const result = await promise;
+    const result = await raceWithDeadline(promise, {
+      timer: this.context.timer,
+      timeoutMs,
+      signal: options.abortSignal,
+      label: operationName,
+      timeoutError: () => new Error(`${operationName} timeout after ${timeoutMs}ms`),
+      onTimeout: () =>
+        this.context.requestManager.reject(
+          requestId,
+          new Error(`${operationName} timeout after ${timeoutMs}ms`),
+        ),
+    });
     if (!result.success) {
       throw new Error(result.error || `${operationName} failed`);
     }

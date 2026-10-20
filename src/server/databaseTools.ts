@@ -1,3 +1,4 @@
+import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -292,6 +293,9 @@ async function executeSqlForDevice(
         isReadOnlySqlQuery(args.query),
       );
     } catch (error) {
+      if (error instanceof SdkCapabilityQueryError) {
+        throw error;
+      }
       throw new ActionableError(
         iosSqlErrorMessage(error, args.databasePath, {
           readOnlyQuery: isReadOnlySqlQuery(args.query),

@@ -1,3 +1,4 @@
+import type { TapOnCall } from "./ActionCall";
 import { TapTargetUnavailableError, findTapTargetNode } from "./tapTargetSupport";
 import { TapElementFinder } from "./tapElementFinder";
 import { TapPointPlanner } from "./tapPointPlanner";
@@ -147,10 +148,11 @@ export class TapTargetResolver {
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult,
     signal?: AbortSignal,
+    call?: Pick<TapOnCall, "settlePostTapEffect">,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     return this.host
       .postTapEffect()
-      .deriveEffectAfterPostTapObservation(previousObservation, currentObservation, signal);
+      .deriveEffectAfterPostTapObservation(previousObservation, currentObservation, signal, call);
   }
 
   enforceFreshnessConsistencyWithEffect(

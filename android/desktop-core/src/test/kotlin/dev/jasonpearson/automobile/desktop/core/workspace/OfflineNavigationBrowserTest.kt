@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.navigation.FakeScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboardOptions
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
@@ -378,8 +379,11 @@ class OfflineNavigationBrowserTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
           NavigationDashboard(
-            providedGraph = NavigationGraph(listOf(screen("Alpha")), emptyList()),
-            readOnly = false,
+            options =
+              NavigationDashboardOptions(
+                providedGraph = NavigationGraph(listOf(screen("Alpha")), emptyList()),
+                readOnly = false,
+              ),
           )
         }
       }

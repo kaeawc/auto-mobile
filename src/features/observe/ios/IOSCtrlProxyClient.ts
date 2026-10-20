@@ -1,34 +1,57 @@
-import { IosCtrlProxyDelegatingFacade } from "./IosCtrlProxyDelegatingFacade";
+import { retireIosServiceEndpoint } from "./iosServiceEndpointChange";
+import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
+import { CtrlProxyBuildContext } from "./CtrlProxyBuildContext";
 import { CtrlProxyConnection } from "./CtrlProxyConnection";
-import { CtrlProxyRunnerRecovery } from "./CtrlProxyRunnerRecovery";
+import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
 import { CtrlProxyHierarchyTelemetry } from "./CtrlProxyHierarchyTelemetry";
-import {
-  CtrlProxyObservationStream,
-  type ScreenshotObservationStreamOptions,
-} from "./CtrlProxyObservationStream";
 import { CtrlProxyInboundMessages } from "./CtrlProxyInboundMessages";
 import {
   CtrlProxyNetworkSync,
   type IosMockRuleSyncResult,
   type IosNetworkErrorSimulationConfig,
 } from "./CtrlProxyNetworkSync";
+import {
+  CtrlProxyObservationStream,
+  type ScreenshotObservationStreamOptions,
+} from "./CtrlProxyObservationStream";
+import { CtrlProxyRunnerRecovery } from "./CtrlProxyRunnerRecovery";
+import { CtrlProxySdkCapabilities } from "./CtrlProxySdkCapabilities";
+import { CtrlProxySdkEvents, type SdkEventPollResult } from "./CtrlProxySdkEvents";
+import { CtrlProxySdkScreenIdentity } from "./CtrlProxySdkScreenIdentity";
+import {
+  type BootedDeviceLister,
+  type IosCtrlProxy,
+  type IosCtrlProxyClientDependencies,
+  type IosCtrlProxyClientTestOptions,
+  type NavGraph,
+  type ServiceManagerFactory,
+  defaultBootedDeviceLister,
+  defaultObservationReadDependencies,
+  defaultServiceManagerFactory,
+  iosCtrlProxyTestDependencies,
+} from "./IosCtrlProxyClientContracts";
+import { IosCtrlProxyDelegatingFacade } from "./IosCtrlProxyDelegatingFacade";
+import { iosDiagnosticSocketFactory } from "./iosDiagnosticSocket";
+import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
+import {
+  notifyPushUpdateListeners,
+  refreshObservationStreamHierarchyCadence,
+} from "./iosObservationControls";
 export type {
   IosMockRuleSyncOutcome,
   IosMockRuleSyncResult,
   IosNetworkErrorSimulationConfig,
 } from "./CtrlProxyNetworkSync";
-import { CtrlProxySdkEvents, type SdkEventPollResult } from "./CtrlProxySdkEvents";
-import { CtrlProxySdkCapabilities } from "./CtrlProxySdkCapabilities";
-import { CtrlProxySdkScreenIdentity } from "./CtrlProxySdkScreenIdentity";
-import { CtrlProxyBuildContext } from "./CtrlProxyBuildContext";
-import type { PinchRequest, TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
-import type { IosActivateAccessibilityLinkRequest } from "./CtrlProxyVoiceOver";
-import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
-import { type IOSDispatchResult } from "./CtrlProxyDispatch";
-import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
-import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
-import { type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
-import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
+export {
+  type BootedDeviceLister,
+  IOS_RUNNER_FEATURE_COMMANDS,
+  IOS_RUNNER_FEATURE_FLAGS,
+  type IosCtrlProxy,
+  type IosCtrlProxyClientOptions,
+  type IosCtrlProxyClientTestOptions,
+  type ServiceManagerFactory,
+  getRequiredIosRunnerFeatureFlags,
+} from "./IosCtrlProxyClientContracts";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
@@ -50,29 +73,17 @@ import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarch
 import { logger } from "../../../utils/logger";
 import type { TimedOutRequest } from "../../../utils/RequestManager";
 
-import { errorMessage } from "../../../utils/describeUnknownError";
+import { BootedDevice, ScreenIdentity, ViewHierarchyResult } from "../../../models";
 
-import {
-  BootedDevice,
-  HighlightShape,
-  ScreenIdentity,
-  ImeAction,
-  ViewHierarchyResult,
-} from "../../../models";
-
-import type { MultiFingerSwipeRequest } from "../../../utils/interfaces/MultiFingerSwipeRequest";
-import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { Timer, defaultTimer } from "../../../utils/SystemTimer";
-import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
-import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
+import { CtrlProxyIosManager, IOSCtrlProxyManager } from "../../../ctrlProxy/IOSCtrlProxyManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
-import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../ctrlProxy/IOSCtrlProxyManager";
-import { PlatformDeviceManagerFactory } from "../../../utils/factories/PlatformDeviceManagerFactory";
-import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
-import type { IosAppMetadataSource } from "../../../models/IosAppMetadataSource";
-import type { ContentHashProvider } from "../../../utils/ContentHashProvider";
+import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import { defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
+import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
+import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
 
 import { WebSocketFactory, defaultWebSocketFactory } from "../DeviceServiceClient";
 
@@ -81,416 +92,23 @@ import {
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
 import type { BaseResult } from "../shared/types";
-import type { DragRequest, GestureTimingResult, SwipeRequest } from "../shared/types";
-import type { SetTextOptions } from "../DeviceService";
-import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 
 import { ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
 
-import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
-import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
-import { serializeIosRequest } from "./serializeIosRequest";
-
-/**
- * Factory function type for creating CtrlProxyIosManager instances.
- * Used for testing to inject fake service managers.
- */
-export type ServiceManagerFactory = (device: BootedDevice) => CtrlProxyIosManager;
-
-/** Default production factory that delegates to the real singleton. */
-type NavGraph = ReturnType<typeof NavigationGraphManager.getInstance>;
-
-const defaultServiceManagerFactory: ServiceManagerFactory = (d) =>
-  IOSCtrlProxyManager.getInstance(d);
-
-export type BootedDeviceLister = () => Promise<BootedDevice[]>;
-
-export interface IosCtrlProxyClientOptions {
-  transientObserver?: boolean;
-  iosSource?: IosAppMetadataSource;
-  contentHashProvider?: ContentHashProvider;
-}
-
-interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
-  wsFactory?: WebSocketFactory;
-  timer?: Timer;
-  serviceManagerFactory?: ServiceManagerFactory;
-  bootedDeviceLister?: BootedDeviceLister;
-  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
-  sdkEventIngestor?: IosSdkEventIngestor;
-  retryExecutor?: RetryExecutor;
-  /** Replaces the side effects `processMessage` runs for hierarchy messages; tests observe their order. */
-  messageEffects?: IosHierarchyMessageEffects;
-}
-
-/** Optional test dependencies; observer options retain the legacy boolean shorthand. */
-export interface IosCtrlProxyClientTestOptions {
-  serviceManagerFactory?: ServiceManagerFactory;
-  bootedDeviceLister?: BootedDeviceLister;
-  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
-  sdkEventIngestor?: IosSdkEventIngestor;
-  retryExecutor?: RetryExecutor;
-  options?: boolean | IosCtrlProxyClientOptions;
-}
-
-// Test-created clients must never fall through to simctl/devicectl for provenance.
-const noOpIosMetadataSource: IosAppMetadataSource = {
-  listApps: async () => [],
-  getPhysicalDeviceAppInfo: async () => null,
-};
-
-/** Default production lister that queries the real device manager. */
-const defaultBootedDeviceLister: BootedDeviceLister = () =>
-  PlatformDeviceManagerFactory.getInstance().getBootedDevices("ios");
-
-const noOpServiceManagerFactory: ServiceManagerFactory = () => new NoOpIOSCtrlProxyManager();
-
 // Import delegates
-
-import {
-  type VoiceOverActivationOptions,
-  type CtrlProxyRequestActionOptions,
-} from "./CtrlProxyVoiceOver";
-
-import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 
 import { DefaultIosSdkEventIngestor, type IosSdkEventIngestor } from "./IosSdkEventIngestor";
 
 // Import types
 // Import types
 import type {
-  XCTestHierarchy,
-  CtrlProxyHierarchyResponse,
-  CtrlProxySyncedHierarchy,
-  CtrlProxyScreenshotResult,
-  CtrlProxySwipeResult,
-  CtrlProxyTapResult,
-  CtrlProxyDragResult,
-  CtrlProxyPinchResult,
-  CtrlProxySetTextResult,
-  CtrlProxyImeActionResult,
-  CtrlProxySelectAllResult,
-  CtrlProxyKeyboardResult,
-  CtrlProxyPressKeyResult,
-  CtrlProxyPressHomeResult,
-  CtrlProxyPressBackResult,
-  CtrlProxyShakeResult,
-  CtrlProxyPressButtonResult,
-  CtrlProxyRecentAppsResult,
-  CtrlProxyRotateResult,
-  CtrlProxyHingeAngleResult,
-  CtrlProxyLaunchAppResult,
-  CtrlProxyResetPermissionsResult,
   CtrlProxyPerfTiming,
   CtrlProxyPerformanceSnapshot,
-  CtrlProxyVoiceOverResult,
-  CtrlProxyActionResult,
-  CtrlProxyClipboardResult,
-  CtrlProxyHighlightResult,
   WebSocketMessage,
+  XCTestHierarchy,
 } from "./types";
-import { CtrlProxyServicePortChangedError } from "./CtrlProxyServicePortChangedError";
-import { NoOpIOSCtrlProxyManager } from "./NoOpIOSCtrlProxyManager";
-
-/**
- * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities
- * via WebSocket connection to iOS CtrlProxy
- */
-export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
-  getSupportedCommands?(): Promise<string[] | null>;
-  connectWithoutSetup(signal?: AbortSignal): Promise<boolean>;
-  getLatestHierarchy(
-    waitForFresh?: boolean,
-    timeout?: number,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal,
-  ): Promise<CtrlProxyHierarchyResponse>;
-
-  requestHierarchySync(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-  ): Promise<CtrlProxySyncedHierarchy | null>;
-  /** Force a real extraction only for cached tap resolution. */
-  requestHierarchySyncForTapRevalidation(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-  ): ReturnType<IosCtrlProxy["requestHierarchySync"]>;
-  requestAddHighlight(
-    id: string,
-    shape: HighlightShape,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<CtrlProxyHighlightResult>;
-
-  setNetworkErrorSimulation(
-    config: IosNetworkErrorSimulationConfig,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<BaseResult>;
-
-  requestHierarchySyncWithoutObservationStreamPush(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-  ): Promise<CtrlProxySyncedHierarchy | null>;
-
-  convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
-
-  requestSwipe(request: SwipeRequest): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
-
-  requestDoubleTapCoordinates(
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
-
-  requestTapCoordinates(
-    request: TapCoordinatesRequest,
-  ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
-
-  requestDrag(request: DragRequest): Promise<CtrlProxyDragResult>;
-
-  requestPathGesture(
-    points: ReadonlyArray<{ x: number; y: number; offsetMs: number }>,
-    timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<GestureTimingResult>>;
-
-  requestPinch(
-    request: PinchRequest,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>>;
-
-  requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult>;
-
-  requestAppendText(
-    text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    options?: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch">,
-  ): Promise<CtrlProxySetTextResult>;
-
-  requestClearText(
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch">,
-  ): Promise<CtrlProxySetTextResult>;
-
-  requestImeAction(
-    action: ImeAction,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<CtrlProxyImeActionResult>;
-
-  requestSelectAll(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<CtrlProxySelectAllResult>;
-
-  requestKeyboard(
-    action: "open" | "close" | "detect",
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<CtrlProxyKeyboardResult>;
-
-  requestPressKey(
-    key: InputKeyName,
-    modifiers: InputKeyModifier[],
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>>;
-
-  requestClipboard(
-    action: "copy" | "paste" | "clear" | "get",
-    text?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<CtrlProxyClipboardResult & { acknowledged?: boolean }>;
-
-  requestPressHome(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxyPressHomeResult>>;
-
-  requestPressBack(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxyPressBackResult>>;
-
-  requestShake(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<CtrlProxyShakeResult>;
-
-  requestPressButton(
-    button: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>>;
-
-  requestRecentApps(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>>;
-
-  requestRotate(
-    orientation: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<CtrlProxyRotateResult>;
-
-  requestSetHingeAngle(angle: number, timeoutMs?: number): Promise<CtrlProxyHingeAngleResult>;
-
-  requestLaunchApp(
-    bundleId: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    coldBoot?: boolean,
-    signal?: AbortSignal,
-  ): Promise<CtrlProxyLaunchAppResult>;
-
-  requestResetPermissions(
-    bundleId: string,
-    permissions: string[],
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<CtrlProxyResetPermissionsResult>;
-
-  requestScreenshot(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<CtrlProxyScreenshotResult>;
-
-  requestScreenshotWithoutObservationStreamPush(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<CtrlProxyScreenshotResult>;
-
-  requestVoiceOverState(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<CtrlProxyVoiceOverResult>;
-
-  requestVoiceOverActivate(
-    label: string,
-    action: "activate" | "long_press",
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: VoiceOverActivationOptions,
-  ): Promise<CtrlProxyActionResult>;
-
-  requestSetVoiceOverEnabled(
-    enabled: boolean,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<CtrlProxyActionResult>;
-
-  requestAction(
-    action: string,
-    resourceId?: string,
-    label?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: CtrlProxyRequestActionOptions,
-  ): Promise<CtrlProxyActionResult>;
-
-  requestMagicTap(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<CtrlProxyMagicTapResult>;
-
-  requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult>;
-
-  requestActivateAccessibilityLink(
-    request: IosActivateAccessibilityLinkRequest,
-  ): Promise<CtrlProxyActionResult>;
-
-  requestMultiFingerSwipe(
-    request: MultiFingerSwipeRequest,
-  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
-
-  clearCache(): void;
-
-  onPushUpdate(callback: (hierarchy: XCTestHierarchy) => void): () => void;
-}
-
-/**
- * Command rawValues a *fresh* iOS CtrlProxy runner advertises in its `connected`
- * handshake that the released v0.0.38 runner predates. The runner exposes no
- * version/hash, so presence of all of these in `supportedCommands` is the runner
- * identity used by diagnostics (doctor) and the booted-devices resource to tell a
- * current runner from a stale one. Keep unreleased feature-gated commands out of
- * this list until they are present in the released runner registry. Environment-
- * restricted commands such as set_hinge_angle are filtered per environment by
- * iosRunnerFeatureCommands.ts. Append input deliberately uses request_set_text
- * as a compatibility fallback until its dedicated command is released.
- */
-export const IOS_RUNNER_FEATURE_COMMANDS = [
-  "request_shake",
-  "request_press_button",
-  "request_multi_finger_swipe",
-  "add_highlight",
-  "execute_sql",
-  "set_network_mock_rules",
-  "set_hinge_angle",
-] as const;
-
-/** Non-command wire capabilities advertised by runners built from this source revision. */
-export const IOS_RUNNER_FEATURE_FLAGS = ["display_cutout_info", "double_tap_v1"] as const;
-
-// The immutable 0.0.66 IPA predates the feature handshake. Require the flag
-// only once the release pipeline cuts 0.0.67+ from source that advertises it.
-const IOS_RUNNER_FEATURE_FLAGS_MIN_RELEASE = "0.0.67";
-
-export function getRequiredIosRunnerFeatureFlags(
-  env: Record<string, string | undefined> = process.env,
-): readonly (typeof IOS_RUNNER_FEATURE_FLAGS)[number][] {
-  const artifactVersion = resolveAssetVersion(resolvePinnedVersion(env));
-  const comparison = compareStrictNumericVersions(
-    artifactVersion,
-    IOS_RUNNER_FEATURE_FLAGS_MIN_RELEASE,
-  );
-  return Number.isNaN(comparison) || comparison >= 0 ? IOS_RUNNER_FEATURE_FLAGS : [];
-}
 
 /**
  * IOSCtrlProxyClient - WebSocket client for iOS CtrlProxy
@@ -1093,36 +711,18 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
           deviceConnectionLostNotifier: resident.deviceConnectionLostNotifier,
           retryExecutor: resident.retryExecutor,
         }
-      : {
-          timer: defaultTimer,
-          serviceManagerFactory: defaultServiceManagerFactory,
-          bootedDeviceLister: defaultBootedDeviceLister,
-          deviceConnectionLostNotifier: observationStreamDeviceConnectionLostNotifier,
-          retryExecutor: defaultRetryExecutor,
-        };
+      : defaultObservationReadDependencies;
     // Ordinary transient observers intentionally ignore connected pushes. A
     // diagnostic probe captures capability metadata on its own socket without
     // changing those handlers or synchronizing the runner's configuration.
     const socketFactory: WebSocketFactory = resident
-      ? (url) => {
-          const socket = resident.webSocketFactory(url);
-          socket.on("message", (data: WebSocket.Data) => {
-            try {
-              const message: WebSocketMessage = JSON.parse(data.toString());
-              if (message.type === "connected") {
-                client.supportedCommands = Array.isArray(message.supportedCommands)
-                  ? new Set(message.supportedCommands)
-                  : null;
-                client.supportedFeatures = Array.isArray(message.supportedFeatures)
-                  ? new Set(message.supportedFeatures)
-                  : null;
-              }
-            } catch (error) {
-              logger.warn(`iOS diagnostic handshake failed: ${errorMessage(error)}`, error);
-            }
-          });
-          return socket;
-        }
+      ? iosDiagnosticSocketFactory(
+          resident.webSocketFactory.bind(resident),
+          (commands, features) => {
+            client.supportedCommands = commands;
+            client.supportedFeatures = features;
+          },
+        )
       : defaultWebSocketFactory;
     const client = new IOSCtrlProxyClient(device, port, {
       ...dependencies,
@@ -1182,31 +782,11 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     timer: Timer,
     dependencies: IosCtrlProxyClientTestOptions = {},
   ): IOSCtrlProxyClient {
-    const {
-      serviceManagerFactory = noOpServiceManagerFactory,
-      bootedDeviceLister,
-      deviceConnectionLostNotifier,
-      sdkEventIngestor,
-      retryExecutor,
-      options = false,
-    } = dependencies;
-    // Default test lister always reports the device as booted so existing tests
-    // are unaffected. Tests that verify boot-check behavior supply their own lister.
-    const lister = bootedDeviceLister ?? (async () => [device]);
-    return new IOSCtrlProxyClient(device, port, {
-      ...(typeof options === "boolean" ? { transientObserver: options } : options),
-      iosSource:
-        typeof options === "boolean"
-          ? noOpIosMetadataSource
-          : (options.iosSource ?? noOpIosMetadataSource),
-      wsFactory,
-      timer,
-      serviceManagerFactory,
-      bootedDeviceLister: lister,
-      deviceConnectionLostNotifier,
-      sdkEventIngestor,
-      retryExecutor,
-    });
+    return new IOSCtrlProxyClient(
+      device,
+      port,
+      iosCtrlProxyTestDependencies(device, wsFactory, timer, dependencies),
+    );
   }
 
   /**
@@ -1259,34 +839,15 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
       );
       this.port = port;
       this.allocatedPort = null;
-      // Invalidate any in-flight connect the same way close() does: a connect
-      // that is mid-handshake snapshotted the old generation and is dialing the
-      // now-stale old port (this.ws is still null, isConnecting is true), so its
-      // `open` must be discarded rather than installed. Bumping the generation
-      // makes the base connectWebSocket() open-guard drop that socket and clear
-      // isConnecting, leaving a fresh connect free to dial the new port.
-      this.connectionGeneration++;
-      // Eagerly abort a handshake still stuck in CONNECTING (this.ws null,
-      // isConnecting true, dialing the now-stale old port): the generation bump
-      // above is only observed inside the socket's open/error handlers, so a
-      // socket emitting neither would keep isConnecting true until
-      // connectionTimeoutMs, stalling the new-port connect by up to ~5s. (#5656)
-      this.abortPendingConnect();
-      // The connection-attempt budget is per-endpoint: failures against the old
-      // port must not cool down the new one. Without this reset, a port change on
-      // the max-th in-flight attempt leaves connectionAttempts at the ceiling, so
-      // connectWebSocket()'s cooldown check refuses to dial the new port for the
-      // reset interval — the wedged state AC2 forbids.
-      this.resetConnectionBudget();
-      if (this.ws) {
-        logger.info(
-          "[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change",
-        );
-        // Same teardown a lost connection gets (pending requests rejected,
-        // per-connection caches/polling reset via onConnectionClosed, an error
-        // listener kept on the closing socket), minus auto-reconnect.
-        this.retireLiveSocket(new CtrlProxyServicePortChangedError());
-      }
+      retireIosServiceEndpoint({
+        invalidateGeneration: () => {
+          this.connectionGeneration++;
+        },
+        abortPendingConnect: () => this.abortPendingConnect(),
+        resetConnectionBudget: () => this.resetConnectionBudget(),
+        hasLiveSocket: () => Boolean(this.ws),
+        retireLiveSocket: (error) => this.retireLiveSocket(error),
+      });
     }
   }
 
@@ -1437,13 +998,10 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   }
 
   private notifyPushUpdateListeners(hierarchy: XCTestHierarchy): void {
-    for (const callback of this.onPushUpdateCallbacks) {
-      try {
-        callback(hierarchy);
-      } catch (error) {
-        logger.warn(`[IOSCtrlProxyClient] Push update callback error: ${error}`);
-      }
-    }
+    return notifyPushUpdateListeners(
+      { onPushUpdateCallbacks: this.onPushUpdateCallbacks },
+      hierarchy,
+    );
   }
 
   /**
@@ -1460,18 +1018,12 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   }
 
   refreshObservationStreamHierarchyCadence(intervalMs: number): void {
-    if (!this.isCommandSupported("set_hierarchy_poll_interval")) {
-      logger.info(
-        "[IOSCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_poll_interval",
-      );
-      return;
-    }
-
-    this.sendMessage(
-      serializeIosRequest({
-        type: "set_hierarchy_poll_interval",
-        intervalMs,
-      }),
+    return refreshObservationStreamHierarchyCadence(
+      {
+        isCommandSupported: this.isCommandSupported.bind(this),
+        sendMessage: this.sendMessage.bind(this),
+      },
+      intervalMs,
     );
   }
 

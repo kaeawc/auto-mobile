@@ -289,6 +289,7 @@ describe("nested observe subtree scope", () => {
 
 // Captured by restoring origin/main's schema, scope transform, and model. Hashes
 // pin the complete serialized observation, including absence of new metadata.
+// Layout-warning portions regenerated from the captured hierarchy (#13955).
 const mainTables = {
   legacy: [
     {
@@ -299,7 +300,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -321,7 +322,7 @@ const mainTables = {
         text: "Battery",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -332,7 +333,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -343,7 +344,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -375,25 +376,25 @@ const mainTables = {
         text: " x ",
       },
       path: "anchor",
-      hash: "92fd88aecd19b4c2b646b52bcf73b72396c102aec05107df01bb8817610aa42d",
+      hash: "1331ac5e0f1e9622474928539abb75925096fd18b8a1f395922d84738bb546f3",
     },
     {
       input: {},
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: true,
       parsed: true,
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: false,
       parsed: false,
       path: "off",
-      hash: "cca9a79b558cf28a2efb1a89994893791c60cbd11234e2d47f8de27dca5000d1",
+      hash: "6dc2d715c8cf7dad64a9dc0115c360b37ce15abda9465a897cacf851951f8b3a",
     },
     {
       input: {
@@ -410,7 +411,7 @@ const mainTables = {
         text: "Battery",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -420,7 +421,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -443,7 +444,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -481,7 +482,7 @@ const mainTables = {
         resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
       },
       path: "anchor",
-      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+      hash: "0f07ca5a2fb3455b8e4b5ea9e041c58185cedc3e7a870613ef735fd83f0d56f1",
     },
     {
       input: {
@@ -493,7 +494,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -503,7 +504,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -511,7 +512,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -522,7 +523,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
     {
       input: {
@@ -534,7 +535,7 @@ const mainTables = {
       },
       parsed: {},
       path: "foreground-app",
-      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+      hash: "d333ba8353d9e11344f7bdb7d7d9baddf5d4fd9fde1f513871c2a9d59a65ad5b",
     },
   ],
 };

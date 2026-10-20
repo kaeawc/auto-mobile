@@ -1,4 +1,5 @@
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
+import { isRetryableCleanReleaseError } from "./cleanReleaseFailure";
 import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
@@ -835,6 +836,7 @@ export class SessionBroker {
     resource: BrokerResourceRecord,
     sessionUuid: string,
   ): Promise<"idle" | "destroy" | "pending"> {
+    let resetClean = false;
     try {
       if (!(await this.options.devices.release(sessionUuid)).settled) {
         return "pending";
@@ -849,6 +851,7 @@ export class SessionBroker {
       if ((await this.options.devices.reset(resource)) !== "clean") {
         return "destroy";
       }
+      resetClean = true;
       const tickets = await this.options.store.completeCleanRelease(
         request.requestId,
         this.options.owner,
@@ -863,7 +866,9 @@ export class SessionBroker {
       logger.warn(
         `Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`,
       );
-      return "destroy";
+      // A clean baseline must survive a failed receipt write. Otherwise retry only known
+      // transient failures; the releasing/resetting rows keep ownership for recover().
+      return resetClean || isRetryableCleanReleaseError(error) ? "pending" : "destroy";
     }
   }
 

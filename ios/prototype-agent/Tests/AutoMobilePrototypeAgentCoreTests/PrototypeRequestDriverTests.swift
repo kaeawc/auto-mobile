@@ -430,6 +430,18 @@ final class PrototypeRequestDriverTests: XCTestCase {
         XCTAssertEqual(harness.session.state["status"], .string("error"))
     }
 
+    func testBlockedDestinationReachesDeviceMetadataAndEvent() async throws {
+        let harness = RequestHarness()
+        try harness.show(request(via: "device"))
+        harness.tap()
+        await harness.waitForDeviceCalls(1)
+        harness.client.fail(0, .blockedDestination)
+        await harness.driver.settled()
+        XCTAssertEqual(harness.data("/feed__meta/error/code"), .string("blocked_destination"))
+        XCTAssertEqual(harness.requestEvents.first?["error"]?.objectValue?["code"], .string("blocked_destination"))
+        XCTAssertNil(harness.data("/feed"))
+    }
+
     func testANon2xxDeviceResponseIsAnHttpError() async throws {
         let harness = RequestHarness()
         try harness.show(request(via: "device"))

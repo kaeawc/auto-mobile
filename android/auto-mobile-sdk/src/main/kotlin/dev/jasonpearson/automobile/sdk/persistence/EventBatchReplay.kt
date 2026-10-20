@@ -72,42 +72,91 @@ internal fun replayEventBatches(
       return
     }
 
-  fun submit(index: Int) {
-    if (index >= pending.size) {
-      onComplete()
-      return
-    }
-    val (batchId, events, deliveryId) = pending[index]
-    val completed = AtomicBoolean(false)
-    val complete: (Boolean) -> Unit = { delivered ->
-      if (completed.compareAndSet(false, true)) {
-        val discard = !delivered && discardOnFailure()
-        val record = !delivered && !discard && recordFailure()
-        val stop = !delivered && stopOnFailure()
-        try {
-          runInBackground(
-            Runnable {
-              try {
-                if (delivered || discard) persistence.removeBatch(batchId)
-                else if (record) persistence.recordReplayFailure(batchId)
-              } catch (error: Exception) {
-                logger.w("EventBatchReplay", error) { "Could not update pending batch $batchId" }
-              }
-              if (stop) onComplete() else submit(index + 1)
-            },
-          )
-        } catch (error: Exception) {
-          logger.w("EventBatchReplay", error) { "Could not schedule replay completion" }
-          onComplete()
-        }
-      }
-    }
+  PendingBatchReplay(
+      persistence,
+      pending,
+      logger,
+      ReplayCallbacks(
+        runInBackground,
+        onComplete,
+        discardOnFailure,
+        recordFailure,
+        stopOnFailure,
+        deliver,
+      ),
+    )
+    .submit(0)
+}
+
+private data class ReplayCallbacks(
+  val runInBackground: (Runnable) -> Unit,
+  val onComplete: () -> Unit,
+  val discardOnFailure: () -> Boolean,
+  val recordFailure: () -> Boolean,
+  val stopOnFailure: () -> Boolean,
+  val deliver: (List<SdkEvent>, String?, (Boolean) -> Unit) -> Unit,
+)
+
+private data class PendingBatchReplay(
+  val persistence: EventPersistence,
+  val pending: List<PendingEventBatch>,
+  val logger: DefaultSdkLogger,
+  val callbacks: ReplayCallbacks,
+)
+
+private fun PendingBatchReplay.submit(index: Int) {
+  if (index >= pending.size) {
+    callbacks.onComplete()
+    return
+  }
+  val batch = pending[index]
+  val (batchId, events, deliveryId) = batch
+  val completed = AtomicBoolean(false)
+  val complete: (Boolean) -> Unit = { delivered ->
+    completeBatch(index, batch, completed, delivered)
+  }
+  try {
+    callbacks.deliver(events, deliveryId, complete)
+  } catch (error: Exception) {
+    logger.w("EventBatchReplay", error) { "Could not submit pending batch $batchId" }
+    complete(false)
+  }
+}
+
+private fun PendingBatchReplay.completeBatch(
+  index: Int,
+  batch: PendingEventBatch,
+  completed: AtomicBoolean,
+  delivered: Boolean,
+) {
+  if (completed.compareAndSet(false, true)) {
+    val discard = !delivered && callbacks.discardOnFailure()
+    val record = !delivered && !discard && callbacks.recordFailure()
+    val stop = !delivered && callbacks.stopOnFailure()
     try {
-      deliver(events, deliveryId, complete)
+      callbacks.runInBackground(
+        Runnable {
+          updateBatch(batch.storageId, delivered, discard, record)
+          if (stop) callbacks.onComplete() else submit(index + 1)
+        },
+      )
     } catch (error: Exception) {
-      logger.w("EventBatchReplay", error) { "Could not submit pending batch $batchId" }
-      complete(false)
+      logger.w("EventBatchReplay", error) { "Could not schedule replay completion" }
+      callbacks.onComplete()
     }
   }
-  submit(0)
+}
+
+private fun PendingBatchReplay.updateBatch(
+  batchId: String,
+  delivered: Boolean,
+  discard: Boolean,
+  record: Boolean,
+) {
+  try {
+    if (delivered || discard) persistence.removeBatch(batchId)
+    else if (record) persistence.recordReplayFailure(batchId)
+  } catch (error: Exception) {
+    logger.w("EventBatchReplay", error) { "Could not update pending batch $batchId" }
+  }
 }

@@ -56,7 +56,19 @@ internal class PackageController(
       return
     }
 
-    try {
+    withPackageFailures(
+      onFailure = { e ->
+        Log.e(TAG, "performInstalledPackages failed", e)
+        broadcastInstalledPackagesResult(
+          requestId = requestId,
+          success = false,
+          userId = currentUserId,
+          packages = emptyList(),
+          error = "Failed to enumerate packages: ${e.message}",
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+        )
+      },
+    ) {
       val infos =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
           packageManager()
@@ -108,18 +120,6 @@ internal class PackageController(
         error = null,
         totalTimeMs = totalTime,
       )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "performInstalledPackages failed", e)
-      broadcastInstalledPackagesResult(
-        requestId = requestId,
-        success = false,
-        userId = currentUserId,
-        packages = emptyList(),
-        error = "Failed to enumerate packages: ${e.message}",
-        totalTimeMs = timeProvider.currentTimeMillis() - startTime,
-      )
     }
   }
 
@@ -130,7 +130,54 @@ internal class PackageController(
     includePermissions: Boolean,
   ) {
     val startTime = timeProvider.currentTimeMillis()
-    try {
+    withPackageFailures(
+      onFailure = { e ->
+        when (e) {
+          is PackageManager.NameNotFoundException -> {
+            Log.w(TAG, "Package not found: $packageName", e)
+            broadcastPackageInfoResult(
+              requestId = requestId,
+              success = false,
+              packageName = packageName,
+              isSystem = false,
+              applicationLabel = null,
+              versionName = null,
+              versionCode = null,
+              installerPackage = null,
+              firstInstallTime = null,
+              lastUpdateTime = null,
+              allowBackup = null,
+              requestedPermissions = emptyList(),
+              grantedPermissions = emptyMap(),
+              mainActivity = null,
+              error = "Package not installed or not visible: $packageName",
+              totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+            )
+          }
+          else -> {
+            Log.e(TAG, "performPackageInfo failed for $packageName", e)
+            broadcastPackageInfoResult(
+              requestId = requestId,
+              success = false,
+              packageName = packageName,
+              isSystem = false,
+              applicationLabel = null,
+              versionName = null,
+              versionCode = null,
+              installerPackage = null,
+              firstInstallTime = null,
+              lastUpdateTime = null,
+              allowBackup = null,
+              requestedPermissions = emptyList(),
+              grantedPermissions = emptyMap(),
+              mainActivity = null,
+              error = "Failed to read package info: ${e.message}",
+              totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+            )
+          }
+        }
+      },
+    ) {
       val flags = if (includePermissions) PackageManager.GET_PERMISSIONS else 0
       val info =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -160,7 +207,13 @@ internal class PackageController(
           }
         } catch (e: CancellationException) {
           throw e
-        } catch (e: Exception) {
+        } catch (e: PackageManager.NameNotFoundException) {
+          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+          null
+        } catch (e: IllegalArgumentException) {
+          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+          null
+        } catch (e: SecurityException) {
           Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
           null
         }
@@ -182,7 +235,7 @@ internal class PackageController(
           packageManager().getLaunchIntentForPackage(packageName)?.component?.flattenToShortString()
         } catch (e: CancellationException) {
           throw e
-        } catch (e: Exception) {
+        } catch (e: SecurityException) {
           Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
           null
         }
@@ -206,55 +259,25 @@ internal class PackageController(
         error = null,
         totalTimeMs = totalTime,
       )
-    } catch (e: PackageManager.NameNotFoundException) {
-      Log.w(TAG, "Package not found: $packageName", e)
-      broadcastPackageInfoResult(
-        requestId = requestId,
-        success = false,
-        packageName = packageName,
-        isSystem = false,
-        applicationLabel = null,
-        versionName = null,
-        versionCode = null,
-        installerPackage = null,
-        firstInstallTime = null,
-        lastUpdateTime = null,
-        allowBackup = null,
-        requestedPermissions = emptyList(),
-        grantedPermissions = emptyMap(),
-        mainActivity = null,
-        error = "Package not installed or not visible: $packageName",
-        totalTimeMs = timeProvider.currentTimeMillis() - startTime,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "performPackageInfo failed for $packageName", e)
-      broadcastPackageInfoResult(
-        requestId = requestId,
-        success = false,
-        packageName = packageName,
-        isSystem = false,
-        applicationLabel = null,
-        versionName = null,
-        versionCode = null,
-        installerPackage = null,
-        firstInstallTime = null,
-        lastUpdateTime = null,
-        allowBackup = null,
-        requestedPermissions = emptyList(),
-        grantedPermissions = emptyMap(),
-        mainActivity = null,
-        error = "Failed to read package info: ${e.message}",
-        totalTimeMs = timeProvider.currentTimeMillis() - startTime,
-      )
     }
   }
 
   /** Resolve the launcher activity component for a package. */
   suspend fun performLaunchIntent(requestId: String?, packageName: String) {
     val startTime = timeProvider.currentTimeMillis()
-    try {
+    withPackageFailures(
+      onFailure = { e ->
+        Log.e(TAG, "performLaunchIntent failed for $packageName", e)
+        broadcastLaunchIntentResult(
+          requestId = requestId,
+          success = false,
+          packageName = packageName,
+          componentName = null,
+          error = "Failed to resolve launch intent: ${e.message}",
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+        )
+      },
+    ) {
       val intent = packageManager().getLaunchIntentForPackage(packageName)
       val component = intent?.component?.flattenToShortString()
       val totalTime = timeProvider.currentTimeMillis() - startTime
@@ -266,18 +289,6 @@ internal class PackageController(
         componentName = component,
         error = if (!success) "No launch intent for $packageName" else null,
         totalTimeMs = totalTime,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "performLaunchIntent failed for $packageName", e)
-      broadcastLaunchIntentResult(
-        requestId = requestId,
-        success = false,
-        packageName = packageName,
-        componentName = null,
-        error = "Failed to resolve launch intent: ${e.message}",
-        totalTimeMs = timeProvider.currentTimeMillis() - startTime,
       )
     }
   }
@@ -374,3 +385,26 @@ internal class PackageController(
     }
   }
 }
+
+/**
+ * Handles the platform failure set shared by these operations. Failure handlers run outside the
+ * try.
+ */
+private inline fun <T> withPackageFailures(onFailure: (Exception) -> T, block: () -> T): T =
+  try {
+    block()
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: PackageManager.NameNotFoundException) {
+    onFailure(e)
+  } catch (e: SecurityException) {
+    onFailure(e)
+  } catch (e: android.content.res.Resources.NotFoundException) {
+    onFailure(e)
+  } catch (e: IllegalArgumentException) {
+    onFailure(e)
+  } catch (e: IllegalStateException) {
+    onFailure(e)
+  } catch (e: java.io.IOException) {
+    onFailure(e)
+  }

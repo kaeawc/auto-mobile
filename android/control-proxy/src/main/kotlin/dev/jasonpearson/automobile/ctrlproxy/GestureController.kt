@@ -241,7 +241,13 @@ internal class GestureController(
     ) {
       val gesture = gestureBuilder(displayId).addStroke(stroke).build()
       val dispatched =
-        try {
+        withGestureFailures(
+          onFailure = { e ->
+            Log.e(TAG, "Error dispatching streamed gesture stroke", e)
+            onRejected(e.message ?: "Failed to dispatch streamed gesture stroke")
+            return
+          },
+        ) {
           host.dispatchGesture(
             gesture,
             object : GestureResultCallback() {
@@ -252,10 +258,6 @@ internal class GestureController(
             },
             gestureHandler,
           )
-        } catch (e: Exception) {
-          Log.e(TAG, "Error dispatching streamed gesture stroke", e)
-          onRejected(e.message ?: "Failed to dispatch streamed gesture stroke")
-          return
         }
       if (!dispatched) onRejected("Failed to dispatch streamed gesture stroke")
     }
@@ -307,7 +309,13 @@ internal class GestureController(
       return
     }
     val dispatched =
-      try {
+      withGestureFailures(
+        onFailure = { e ->
+          Log.e(TAG, "Error dispatching $perfLabel gesture (requestId=$requestId)", e)
+          lifecycle.failed(e, onResult)
+          return
+        },
+      ) {
         host.dispatchGesture(
           gesture,
           object : GestureResultCallback() {
@@ -337,10 +345,6 @@ internal class GestureController(
           },
           gestureHandler,
         )
-      } catch (e: Exception) {
-        Log.e(TAG, "Error dispatching $perfLabel gesture (requestId=$requestId)", e)
-        lifecycle.failed(e, onResult)
-        return
       }
 
     if (!dispatched) {
@@ -375,7 +379,16 @@ internal class GestureController(
     Log.d(TAG, "performSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms")
     perfProvider.serial("performSwipe")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end() // end performSwipe block
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing swipe", e)
+        host.launchRequestScope(requestId) {
+          broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
+        }
+      },
+    ) {
       // Create the swipe path
       perfProvider.startOperation("buildPath")
       val path =
@@ -423,13 +436,6 @@ internal class GestureController(
           }
         }
       }
-    } catch (e: Exception) {
-      perfProvider.end() // end performSwipe block
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing swipe", e)
-      host.launchRequestScope(requestId) {
-        broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
-      }
     }
   }
 
@@ -472,7 +478,27 @@ internal class GestureController(
       } else null
     if (dragPerf == null) perfProvider.serial("performDrag")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        val errorTime = timeProvider.currentTimeMillis()
+        if (dragPerf == null) perfProvider.end()
+        else {
+          dragPerf.children.forEach { if (it.endTime == null) it.endTime = errorTime }
+          dragPerf.endTime = errorTime
+          perfProvider.complete(dragPerf)
+        }
+        Log.e(TAG, "Error performing drag", e)
+        dragResultReporter(
+          requestId,
+          GestureDispatchOutcome(
+            false,
+            errorTime - startTime,
+            null,
+            e.message ?: "Failed to perform drag",
+          ),
+        )
+      },
+    ) {
       if (dragPerf == null) perfProvider.startOperation("buildPath")
       val gestureBuilder = gestureBuilder(displayId)
       val startX = x1.toFloat()
@@ -575,24 +601,6 @@ internal class GestureController(
       ) { outcome ->
         dragResultReporter(requestId, outcome)
       }
-    } catch (e: Exception) {
-      val errorTime = timeProvider.currentTimeMillis()
-      if (dragPerf == null) perfProvider.end()
-      else {
-        dragPerf.children.forEach { if (it.endTime == null) it.endTime = errorTime }
-        dragPerf.endTime = errorTime
-        perfProvider.complete(dragPerf)
-      }
-      Log.e(TAG, "Error performing drag", e)
-      dragResultReporter(
-        requestId,
-        GestureDispatchOutcome(
-          false,
-          errorTime - startTime,
-          null,
-          e.message ?: "Failed to perform drag",
-        ),
-      )
     }
   }
 
@@ -618,7 +626,16 @@ internal class GestureController(
     Log.d(TAG, "performTapCoordinates: ($x, $y) duration=${duration}ms")
     perfProvider.serial("performTapCoordinates")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end() // end performTapCoordinates block
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing tap", e)
+        host.launchRequestScope(requestId) {
+          broadcastTapCoordinatesResult(requestId, false, e.message, errorTime - startTime)
+        }
+      },
+    ) {
       // Create a tap path (single point, no movement)
       perfProvider.startOperation("buildPath")
       val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
@@ -665,13 +682,6 @@ internal class GestureController(
           }
         }
       }
-    } catch (e: Exception) {
-      perfProvider.end() // end performTapCoordinates block
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing tap", e)
-      host.launchRequestScope(requestId) {
-        broadcastTapCoordinatesResult(requestId, false, e.message, errorTime - startTime)
-      }
     }
   }
 
@@ -705,7 +715,16 @@ internal class GestureController(
     )
     perfProvider.serial("performTwoFingerSwipe")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end() // end performTwoFingerSwipe block
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing two-finger swipe", e)
+        host.launchRequestScope(requestId) {
+          broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
+        }
+      },
+    ) {
       // One parallel stroke per finger (geometry shared with iOS via computeMultiFingerStrokes).
       perfProvider.startOperation("buildPaths")
       val builder = gestureBuilder(displayId)
@@ -754,13 +773,6 @@ internal class GestureController(
           }
         }
       }
-    } catch (e: Exception) {
-      perfProvider.end() // end performTwoFingerSwipe block
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing two-finger swipe", e)
-      host.launchRequestScope(requestId) {
-        broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
-      }
     }
   }
 
@@ -782,7 +794,16 @@ internal class GestureController(
     )
     perfProvider.serial("performPinch")
 
-    try {
+    withGestureFailures(
+      onFailure = { e ->
+        perfProvider.end()
+        val errorTime = timeProvider.currentTimeMillis()
+        Log.e(TAG, "Error performing pinch", e)
+        host.launchRequestScope(requestId) {
+          broadcastPinchResult(requestId, false, e.message, errorTime - startTime, null)
+        }
+      },
+    ) {
       perfProvider.startOperation("buildPath")
       // Geometry is extracted into computePinchPoints so it stays unit testable (see
       // PinchGeometryTest) and stays in sync with the iOS runner. rotationDegrees rotates the
@@ -838,13 +859,6 @@ internal class GestureController(
             broadcastPinchResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
           }
         }
-      }
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = timeProvider.currentTimeMillis()
-      Log.e(TAG, "Error performing pinch", e)
-      host.launchRequestScope(requestId) {
-        broadcastPinchResult(requestId, false, e.message, errorTime - startTime, null)
       }
     }
   }
@@ -935,3 +949,20 @@ internal class GestureController(
     }
   }
 }
+
+/**
+ * Handles the platform failure set shared by these operations. Failure handlers run outside the
+ * try.
+ */
+private inline fun <T> withGestureFailures(onFailure: (Exception) -> T, block: () -> T): T =
+  try {
+    block()
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: IllegalArgumentException) {
+    onFailure(e)
+  } catch (e: IllegalStateException) {
+    onFailure(e)
+  } catch (e: SecurityException) {
+    onFailure(e)
+  }

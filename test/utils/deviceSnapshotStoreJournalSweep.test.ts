@@ -1,20 +1,16 @@
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { useScratchRoot } from "../helpers/scratchRoot";
-import { promises as fs, type Dirent, type PathLike } from "fs";
+import { promises as fs, type Dirent } from "fs";
 import * as path from "path";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
+import * as io from "../../src/utils/io";
 import { sortedReaddir } from "../../src/utils/io";
 import {
   noOpSnapshotDirectorySync,
   noOpSnapshotFileSync,
 } from "../helpers/deviceSnapshotStoreSync";
-
-// Exercise only the directory-entry overload used by snapshot enumeration.
-const directoryFs: {
-  readdir(directory: PathLike, options: { withFileTypes: true }): Promise<Dirent[]>;
-} = fs;
 
 const LIMITS = { maxEntries: 50, maxScopeDirectories: 64 };
 
@@ -86,20 +82,17 @@ describe("snapshot journal enumeration and discard", () => {
     await artifact("ordinary/nested.replacing");
     await artifact("android/Pixel/ordinary/nested.journal.replacing");
     await artifact("ios/UDID/ordinary/nested.replacing");
-    const readdir = directoryFs.readdir.bind(directoryFs);
+    const readdir = io.sortedReaddirEntries;
     // Backslashes are path separators on Windows, so inject these names instead of creating them.
-    const read = spyOn(directoryFs, "readdir").mockImplementation(async (directory, options) => {
-      if (options && typeof options === "object" && options.withFileTypes === true) {
-        const entries = await readdir(directory, options);
-        if (directory === root) {
-          return [...entries, syntheticDirent(root, "bad\\name.replacing")];
-        }
-        if (directory === path.join(root, "android")) {
-          return [...entries, syntheticDirent(String(directory), "bad\\scope", true)];
-        }
-        return entries;
+    const read = spyOn(io, "sortedReaddirEntries").mockImplementation(async (directory) => {
+      const entries = await readdir(directory);
+      if (directory === root) {
+        return [...entries, syntheticDirent(root, "bad\\name.replacing")];
       }
-      return readdir(directory, options);
+      if (directory === path.join(root, "android")) {
+        return [...entries, syntheticDirent(directory, "bad\\scope", true)];
+      }
+      return entries;
     });
     try {
       expect(await store.listLeftoverSnapshotJournals(LIMITS)).toEqual({
@@ -193,7 +186,10 @@ describe("snapshot journal enumeration and discard", () => {
     await artifact("android/Pixel/save.journal.tmp.replacing");
     await artifact("android/Pixel/save/payload");
     expect(
-      await store.discardSnapshotArtifacts("save", { platform: "android", avdName: "Pixel" }),
+      await store.discardSnapshotArtifacts("save", {
+        platform: "android" as const,
+        avdName: "Pixel",
+      }),
     ).toEqual([]);
     expect(await fs.readdir(path.join(root, "android", "Pixel"))).toEqual(["save"]);
     expect(await fs.readFile(path.join(root, "android", "Pixel", "save", "payload"), "utf8")).toBe(

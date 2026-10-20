@@ -1,146 +1,144 @@
 import type { z, ZodType } from "zod/v4";
-import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
-import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
-import {
-  runWithPostActionCaptureScope,
-  postActionCaptures,
-} from "../utils/PostActionCaptureContext";
-import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
-import { toolExecutionError } from "./toolExecutionError";
+import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import {
   clearToolTransportRecovery,
   setToolTransportRecovery,
   type ToolTransportRecovery,
 } from "../daemon/toolTransportRecovery";
-import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
-import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";
+import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import {
+  postActionCaptures,
+  runWithPostActionCaptureScope,
+} from "../utils/PostActionCaptureContext";
 import { serverConfig } from "../utils/ServerConfig";
+import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
+import { ToolDefinitionListing } from "./ToolDefinitionListing";
+import { toolExecutionError } from "./toolExecutionError";
+import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
 
 import { logger, type Logger } from "../utils/logger";
-import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
 import "./featureWiring";
+import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
 
-import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
-import { ToolCallRepository } from "../db/toolCallRepository";
-import { runRecordedToolCall, toolCallOutcome } from "./toolCallRecording";
-import type { Environment } from "../daemon/poolConfig";
 import { runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
-import { isDebugModeEnabled } from "../utils/debug";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
+import { executionTracker } from "../daemon/executionTracker";
 import { markInternalToolCall } from "../daemon/internalToolCall";
 import {
   ListChangedBroadcaster,
   type ServerRegistrationOptions,
 } from "../daemon/listChangedBroadcast";
-import { StructuredToolResponse } from "../utils/toolUtils";
+import type { Environment } from "../daemon/poolConfig";
+import { ToolCallRepository } from "../db/toolCallRepository";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
+import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
+import { isDebugModeEnabled } from "../utils/debug";
+import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import {
   InternalToolName,
   InternalToolPayloads,
   narrowInternalToolEnvelope,
 } from "../utils/internalToolPayloads";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { StructuredToolResponse } from "../utils/toolUtils";
+import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
+import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import {
-  getToolSelectionContext,
-  runWithToolSelectionContext,
-} from "../features/toolSelection/toolSelectionContext";
-import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
-import { nonBlankSessionUuid } from "./planCallerIdentity";
-import { executionTracker } from "../daemon/executionTracker";
-import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
-import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
-import {
+  addSpillArtifactToAdvertisedOutputSchema,
   applyInheritedPlanRequestParams,
   toAdvertisedJsonSchema,
-  addSpillArtifactToAdvertisedOutputSchema,
 } from "./pipeline/advertisedSchema";
 import {
-  ExecutionTargetResolver,
-  DefaultExecutionTargetResolver,
-} from "./pipeline/executionTarget";
+  AfterToolCallHandler,
+  DefaultAfterToolCallHandler,
+  isToolResponseFailure,
+} from "./pipeline/afterToolCall";
 import { AuditRunner, DefaultAuditRunner } from "./pipeline/audit";
 import {
-  NavigationToolCallRecorder,
+  assertInternalCallWithinBrokerGrant,
+  deviceAwareHandlerArgs,
+  invokeResolvedDeviceHandler,
+  refuseInternalControlOnForeignOwnedSession,
+  sessionDisplayPinnedHandler,
+} from "./pipeline/deviceCallDispatch";
+import {
+  DefaultExecutionTargetResolver,
+  ExecutionTargetResolver,
+} from "./pipeline/executionTarget";
+import {
   DefaultNavigationToolCallRecorder,
+  NavigationToolCallRecorder,
 } from "./pipeline/navigationRecording";
 import {
-  AfterToolCallHandler,
-  isToolResponseFailure,
-  DefaultAfterToolCallHandler,
-} from "./pipeline/afterToolCall";
-import {
-  SessionBindingReleaseHandler,
+  DefaultPlanLifecycleManager,
   PlanLifecycleInput,
   PlanLifecycleManager,
-  DefaultPlanLifecycleManager,
+  SessionBindingReleaseHandler,
 } from "./pipeline/planLifecycle";
-import { holdSessionForCurrentTask } from "./tasks/runAsTask";
 import {
+  isDeviceIdControlCall,
   isDeviceReadOnlyCall,
   isReadOnlyCall,
   resolveCallerDeviceIds,
-  isDeviceIdControlCall,
 } from "./pipeline/readTarget";
-import {
-  deviceAwareHandlerArgs,
-  refuseInternalControlOnForeignOwnedSession,
-  assertInternalCallWithinBrokerGrant,
-  sessionDisplayPinnedHandler,
-  invokeResolvedDeviceHandler,
-} from "./pipeline/deviceCallDispatch";
+import { nonBlankSessionUuid } from "./planCallerIdentity";
+import { holdSessionForCurrentTask } from "./tasks/runAsTask";
+import { runRecordedToolCall, toolCallOutcome } from "./toolCallRecording";
 
-export { stripNavigationInternalParams } from "./pipeline/navigationRecording";
 export {
   AUTOMATIC_TOOL_OUTPUT_RETENTION,
   DefaultAfterToolCallHandler,
 } from "./pipeline/afterToolCall";
-export { DefaultAuditRunner, type AuditRunnerInput } from "./pipeline/audit";
 export type { SettleObserveFactory } from "./pipeline/afterToolCall";
+export { DefaultAuditRunner, type AuditRunnerInput } from "./pipeline/audit";
+export { isRecord } from "./pipeline/isRecord";
+export { stripNavigationInternalParams } from "./pipeline/navigationRecording";
 export {
+  DefaultPlanLifecycleManager,
   PLAN_APP_CLEANUP_CAP_MS,
   PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
-  DefaultPlanLifecycleManager,
-  type SessionBindingReleaseHandler,
-  type PlanLifecycleInput,
   type PlanCleanupFailure,
   type PlanCleanupOutcome,
+  type PlanLifecycleInput,
+  type SessionBindingReleaseHandler,
 } from "./pipeline/planLifecycle";
+export { toolHasOutputSchema } from "./toolRegistryTypes";
+export type {
+  DeviceAwareToolHandler,
+  DeviceAwareToolOptions,
+  PlainToolOptions,
+  ProgressCallback,
+  RegisteredTool,
+  SessionlessDeviceRead,
+  ToolRegistryCollaborators,
+  ToolTraits,
+} from "./toolRegistryTypes";
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 
-import {
-  ProgressCallback,
-  ToolHandler,
-  DeviceAwareToolHandler,
-  InternalToolCallOptions,
-  InternalToolInvocationContext,
-  PLAN_ONLY_GATE_REASON,
-  shadowedSdkToolCallback,
-  PlainToolOptions,
-  pickToolTraits,
-  DeviceAwareToolOptions,
-  ToolListingOptions,
-  CachedToolDefinitionSchemas,
-  RegisteredTool,
-  deviceReadOnlyMetadata,
-  toolHasOutputSchema,
-  ToolRegistryCollaborators,
-  ToolRegistryPipelineOverrides,
-  withItemsEnum,
-} from "./toolRegistryTypes";
 import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
 import { installDaemonToolRegistryPort } from "../daemon/toolRegistryPort";
-export type {
-  ProgressCallback,
+import {
+  CachedToolDefinitionSchemas,
   DeviceAwareToolHandler,
-  PlainToolOptions,
-  SessionlessDeviceRead,
-  ToolTraits,
   DeviceAwareToolOptions,
+  deviceReadOnlyMetadata,
+  InternalToolCallOptions,
+  InternalToolInvocationContext,
+  pickToolTraits,
+  PlainToolOptions,
+  PLAN_ONLY_GATE_REASON,
+  ProgressCallback,
   RegisteredTool,
+  shadowedSdkToolCallback,
+  ToolHandler,
+  toolHasOutputSchema,
+  ToolListingOptions,
   ToolRegistryCollaborators,
+  ToolRegistryPipelineOverrides,
 } from "./toolRegistryTypes";
-export { toolHasOutputSchema } from "./toolRegistryTypes";
-export { isRecord } from "./pipeline/isRecord";
 
 // The registry that holds all tools
 export class ToolRegistryClass {
@@ -914,143 +912,12 @@ export class ToolRegistryClass {
     }
     ListChangedBroadcaster.emit("tools");
   }
-
-  // Get tools in MCP format
   getToolDefinitions(options: ToolListingOptions = {}) {
-    const alwaysLoad = isAlwaysLoadToolsEnabled();
-    // When tool results are stripped of `structuredContent` (issue #2899), do not
-    // advertise an `outputSchema` in `tools/list`: an MCP server that declares an
-    // output schema is expected to return matching `structuredContent`, so keeping
-    // both consistent avoids advertising output the finalize step will strip.
-    const suppressOutputSchema =
-      options.suppressOutputSchema ?? serverConfig.isToolResultsNoStructuredContentEnabled();
-    // Bounds compaction is now an unconditional default, so the tuple arm is always
-    // emitted and therefore always advertised — keeping the advertised shape in sync
-    // with the wire (issue #2990), the same way `suppressOutputSchema` above keeps the
-    // two in sync for the strip flag.
-    const compactBounds = true;
-    const listedTools = this.getAllTools(options);
-    const configurableToolNames = listedTools
-      .filter((tool) => this.isUserConfigurableTool(tool.name))
-      .map((tool) => tool.name)
-      .sort();
-    return listedTools.map((tool) => {
-      const { inputSchema, outputSchema } = this.getCachedToolDefinitionSchemas(
-        tool,
-        suppressOutputSchema,
-        compactBounds,
-      );
-
-      const definition: {
-        name: string;
-        description: string;
-        inputSchema: Record<string, unknown>;
-        outputSchema?: Record<string, unknown>;
-        _meta?: {
-          "anthropic/alwaysLoad"?: boolean;
-          "automobile/debugOnly"?: boolean;
-          "automobile/embeddedSdkOnly"?: boolean;
-          "automobile/planOnly"?: boolean;
-          "automobile/deviceReadOnly"?: boolean;
-          "automobile/deviceReadOnlyArgs"?: readonly DeviceReadOnlyArgShape[];
-          ui?: { resourceUri: string };
-        };
-      } = {
-        name: tool.name,
-        description: tool.description,
-        inputSchema,
-      };
-      // Keep the compact enabled-tool profile while making optional capabilities
-      // discoverable through the always-listed selection control (#6797).
-      // Copy the cached schema: availability can change between listings.
-      definition.inputSchema = this.withConfigurableToolVocabulary(
-        tool.name,
-        inputSchema,
-        configurableToolNames,
-      );
-      if (outputSchema) {
-        definition.outputSchema = outputSchema;
-      }
-      if (alwaysLoad) {
-        definition._meta = { ...definition._meta, "anthropic/alwaysLoad": true };
-      }
-      // The committed static catalog includes unavailable tools for schema
-      // completeness. Preserve enough generated metadata for the proxy to
-      // exclude plan-only tools after a live connection is available.
-      if (tool.planOnly) {
-        definition._meta = { ...definition._meta, "automobile/planOnly": true };
-      }
-      if (tool.debugOnly) {
-        definition._meta = { ...definition._meta, "automobile/debugOnly": true };
-      }
-      if (tool.embeddedSdkOnly) {
-        definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
-      }
-      // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
-      if (tool.deviceReadOnly === true) {
-        definition._meta = { ...definition._meta, "automobile/deviceReadOnly": true };
-      } else if (tool.deviceReadOnlyArgs?.length) {
-        definition._meta = {
-          ...definition._meta,
-          "automobile/deviceReadOnlyArgs": tool.deviceReadOnlyArgs,
-        };
-      }
-      // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
-      if (tool.appUiResourceUri) {
-        definition._meta = { ...definition._meta, ui: { resourceUri: tool.appUiResourceUri } };
-      }
-      return definition;
-    });
-  }
-
-  /**
-   * Decorate the advertised schema with the enum of tool names this listing
-   * accepts, so a schema-driven client cannot build a call the handler rejects.
-   *
-   * Two fields carry that vocabulary: `setToolEnabled`'s `toolName`/`toolNames`
-   * (#6797, #6869) and the `enableTools` array the device-acquisition tools
-   * (`getAndroid`, `getApple`, `provisionDevice`) take so acquisition and
-   * capability declaration are one call. `resolveRequestedEnableTools` rejects
-   * every unknown or non-configurable name before any device work starts, so
-   * advertising "any non-empty string" there both allowed schema-valid calls
-   * that invocation refuses and hid the vocabulary of the one-call flow
-   * (#6886 review). Detected by the field's presence rather than a hardcoded
-   * tool list, so a future acquisition tool is covered by declaring the field.
-   */
-  private withConfigurableToolVocabulary(
-    toolName: string,
-    inputSchema: Record<string, unknown>,
-    configurableToolNames: string[],
-  ): Record<string, unknown> {
-    const properties = inputSchema.properties as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    if (!properties) {
-      return inputSchema;
-    }
-    if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
-      return {
-        ...inputSchema,
-        properties: {
-          ...properties,
-          toolName: { ...properties.toolName, enum: configurableToolNames },
-          // #6869 — the batch spelling carries the same vocabulary, so a
-          // client declaring a whole toolset in one call reads the choices
-          // from the field it is actually filling in.
-          toolNames: withItemsEnum(properties.toolNames, configurableToolNames),
-        },
-      };
-    }
-    if (!properties.enableTools) {
-      return inputSchema;
-    }
-    return {
-      ...inputSchema,
-      properties: {
-        ...properties,
-        enableTools: withItemsEnum(properties.enableTools, configurableToolNames),
-      },
-    };
+    return new ToolDefinitionListing(
+      (options) => this.getAllTools(options),
+      (name) => this.isUserConfigurableTool(name),
+      (tool, suppress, compact) => this.getCachedToolDefinitionSchemas(tool, suppress, compact),
+    ).getToolDefinitions(options);
   }
 
   private getCachedToolDefinitionSchemas(

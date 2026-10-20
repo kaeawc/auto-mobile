@@ -210,8 +210,7 @@ remove_bun() {
     local found=()
 
     if [[ -d "${HOME}/.bun" ]]; then
-        # shellcheck disable=SC2088 # Tilde is intentional for display purposes
-        found+=("~/.bun/ directory")
+        found+=(\~"/.bun/ directory")
     fi
     if command -v brew >/dev/null 2>&1 && brew list oven-sh/bun/bun >/dev/null 2>&1; then
         found+=("Homebrew: oven-sh/bun/bun")
@@ -264,8 +263,7 @@ remove_node_nvm() {
     local found=()
 
     if [[ -d "${HOME}/.nvm" ]]; then
-        # shellcheck disable=SC2088 # Tilde is intentional for display purposes
-        found+=("~/.nvm/ directory")
+        found+=(\~"/.nvm/ directory")
     fi
     if command -v brew >/dev/null 2>&1 && brew list node >/dev/null 2>&1; then
         found+=("Homebrew: node")
@@ -435,8 +433,7 @@ remove_manual_tools() {
     local manual_binaries=(lychee ktfmt hadolint swiftformat swiftlint)
     for tool in "${manual_binaries[@]}"; do
         if [[ -f "${local_bin}/${tool}" ]]; then
-            # shellcheck disable=SC2088
-            found+=("~/.local/bin/${tool}")
+            found+=(\~/.local/bin/"${tool}")
         fi
     done
 
@@ -445,8 +442,7 @@ remove_manual_tools() {
         if [[ -f "${jar}" ]]; then
             local jar_name
             jar_name=$(basename "${jar}")
-            # shellcheck disable=SC2088
-            found+=("~/.local/bin/${jar_name}")
+            found+=(\~/.local/bin/"${jar_name}")
         fi
     done
 

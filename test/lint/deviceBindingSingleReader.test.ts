@@ -6,7 +6,10 @@ import {
   type Expression,
   type MemberExpression,
   type ParamPattern,
-  type AssignmentTarget,
+  type AssignmentTargetMaybeDefault,
+  type AssignmentTargetRest,
+  type BindingPattern,
+  type BindingRestElement,
 } from "oxc-parser";
 import {
   localBindings,
@@ -139,7 +142,7 @@ function scan(file: string, source: string): { reads: string[] } {
       `${file}:${source.slice(0, offset).split("\n").length}: read ${text} through holderOf/statusOf/isIdle/isBusy/isErrored in ${OWNER}`,
     );
   };
-  const markWrite = (target: AssignmentTarget | Expression): void => {
+  const markWrite = (target: AssignmentTargetMaybeDefault | Expression): void => {
     if (target.type === "ObjectPattern") {
       for (const property of target.properties) {
         markWrite(property.type === "RestElement" ? property.argument : property.value);
@@ -159,7 +162,14 @@ function scan(file: string, source: string): { reads: string[] } {
       }
     }
   };
-  const checkPattern = (pattern: ParamPattern | AssignmentTarget): void => {
+  const checkPattern = (
+    pattern:
+      | ParamPattern
+      | AssignmentTargetMaybeDefault
+      | AssignmentTargetRest
+      | BindingPattern
+      | BindingRestElement,
+  ): void => {
     if (pattern.type === "AssignmentPattern") {
       checkPattern(pattern.left);
     } else if (pattern.type === "RestElement") {

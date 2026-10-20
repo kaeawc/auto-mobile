@@ -5,12 +5,11 @@
 install_session_release_trap() {
   session_release_uuid="$1"
   session_release_done=0
-  trap session_release_on_exit EXIT
+  trap 'session_release_on_exit' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
 }
 
-# shellcheck disable=SC2317
 session_release_on_exit() {
   local original_status=$?
   trap - EXIT

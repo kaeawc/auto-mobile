@@ -98,12 +98,12 @@ describe("SimCtlBootStateProvider", () => {
         deviceId: "sim-1",
         name: "one",
         platform: "ios",
-        state: "Booted",
         isRunning: true,
+        state: "Booted",
         deviceType: "nonDuo",
       },
-      { deviceId: "sim-2", name: "two", platform: "ios", state: "Shutdown", isRunning: false },
-      { deviceId: "sim-3", name: "three", platform: "ios", state: "Booting", isRunning: false },
+      { deviceId: "sim-2", name: "two", platform: "ios", isRunning: false, state: "Shutdown" },
+      { deviceId: "sim-3", name: "three", platform: "ios", isRunning: false, state: "Booting" },
     ];
     const provider = new SimCtlBootStateProvider(
       {

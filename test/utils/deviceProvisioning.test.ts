@@ -1,7 +1,7 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import {
-  type AndroidAvdCreator,
   DefaultDeviceProvisioner,
+  type AndroidAvdCreator,
   buildCreatedDeviceName,
   isCreatedDeviceName,
   pickAndroidSystemImage,
@@ -723,16 +723,16 @@ describe("DefaultDeviceProvisioner", () => {
     const events: string[] = [];
     const controller = new AbortController();
     const avd = new FakeAndroidAvdCreator([systemImage(34, "google_apis", "arm64-v8a")]);
-    const createAvd = avd.createAvd.bind(avd);
     const creator: AndroidAvdCreator = avd;
+    const createAvd = creator.createAvd.bind(creator);
     creator.createAvd = async (params, signal) => {
       events.push(`create:${params.name}`);
       expect(signal).toBe(controller.signal);
-      return await createAvd(params);
+      return await createAvd(params, signal);
     };
     const provisioner = new DefaultDeviceProvisioner({
       iosCreator: () => undefined,
-      androidCreator: () => avd,
+      androidCreator: () => creator,
       idGenerator: new CountingIdGenerator("uuid"),
       architecture: "arm64",
       identityHooks: {

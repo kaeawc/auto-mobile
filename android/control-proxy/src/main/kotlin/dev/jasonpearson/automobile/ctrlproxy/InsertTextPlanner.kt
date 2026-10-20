@@ -53,13 +53,13 @@ internal fun planInsertText(
   remembered: RememberedCaret? = null,
 ): InsertTextPlan {
   val text = if (isShowingHintText) "" else currentText.orEmpty()
-  if (
+  val hasMatchingRememberedCaret =
     remembered != null &&
       remembered.text == text &&
       remembered.reportedStart == selectionStart &&
       remembered.reportedEnd == selectionEnd &&
       remembered.caret in 0..text.length
-  ) {
+  if (hasMatchingRememberedCaret) {
     return InsertTextPlan(
       text.substring(0, remembered.caret) + textToInsert + text.substring(remembered.caret),
       remembered.caret + textToInsert.length,

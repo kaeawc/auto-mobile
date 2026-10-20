@@ -476,8 +476,8 @@ describe("VideoRecordingRepository", () => {
 
     test("drops highlight entries without a usable timeline and keeps valid ones", async () => {
       await repo.insertRecording(makeRecord());
-      const good: NonNullable<VideoRecordingRecord["highlights"]>[number] = {
-        shape: { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } },
+      const good = {
+        shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
         timeline: { appearedAtSeconds: 1 },
       };
       await rawUpdate({

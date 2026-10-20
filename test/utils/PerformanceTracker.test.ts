@@ -385,7 +385,7 @@ describe("PerformanceTracker", function () {
         startOperation(): void {}
         endOperation(): void {}
         fork(): PerformanceTracker {
-          return this;
+          return new FakePerformanceTracker();
         }
 
         getTimings(): TimingData | null {

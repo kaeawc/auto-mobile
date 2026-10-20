@@ -50,7 +50,6 @@ fi
 # as "<count>\t<filename>", sorted by filename for stable baseline diffs.
 run_ratchet() {
   local kind="$1" BASELINE="$2" label="$3" noun="$4" current current_total grew
-  # shellcheck disable=SC2016 # JavaScript template interpolation is intentional.
   # Callers run this as `run_ratchet ... || status=1`, which disables `set -e` inside the function,
   # so a crashed counter must be turned into a failure explicitly. Otherwise an empty result reads
   # as "no assertions" and --update would wipe the baseline.
@@ -85,7 +84,7 @@ run_ratchet() {
       if (count) rows.push([relative(root, absolute).replaceAll("\\", "/"), count]);
     }
     rows.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-    process.stdout.write(rows.map(([file, count]) => `${count}\t${file}`).join("\n"));
+    process.stdout.write(rows.map(([file, count]) => count + "\t" + file).join("\n"));
   ' "$TEST_ROOT" "$kind")" || {
     echo "ERROR: could not count $noun(s) under $TEST_ROOT; baseline left untouched" >&2
     return 1

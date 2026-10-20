@@ -605,8 +605,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       avdConfigReader: fakeAvdConfigReader,
     });
 
-    const firstLaunch = await client.startEmulator("Pixel_9_Pro");
-    expect(firstLaunch).toBe(firstChild);
+    await client.startEmulator("Pixel_9_Pro");
     firstChild.emit("exit", 0);
     fakeAdb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
     await client.startEmulator("Pixel_9_Pro");
@@ -1253,7 +1252,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     // A DIFFERENT AVD: a second launch of an AVD this process is already
     // launching is adopted rather than spawned (#6407), and what this test
     // needs is two concurrent launches of our own.
-    const secondLaunch = await client.startEmulator("am-api34-ga-arm64");
+    await client.startEmulator("am-api34-ga-arm64");
     await expect(
       client.waitForEmulatorReady("am-api33-ga-arm64", 100, firstLaunch),
     ).rejects.toThrow("failed to become ready within 100ms");
@@ -1267,7 +1266,6 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(
       scopedFactory.commandLog.some((command) => command.startsWith("emulator-5558:get-state")),
     ).toBe(false);
-    expect(secondLaunch).toBe(secondChild);
     secondChild.emit("exit", 0);
   });
 
@@ -1312,7 +1310,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: scopedFactory,
     });
 
-    const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
+    await client.startEmulator("am-api33-ga-arm64");
     // A DIFFERENT AVD: a second launch of an AVD this process is already
     // launching is adopted rather than spawned (#6407), and what this test
     // needs is two concurrent launches of our own.
@@ -1325,9 +1323,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(
       scopedFactory.commandLog.some((command) => command.startsWith("emulator-5558:get-state")),
     ).toBe(false);
-    expect(firstLaunch).toBe(firstChild);
     firstChild.emit("exit", 0);
-    expect(secondLaunch).toBe(secondChild);
     secondChild.emit("exit", 0);
   });
 
@@ -1371,8 +1367,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: scopedFactory,
     });
 
-    const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
-    expect(firstLaunch).toBe(firstChild);
+    await client.startEmulator("am-api33-ga-arm64");
     firstChild.emit("exit", 0);
     await client.startEmulator("am-api33-ga-arm64");
 

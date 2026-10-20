@@ -407,6 +407,7 @@ export class DaemonClient {
         inboundClosed: this.inboundClosed,
         handleResponse: this.handleResponse.bind(this),
         extendPendingRequestOnProgress: this.extendPendingRequestOnProgress.bind(this),
+        extendPendingRequestBudget: this.extendPendingRequestBudget.bind(this),
         notificationHandlers: this.notificationHandlers,
         pendingRequests: this.pendingRequests,
         timer: this.timer,
@@ -498,6 +499,44 @@ export class DaemonClient {
       remainingMs,
       pending.reject,
     );
+  }
+
+  /**
+   * The daemon resolved a larger budget than this request sent (a per-tool floor from its own
+   * environment, #13797). Lengthen this request's backstop to match, measured from when it was
+   * sent. Never shortens, so a stale or smaller value changes nothing.
+   */
+  private extendPendingRequestBudget(requestId: string, timeoutMs: number): void {
+    const pending = this.pendingRequests.get(requestId);
+    if (
+      !pending ||
+      pending.sentAtMs === undefined ||
+      pending.requestTimeoutMs === undefined ||
+      !Number.isFinite(timeoutMs) ||
+      timeoutMs <= pending.requestTimeoutMs
+    ) {
+      return;
+    }
+    if (pending.deadline) {
+      // A later progress tick re-arms from this deadline and must not shrink the backstop back to
+      // the budget this request was sent with; give it the ceiling the daemon uses.
+      pending.deadline = new ProgressExtendableDeadline(
+        pending.sentAtMs,
+        Math.max(timeoutMs, pending.deadline.value - pending.sentAtMs),
+      );
+    }
+    const targetMs = Math.max(pending.sentAtMs + timeoutMs, pending.deadline?.value ?? 0);
+    const remainingMs = targetMs - this.timer.now();
+    if (remainingMs > 0) {
+      pending.requestTimeoutMs = timeoutMs;
+      this.timer.clearTimeout(pending.timeout);
+      pending.timeout = this.scheduleRequestTimeout(
+        requestId,
+        pending.toolName,
+        remainingMs,
+        pending.reject,
+      );
+    }
   }
 
   /**
@@ -745,6 +784,7 @@ export class DaemonClient {
       method,
       params,
       ...(progressToken !== undefined ? { progressToken } : {}),
+      acceptsRequestBudget: true,
       ...taskRelayField(tasks),
       ...this.handshakeFields(),
     };
@@ -757,8 +797,10 @@ export class DaemonClient {
     );
     // Send the daemon budget, excluding client response grace (#6385). Without it the
     // daemon fell back to its 30s default and aborted calls the client was still
-    // prepared to wait for (the client's default is 120s). The daemon applies
-    // the same clamp and floors, so both sides resolve the same deadline.
+    // prepared to wait for (the client's default is 120s). The daemon applies the same clamp
+    // and its own per-tool floors, which may be larger when its environment differs; it then
+    // reports the budget it resolved (REQUEST_BUDGET_NOTIFICATION_METHOD, #13797) and this
+    // request's backstop is lengthened to match.
     request.timeoutMs = requestTimeoutMs;
     // Serialize before registering the request: an unserializable argument
     // rejects here with nothing scheduled, instead of throwing inside the
@@ -793,6 +835,7 @@ export class DaemonClient {
         progressToken,
         deadline,
         requestTimeoutMs,
+        sentAtMs: this.timer.now(),
         disconnectCause,
         removeAbortListener: () => removeAbortListener(),
       });

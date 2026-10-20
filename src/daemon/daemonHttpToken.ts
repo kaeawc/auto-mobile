@@ -17,6 +17,7 @@ import {
 import { dirname } from "node:path";
 import { ENV, readEnvTrimmed } from "../config/env";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { exponentialBackoff } from "../utils/Backoff";
 import { logger } from "../utils/logger";
 import { resolveDaemonStatePath } from "./constants";
 
@@ -33,19 +34,62 @@ export function generateDaemonHttpToken(idGen?: IdGenerator): string {
 
 export { FakeDaemonHttpTokenStore } from "./FakeDaemonHttpTokenStore";
 
+interface FileDaemonHttpTokenStoreOptions {
+  platform?: NodeJS.Platform;
+  renameFile?: (source: string, destination: string) => void;
+  sleep?: (ms: number) => void;
+}
+
 /** Atomic publication; readers validate the opened inode, not a prior path stat. */
 export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
   private publishedToken: string | undefined;
+  private readonly platform: NodeJS.Platform;
+  private readonly renameFile: (source: string, destination: string) => void;
+  private readonly sleep: (ms: number) => void;
 
   constructor(
     private readonly path = resolveDaemonStatePath("token"),
     private readonly idGen: IdGenerator = defaultIdGenerator,
-  ) {}
+    options: FileDaemonHttpTokenStoreOptions = {},
+  ) {
+    this.platform = options.platform ?? process.platform;
+    this.renameFile = options.renameFile ?? renameSync;
+    this.sleep =
+      options.sleep ??
+      ((ms) => {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      });
+  }
 
   private assertTarget(): void {
     const stat = lstatSync(this.path, { throwIfNoEntry: false });
     if (stat && (!stat.isFile() || stat.isSymbolicLink())) {
       throw new Error("Unsafe daemon HTTP token file");
+    }
+  }
+
+  private publish(temporaryPath: string): void {
+    // Brief Windows sharing/antivirus locks can outlive a reader's close. Bound the
+    // synchronous wait to five attempts (150 ms total); never write the token in place.
+    const backoff = exponentialBackoff({ initialDelayMs: 10, maxDelayMs: 100 });
+    for (let attempt = 1; ; attempt++) {
+      this.assertTarget();
+      try {
+        this.renameFile(temporaryPath, this.path);
+        return;
+      } catch (error) {
+        const code = error instanceof Error && "code" in error ? error.code : undefined;
+        if (
+          this.platform !== "win32" ||
+          attempt >= 5 ||
+          (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES")
+        ) {
+          throw toActionableError(error, "Unable to persist daemon HTTP token");
+        }
+        // Sharing violations are expected transient contention; the outer write reports failure.
+        logger.debug("Retrying daemon HTTP token publication after a sharing violation");
+        this.sleep(backoff.delayForAttempt(attempt));
+      }
     }
   }
 
@@ -65,8 +109,7 @@ export class FileDaemonHttpTokenStore implements DaemonHttpTokenStore {
       } finally {
         closeSync(fd);
       }
-      this.assertTarget();
-      renameSync(temporaryPath, this.path);
+      this.publish(temporaryPath);
       created = false;
       this.publishedToken = token.trim();
     } catch (error) {

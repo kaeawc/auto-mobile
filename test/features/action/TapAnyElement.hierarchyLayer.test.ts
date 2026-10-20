@@ -1,5 +1,5 @@
 import { runBlockWith } from "../../helpers/observedInteractionStub";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -21,7 +21,7 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const service = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
+  clientSpy.mockReturnValue(service);
   const detector = new FakeAccessibilityDetector();
   detector.setDefaultResult(false);
   const command = new TapAnyElement(
@@ -89,4 +89,9 @@ describe("tapAny layer (#9305)", () => {
     expect(result.error).toContain("no AutoMobile prototype is showing");
     expect(service.getTapHistory()).toEqual([]);
   });
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 });

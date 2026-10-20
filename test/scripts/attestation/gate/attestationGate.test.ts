@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { logger } from "../../../../src/utils/logger";
 import {
@@ -24,11 +24,11 @@ const found: TransportResult = {
   kind: "found",
   attestation: { tier: 1, claimedInputHash: "ci-hash", raw: { opaque: true } },
 };
-const warn = spyOn(logger, "warn");
-beforeAll(() => {
-  warn.mockImplementation(() => {});
+let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+beforeEach(() => {
+  warn = spyOn(logger, "warn").mockImplementation(() => {});
 });
-afterAll(() => {
+afterEach(() => {
   warn.mockRestore();
 });
 

@@ -458,7 +458,7 @@ test("the restart recovery window is judged on the session clock across a wall-c
   timer.advanceTime(2_500);
   // A backward NTP step: the deadline derives from session stamps, which the step does not move.
   timer.stepWallClock(-3_600_000);
-  const buildError = Reflect.get(pool, "recoveryAssignmentError").bind(pool) as (
+  const buildError = pool.testHooks.recoveryAssignmentError.bind(pool) as (
     sessionId: string,
     target: { platform: "android"; stableDeviceId: string; restartRecoveryDeadlineMs?: number },
   ) => ActionableError;
@@ -478,7 +478,7 @@ test.each([undefined, 60_000, 59_999])(
   async (deadline) => {
     const { timer, sessions, pool, incident, incidents } = await setupSettledRestart();
     timer.advanceTime(60_000);
-    const buildError = Reflect.get(pool, "recoveryAssignmentError").bind(pool) as (
+    const buildError = pool.testHooks.recoveryAssignmentError.bind(pool) as (
       sessionId: string,
       target: { platform: "android"; stableDeviceId: string; restartRecoveryDeadlineMs?: number },
       loss?: typeof incident,

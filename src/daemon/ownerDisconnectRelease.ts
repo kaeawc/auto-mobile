@@ -280,6 +280,10 @@ export class OwnerDisconnectRelease {
     );
     pending.handle = this.timer.setTimeout(() => this.fire(sessionId), delayMs);
   }
+  /** @internal Read-only state used by deterministic ownership tests. */
+  get testHooks() {
+    return { pending: this.pending as ReadonlyMap<string, Readonly<PendingRelease>> };
+  }
 }
 
 export { OwnerDisconnectExecutionVeto } from "./OwnerDisconnectExecutionVeto";

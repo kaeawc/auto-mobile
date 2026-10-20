@@ -30,6 +30,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
@@ -92,7 +93,6 @@ import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NavigationEventData
 import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
@@ -118,6 +118,7 @@ import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
+import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
@@ -1342,21 +1343,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
 
-          override suspend fun sendActionResult(
-            requestId: String?,
-            action: String,
-            success: Boolean,
-            error: String?,
-            totalTimeMs: Long,
-            alreadySatisfied: Boolean,
-          ) =
+          override suspend fun sendActionResult(outcome: NodeActionResult) =
             this@CtrlProxy.broadcastActionResult(
-              requestId,
-              action,
-              success,
-              error,
-              totalTimeMs,
-              alreadySatisfied,
+              outcome.requestId,
+              outcome.action,
+              outcome.success,
+              outcome.error,
+              outcome.totalTimeMs,
+              outcome.alreadySatisfied,
             )
         },
       perfProvider = perfProvider,
@@ -1507,25 +1501,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             CtrlProxyIme.current()?.let { ime ->
               object : ImeController.ImeTarget {
                 override fun commitText(
-                  text: String,
-                  priorImeId: String?,
-                  isCancelled: () -> Boolean,
-                  delivery: ImeTextDelivery,
-                  timeoutMs: Long?,
-                  requestDeadlineMs: Long,
-                  trace: Boolean,
+                  request: ImeCommitRequest,
                   onResult: (ImeCommitResult) -> Unit,
-                ) =
-                  ime.commitText(
-                    text,
-                    priorImeId,
-                    isCancelled,
-                    delivery,
-                    timeoutMs,
-                    requestDeadlineMs,
-                    trace,
-                    onResult,
-                  )
+                ) = ime.commitText(request, onResult)
               }
             }
 
@@ -2074,20 +2052,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           WebSocketServer(
             port = 8765,
             scope = serviceScope,
-            messageHandler = queuedHandler,
-            onClientDisconnected = { client ->
-              queuedHandler.disconnect(client)
-              gestureController.cancelStreamsOwnedBy(client)
-              // Its in-flight host requests have no socket to answer on, even if another remains.
-              hostPrototypeHttp.onHostLost(client)
-            },
-            onClientCountChanged = { count, session ->
-              if (count == 0) hostPrototypeHttp.onHostLost()
-              serviceScope.launch { prototypes.onClientCountChanged(count, session) }
-            },
-            onPrototypeResponse = hostPrototypeHttp::onResponse,
-            onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
-            onPermanentStartFailure = { disableSelf() },
+            options =
+              WebSocketServerOptions(
+                messageHandler = queuedHandler,
+                onClientDisconnected = { client ->
+                  queuedHandler.disconnect(client)
+                  gestureController.cancelStreamsOwnedBy(client)
+                  // Its in-flight host requests have no socket to answer on, even if another
+                  // remains.
+                  hostPrototypeHttp.onHostLost(client)
+                },
+                onClientCountChanged = { count, session ->
+                  if (count == 0) hostPrototypeHttp.onHostLost()
+                  serviceScope.launch { prototypes.onClientCountChanged(count, session) }
+                },
+                onPrototypeResponse = hostPrototypeHttp::onResponse,
+                onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
+                onPermanentStartFailure = { disableSelf() },
+              ),
           )
         webSocketLifecycle.replace(webSocketServer)
         webSocketServer.start()
@@ -2568,7 +2550,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       StaleFrameContextAction.SET_TEXT ->
         textInputController.broadcastSetTextResult(requestId, false, error, 0)
       StaleFrameContextAction.IME_ACTION ->
-        textInputController.broadcastImeActionResult(requestId, action.wireName, false, error, 0)
+        textInputController.broadcastImeActionResult(
+          ImeActionFrameResult(
+            requestId = requestId,
+            action = action.wireName,
+            success = false,
+            error = error,
+            totalTimeMs = 0,
+          ),
+        )
       StaleFrameContextAction.GLOBAL_ACTION ->
         webSocketServer.broadcast(
           dev.jasonpearson.automobile.protocol.GlobalActionResult(
@@ -2931,14 +2921,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     key: String,
   ) = storageController.handleGetPreference(requestId, packageName, fileName, key)
 
-  override suspend fun setPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) = storageController.handleSetPreference(requestId, packageName, fileName, key, value, type)
+  override suspend fun setPreference(request: SetPreference) =
+    storageController.handleSetPreference(request)
 
   override suspend fun removePreference(
     requestId: String?,
@@ -3229,13 +3213,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val timestamp = timeProvider.currentTimeMillis()
         val message =
           packageEventFrame(
-            timestamp,
-            action,
-            packageName,
-            userId,
-            uid,
-            isSystem,
-            removedForAllUsers,
+            PackageEventResult(
+              timestamp = timestamp,
+              action = action,
+              packageName = packageName,
+              userId = userId,
+              uid = uid,
+              isSystem = isSystem,
+              removedForAllUsers = removedForAllUsers,
+            ),
           )
         webSocketServer.broadcast(message)
         Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")

@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   PROXY_ACTIVITY_CLOCKS,
   SESSION_ACTIVITY_CLOCKS,
@@ -92,10 +92,10 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
   "src/daemon/daemonHttpIngress.ts": ["DaemonHttpIngress.handleHeartbeatHttpRequest"],
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
-  "src/daemon/daemonMcpProxy.ts": [
-    "DaemonMcpProxy.sendFirstBoundSessionHeartbeat",
-    "DaemonMcpProxy.recordBoundSessionHeartbeatSuccess",
-    "DaemonMcpProxy.heartbeatHeldSession",
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts": [
+    "ProxySessionOwnership.sendFirstBoundSessionHeartbeat",
+    "ProxySessionOwnership.recordBoundSessionHeartbeatSuccess",
+    "ProxySessionOwnership.heartbeatHeldSession",
   ],
   // Terminal fencing moved behind the proxy port; the walker cannot follow the collaborator.
   "src/daemon/proxy/BoundSessionFenceGate.ts": [
@@ -183,7 +183,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   ],
   // #11162: the veto's start and bound are judged against session-clock request deadlines.
   "src/daemon/unsettledExecutionVeto.ts": ["UnsettledExecutionVeto.judge"],
-  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+  "src/daemon/devicePoolParts/assignment.ts": [
+    "DevicePoolAssignment.recoveryAssignmentError",
+    "DevicePoolAssignment.recoveryNow",
+  ],
   "src/daemon/deviceAllocation.ts": [
     // #11162: the restart-recovery wait and retry gate compare with the recovery deadline.
     "DeviceAllocation.assignmentRetryPolicy",
@@ -239,7 +242,7 @@ const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
       "no hold time a non-stalled session would not have had. #10835: a cli-idle session's " +
       "idleStallForgivenAt moves by the same bounded lost interval.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.holdTokenOwnedSession": {
     writes: 1,
     reason:
       "#10990: any connection, including one a keeper heartbeat re-establishes, resumes the " +
@@ -305,13 +308,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.boundSessionUuidAt": {
+  "src/daemon/mcpProxy/ProxyRuntime.ts ProxyRuntime.boundSessionUuidAt": {
     writes: 1,
     reason:
       "Delegation: the setter forwards the caller's existing activity-clock value to " +
       "ProxySessionState without reading the clock or changing when callers write it.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindStartupSession": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.bindStartupSession": {
     writes: 1,
     reason:
       "Binding: a configured --initial-session-uuid, or a managed execution's held session " +
@@ -321,7 +324,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.creditSessionUse": {
+  "src/daemon/mcpProxy/ProxyToolRouting.ts ProxyToolRouting.creditSessionUse": {
     writes: 2,
     reason:
       "Tool usage: the end of a forwarded call that reached the session restarts the latest " +
@@ -330,14 +333,14 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "(endOneSessionCall) and for the session the daemon echoed as the one it routed an " +
       "admitted control call to (#10692, #10974); a read or refused call carries no echo.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdPreviousBinding": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.holdPreviousBinding": {
     writes: 1,
     reason:
       "Tool usage: a newer binding demotes the previous one to a held session whose lastUsedAt " +
       "carries that binding's replay lease (boundSessionUuidAt, itself only stamped by tool " +
       "calls), so held-session idle eviction keys off tool use, never heartbeat acks (#10677).",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.holdTokenOwnedSession": {
     writes: 1,
     reason:
       "Resume (#10990): a session the stable owner token holds is held with the daemon's own " +
@@ -355,11 +358,11 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "A read projection (#11117): the tokenOwnedSessions answer reports the session's lastUsedAt " +
       "converted to wall-clock ms for the resuming proxy; it stamps nothing.",
   },
-  "src/daemon/daemonMcpProxy.ts <module>": {
+  "src/daemon/mcpProxy/ProxyContracts.ts <module>": {
     writes: 1,
     reason: "The tokenOwnedSessions answer schema (zod) declares lastUsedAt, not a clock value.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.stallRestoreSnapshot": {
+  "src/daemon/mcpProxy/ProxyLiveness.ts ProxyLiveness.stallRestoreSnapshot": {
     writes: 1,
     reason:
       "Rollback record: a daemon_stalled handover copies the session's tool-use clock " +
@@ -371,7 +374,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
       "lastUsedAt it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.noteSessionRestoredByCall": {
+  "src/daemon/mcpProxy/ProxySessionOwnership.ts ProxySessionOwnership.noteSessionRestoredByCall": {
     writes: 1,
     reason:
       "Tool usage: the daemon echoed a held session as the one it admitted a control call under " +
@@ -390,19 +393,19 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
 
   // --- Same names, different clocks -----------------------------------------
-  "src/daemon/devicePool.ts DevicePool.addDevice": {
+  "src/daemon/devicePoolParts/membership.ts DevicePoolMembership.addDevice": {
     writes: 2,
     reason:
       "PooledDevice.lastUsedAt is the pool's LRU order (assigned, or stored with a new pool " +
       "entry), not a session idle clock.",
   },
-  "src/daemon/devicePool.ts DevicePool.restoreSessionAssignment": {
+  "src/daemon/devicePoolParts/release.ts DevicePoolRelease.restoreSessionAssignment": {
     writes: 1,
     reason:
       "Allocation rollback restores the captured lastUsedAt without reading the clock; " +
       "explicit bookkeeping projection keeps binding and health writes in their owner (#11802).",
   },
-  "src/daemon/devicePool.ts DevicePool.initializeWithDevices": {
+  "src/daemon/devicePoolParts/membership.ts DevicePoolMembership.initializeWithDevices": {
     writes: 1,
     reason: "PooledDevice LRU order seeded for each discovered device, not a session idle clock.",
   },
@@ -885,25 +888,87 @@ function forwardedOwnerMethod(initializer: ts.Expression): ts.PropertyAccessExpr
   return callee;
 }
 
-/** Resolve delegate types only from scanned ASTs, without filesystem reads or libraries. */
+/** Resolve application delegates from scanned ASTs, with standard Pick/Readonly utility types. */
 function portTypeChecker(models: ReadonlyMap<string, FileModel>): ts.TypeChecker {
   const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
   const host = ts.createCompilerHost(options);
+  // Shared runtime views use Pick. Supply TypeScript's own utility types instead of treating
+  // those receivers as any under noLib, which would hide their collaborator targets.
+  const libraryPath = join(dirname(ts.getDefaultLibFilePath(options)), "lib.es5.d.ts");
+  const library = ts.createSourceFile(
+    libraryPath,
+    readFileSync(libraryPath, "utf8"),
+    options.target!,
+    true,
+  );
   const modelAt = (path: string): FileModel | undefined =>
     models.get(isAbsolute(path) ? relative(ROOT, path).split(sep).join("/") : path);
   host.getCurrentDirectory = () => ROOT;
-  host.fileExists = (path) => modelAt(path) !== undefined;
+  host.fileExists = (path) => path === libraryPath || modelAt(path) !== undefined;
   host.readFile = (path) => modelAt(path)?.source.text;
-  host.getSourceFile = (path) => modelAt(path)?.source;
+  host.getSourceFile = (path) => (path === libraryPath ? library : modelAt(path)?.source);
   host.directoryExists = () => true;
   host.getDirectories = () => [];
   host.realpath = (path) => path;
-  return ts.createProgram([...models.keys()], options, host).getTypeChecker();
+  return ts.createProgram([...models.keys(), libraryPath], options, host).getTypeChecker();
 }
 
 function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
   const index = new Map<string, FunctionRef[]>();
   const checker = portTypeChecker(models);
+  const resolveTarget = (
+    model: FileModel,
+    unit: FunctionUnit,
+    owner: ts.PropertyAccessExpression,
+  ): FunctionRef | undefined => {
+    const receiver = unwrap(owner.expression);
+    // Shared runtime collaborators can sit deeper than one field on this.
+    let root = receiver;
+    while (ts.isPropertyAccessExpression(root)) {
+      root = unwrap(root.expression);
+    }
+    if (root.kind !== ts.SyntaxKind.ThisKeyword) {
+      return undefined;
+    }
+    if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+      return { path: model.path, key: `${unit.className}.${owner.name.text}` };
+    }
+    const declaration = checker
+      .getTypeAtLocation(receiver)
+      .getSymbol()
+      ?.declarations?.find((node): node is ts.ClassDeclaration => ts.isClassDeclaration(node));
+    const targetModel =
+      declaration &&
+      [...models.values()].find((candidate) => candidate.source === declaration.getSourceFile());
+    return declaration?.name && targetModel
+      ? { path: targetModel.path, key: `${declaration.name.text}.${owner.name.text}` }
+      : undefined;
+  };
+  const addForwarder = (member: string, first: FunctionRef | undefined): void => {
+    let target = first;
+    while (target) {
+      const model = models.get(target.path);
+      const unit = model?.functions.get(target.key);
+      if (!model || !unit) {
+        return;
+      }
+      const list = index.get(member) ?? [];
+      if (list.some((ref) => ref.path === target!.path && ref.key === target!.key)) {
+        return;
+      }
+      index.set(member, [...list, target]);
+      // A public facade or a private named delegate adds another typed forwarding hop.
+      const statement =
+        ts.isMethodDeclaration(unit.node) && unit.node.body?.statements.length === 1
+          ? unit.node.body.statements[0]
+          : undefined;
+      const next =
+        statement && ts.isReturnStatement(statement) && statement.expression
+          ? forwardedOwnerMethod(statement.expression)
+          : undefined;
+      target = next ? resolveTarget(model, unit, next) : undefined;
+    }
+  };
   for (const model of models.values()) {
     for (const unit of model.functions.values()) {
       if (unit.className === undefined) {
@@ -912,50 +977,12 @@ function buildPortIndex(models: ReadonlyMap<string, FileModel>): PortIndex {
       const visit = (node: ts.Node): void => {
         if (ts.isObjectLiteralExpression(node)) {
           for (const property of node.properties) {
-            const member =
-              ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
-                ? property.name.text
-                : undefined;
-            const owner =
-              member !== undefined && ts.isPropertyAssignment(property)
-                ? forwardedOwnerMethod(property.initializer)
-                : undefined;
-            if (member === undefined || owner === undefined) {
+            if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) {
               continue;
             }
-            const receiver = unwrap(owner.expression);
-            // Only a direct `this` or one delegate field on `this` is a port forwarder.
-            if (
-              receiver.kind !== ts.SyntaxKind.ThisKeyword &&
-              !(
-                ts.isPropertyAccessExpression(receiver) &&
-                unwrap(receiver.expression).kind === ts.SyntaxKind.ThisKeyword
-              )
-            ) {
-              continue;
-            }
-            const declaration = checker
-              .getTypeAtLocation(receiver)
-              .getSymbol()
-              ?.declarations?.find((node): node is ts.ClassDeclaration =>
-                ts.isClassDeclaration(node),
-              );
-            const target =
-              receiver.kind === ts.SyntaxKind.ThisKeyword
-                ? { path: model.path, key: `${unit.className}.${owner.name.text}` }
-                : declaration?.name
-                  ? {
-                      path: [...models.values()].find(
-                        (candidate) => candidate.source === declaration.getSourceFile(),
-                      )!.path,
-                      key: `${declaration.name.text}.${owner.name.text}`,
-                    }
-                  : undefined;
-            if (target && models.get(target.path)?.functions.has(target.key)) {
-              const list = index.get(member) ?? [];
-              if (!list.some((ref) => ref.path === target.path && ref.key === target.key)) {
-                index.set(member, [...list, target]);
-              }
+            const owner = forwardedOwnerMethod(property.initializer);
+            if (owner) {
+              addForwarder(property.name.text, resolveTarget(model, unit, owner));
             }
           }
         }
@@ -1316,7 +1343,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     const clockBytes = [...ACTIVITY_CLOCKS].map((clock) => Buffer.from(clock));
     for (const full of INVENTORY_DIRS.flatMap((dir) => walk(join(ROOT, dir)))) {
       const bytes = readFileSync(full);
-      if (!clockBytes.some((clock) => bytes.includes(clock))) {
+      if (
+        !repoPath(full).startsWith("src/daemon/mcpProxy/") &&
+        !clockBytes.some((clock) => bytes.includes(clock))
+      ) {
         continue;
       }
       const model = parse(repoPath(full), bytes.toString("utf8"));
@@ -1387,13 +1417,14 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     const roots = LIVENESS_ONLY[keeperPath]!;
     expect(roots).toEqual(["HeartbeatKeeper.heartbeatHeldSession"]);
     const reached = reachableFrom(models.get(keeperPath)!, roots, new Set(), { models, ports });
-    const proxy = "src/daemon/daemonMcpProxy.ts";
+    const routing = "src/daemon/mcpProxy/ProxyToolRouting.ts";
+    const ownership = "src/daemon/mcpProxy/ProxySessionOwnership.ts";
     expect(reached.map((ref) => `${ref.path} ${ref.key}`)).toEqual(
       expect.arrayContaining([
-        `${proxy} DaemonMcpProxy.recordHeldSessionTerminalLoss`,
-        `${proxy} DaemonMcpProxy.dropHeldSession`,
-        `${proxy} DaemonMcpProxy.recordHeldSessionHeartbeatSuccess`,
-        `${proxy} DaemonMcpProxy.handleHeldSessionHeartbeatError`,
+        `${routing} ProxyToolRouting.recordHeldSessionTerminalLoss`,
+        `${ownership} ProxySessionOwnership.dropHeldSession`,
+        `${ownership} ProxySessionOwnership.recordHeldSessionHeartbeatSuccess`,
+        `${ownership} ProxySessionOwnership.handleHeldSessionHeartbeatError`,
       ]),
     );
   });
@@ -1698,6 +1729,33 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       });
       expect(found.map((v) => [v.path, v.via, v.clock])).toEqual([
         ["owner.ts", "Owner.drop", "lastUsedAt"],
+      ]);
+    });
+
+    test("follows a collaborator on a narrowed shared runtime", () => {
+      const keeper = parse("keeper.ts", "class Keeper { beat(id) { this.port.drop(id); } }");
+      const owner = parse(
+        "owner.ts",
+        `
+        class Target { drop(session) { session.lastUsedAt = 5; } }
+        class Runtime { target: Target; }
+        class Owner {
+          constructor(private runtime: Pick<Runtime, "target">) {}
+          make() { return { drop: (id) => this.drop(id) }; }
+          drop(id) { return this.runtime.target.drop(id); }
+        }
+      `,
+      );
+      const models = new Map([
+        [keeper.path, keeper],
+        [owner.path, owner],
+      ]);
+      const found = livenessViolations(keeper, ["Keeper.beat"], new Set(), {
+        models,
+        ports: buildPortIndex(models),
+      });
+      expect(found.map((v) => [v.path, v.via, v.clock])).toEqual([
+        ["owner.ts", "Target.drop", "lastUsedAt"],
       ]);
     });
 

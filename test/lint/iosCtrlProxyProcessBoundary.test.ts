@@ -9,6 +9,7 @@ import {
 
 const ROOT = join(import.meta.dir, "..", "..");
 const MANAGER = "src/ctrlProxy/IOSCtrlProxyManager.ts";
+const LAUNCH = "src/ctrlProxy/ios/IosCtrlProxyLaunch.ts";
 const OWNER = "src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts";
 const CHECK = "scripts/lib/iosCtrlProxyProcessBoundary.ts";
 
@@ -72,7 +73,7 @@ function parsedSource(relativePath: string): ts.SourceFile {
   return source;
 }
 
-/** `this.xcodebuild.startStreaming(...)` call sites, matched structurally. */
+/** `this.state.xcodebuild.startStreaming(...)` call sites, matched structurally. */
 function startStreamingCalls(source: ts.SourceFile): ts.CallExpression[] {
   const calls: ts.CallExpression[] = [];
   const visit = (node: ts.Node): void => {
@@ -96,7 +97,9 @@ function isThisXcodebuildStartStreaming(expression: ts.Expression): boolean {
   return (
     ts.isPropertyAccessExpression(target) &&
     target.name.text === "xcodebuild" &&
-    target.expression.kind === ts.SyntaxKind.ThisKeyword
+    ts.isPropertyAccessExpression(target.expression) &&
+    target.expression.name.text === "state" &&
+    target.expression.expression.kind === ts.SyntaxKind.ThisKeyword
   );
 }
 
@@ -359,7 +362,7 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
   beforeAll(() => {
     commentFreeSource(MANAGER);
     commentFreeSource(OWNER);
-    parsedSource(MANAGER);
+    parsedSource(LAUNCH);
   });
 
   test("keeps ps, pgrep, and kill ownership in the lifecycle client", () => {
@@ -421,7 +424,7 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     // lifecycle-abort wiring at all. A regression here (dropping the `signal:`
     // line from either call) must fail loudly instead of just changing runtime
     // behavior silently.
-    const source = parsedSource(MANAGER);
+    const source = parsedSource(LAUNCH);
     const calls = startStreamingCalls(source);
     expect(calls).toHaveLength(2);
     for (const call of calls) {
@@ -437,7 +440,7 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
           property.name.text === "signal",
       );
       expect(signal && ts.isPropertyAssignment(signal) && signal.initializer.getText(source)).toBe(
-        "this.runnerAbortController.signal",
+        "this.state.runnerAbortController.signal",
       );
     }
   });

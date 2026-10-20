@@ -17,7 +17,7 @@ object AutoMobileLog {
   private val filters = mutableMapOf<String, CompiledLogFilter>()
 
   /** No-op retained for source compatibility during migration. */
-  internal fun initialize() {}
+  internal fun initialize() = Unit
 
   // --- Filter API ---
 

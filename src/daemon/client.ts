@@ -517,7 +517,16 @@ export class DaemonClient {
     ) {
       return;
     }
-    const remainingMs = pending.sentAtMs + timeoutMs - this.timer.now();
+    if (pending.deadline) {
+      // A later progress tick re-arms from this deadline and must not shrink the backstop back to
+      // the budget this request was sent with; give it the ceiling the daemon uses.
+      pending.deadline = new ProgressExtendableDeadline(
+        pending.sentAtMs,
+        Math.max(timeoutMs, pending.deadline.value - pending.sentAtMs),
+      );
+    }
+    const targetMs = Math.max(pending.sentAtMs + timeoutMs, pending.deadline?.value ?? 0);
+    const remainingMs = targetMs - this.timer.now();
     if (remainingMs <= 0) {
       return;
     }
@@ -789,8 +798,10 @@ export class DaemonClient {
     );
     // Send the daemon budget, excluding client response grace (#6385). Without it the
     // daemon fell back to its 30s default and aborted calls the client was still
-    // prepared to wait for (the client's default is 120s). The daemon applies
-    // the same clamp and floors, so both sides resolve the same deadline.
+    // prepared to wait for (the client's default is 120s). The daemon applies the same clamp
+    // and its own per-tool floors, which may be larger when its environment differs; it then
+    // reports the budget it resolved (REQUEST_BUDGET_NOTIFICATION_METHOD, #13797) and this
+    // request's backstop is lengthened to match.
     request.timeoutMs = requestTimeoutMs;
     // Serialize before registering the request: an unserializable argument
     // rejects here with nothing scheduled, instead of throwing inside the

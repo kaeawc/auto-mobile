@@ -99,4 +99,17 @@ describe("daemon request budget notification (#13797)", () => {
 
     expect(budgetNotifications(socket)).toEqual([]);
   });
+
+  test("a control frame is never announced even when it opts in", async () => {
+    const socket = await send({
+      id: "ctl-1",
+      type: "daemon_request",
+      method: "daemon/cancelRequest",
+      params: { requestId: "other" },
+      timeoutMs: 1,
+      acceptsRequestBudget: true,
+    });
+
+    expect(budgetNotifications(socket)).toEqual([]);
+  });
 });

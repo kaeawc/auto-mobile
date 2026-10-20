@@ -66,6 +66,8 @@ export function handleNotification(
     typeof notification.timeoutMs === "number"
   ) {
     context.extendPendingRequestBudget(notification.requestId, notification.timeoutMs);
+    // Internal plumbing for this client's own timer; not for notification handlers.
+    return;
   }
   if (
     notification.method === PROGRESS_NOTIFICATION_METHOD &&

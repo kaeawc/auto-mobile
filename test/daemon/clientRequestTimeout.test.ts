@@ -963,6 +963,39 @@ describe("DaemonClient lengthens its backstop to the daemon's resolved budget (#
     }
   });
 
+  test("progress after a larger budget notice does not shrink the backstop back (#13797)", async () => {
+    const { client, timer, socket, notifyBudget } = setup();
+    const outcome = client.callTool("openLink", {}, "tok-budget").catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    const sent = request.timeoutMs!;
+    const resolved = sent + 600_000;
+    const progress = () =>
+      client.testHooks.simulateIncomingData(
+        Buffer.from(
+          JSON.stringify({
+            type: "daemon_notification",
+            method: PROGRESS_NOTIFICATION_METHOD,
+            progressToken: "tok-budget",
+            requestId: request.id,
+            progress: 1,
+            total: 1,
+          }) + "\n",
+        ),
+      );
+    try {
+      notifyBudget(request.id, resolved);
+      timer.advanceTime(sent + 1_000);
+      progress();
+      // Well past the budget the request was sent with and past the default progress ceiling.
+      timer.advanceTime(resolved - sent - 2_000);
+      expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
+      timer.advanceTime(1_000 + responseGraceMs);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+    } finally {
+      await client.close();
+    }
+  });
+
   test("a notice for an unknown or finished request is ignored", async () => {
     const { client, notifyBudget } = setup();
     try {

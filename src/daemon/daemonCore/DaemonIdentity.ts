@@ -1,7 +1,12 @@
+import {
+  availableDaemonSockets,
+  degradeAuxiliarySocket,
+  markAuxiliarySocketAvailable,
+} from "../auxiliarySocketAvailability";
 import type { DaemonCoreServices, DaemonIdentityState } from "./DaemonCoreState";
 import { republishOwnedIdentity } from "../identityRecovery";
 import { logger } from "../../utils/logger";
-import { SOCKET_PATH, DAEMON_LAUNCH_LOG_PATH_ENV } from "../constants";
+import { SOCKET_PATH, DAEMON_LAUNCH_LOG_PATH_ENV, DAEMON_LAUNCH_NONCE_ENV } from "../constants";
 import { PidFileData, type AuxiliaryDaemonSocketName } from "../types";
 import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -13,6 +18,7 @@ import {
   readPidFileDataSync,
   isProcessRunning,
   writePidFileDataAtomic,
+  type DaemonCleanupFileSystem,
 } from "../daemonFiles";
 import { processGenerationRecordFields } from "../processGenerationFields";
 import { getDatabasePath } from "../../db";
@@ -41,8 +47,13 @@ export interface DaemonIdentityHost {
 
 /** Publishes PID identity and records precisely which socket paths this daemon owns. */
 export class DaemonIdentity {
-  private readonly boundAuxSocketIdentities = new Map<string, { dev: number; ino: number }>();
-  constructor(private readonly host: DaemonIdentityHost) {}
+  private readonly boundSocketIdentities = new Map<string, { dev: number; ino: number }>();
+  constructor(
+    private readonly host: DaemonIdentityHost,
+    private readonly files: Pick<DaemonCleanupFileSystem, "stat"> = { stat: statSync },
+    private readonly platform: NodeJS.Platform = process.platform,
+    private readonly databasePath: () => string = getDatabasePath,
+  ) {}
 
   /**
    * Persist a PID-file record to disk (creating the directory as needed).
@@ -93,10 +104,11 @@ export class DaemonIdentity {
       .supersededOwnerForEarlyRecord();
     const pidData: PidFileData = {
       pid: process.pid,
+      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
       daemonSessionId: this.host.identity.daemonSessionId(),
       socketPath: SOCKET_PATH,
       port: this.host.identity.port(),
-      dbPath: getDatabasePath(),
+      dbPath: this.databasePath(),
       startedAt: this.host.identity.generationStartedAt(),
       processStartedAt: this.host.identity.processStartedAt(),
       ...processGenerationRecordFields(this.host.identity.processGenerationToken()),
@@ -119,11 +131,12 @@ export class DaemonIdentity {
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
       pid: process.pid,
+      launchNonce: process.env[DAEMON_LAUNCH_NONCE_ENV],
       daemonSessionId: this.host.identity.daemonSessionId(),
       socketPath: SOCKET_PATH,
-      sockets: getDaemonSocketPathsByName(),
+      sockets: availableDaemonSockets(getDaemonSocketPathsByName()),
       port: this.host.identity.port(),
-      dbPath: getDatabasePath(),
+      dbPath: this.databasePath(),
       startedAt: this.host.identity.generationStartedAt(),
       processStartedAt: this.host.identity.processStartedAt(),
       ...processGenerationRecordFields(this.host.identity.processGenerationToken()),
@@ -153,7 +166,7 @@ export class DaemonIdentity {
         writeRecord: () => this.writePidFile(),
         isProcessRunning: (pid) => isProcessRunning(pid, { debugLog: logger.debug }),
       },
-      getDaemonSocketPathsByName(),
+      availableDaemonSockets(getDaemonSocketPathsByName()),
     );
   }
 
@@ -185,19 +198,38 @@ export class DaemonIdentity {
     }
   }
 
+  recordControlSocketIdentity(): void {
+    this.recordSocketIdentity(SOCKET_PATH);
+  }
+
+  private recordSocketIdentity(socketPath: string): void {
+    try {
+      const { dev, ino } = this.files.stat(socketPath);
+      this.boundSocketIdentities.set(socketPath, { dev, ino });
+    } catch (error) {
+      // An unidentified bound path must never join destructive exit cleanup.
+      // Named pipes have no filesystem inode on Windows; this is expected.
+      const log = this.platform === "win32" ? logger.debug : logger.warn;
+      log(`[Daemon] Cannot record ownership of socket ${socketPath}: ${error}`);
+    }
+  }
+
   async startAuxiliarySocket(
     name: AuxiliaryDaemonSocketName,
     start: () => Promise<unknown>,
   ): Promise<void> {
-    await start();
-    const socketPath = getDaemonSocketPathsByName()[name];
     try {
-      const { dev, ino } = statSync(socketPath);
-      this.boundAuxSocketIdentities.set(socketPath, { dev, ino });
+      await start();
     } catch (error) {
-      // A bound path we cannot identify must not be unlinked by exit cleanup.
-      logger.warn(`[Daemon] Cannot record ownership of auxiliary socket ${socketPath}: ${error}`);
+      const warning = degradeAuxiliarySocket(name, error);
+      if (!warning) {
+        throw error;
+      }
+      logger.warn(`[Daemon] ${warning.code}: ${name} disabled at ${warning.socketPath}`, error);
+      return;
     }
+    markAuxiliarySocketAvailable(name);
+    this.recordSocketIdentity(getDaemonSocketPathsByName()[name]);
   }
 
   getDaemonFileCleanupOptions(): {
@@ -216,10 +248,8 @@ export class DaemonIdentity {
     // still be refused after this control bind, so only recorded aux paths join
     // the cleanup list.
     const socketBindCommitted = this.host.identity.socketBindCommitted();
-    const socketPaths = socketBindCommitted
-      ? [SOCKET_PATH, ...this.boundAuxSocketIdentities.keys()]
-      : [];
-    const socketFileIdentities = this.boundAuxSocketIdentities;
+    const socketPaths = socketBindCommitted ? [...this.boundSocketIdentities.keys()] : [];
+    const socketFileIdentities = this.boundSocketIdentities;
     if (this.host.pidFileWritten()) {
       return { expectedPid: process.pid, socketBindCommitted, socketPaths, socketFileIdentities };
     }

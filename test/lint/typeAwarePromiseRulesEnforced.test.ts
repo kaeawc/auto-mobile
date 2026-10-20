@@ -24,7 +24,9 @@ describe("type-aware promise rules are enforced", () => {
     for (const rule of PROMISE_RULES) {
       expect(codes.split(" ")).toContain(`typescript(${rule})`);
     }
-    expect(script).toContain("oxlint --type-aware");
+    // The type-aware invocation lives in the host-slot helper; the ratchet script must run it.
+    expect(script).toContain("host_heavy_run host_heavy_oxlint_type_aware");
+    expect(read("scripts/lib/host-heavy-run.sh")).toContain("oxlint --type-aware");
   });
 
   test("have a zero baseline", () => {

@@ -361,7 +361,7 @@ describe("Simctl", function () {
 
       const childProcess = await simctl.startSimulator("test-ios-device-id");
 
-      expect(childProcess.exitCode).toBe(0);
+      expect(childProcess.exitCode).toBeNull();
       expect(commands).toContainEqual([
         "xcrun",
         "simctl",
@@ -381,6 +381,19 @@ describe("Simctl", function () {
         }
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "Test iOS Device",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
         }
         return new Promise<ExecResult>((resolve) => {
           resolveCommand = resolve;
@@ -408,6 +421,19 @@ describe("Simctl", function () {
         }
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "Test iOS Device",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
         }
         return new Promise<ExecResult>((resolve) => {
           resolveCommand = resolve;
@@ -440,6 +466,19 @@ describe("Simctl", function () {
         }
         if (file === "xcrun" && args.join(" ") === "simctl shutdown test-ios-device-id") {
           return createExecResult("", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "Test iOS Device",
+                state: "Shutdown",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
         }
         capturedSignal = signal;
         // Simulate a long-running child that only settles when aborted, mirroring

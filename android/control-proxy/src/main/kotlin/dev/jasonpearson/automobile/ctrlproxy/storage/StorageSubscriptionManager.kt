@@ -31,6 +31,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** Cleanup bounds and the wait between the first and single retry of a DISABLED subscribe reply. */
+data class StorageSubscriptionConfig(
+  val cleanupTimeoutMs: Long = 1_000L,
+  val retryDelayMs: Long = 500L,
+  // The subscribe path already blocks a background worker; tests inject a wait without sleeping.
+  val pause: (Long) -> Unit = { Thread.sleep(it) },
+)
+
 /**
  * Manages subscriptions to SharedPreferences changes across multiple target apps.
  *
@@ -42,12 +50,11 @@ class StorageSubscriptionManager(
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   scope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
   private val backgroundCalls: BackgroundCalls = ContentResolverCalls(context, ioDispatcher),
-  private val cleanupTimeoutMs: Long = 1_000L,
-  // Waits between the first and the single retry of a DISABLED subscribe reply. Injected so tests
-  // run without a wall-clock sleep; the subscribe path already blocks a background worker.
-  private val retryDelayMs: Long = DISABLED_RETRY_DELAY_MS,
-  private val pause: (Long) -> Unit = { Thread.sleep(it) },
+  config: StorageSubscriptionConfig = StorageSubscriptionConfig(),
 ) {
+  private val cleanupTimeoutMs = config.cleanupTimeoutMs
+  private val retryDelayMs = config.retryDelayMs
+  private val pause = config.pause
 
   /**
    * Suspendable boundary for background provider calls, including deterministic cancellation tests.
@@ -79,7 +86,6 @@ class StorageSubscriptionManager(
     private const val AUTHORITY_SUFFIX = ".automobile.sharedprefs"
     private const val CHANGES_PATH = "changes"
     private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
-    private const val DISABLED_RETRY_DELAY_MS = 500L
   }
 
   /** State for a single subscription. */

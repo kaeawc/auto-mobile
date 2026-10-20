@@ -81,7 +81,10 @@ class HierarchyDebouncerThreadingTest {
         scope = backgroundScope,
         timeProvider = FakeTime(),
         stats = stats,
-        extractHierarchy = { _, _ -> hierarchy("now") },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> hierarchy("now") },
+          ),
       )
 
     debouncer.extractNow()
@@ -101,7 +104,10 @@ class HierarchyDebouncerThreadingTest {
         scope = backgroundScope,
         timeProvider = FakeTime(),
         stats = stats,
-        extractHierarchy = { _, _ -> hierarchy("stale") },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> hierarchy("stale") },
+          ),
       )
 
     debouncer.extractNow()
@@ -121,7 +127,10 @@ class HierarchyDebouncerThreadingTest {
       HierarchyDebouncer(
         scope = backgroundScope,
         timeProvider = time,
-        extractHierarchy = { _, _ -> hierarchy(next) },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> hierarchy(next) },
+          ),
       )
 
     debouncer.extractNow()
@@ -146,8 +155,14 @@ class HierarchyDebouncerThreadingTest {
         scope = backgroundScope,
         timeProvider = time,
         stats = stats,
-        animationSkipWindowMs = 100,
-        extractHierarchy = { _, _ -> hierarchy("same") },
+        config =
+          HierarchyDebouncerConfig(
+            animationSkipWindowMs = 100,
+          ),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> hierarchy("same") },
+          ),
       )
 
     debouncer.extractImmediately()
@@ -180,11 +195,17 @@ class HierarchyDebouncerThreadingTest {
       HierarchyDebouncer(
         scope = scope,
         timeProvider = TickingTime(),
-        quickDebounceMs = 0,
-        animationSkipWindowMs = 2,
-        unsolicitedIntervalMs = 0,
-        // Alternate between a few trees so both Changed and Unchanged paths are exercised.
-        extractHierarchy = { _, _ -> hierarchy("tree-${counter.incrementAndGet() % 3}") },
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 0,
+            animationSkipWindowMs = 2,
+            unsolicitedIntervalMs = 0,
+          ),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            // Alternate between a few trees so both Changed and Unchanged paths are exercised.
+            extractHierarchy = { _, _ -> hierarchy("tree-${counter.incrementAndGet() % 3}") },
+          ),
       )
     val failure = AtomicReference<Throwable?>(null)
     val start = CountDownLatch(1)

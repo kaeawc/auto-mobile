@@ -68,10 +68,13 @@ class HierarchyDebouncerSuppressionTest {
       HierarchyDebouncer(
         scope = backgroundScope,
         timeProvider = FakeTime(),
-        extractHierarchy = { _, snapshotOptions ->
-          optionsSeen.add(snapshotOptions)
-          ViewHierarchy(packageName = "current")
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, snapshotOptions ->
+              optionsSeen.add(snapshotOptions)
+              ViewHierarchy(packageName = "current")
+            },
+          ),
       )
     val explicit = HierarchySnapshotOptions(displayId = 2)
     debouncer.extractAfterQuiescenceSuspending(
@@ -148,24 +151,30 @@ class HierarchyDebouncerSuppressionTest {
       HierarchyDebouncer(
         scope = test.backgroundScope,
         timeProvider = FakeTime(secondStarted),
-        quickDebounceMs = 0,
-        unsolicitedIntervalMs = 0,
-        extractHierarchy = { _, _ ->
-          when (calls.incrementAndGet()) {
-            1 -> {
-              firstEntered.countDown()
-              await(releaseFirst)
-              if (firstThrows) error("first extraction failed")
-              ViewHierarchy(packageName = "first")
-            }
-            2 -> {
-              secondEntered.countDown()
-              await(releaseSecond)
-              ViewHierarchy(packageName = "second")
-            }
-            else -> ViewHierarchy(packageName = "unsolicited")
-          }
-        },
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 0,
+            unsolicitedIntervalMs = 0,
+          ),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ ->
+              when (calls.incrementAndGet()) {
+                1 -> {
+                  firstEntered.countDown()
+                  await(releaseFirst)
+                  if (firstThrows) error("first extraction failed")
+                  ViewHierarchy(packageName = "first")
+                }
+                2 -> {
+                  secondEntered.countDown()
+                  await(releaseSecond)
+                  ViewHierarchy(packageName = "second")
+                }
+                else -> ViewHierarchy(packageName = "unsolicited")
+              }
+            },
+          ),
       )
   }
 
@@ -198,13 +207,19 @@ class HierarchyDebouncerSuppressionTest {
       HierarchyDebouncer(
         scope = backgroundScope,
         timeProvider = FakeTime(),
-        quickDebounceMs = 0,
-        unsolicitedIntervalMs = 0,
-        extractHierarchy = { _, _ ->
-          entered.countDown()
-          await(release)
-          ViewHierarchy(packageName = "current")
-        },
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 0,
+            unsolicitedIntervalMs = 0,
+          ),
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ ->
+              entered.countDown()
+              await(release)
+              ViewHierarchy(packageName = "current")
+            },
+          ),
       )
     val worker = thread {
       failure.set(

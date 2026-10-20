@@ -26,6 +26,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
 
+/** Timing, performance tracking and delivery for gesture result frames. */
+internal data class GestureReportingDependencies(
+  val perfProvider: PerfProvider,
+  val timeProvider: TimeProvider,
+  val resultBroadcaster: ResultBroadcaster,
+  val responseSender: GestureController.ResponseSender,
+)
+
 /**
  * Accessibility gesture injection: tap, double tap, long press, swipe, multi-finger swipe, pinch,
  * the chained press/drag/hold drag, and the streamed press/move/lift gestures, together with their
@@ -39,12 +47,14 @@ import kotlinx.serialization.json.JsonElement
 internal class GestureController(
   private val host: Host,
   private val scope: () -> CoroutineScope,
-  private val perfProvider: PerfProvider,
-  private val timeProvider: TimeProvider,
-  private val resultBroadcaster: ResultBroadcaster,
-  private val responseSender: ResponseSender,
+  reporting: GestureReportingDependencies,
   private val gestureThreadFactory: () -> GestureThread,
 ) {
+  private val perfProvider = reporting.perfProvider
+  private val timeProvider = reporting.timeProvider
+  private val resultBroadcaster = reporting.resultBroadcaster
+  private val responseSender = reporting.responseSender
+
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
     /** `AccessibilityService.dispatchGesture`; may throw or return false when refused. */
@@ -566,7 +576,11 @@ internal class GestureController(
           DragStrokeSession(
               plan = plan,
               dispatcher = AccessibilityStrokeDispatcher(),
-              deadline = dragDeadline,
+              timing =
+                DragStrokeDependencies(
+                  deadline = dragDeadline,
+                  nowMs = android.os.SystemClock::elapsedRealtime,
+                ),
               displayId = displayId,
               logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
               onFinished = { success, error ->
@@ -582,7 +596,6 @@ internal class GestureController(
                   lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
                 }
               },
-              nowMs = android.os.SystemClock::elapsedRealtime,
             )
             .start()
         }

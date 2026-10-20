@@ -55,10 +55,13 @@ class OverlayDrawer(
   private var overlayView: HighlightOverlayView? = null
   private val animator =
     HighlightAnimator(
-      onAlphaUpdate = { id, alpha -> updateHighlightAlpha(id, alpha) },
-      onDrawProgressUpdate = { id, progress -> updateHighlightDrawProgress(id, progress) },
-      onAnimationComplete = { id -> removeHighlightInternal(id, cancelAnimation = false) },
-      onAnimationActiveChanged = { active -> overlayView?.setAnimationActive(active) },
+      dependencies =
+        HighlightAnimatorDependencies(
+          onAlphaUpdate = { id, alpha -> updateHighlightAlpha(id, alpha) },
+          onDrawProgressUpdate = { id, progress -> updateHighlightDrawProgress(id, progress) },
+          onAnimationComplete = { id -> removeHighlightInternal(id, cancelAnimation = false) },
+          onAnimationActiveChanged = { active -> overlayView?.setAnimationActive(active) },
+        ),
     )
 
   fun attachOverlayManager(manager: OverlayManager) {

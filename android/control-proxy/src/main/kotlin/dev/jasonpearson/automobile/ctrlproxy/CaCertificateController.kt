@@ -10,16 +10,25 @@ import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 
+/** Platform access bound to the service's device-admin component and private storage. */
+internal data class CaCertificateDependencies(
+  val devicePolicy: CaCertificateController.DevicePolicy,
+  val packageName: String,
+  val filesDir: () -> File,
+)
+
 /** Device-owner CA certificate operations, with service and platform access supplied per call. */
 internal class CaCertificateController(
-  private val devicePolicy: DevicePolicy,
-  private val packageName: String,
-  private val filesDir: () -> File,
+  dependencies: CaCertificateDependencies,
   private val perfProvider: PerfProvider,
   private val timeProvider: TimeProvider,
   private val resultBroadcaster: ResultBroadcaster,
   private val responseSender: ResponseSender,
 ) {
+  private val devicePolicy = dependencies.devicePolicy
+  private val packageName = dependencies.packageName
+  private val filesDir = dependencies.filesDir
+
   /** The DevicePolicyManager operations bound to the service's device-admin component. */
   interface DevicePolicy {
     fun isDeviceOwnerApp(packageName: String): Boolean

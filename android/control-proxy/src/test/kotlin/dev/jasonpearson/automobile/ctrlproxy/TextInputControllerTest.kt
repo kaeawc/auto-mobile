@@ -207,13 +207,19 @@ class TextInputControllerTest {
         serviceScope = this,
         perfProvider = PerfProvider.createForTesting(timer),
         timeProvider = timer,
-        resultBroadcaster =
-          ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
-        jsonCompact = Json { encodeDefaults = true },
-        responseSender = sender,
-        uptimeMillis = { uptimeMs },
-        pause = { ms -> uptimeMs += ms },
-        sdkInt = sdkInt,
+        responses =
+          TextInputResponseDependencies(
+            resultBroadcaster =
+              ResultBroadcaster(broadcastError = { errors += it }, logError = { _, _ -> }),
+            jsonCompact = Json { encodeDefaults = true },
+            responseSender = sender,
+          ),
+        config =
+          TextInputConfig(
+            uptimeMillis = { uptimeMs },
+            pause = { ms -> uptimeMs += ms },
+            sdkInt = sdkInt,
+          ),
       )
     return Harness(controller, host, sender)
   }

@@ -120,8 +120,11 @@ class ImeControllerTest {
         resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
         jsonCompact = Json { encodeDefaults = true },
         responseSender = sender,
-        uptimeMillis = { clock[0] },
-        pause = { clock[0] += it },
+        config =
+          ImeConfig(
+            uptimeMillis = { clock[0] },
+            pause = { clock[0] += it },
+          ),
       )
     return Fixture(host, sender, controller, clock)
   }

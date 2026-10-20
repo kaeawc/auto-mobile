@@ -319,9 +319,12 @@ class CaCertificateControllerTest {
 
     fun newController() =
       CaCertificateController(
-        devicePolicy = policy,
-        packageName = PACKAGE,
-        filesDir = { directory },
+        dependencies =
+          CaCertificateDependencies(
+            devicePolicy = policy,
+            packageName = PACKAGE,
+            filesDir = { directory },
+          ),
         perfProvider = perfProvider,
         timeProvider = timer,
         resultBroadcaster =

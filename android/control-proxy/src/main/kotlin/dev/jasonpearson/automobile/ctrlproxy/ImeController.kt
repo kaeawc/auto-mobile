@@ -18,6 +18,12 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
+/** Monotonic deadlines and suspending waits used while the IME becomes ready. */
+internal data class ImeConfig(
+  val uptimeMillis: () -> Long = android.os.SystemClock::uptimeMillis,
+  val pause: suspend (Long) -> Unit = { ms -> delay(ms) },
+)
+
 /**
  * The CtrlProxy IME request surface: commitText (and its cancellation tombstones), keyboard profile
  * selection and the profile catalog, plus their result frames. Everything that needs the live
@@ -30,9 +36,11 @@ internal class ImeController(
   private val resultBroadcaster: ResultBroadcaster,
   private val jsonCompact: Json,
   private val responseSender: ResponseSender,
-  private val uptimeMillis: () -> Long = android.os.SystemClock::uptimeMillis,
-  private val pause: suspend (Long) -> Unit = { ms -> delay(ms) },
+  config: ImeConfig = ImeConfig(),
 ) {
+  private val uptimeMillis = config.uptimeMillis
+  private val pause = config.pause
+
   /** The live CtrlProxy keyboard, narrowed to what the commit path drives. */
   interface ImeTarget {
     fun commitText(request: ImeCommitRequest, onResult: (ImeCommitResult) -> Unit)

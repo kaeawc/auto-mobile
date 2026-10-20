@@ -124,10 +124,13 @@ class GestureControllerTest {
     GestureController(
         host = host,
         scope = { scope },
-        perfProvider = PerfProvider.createForTesting(timer),
-        timeProvider = timer,
-        resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
-        responseSender = sender,
+        reporting =
+          GestureReportingDependencies(
+            perfProvider = PerfProvider.createForTesting(timer),
+            timeProvider = timer,
+            resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
+            responseSender = sender,
+          ),
         gestureThreadFactory = ::InlineGestureThread,
       )
       .also { it.startThread() }

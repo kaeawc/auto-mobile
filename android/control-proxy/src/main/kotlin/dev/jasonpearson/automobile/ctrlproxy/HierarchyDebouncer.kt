@@ -43,6 +43,22 @@ sealed class HierarchyResult {
   data class Error(val message: String) : HierarchyResult()
 }
 
+/** Admission and animation timing for hierarchy extraction. */
+internal data class HierarchyDebouncerConfig(
+  val quickDebounceMs: Long = 5L,
+  val animationSkipWindowMs: Long = 100L,
+  val unsolicitedIntervalMs: Long = 250L,
+)
+
+/** Extraction callbacks, including the synchronization hooks used by deterministic tests. */
+internal data class HierarchyDebouncerDependencies(
+  val beforeDebounceLock: () -> Unit = {},
+  val beforeDebounceCompletion: suspend () -> Unit = {},
+  val onDiscardedHierarchy: (ViewHierarchy) -> Unit = {},
+  val extractHierarchy:
+    (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
+)
+
 /**
  * Smart debouncer for view hierarchy extraction.
  *
@@ -59,26 +75,26 @@ sealed class HierarchyResult {
  * @param scope Coroutine scope for debounce jobs
  * @param timeProvider Time provider for testability
  * @param perfProvider Performance tracking provider
- * @param quickDebounceMs Short debounce to batch rapid events (default 5ms)
- * @param animationSkipWindowMs How long to skip extractions after detecting animation (default
- *   100ms)
- * @param extractHierarchy Function to extract the current hierarchy
+ * @param config Debounce, animation and unsolicited-extraction timing
+ * @param dependencies Hierarchy extraction and lifecycle callbacks
  */
 class HierarchyDebouncer
 internal constructor(
   private val scope: CoroutineScope,
   private val timeProvider: TimeProvider = SystemTimeProvider(),
   private val perfProvider: PerfProvider = PerfProvider.instance,
-  private val quickDebounceMs: Long = 5L,
-  private val animationSkipWindowMs: Long = 100L,
-  private var unsolicitedIntervalMs: Long = 250L,
+  config: HierarchyDebouncerConfig = HierarchyDebouncerConfig(),
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
-  private val beforeDebounceLock: () -> Unit = {},
-  private val beforeDebounceCompletion: suspend () -> Unit = {},
-  private val onDiscardedHierarchy: (ViewHierarchy) -> Unit = {},
-  private val extractHierarchy:
-    (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
+  dependencies: HierarchyDebouncerDependencies,
 ) {
+  private val quickDebounceMs = config.quickDebounceMs
+  private val animationSkipWindowMs = config.animationSkipWindowMs
+  private var unsolicitedIntervalMs = config.unsolicitedIntervalMs
+  private val beforeDebounceLock = dependencies.beforeDebounceLock
+  private val beforeDebounceCompletion = dependencies.beforeDebounceCompletion
+  private val onDiscardedHierarchy = dependencies.onDiscardedHierarchy
+  private val extractHierarchy = dependencies.extractHierarchy
+
   companion object {
     private const val TAG = "HierarchyDebouncer"
     // A client may request a faster broadcast interval, but accessibility events must never

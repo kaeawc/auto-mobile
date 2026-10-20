@@ -71,7 +71,16 @@ class StorageSubscriptionManagerTest {
     contentResolver = mockk(relaxed = true)
     context = mockk(relaxed = true)
     every { context.contentResolver } returns contentResolver
-    manager = StorageSubscriptionManager(context, dispatcher, scope, pause = { pauses += it })
+    manager =
+      StorageSubscriptionManager(
+        context = context,
+        ioDispatcher = dispatcher,
+        scope = scope,
+        config =
+          StorageSubscriptionConfig(
+            pause = { pauses += it },
+          ),
+      )
   }
 
   @After
@@ -1406,7 +1415,16 @@ class StorageSubscriptionManagerTest {
       }
       manager.destroy()
       manager =
-        StorageSubscriptionManager(context, dispatcher, this, provider, cleanupTimeoutMs = 100)
+        StorageSubscriptionManager(
+          context = context,
+          ioDispatcher = dispatcher,
+          scope = this,
+          backgroundCalls = provider,
+          config =
+            StorageSubscriptionConfig(
+              cleanupTimeoutMs = 100,
+            ),
+        )
       every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
         Bundle().apply { putBoolean("success", true) }
       manager.subscribe("com.example.app", "auth")

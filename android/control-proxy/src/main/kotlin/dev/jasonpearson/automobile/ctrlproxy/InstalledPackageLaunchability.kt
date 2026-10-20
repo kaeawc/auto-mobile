@@ -41,7 +41,7 @@ internal fun launchablePackageNames(
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0L))
     } else {
-      @Suppress("DEPRECATION") packageManager.queryIntentActivities(intent, 0)
+      legacyQueryIntentActivities(packageManager, intent)
     }
   }
   if (resolved.isFailure) {
@@ -67,6 +67,13 @@ internal fun launchablePackageNames(
   }
   return LaunchablePackages(packageNames, launcherActivityLabels)
 }
+
+// The int-flags overload is required below API 33.
+@Suppress("DEPRECATION")
+private fun legacyQueryIntentActivities(
+  packageManager: PackageManager,
+  intent: Intent,
+): List<android.content.pm.ResolveInfo> = packageManager.queryIntentActivities(intent, 0)
 
 /** Uses the launcher-visible label when available, then falls back to the application label. */
 internal fun preferredInstalledPackageLabel(

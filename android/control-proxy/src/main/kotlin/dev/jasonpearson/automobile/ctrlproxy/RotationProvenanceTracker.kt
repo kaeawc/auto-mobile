@@ -55,6 +55,7 @@ internal class DisplayRotationChangeSignal(
     }
     val display = displayManager?.getDisplay(displayId) ?: return null
     val size = Point()
+    // Capture provenance needs this display's real size; window metrics have different semantics.
     @Suppress("DEPRECATION") display.getRealSize(size)
     return DisplayTransition(
       change,

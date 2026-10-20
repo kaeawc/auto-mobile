@@ -13,8 +13,8 @@ import org.junit.Test
  * through [AsyncActionRunner] so an async throw yields a correlated `type:"error"` frame instead of
  * hanging the daemon awaiter. Its tests fully cover the *helper* ([AsyncActionRunnerTest]) and
  * prove the runner's correlated-error-on-throw contract over a live WebSocket
- * ([WebSocketServerIntegrationTest]). But that integration test wires a *test fake* to a real
- * runner — it never instantiates the production [CtrlProxy] AccessibilityService (heavy
+ * ([WebSocketServerIntegrationTestCorrelationTest]). But that integration test wires a *test fake*
+ * to a real runner — it never instantiates the production [CtrlProxy] AccessibilityService (heavy
  * `onServiceConnected` init, fixed port 8765). So reverting a production site (e.g.
  * `broadcastScreenshot`) from `asyncActionRunner.launch("screenshot") { … }` back to a bare
  * `serviceScope.launch { … }` — the exact regression #3023 fixes — would leave every existing test

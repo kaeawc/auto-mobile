@@ -67,6 +67,7 @@ export const DERIVED_PATH_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DAEMON_SOCKET_PATH",
   "AUTOMOBILE_DAEMON_PID_FILE_PATH",
   "AUTOMOBILE_DAEMON_LOCK_FILE_PATH",
+  "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH",
   "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH",
 ];
 const INHERITED_PATH_OVERRIDES = ["AUTOMOBILE_DB_PATH", "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH"];
@@ -259,6 +260,7 @@ export function derivePrivateDaemonBatch(options: PrivateDaemonBatchOptions): Pr
       AUTOMOBILE_DAEMON_SOCKET_PATH: join(auxSocketDir, "d.sock"),
       AUTOMOBILE_DAEMON_PID_FILE_PATH: join(dir, "daemon.pid"),
       AUTOMOBILE_DAEMON_LOCK_FILE_PATH: join(dir, "daemon.lock"),
+      AUTOMOBILE_DAEMON_TOKEN_FILE_PATH: join(dir, "daemon.token"),
       AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH: join(dir, "launch.log"),
       AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: String(options.orphanIdleMs ?? 0),
       AUTOMOBILE_APPEARANCE_SYNC: "off",

@@ -28,6 +28,12 @@ export const ENV = {
  * product-variable conformance checks (AUTOMOBILE_ prefix, path classification) do not apply.
  */
 export const AMBIENT_ENV = {
+  DEVELOPER_DIR: {
+    name: "DEVELOPER_DIR",
+    kind: "path",
+    default: "unset",
+    doc: "Active Xcode developer directory; overrides xcode-select for simulator profile caching.",
+  },
   ANDROID_HOME: {
     name: "ANDROID_HOME",
     kind: "path",

@@ -1,4 +1,6 @@
-import { runPassthroughForward } from "../socketServer/controlRoutes";
+import { HostInventoryForward } from "../socketServer/hostInventoryForward";
+import { isHostInventoryCall } from "../socketRequestAdmission";
+import { ControlDiscoveryCache, runPassthroughForward } from "../socketServer/controlRoutes";
 
 import { logger } from "../../utils/logger";
 
@@ -113,12 +115,23 @@ type Callbacks = Pick<
 >;
 /** Mcp Execution over shared connection state and explicit callbacks. */
 export class McpExecution {
+  private readonly discoveryCache: ControlDiscoveryCache;
+  private readonly inventoryForward: HostInventoryForward;
   constructor(
     private readonly state: State,
     private readonly resolveCallbacks: () => Callbacks,
-  ) {}
+  ) {
+    this.inventoryForward = new HostInventoryForward(state.timer, state.idGenerator);
+    this.discoveryCache = new ControlDiscoveryCache(
+      () => this.state.mcpDispatcher.refreshResources?.() ?? Promise.resolve(),
+    );
+  }
   private get callbacks(): Callbacks {
     return this.resolveCallbacks();
+  }
+
+  forgetSocketDiscovery(socketSessionId: string): void {
+    this.discoveryCache.forgetSocket(socketSessionId);
   }
   /**
    * Reject an inbound request whose declared version/build identity does not match
@@ -193,6 +206,14 @@ export class McpExecution {
     fn: (route: McpForwardRoute) => Promise<T>,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
+    // Inventory reads share discovery rather than holding a global serial queue.
+    // Distinct-key flights run discovery in parallel without a concurrency limit (known limitation).
+    if (
+      request.method === "tools/call" &&
+      isHostInventoryCall(request.params?.name, request.params?.arguments)
+    ) {
+      return await fn(initialRoute);
+    }
     const visitedKeys = [initialRoute.executionKey];
     let route = initialRoute;
     for (;;) {
@@ -273,6 +294,41 @@ export class McpExecution {
    */
   async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
+    const inventory = this.inventoryForward.read(
+      context,
+      (shared) => this.forwardUncachedMcpRequest(shared),
+      this.state.sessions.get(context.socketSessionId)?.requestQueue.lastBarrierCompletionOrder,
+    );
+    if (inventory) {
+      return await inventory;
+    }
+    const method = context.request.method;
+    if (
+      (method !== "tools/list" && method !== "resources/list") ||
+      (method === "resources/list" && !this.state.mcpDispatcher.refreshResources)
+    ) {
+      return await this.forwardUncachedMcpRequest(context);
+    }
+    this.callbacks.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.deadline,
+      "preparing discovery",
+    );
+    const result = await this.callbacks.withAdmittedBoundSession(context.request.params, () =>
+      this.discoveryCache.read(context, () => this.forwardUncachedMcpRequest(context)),
+    );
+    context.signal?.throwIfAborted();
+    this.callbacks.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.deadline,
+      "refreshing discovery",
+    );
+    return result;
+  }
+
+  private async forwardUncachedMcpRequest(context: McpForwardContext): Promise<unknown> {
     const mcpClient = await runWithForwardSessionKey(
       context.socketSessionId,
       () =>

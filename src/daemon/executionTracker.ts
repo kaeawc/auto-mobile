@@ -635,20 +635,26 @@ export class ExecutionTracker {
   /**
    * Bind at admission, including sessionless calls and multi-device fan-out.
    *
-   * Throws the recorded rebind error when a `setActiveDevice` rebind already
-   * revoked this execution's session from `deviceId` (#9958): a call admitted
-   * before the rebind but not yet bound to the old device is absent from the
-   * device index, so the rebind cancel could not abort it, and binding now
-   * would drive a device the session has left. Other aborts (device loss,
-   * kill, ANR) never refuse a bind, so their cleanup paths are unaffected.
+   * Recorded session/device revocations refuse admission, including calls
+   * admitted before a rebind but not yet in the device index (#9958).
+   * Loss-monitor bookkeeping can skip a revoked binding without restoring it;
+   * ordinary callers still receive the recorded error.
    */
-  bindDeviceExecution(executionId: string, deviceId: string): void {
+  bindDeviceExecution(
+    executionId: string,
+    deviceId: string,
+    options: { skipRevoked?: boolean } = {},
+  ): void {
     const execution = this.executions.get(executionId);
     if (!execution) {
       return;
     }
     const revocation = execution.revokedDeviceBindings?.get(deviceId);
     if (revocation) {
+      // Loss monitoring may revisit a still-draining plan; admission stays strict.
+      if (options.skipRevoked) {
+        return;
+      }
       throw new ActionableError(revocation.message, { cause: revocation });
     }
     execution.deviceIds ??= new Set();

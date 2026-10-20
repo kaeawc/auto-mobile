@@ -7,6 +7,7 @@ import { logger } from "../../src/utils/logger";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { Daemon } from "../../src/daemon/daemon";
+import { FakeDaemonHttpTokenStore } from "../../src/daemon/daemonHttpToken";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
@@ -22,8 +23,10 @@ import type {
 } from "../../src/daemon/statelessMcpHttpEndpoint";
 
 const port = 41321;
+const HTTP_TOKEN = "test-http-token";
 
 class FakeRequest extends EventEmitter implements McpIngressRequest, HttpBodyRequest {
+  rawHeaders = ["Authorization", `Bearer ${HTTP_TOKEN}`];
   method = "GET";
   url = MCP_STREAMABLE_PATH;
 
@@ -86,6 +89,7 @@ class FakeHttpServer extends EventEmitter implements HttpListener {
   headersTimeout = 0;
   timeout = 0;
   closed = false;
+  lastRequest: FakeRequest | undefined;
   private readonly inFlight = new Set<Promise<FakeResponse>>();
 
   /** Like node:http/Bun: close completes only after in-flight requests finish. */
@@ -106,7 +110,8 @@ class FakeHttpServer extends EventEmitter implements HttpListener {
     path = MCP_STREAMABLE_PATH,
     body?: string,
   ): Promise<FakeResponse> {
-    const request = new FakeRequest(headers);
+    const request = new FakeRequest({ authorization: `Bearer ${HTTP_TOKEN}`, ...headers });
+    this.lastRequest = request;
     request.method = method;
     request.url = path;
     const response = new FakeResponse();
@@ -172,7 +177,7 @@ async function harness(
   const server = new FakeHttpServer();
   const daemon = new Daemon(
     { port, host: "127.0.0.1" },
-    { timer, httpServerFactory: () => server },
+    { timer, httpToken: HTTP_TOKEN, httpServerFactory: () => server },
   );
   const transport = new FakeTransport();
   const hooks = daemon.testHooks;
@@ -654,4 +659,143 @@ test("HTTP request callback handles unexpected rejection before transport dispat
   } finally {
     warnings.mockRestore();
   }
+});
+
+describe("daemon HTTP bearer authentication", () => {
+  test("requires the in-memory token before the listen callback completes", async () => {
+    const server = new FakeHttpServer();
+    const store = new FakeDaemonHttpTokenStore();
+    const daemon = new Daemon(
+      { port, host: "127.0.0.1" },
+      {
+        timer: new FakeTimer(),
+        httpToken: HTTP_TOKEN,
+        httpTokenStore: store,
+        httpServerFactory: () => server,
+      },
+    );
+    let completeBind: () => void = () => {
+      throw new Error("listen was not called");
+    };
+    const listen = spyOn(server, "listen").mockImplementation((_port, _host, callback) => {
+      completeBind = callback;
+      return server;
+    });
+    try {
+      const starting = daemon.testHooks.httpIngress.start();
+      const response = await server.dispatch(
+        { host: `localhost:${port}`, authorization: undefined },
+        "OPTIONS",
+      );
+      expect(response.statusCode).toBe(401);
+      expect(response.body).toBe('{"error":"Unauthorized"}');
+      expect((await server.dispatch({ host: `localhost:${port}` }, "OPTIONS")).statusCode).toBe(
+        200,
+      );
+      expect(store.read()).toBeUndefined();
+      completeBind();
+      await starting;
+    } finally {
+      listen.mockRestore();
+    }
+  });
+
+  test.each(["Bearer", "bearer", "BEARER", "bEaReR"])(
+    "accepts the case-insensitive %s scheme",
+    async (scheme) => {
+      const { server, transport } = await harness();
+      const response = await dispatchMcp(server, {
+        host: `localhost:${port}`,
+        authorization: `${scheme} ${HTTP_TOKEN}`,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(transport.handled).toBe(1);
+    },
+  );
+  test.each([
+    undefined,
+    "Bearer wrong",
+    "Basic test-http-token",
+    "Bearer ",
+    "Bearer x",
+    "Bearer " + "x".repeat(200),
+  ])(
+    "refuses invalid credentials %s without disclosing the configured token",
+    async (authorization) => {
+      const logs: unknown[] = [];
+      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
+        spyOn(logger, level).mockImplementation((...args: unknown[]) => {
+          logs.push(args);
+        }),
+      );
+      try {
+        const { server, transport } = await harness();
+        const response = await dispatchMcp(server, { host: `localhost:${port}`, authorization });
+        expect(response.statusCode).toBe(401);
+        expect(response.body).toBe('{"error":"Unauthorized"}');
+        expect(response.headers.get("www-authenticate")).toBe("Bearer");
+        expect(transport.handled).toBe(0);
+        expect(JSON.stringify([logs, response.body, [...response.headers]])).not.toContain(
+          HTTP_TOKEN,
+        );
+      } finally {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      }
+    },
+  );
+
+  test.each([
+    ["OPTIONS", MCP_STREAMABLE_PATH],
+    ["POST", "/heartbeat"],
+    ["GET", "/unknown"],
+  ])("authenticates %s %s before routing", async (method, path) => {
+    const { server } = await harness();
+    const response = await server.dispatch(
+      { host: `localhost:${port}`, authorization: undefined },
+      method,
+      path,
+    );
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toBe('{"error":"Unauthorized"}');
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+  });
+
+  test("Host and Origin rejection precedes authentication", async () => {
+    const { server } = await harness();
+    for (const headers of [
+      { host: "example.com", authorization: undefined },
+      { host: `localhost:${port}`, origin: "https://example.com", authorization: undefined },
+    ]) {
+      expect((await server.dispatch(headers)).statusCode).toBe(403);
+    }
+  });
+
+  test("correct credentials preserve routing and are stripped before MCP dispatch", async () => {
+    const { daemon, server, transport } = await harness();
+    daemon.testHooks.httpIngress.setMcpRequestServerFactory((req) => {
+      expect(req.headers.authorization).toBeUndefined();
+      expect(server.lastRequest?.rawHeaders).not.toContain(`Bearer ${HTTP_TOKEN}`);
+      return new FakeMcpServer();
+    });
+    expect((await dispatchMcp(server, { host: `localhost:${port}` })).statusCode).toBe(200);
+    expect(transport.handled).toBe(1);
+    expect((await server.dispatch({ host: `localhost:${port}` }, "OPTIONS")).statusCode).toBe(200);
+    expect(
+      (await server.dispatch({ host: `localhost:${port}` }, "GET", "/heartbeat")).statusCode,
+    ).toBe(405);
+    expect(
+      (await server.dispatch({ host: `localhost:${port}` }, "GET", "/unknown")).statusCode,
+    ).toBe(404);
+  });
+
+  test("refuses to bind without a configured token", async () => {
+    const server = new FakeHttpServer();
+    const daemon = new Daemon({}, { httpServerFactory: () => server });
+    await expect(daemon.testHooks.httpIngress.start()).rejects.toThrow(
+      "Daemon HTTP token is not configured",
+    );
+    expect(server.listenerCount("request")).toBe(0);
+  });
 });

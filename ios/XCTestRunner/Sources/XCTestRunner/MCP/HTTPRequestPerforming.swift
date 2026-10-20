@@ -17,3 +17,24 @@ struct URLSessionRequestPerformer: HTTPRequestPerforming {
         return try await session.data(for: request)
     }
 }
+
+/// Shared authentication for daemon HTTP requests, including a single token refresh on HTTP 401.
+/// The caller's deadline wraps both exchanges. A rejected response never installs MCP session state.
+struct AuthenticatedDaemonHTTPRequestPerformer: HTTPRequestPerforming {
+    let performer: any HTTPRequestPerforming
+    let tokenProvider: any DaemonHTTPTokenProviding
+
+    func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        var refreshed = false
+        while true {
+            try Task.checkCancellation()
+            var authenticated = request
+            authenticated.setValue(
+                tokenProvider.readToken().map { "Bearer \($0)" }, forHTTPHeaderField: "Authorization"
+            )
+            let response = try await performer.perform(authenticated)
+            if (response.1 as? HTTPURLResponse)?.statusCode != 401 || refreshed { return response }
+            refreshed = true
+        }
+    }
+}

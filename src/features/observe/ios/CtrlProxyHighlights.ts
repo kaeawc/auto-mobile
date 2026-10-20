@@ -1,3 +1,4 @@
+import type { SdkCapabilityQueryOptions } from "./CtrlProxySdkCapabilities";
 /**
  * CtrlProxy iOS Highlights - Delegate for visual highlight overlay operations.
  */
@@ -19,6 +20,7 @@ export class CtrlProxyHighlights {
     shape: HighlightShape,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    options: SdkCapabilityQueryOptions = {},
   ): Promise<HighlightOperationResult> {
     return sendCommand<HighlightOperationResult>(this.context, {
       idPrefix: "highlight",
@@ -29,6 +31,7 @@ export class CtrlProxyHighlights {
         shape: this.normalizeHighlightShape(shape),
       },
       timeoutMs,
+      ...options,
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({

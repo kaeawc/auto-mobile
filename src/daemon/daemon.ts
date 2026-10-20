@@ -1,5 +1,6 @@
+import { registerPrototypeDaemonPort } from "../features/prototype/prototypeDaemonPorts";
 import {} from "./networkStateSessionCleanup";
-import {} from "../server/recordingSessionCleanup";
+import {} from "./recordingSessionCleanup";
 import {} from "./observationRequestBatch";
 import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
@@ -79,12 +80,13 @@ import {
   type DaemonProcessBirthTimeProvider,
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
+import { DaemonHttpTokenLifecycle } from "./daemonCore/DaemonHttpTokenLifecycle";
 import type { DaemonStateWrites } from "./daemonContext";
 import { DaemonBroker } from "./daemonCore/DaemonBroker";
 import { DaemonSessions } from "./daemonCore/DaemonSessions";
 import { DaemonStartup, applyDaemonToolOutputOptions } from "./daemonCore/DaemonStartup";
 import { DaemonIdentity } from "./daemonCore/DaemonIdentity";
-import { DaemonStreams } from "./daemonCore/DaemonStreams";
+import { DaemonStreams, type DeviceSessionRoutingTargets } from "./daemonCore/DaemonStreams";
 import { DaemonMaintenance } from "./daemonCore/DaemonMaintenance";
 import { DaemonDisconnect } from "./daemonCore/DaemonDisconnect";
 import { DaemonShutdown } from "./daemonCore/DaemonShutdown";
@@ -93,7 +95,6 @@ import type {
   DaemonIdentityState,
   DaemonLifecycleState,
 } from "./daemonCore/DaemonCoreState";
-import type { DeviceSessionRoutingTargets } from "./daemonCore/DaemonStreams";
 import {
   createDatabaseHealthFailureRecovery,
   createObservationStreamHealth,
@@ -124,16 +125,8 @@ export type {
   DaemonProcessGenerationTokenProvider,
 };
 
-/**
- * Main daemon process
- *
- * Combines:
- * - MCP server in Streamable HTTP mode
- * - Unix socket server for CLI communication
- * - PID file management
- * - Graceful shutdown handling
- */
 export class Daemon {
+  private readonly httpToken: DaemonHttpTokenLifecycle;
   private pidFileWritten: boolean = false;
   private stoppingRecordings: Set<string> = new Set();
   private readonly broker: DaemonBroker;
@@ -199,6 +192,7 @@ export class Daemon {
   private rejectStartupCompletion!: (reason: unknown) => void;
 
   private readonly mcpServices = new DaemonMcpServices({
+    httpToken: () => this.httpToken.value,
     iosDoctorDependencies: this.iosDoctorDependencies,
     debug: () => this.debug,
     acceptanceDiscoveryCapability: () => this.acceptanceDiscoveryCapability,
@@ -383,6 +377,11 @@ export class Daemon {
     } = resolveDaemonDependencies(dependencies);
     this.daemonState = retained.daemonState;
     this.httpServerFactory = retained.httpServerFactory;
+    this.httpToken = new DaemonHttpTokenLifecycle(
+      retained.httpTokenStore,
+      dependencies.idGenerator,
+      retained.httpToken,
+    );
     this.liveDaemonSessionIdProvider = retained.liveDaemonSessionIdProvider;
     this.avdManagerFactory = retained.avdManagerFactory;
     this.iosDeviceVerifier = retained.iosDeviceVerifier;
@@ -404,6 +403,7 @@ export class Daemon {
     );
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
+    registerPrototypeDaemonPort(this.port);
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
     this.host = options.host || "127.0.0.1";
@@ -606,6 +606,8 @@ export class Daemon {
       navigationGraphBridge: this.navigationGraphBridge,
 
       httpIngress: this.httpIngress.testHooks,
+      prepareHttpToken: () => this.httpToken.prepare(),
+      publishHttpToken: () => this.httpToken.publish(),
 
       /** Installs (or clears) a socket server double whose members the shutdown path calls. */
       setSocketServer: (server: Partial<DaemonSocketServer> | null): void => {
@@ -765,7 +767,9 @@ export class Daemon {
       setVideoRecordingManagerDependencies: (...args) =>
         defaultDaemonRecordingHost.setVideoRecordingManagerDependencies(...args),
       enterDaemonProcess: (...args) => this.enterDaemonProcess(...args),
-      startHttpIngress: (...args) => this.startHttpIngress(...args),
+      prepareHttpToken: () => this.httpToken.prepare(),
+      publishHttpToken: () => this.httpToken.publish(),
+      startHttpIngress: () => this.startup.startHttpIngress(),
       bindControlSocket: (...args) => this.bindControlSocket(...args),
       startServicesAfterSocketBind: (...args) => this.startServicesAfterSocketBind(...args),
       startMaintenanceMonitors: (...args) => this.startMaintenanceMonitors(...args),
@@ -806,6 +810,7 @@ export class Daemon {
       initializeIosServices: (...args) => this.initializeIosServices(...args),
       restoreIncumbentOwnerRecord: (...args) => this.identity.restoreIncumbentOwnerRecord(...args),
       republishIdentity: (...args) => this.identity.republishIdentity(...args),
+      recordControlSocketIdentity: () => this.identity.recordControlSocketIdentity(),
       startAuxiliarySocket: (...args) => this.startAuxiliarySocket(...args),
       configureDeviceDataStreamServer: (...args) =>
         this.streams.configureDeviceDataStreamServer(...args),
@@ -936,6 +941,7 @@ export class Daemon {
       services,
       lifecycle,
       stopManagedAdbServer: () => daemon.stopManagedAdbServer,
+      removeHttpToken: () => this.httpToken.remove(),
       stop: (...args) => this.stop(...args),
       getDaemonFileCleanupOptions: (...args) => this.identity.getDaemonFileCleanupOptions(...args),
       closeManagedExecutionRelease: (...args) => this.broker.closeManagedExecutionRelease(...args),
@@ -1035,9 +1041,6 @@ export class Daemon {
   private persistPidFileData(...args: Parameters<DaemonIdentity["persistPidFileData"]>) {
     return this.identity.persistPidFileData(...args);
   }
-  private startHttpIngress(...args: Parameters<DaemonStartup["startHttpIngress"]>) {
-    return this.startup.startHttpIngress(...args);
-  }
   private bindControlSocket(...args: Parameters<DaemonStartup["bindControlSocket"]>) {
     return this.startup.bindControlSocket(...args);
   }
@@ -1046,6 +1049,7 @@ export class Daemon {
   ) {
     return this.startup.startServicesAfterSocketBind(...args);
   }
+
   private startAuxiliarySocket(...args: Parameters<DaemonIdentity["startAuxiliarySocket"]>) {
     return this.identity.startAuxiliarySocket(...args);
   }

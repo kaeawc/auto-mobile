@@ -203,9 +203,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * answer. Additive to simulator discovery and never throws, so a host with no
    * Xcode/hardware still resolves its simulators (issue #5620).
    */
-  private async listPhysicalIosDevices(): Promise<PhysicalIosDeviceDiscovery> {
+  private async listPhysicalIosDevices(bypassCache = false): Promise<PhysicalIosDeviceDiscovery> {
     try {
-      return await this.physicalIosDevices.listConnectedDevices();
+      return await this.physicalIosDevices.listConnectedDevices({ bypassCache });
     } catch (error) {
       // The lister contract is non-throwing; a misbehaving implementation must
       // still not take simulator discovery down with it. `complete: false` so a
@@ -607,6 +607,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
             memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
             skipNameEnrichment: options.skipAndroidNameEnrichment,
+            skipProfileEnrichment: options.skipAndroidProfileEnrichment,
           },
           signal,
         ),
@@ -631,12 +632,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
   private async discoverPhysicalIosDevices(
     signal: AbortSignal | undefined,
+    bypassCache: boolean | undefined,
   ): Promise<PhysicalIosDeviceDiscovery> {
     // Physical-device discovery runs regardless of the simulator outcome and
     // cannot fail the sweep: it is best-effort by contract.
     let physical: PhysicalIosDeviceDiscovery;
     try {
-      physical = await raceWithDeadline(this.listPhysicalIosDevices(), {
+      physical = await raceWithDeadline(this.listPhysicalIosDevices(bypassCache), {
         timer: this.physicalIosScanTimer,
         timeoutMs: this.physicalIosScanBudgetMs,
         signal,
@@ -725,7 +727,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       PhysicalIosDeviceDiscovery | ReturnType<typeof skippedPhysicalIosDiscovery>
     > = options.skipPhysicalIosDiscovery
       ? Promise.resolve(skippedPhysicalIosDiscovery())
-      : this.discoverPhysicalIosDevices(signal);
+      : this.discoverPhysicalIosDevices(signal, options.bypassPhysicalIosDeviceListCache);
     // An abort rejects the physical race too; the await below surfaces it.
     physicalPromise.catch(() => undefined);
     const simulatorOutcome = await this.readSimulatorListing(options, signal);

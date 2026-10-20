@@ -72,7 +72,7 @@ describe("#4308 device WebRTC integration workflow", () => {
       "src/features/screen-stream/**",
       "android/video-server/**",
       "ios/screen-capture/**",
-      "src/server/webrtcStreamManager.ts",
+      "src/daemon/webrtcStreamManager.ts",
       "src/daemon/webrtc*",
       "src/daemon/videoStreamSocket*",
       "src/daemon/videoStreamFraming.ts",

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import { z } from "zod/v4";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -14,6 +14,8 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+afterEach(() => mock.restore());
 
 const device: BootedDevice = { deviceId: "replay-device", platform: "ios", name: "Replay device" };
 const options = { targetScreen: "D", platform: "ios" } as const;

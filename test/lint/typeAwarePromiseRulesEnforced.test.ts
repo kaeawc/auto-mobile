@@ -1,9 +1,10 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "../..");
-const read = (rel: string): string => readFileSync(path.join(root, rel), "utf8");
+const read = (rel: string): string => readGuardFile(path.join(root, rel));
 
 const PROMISE_RULES = ["no-floating-promises", "no-misused-promises"] as const;
 
@@ -23,7 +24,9 @@ describe("type-aware promise rules are enforced", () => {
     for (const rule of PROMISE_RULES) {
       expect(codes.split(" ")).toContain(`typescript(${rule})`);
     }
-    expect(script).toContain("oxlint --type-aware");
+    // The type-aware invocation lives in the host-slot helper; the ratchet script must run it.
+    expect(script).toContain("host_heavy_run host_heavy_oxlint_type_aware");
+    expect(read("scripts/lib/host-heavy-run.sh")).toContain("oxlint --type-aware");
   });
 
   test("have a zero baseline", () => {

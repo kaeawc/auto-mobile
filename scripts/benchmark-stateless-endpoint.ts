@@ -1,3 +1,5 @@
+import { generateDaemonHttpToken } from "../src/daemon/daemonHttpToken";
+import { defaultIdGenerator } from "../src/utils/IdGenerator";
 /**
  * Per-request latency of the daemon's stateless MCP HTTP endpoint (#13068).
  *
@@ -139,7 +141,8 @@ async function main(): Promise<void> {
   } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
 
   const port = await freePort();
-  const daemon = new Daemon({ port, host: "127.0.0.1" }, { timer: defaultTimer });
+  const httpToken = generateDaemonHttpToken(defaultIdGenerator);
+  const daemon = new Daemon({ port, host: "127.0.0.1" }, { timer: defaultTimer, httpToken });
   // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
   const call = async (method: string): Promise<void> => {
     await Reflect.get(daemon, method).call(daemon);
@@ -153,6 +156,7 @@ async function main(): Promise<void> {
     const response = await fetch(url, {
       method: "POST",
       headers: {
+        authorization: `Bearer ${httpToken}`,
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
         "x-auto-mobile-mcp-session-id": "benchmark-session",

@@ -1,4 +1,4 @@
-import { parseSync } from "oxc-parser";
+import { parseGuardSource, guardTextMayMatch } from "./astGuard";
 
 /**
  * Finds known-expensive work inside `beforeEach`/`afterEach` hooks of a test file.
@@ -147,9 +147,17 @@ export function scanExpensiveHookWork(file: string, source: string): ExpensiveHo
   if (!/\b(beforeEach|afterEach)\b/.test(source)) {
     return [];
   }
-  const { program, errors } = parseSync(file, source);
-  if (errors.length > 0) {
-    throw new Error(`${file}: ${errors[0].message}`);
+  // Hook references only follow helpers in this file, so a known operation must occur here.
+  const program = parseGuardSource(
+    file,
+    source,
+    guardTextMayMatch(
+      source,
+      /\b(?:mkdtemp|mkdtempSync|rm|rmSync|rmdir|rmdirSync|Jimp|AdmZip|createTestImage|createTestPng|DevicePool|createRegistryWiredDevicePool|makePool|createDevicePoolFor)\b/,
+    ),
+  );
+  if (!program) {
+    return [];
   }
   if (!isAstNode(program)) {
     throw new TypeError("Parser did not return an AST program");

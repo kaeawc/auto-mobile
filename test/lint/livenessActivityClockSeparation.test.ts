@@ -1,6 +1,7 @@
+import { readGuardFile, guardDirectoryEntries } from "./astGuard";
 import ts from "typescript";
-import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   PROXY_ACTIVITY_CLOCKS,
@@ -440,13 +441,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "PooledDevice LRU order on autolock assignment, not a session idle clock.",
   },
-  "src/server/webrtcStreamManager.ts acquireLease": {
+  "src/daemon/webrtcStreamManager.ts acquireLease": {
     writes: 2,
     reason:
       "WebRTC stream subscription lease expiry (renewed, or stored with a new lease), unrelated " +
       "to device sessions.",
   },
-  "src/server/webrtcStreamManager.ts endLease": {
+  "src/daemon/webrtcStreamManager.ts endLease": {
     writes: 1,
     reason: "WebRTC stream end-of-lease record expiry, unrelated to device sessions.",
   },
@@ -458,7 +459,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 2,
     reason: "Installed-apps resource cache TTL, unrelated to device sessions.",
   },
-  "src/server/webrtcStreamQueries.ts WebRtcStreamQueries.describeRecord": {
+  "src/daemon/webrtcStreamQueries.ts WebRtcStreamQueries.describeRecord": {
     writes: 1,
     reason:
       "WebRTC stream descriptor reporting its subscription lease expiry, not a session clock.",
@@ -890,28 +891,49 @@ function forwardedOwnerMethod(initializer: ts.Expression): ts.PropertyAccessExpr
   return callee;
 }
 
+function normalizeTsPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+function portCompilerHost(
+  models: ReadonlyMap<string, FileModel>,
+  options: ts.CompilerOptions,
+  libraryPath: string,
+  library: ts.SourceFile,
+): ts.CompilerHost {
+  const host = ts.createCompilerHost(options);
+  const modelAt = (path: string): FileModel | undefined => {
+    const normalized = normalizeTsPath(path);
+    // node:path.win32 accepts both separators, including TypeScript's absolute paths.
+    return models.get(isAbsolute(normalized) ? repoPath(normalized) : normalized);
+  };
+  const isLibrary = (path: string): boolean =>
+    normalizeTsPath(path) === normalizeTsPath(libraryPath);
+  host.getCurrentDirectory = () => normalizeTsPath(ROOT);
+  host.fileExists = (path) => isLibrary(path) || modelAt(path) !== undefined;
+  host.readFile = (path) => (isLibrary(path) ? library.text : modelAt(path)?.source.text);
+  host.getSourceFile = (path) => (isLibrary(path) ? library : modelAt(path)?.source);
+  host.directoryExists = () => true;
+  host.getDirectories = () => [];
+  host.realpath = normalizeTsPath;
+  return host;
+}
+
 /** Resolve application delegates from scanned ASTs, with standard Pick/Readonly utility types. */
 function portTypeChecker(models: ReadonlyMap<string, FileModel>): ts.TypeChecker {
   const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
-  const host = ts.createCompilerHost(options);
   // Shared runtime views use Pick. Supply TypeScript's own utility types instead of treating
   // those receivers as any under noLib, which would hide their collaborator targets.
-  const libraryPath = join(dirname(ts.getDefaultLibFilePath(options)), "lib.es5.d.ts");
+  const libraryPath = normalizeTsPath(
+    join(dirname(ts.getDefaultLibFilePath(options)), "lib.es5.d.ts"),
+  );
   const library = ts.createSourceFile(
     libraryPath,
-    readFileSync(libraryPath, "utf8"),
+    readGuardFile(libraryPath),
     options.target!,
     true,
   );
-  const modelAt = (path: string): FileModel | undefined =>
-    models.get(isAbsolute(path) ? relative(ROOT, path).split(sep).join("/") : path);
-  host.getCurrentDirectory = () => ROOT;
-  host.fileExists = (path) => path === libraryPath || modelAt(path) !== undefined;
-  host.readFile = (path) => modelAt(path)?.source.text;
-  host.getSourceFile = (path) => (path === libraryPath ? library : modelAt(path)?.source);
-  host.directoryExists = () => true;
-  host.getDirectories = () => [];
-  host.realpath = (path) => path;
+  const host = portCompilerHost(models, options, libraryPath, library);
   return ts.createProgram([...models.keys(), libraryPath], options, host).getTypeChecker();
 }
 
@@ -1343,7 +1365,7 @@ function inventoryOf(model: FileModel): Map<string, number[]> {
 }
 
 function walk(dir: string, files: string[] = []): string[] {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of guardDirectoryEntries(dir)) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       walk(full, files);
@@ -1359,9 +1381,47 @@ function repoPath(full: string): string {
 }
 
 describe("liveness paths never write activity clocks (#10656, #10668)", () => {
+  test("port compiler host resolves both Windows library spellings and absolute model paths", () => {
+    const libraryPath = String.raw`C:\typescript\lib\lib.es5.d.ts`;
+    const options: ts.CompilerOptions = { noLib: true, types: [], target: ts.ScriptTarget.Latest };
+    const library = ts.createSourceFile(
+      libraryPath,
+      "type Pick<T, K extends keyof T> = { [P in K]: T[P] };",
+      options.target!,
+      true,
+    );
+    const owner = parse(
+      "owner.ts",
+      'class Target {} class Owner { target: Pick<{ target: Target }, "target">; }',
+    );
+    const host = portCompilerHost(new Map([[owner.path, owner]]), options, libraryPath, library);
+    const program = ts.createProgram([owner.path, libraryPath], options, host);
+    const checker = program.getTypeChecker();
+    // Pick's mapped property must resolve rather than disappearing into any.
+    const ownerDeclaration = owner.source.statements.filter(ts.isClassDeclaration)[1]!;
+    const member = ownerDeclaration.members[0]!;
+    expect(checker.getTypeAtLocation(member).getProperty("target")).toBeDefined();
+    for (const path of [libraryPath, libraryPath.replaceAll("\\", "/")]) {
+      expect(host.fileExists(path)).toBe(true);
+      expect(host.getSourceFile(path, options.target!)).toBe(library);
+      expect(host.readFile(path)).toBe(library.text);
+      expect(host.realpath?.(path)).toBe("C:/typescript/lib/lib.es5.d.ts");
+    }
+    for (const path of [join(ROOT, owner.path), join(ROOT, owner.path).replaceAll("\\", "/")]) {
+      expect(host.fileExists(path)).toBe(true);
+      expect(host.getSourceFile(path, options.target!)).toBe(owner.source);
+      expect(host.readFile(path)).toBe(owner.source.text);
+    }
+  });
+
   const models = new Map<string, FileModel>();
   const inventory = new Map<string, number[]>();
   let ports: PortIndex = new Map();
+  afterAll(() => {
+    // These models contain SourceFiles and type-checker references needed only by this suite.
+    models.clear();
+    ports = new Map();
+  });
   // Parsing the scanned daemon/server/db files can take seconds on a loaded runner.
   const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 
@@ -1396,7 +1456,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       ...Object.keys(SESSION_CLOCK_JUDGEMENTS),
     ]) {
       if (!models.has(path)) {
-        models.set(path, parse(path, readFileSync(join(ROOT, path), "utf8")));
+        models.set(path, parse(path, readGuardFile(join(ROOT, path))));
       }
     }
     ports = buildPortIndex(models);
@@ -1622,7 +1682,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     // A `--daemon heartbeat` loop proves the CLI owner is alive, not that it uses the device, so
     // it must never hold a CLI session past the idle window (owner decision 2026-10-08).
     const path = "src/daemon/SessionHeartbeatMonitor.ts";
-    const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+    const model = parse(path, readGuardFile(join(ROOT, path)));
     const heartbeatClocks = LIVENESS_READS;
     const judgements: { line: number; readsActivity: boolean; heartbeatReads: string[] }[] = [];
     const visit = (node: ts.Node): void => {
@@ -1689,7 +1749,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
 
   test("a device-tool admission is credited only for a control call, never a read (#10964)", () => {
     for (const [path, readNames] of Object.entries(ADMISSION_SITES)) {
-      const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+      const model = parse(path, readGuardFile(join(ROOT, path)));
       expect(model.source.text).toContain("markSessionAdmitted");
       expect(unguardedAdmissions(model, readNames)).toEqual([]);
     }

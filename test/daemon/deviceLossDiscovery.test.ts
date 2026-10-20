@@ -9,7 +9,7 @@ import {
   probeListedAndroidStates,
   stopRecordingAfterDeviceDisconnect,
 } from "../../src/daemon/deviceLossDiscovery";
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { AndroidOfflineProbeError } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
@@ -164,10 +164,10 @@ describe("device-loss discovery helpers (#11808)", () => {
       missed: [{ deviceId: "emu-1", misses: PLAN_DEVICE_DISCONNECT_MISS_CAP + 5 }],
       transitional: [],
     };
-    logDisconnectMisses(misses, result, true, new Set());
+    logDisconnectMisses(misses, result, new Set(["emu-1"]), new Set());
     expect(misses.get("emu-1")).toBe(PLAN_DEVICE_DISCONNECT_MISS_CAP);
     const idle = new Map<string, number>();
-    logDisconnectMisses(idle, result, false, new Set());
+    logDisconnectMisses(idle, result, new Set(), new Set());
     expect(idle.size).toBe(0);
   });
 

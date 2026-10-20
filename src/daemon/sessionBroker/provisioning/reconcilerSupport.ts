@@ -159,6 +159,9 @@ export function provisionFailure(error: unknown): BindingReconcileFailure {
         booted: error.booted,
         retryAfterMs: error.retryAfterMs,
         ...externalDevicesField(error.details.externalDevices),
+        ...(error.details.heldDevices?.length
+          ? { heldDevices: [...error.details.heldDevices] }
+          : {}),
       },
     });
   }
@@ -177,6 +180,7 @@ export function provisionFailure(error: unknown): BindingReconcileFailure {
           booted: capacity.booted,
           retryAfterMs: error.diagnostics.retryAfterMs ?? 0,
           ...externalDevicesField(capacity.externalDevices),
+          ...(capacity.heldDevices?.length ? { heldDevices: [...capacity.heldDevices] } : {}),
         },
       });
     }

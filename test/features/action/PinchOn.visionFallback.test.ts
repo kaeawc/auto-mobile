@@ -1,7 +1,7 @@
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -15,6 +15,8 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeVisionAnalyzer } from "../../fakes/FakeVisionAnalyzer";
 import type { VisionFallbackConfig } from "../../../src/vision/VisionTypes";
+
+afterEach(() => mock.restore());
 
 const enabledVisionConfig: VisionFallbackConfig = {
   enabled: true,

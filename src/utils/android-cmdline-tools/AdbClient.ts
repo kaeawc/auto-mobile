@@ -892,7 +892,10 @@ export class AdbClient implements AdbExecutor {
           if (resolvedSignal?.aborted) {
             return false;
           }
-          if (isDeviceLostError(error) || error instanceof AdbDeviceTransportUnavailableError) {
+          if (
+            isDeviceLostError(error) ||
+            (error instanceof AdbDeviceTransportUnavailableError && error.dispatched !== "unknown")
+          ) {
             return false;
           }
           if (error instanceof AdbCommandTimeoutError) {
@@ -902,12 +905,17 @@ export class AdbClient implements AdbExecutor {
             // original "Command timed out after ..." error instead.
             return false;
           }
-          if (isNonRetryableAdbError(error, this.device !== null)) {
+          const retryError =
+            error instanceof AdbDeviceTransportUnavailableError && error.cause instanceof Error
+              ? error.cause
+              : error;
+          if (isNonRetryableAdbError(retryError, this.device !== null)) {
             return false;
           }
           return (
             isSafeToRetryCommand(commandArgs, beforeDispatch !== undefined) ||
-            isPreDispatchError(error)
+            (!(error instanceof AdbDeviceTransportUnavailableError) &&
+              isPreDispatchError(retryError))
           );
         },
         onRetry: (error, attempt) => {

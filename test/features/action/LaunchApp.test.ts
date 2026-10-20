@@ -1,3 +1,4 @@
+import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
@@ -162,7 +163,6 @@ describe("LaunchApp", () => {
   });
 
   test("foreground launch retires the pre-launch hierarchy before post-action observation", async () => {
-    fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
     fakeAdb.setCommandResponse("shell am start --user 0", createExecResult("Starting: Intent", ""));
     const invalidator = new FakeDeviceWindowCacheInvalidator();
@@ -175,7 +175,11 @@ describe("LaunchApp", () => {
         activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
       };
     });
-    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: false });
+    const result = await settleByFakeEvents(
+      fakeTimer,
+      launchApp.execute(packageName, { clearAppData: false, coldBoot: false }),
+      { description: "foreground launch and post-action observation" },
+    );
     expect(result.success).toBe(true);
     expect(invalidator.calls).toEqual([device]);
     // The app was not running, so this launch starts a new process.
@@ -3081,22 +3085,30 @@ describe("LaunchApp", () => {
     expect(hasStartedAppLaunch()).toBe(false);
   });
 
-  test("preserves the transport code from a failed installed-app listing", async () => {
-    fakeTimer.enableAutoAdvance();
-    const error = new AdbDeviceTransportUnavailableError(device.deviceId, new Error("offline"));
-    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector: new FakeTargetUserDetector(fakeTimer, { resolvedUserId: 0 }),
-      installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
-        successful: false,
-        error,
-      }),
-    });
+  test.each([false, "unknown"] as const)(
+    "preserves the transport dispatch state %s from a failed installed-app listing",
+    async (dispatched) => {
+      fakeTimer.enableAutoAdvance();
+      const error = new AdbDeviceTransportUnavailableError(
+        device.deviceId,
+        new Error("offline"),
+        1000,
+        dispatched,
+      );
+      const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+        targetUserDetector: new FakeTargetUserDetector(fakeTimer, { resolvedUserId: 0 }),
+        installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
+          successful: false,
+          error,
+        }),
+      });
 
-    await expect(
-      action.execute(packageName, { clearAppData: false, coldBoot: false }),
-    ).rejects.toMatchObject({ code: "device_transport_unavailable" });
-    expect(hasStartedAppLaunch()).toBe(false);
-  });
+      await expect(
+        action.execute(packageName, { clearAppData: false, coldBoot: false }),
+      ).rejects.toBe(error);
+      expect(hasStartedAppLaunch()).toBe(false);
+    },
+  );
 
   test("rejects an incomplete Android listing even when it contains the app", async () => {
     fakeTimer.enableAutoAdvance();
@@ -3684,6 +3696,63 @@ describe("LaunchApp", () => {
         });
         expect(installedApps.getCallCount()).toBe(1);
       } finally {
+        cleanup();
+      }
+    });
+
+    test("bounds cancellation settlement when a retarget ignores abort", async () => {
+      const controller = new AbortController();
+      const cancellation = new Error("launch request cancelled");
+      const { iosLaunchApp, fakeCtrlProxy, cleanup } = createIOSTestHarness({
+        bundleId: userBundleId,
+        launchSuccess: true,
+      });
+      const lateReply =
+        Promise.withResolvers<Awaited<ReturnType<typeof fakeCtrlProxy.requestLaunchApp>>>();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      let receivedSignal: AbortSignal | undefined;
+      fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
+        receivedSignal = signal;
+        return await lateReply.promise;
+      };
+      let settled = false;
+      const pending = iosLaunchApp
+        .execute(userBundleId, { clearAppData: false, coldBoot: false, signal: controller.signal })
+        .catch((error: unknown) => {
+          settled = true;
+          return error;
+        });
+      try {
+        await drainUntil(() => receivedSignal !== undefined, {
+          description: "resident retarget starts",
+        });
+        expect(receivedSignal).toBeDefined();
+        controller.abort(cancellation);
+        await drainUntil(() => fakeTimer.getPendingTimeoutCount() > 0, {
+          description: "retarget settlement grace starts",
+        });
+        fakeTimer.advanceTime(1000);
+        await drainUntil(() => settled, {
+          description: "retarget cancellation settles within grace",
+        });
+        expect(settled).toBe(true);
+        expect(await pending).toBe(cancellation);
+        expect(receivedSignal?.aborted).toBe(true);
+        lateReply.reject(cancellation);
+        await drainMicrotasks(100);
+        expect(
+          warn.mock.calls.filter(([message]) =>
+            message.includes("Retarget failed after cancellation"),
+          ),
+        ).toHaveLength(0);
+        expect(debug).toHaveBeenCalledWith(
+          "[LaunchApp] Retarget failed after cancellation",
+          cancellation,
+        );
+      } finally {
+        warn.mockRestore();
+        debug.mockRestore();
         cleanup();
       }
     });

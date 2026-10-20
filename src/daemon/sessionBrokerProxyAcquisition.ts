@@ -26,7 +26,7 @@ export interface SessionBrokerProxyAcquisitionPorts {
   callDaemonMethod(
     method: string,
     params: Record<string, unknown>,
-    options: { timeoutMs: number; signal?: AbortSignal },
+    options: { timeoutMs: number; signal?: AbortSignal; cancelOnTimeout?: boolean },
   ): Promise<unknown>;
   holdSession(requestId: string, sessionUuid: string): Promise<void>;
   releaseSession(sessionUuid: string): Promise<unknown>;
@@ -395,7 +395,12 @@ async function prepareThenRecover(
         config: daemonConfig,
         livenessOwnerToken: ports.livenessOwnerToken,
       },
-      { timeoutMs: prepareCallBudgetMs, signal },
+      // A reply that does not arrive in time must not cancel the daemon-side preparation: the
+      // reserve exists so the late result is recovered by request id (#13800). Real caller
+      // cancellation arrives through `signal`, which still cancels. `daemon/*` methods hold their
+      // socket's barrier lane, so status polls on this connection wait behind an in-flight
+      // prepare (each poll may answer queue-timeout) and settle once it finishes.
+      { timeoutMs: prepareCallBudgetMs, signal, cancelOnTimeout: false },
     );
   } catch (error) {
     if (signal?.aborted) {

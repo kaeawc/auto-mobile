@@ -358,7 +358,10 @@ export function resolveIosSnapshotAppListBackend(
 export interface IosInstallBackend {
   readonly kind: "simulator" | "physical";
   /** `timeoutMs` bounds a simulator install at the transport (it kills the child); physical ignores it. */
-  installApp(artifactPath: string, options?: { timeoutMs?: number }): Promise<void>;
+  installApp(
+    artifactPath: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
   listApps(): Promise<Record<string, unknown>[]>;
 }
 

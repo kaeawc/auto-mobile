@@ -38,6 +38,23 @@ create_mock_command() {
   [[ "$output" == *"All runtime dependencies verified."* ]]
 }
 
+@test "does not source the user's .bashrc, even one that exits or fails" {
+  for cmd in bun bunx ffmpeg shellcheck jq rg; do
+    create_mock_command "$cmd"
+  done
+  printf '#!/bin/sh\nprintf "Linux\\n"\n' > "${MOCK_BIN}/uname"
+  "$CHMOD" +x "${MOCK_BIN}/uname"
+  # A hostile rc: it would end the script silently if it were ever sourced.
+  printf 'echo rc-was-sourced >&2\nexit 1\n' > "${TEST_HOME}/.bashrc"
+  export PATH="${MOCK_BIN}:/usr/bin:/bin"
+  export HOME="$TEST_HOME"
+
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"All runtime dependencies verified."* ]]
+  [[ "$output" != *"rc-was-sourced"* ]]
+}
+
 @test "fails when bun is missing" {
   # Provide everything except bun — keep /usr/bin for bash/coreutils
   for cmd in bunx ffmpeg shellcheck jq rg; do

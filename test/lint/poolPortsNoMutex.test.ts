@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import path from "node:path";
-import { Visitor, type TSInterfaceDeclaration } from "oxc-parser";
-import { parseGuardSource } from "./astGuard";
+import { type TSInterfaceDeclaration } from "oxc-parser";
+import { parseGuardSource, readGuardFile, GuardVisitor as Visitor } from "./astGuard";
 
 // Collaborator ports of the device pool (and the binding fields they see are readonly) expose verbs (`withAssignmentLock`), never the mutex
 // itself, so a collaborator cannot lock without going through the pool (#11804).
@@ -103,7 +103,7 @@ describe("device pool ports", () => {
       ),
     ]
       .filter((name) => name.endsWith(".ts"))
-      .map((name): [string, string] => [name, readFileSync(path.join(DAEMON_DIR, name), "utf8")]);
+      .map((name): [string, string] => [name, readGuardFile(path.join(DAEMON_DIR, name))]);
     sourceCount = sources.length;
     mutexLeaks = sources.flatMap(([file, source]) => poolPortMutexLeaks(file, source));
     mapLeaks = sources.flatMap(([file, source]) => liveDeviceMapLeaks(file, source));
@@ -144,7 +144,7 @@ describe("device pool ports", () => {
 
   test("read-only collaborator state getters return ReadonlyMap/ReadonlySet", () => {
     for (const [file, names] of Object.entries(READ_ONLY_GETTERS)) {
-      const source = readFileSync(path.join(DAEMON_DIR, file), "utf8");
+      const source = readGuardFile(path.join(DAEMON_DIR, file));
       expect(mutableReadOnlyGetters(file, source, names)).toEqual([]);
     }
   });

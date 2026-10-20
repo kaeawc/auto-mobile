@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+
 import { join } from "node:path";
 import ts from "typescript";
 
@@ -20,7 +21,7 @@ const ALLOW_LIST = new Map<string, string>([
 ]);
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(join(ROOT, directory), { withFileTypes: true }).flatMap((entry) => {
+  return guardDirectoryEntries(join(ROOT, directory)).flatMap((entry) => {
     const file = `${directory}/${entry.name}`;
     if (entry.isDirectory()) {
       return sourceFiles(file);
@@ -71,7 +72,7 @@ const references = new Map(
   sourceFiles("src").map((file) => {
     const ast = ts.createSourceFile(
       file,
-      readFileSync(join(ROOT, file), "utf8"),
+      readGuardFile(join(ROOT, file)),
       ts.ScriptTarget.Latest,
       true,
     );

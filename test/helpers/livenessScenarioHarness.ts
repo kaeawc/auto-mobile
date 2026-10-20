@@ -23,7 +23,7 @@ import {
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
-import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
+import { defaultRecordingSessionCleanupDeps } from "../../src/daemon/recordingSessionCleanup";
 import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -252,7 +252,6 @@ const HOST_TOUCHING_DAEMON_METHODS = [
   "writeEarlyOwnerRecord",
   "writePidFile",
   "persistPidFileData",
-  "startHttpIngress",
   "bindControlSocket",
   "startServicesAfterSocketBind",
   "startAuxiliarySocket",
@@ -752,6 +751,8 @@ export class LivenessScenario {
         });
       },
       startHttpIngress: async () => void steps.push("startHttpIngress"),
+      prepareHttpToken: () => void steps.push("prepareHttpToken"),
+      publishHttpToken: () => void steps.push("publishHttpToken"),
       sweepStaleAppearanceConfigs: async () => void steps.push("sweepStaleAppearanceConfigs"),
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {

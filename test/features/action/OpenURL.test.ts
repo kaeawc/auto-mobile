@@ -31,30 +31,35 @@ const SIMULATOR_UDID = "ABCDEF01-1234-1234-1234-1234567890AB";
 const PHYSICAL_UDID = "00008110-000A4D8E1234567E";
 
 describe("OpenURL Android command output", () => {
-  test("package openLink preserves the transport refusal instead of returning text", async () => {
-    const typed = new AdbDeviceTransportUnavailableError(
-      "emulator-5554",
-      new Error("device offline"),
-    );
-    const launch = spyOn(LaunchApp.prototype, "execute").mockRejectedValue(
-      new Error("launch failed", { cause: typed }),
-    );
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    try {
-      const openURL = new OpenURL(
-        { name: "pixel", platform: "android", deviceId: "emulator-5554" },
-        new FakeAdbExecutor(),
-        null,
-        null,
-        timer,
+  test.each([false, "unknown"] as const)(
+    "package openLink preserves dispatch state %s",
+    async (dispatched) => {
+      const typed = new AdbDeviceTransportUnavailableError(
+        "emulator-5554",
+        new Error("device offline"),
+        1000,
+        dispatched,
       );
-      await expect(openURL.execute("package:com.example.app")).rejects.toBe(typed);
-    } finally {
-      launch.mockRestore();
-      timer.reset();
-    }
-  });
+      const launch = spyOn(LaunchApp.prototype, "execute").mockRejectedValue(
+        new Error("launch failed", { cause: typed }),
+      );
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      try {
+        const openURL = new OpenURL(
+          { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+          new FakeAdbExecutor(),
+          null,
+          null,
+          timer,
+        );
+        await expect(openURL.execute("package:com.example.app")).rejects.toBe(typed);
+      } finally {
+        launch.mockRestore();
+        timer.reset();
+      }
+    },
+  );
 
   test.each(["stdout", "stderr"] as const)(
     "returns failure when am start reports an unresolved intent on %s",

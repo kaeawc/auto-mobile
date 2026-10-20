@@ -1,16 +1,14 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 // Existing hooks are a ratchet: remove allowances as callers migrate to injection.
 const ALLOWLIST: Record<string, number> = {
   "appTools.ts": 0,
   "deviceReadinessProxyProvider.ts": 1,
-  "deviceSnapshotManager.ts": 1,
   "deviceTools.ts": 2,
-  "videoRecordingManager.ts": 1,
   "videoRecordingSegments.ts": 1,
-  "webrtcStreamManager.ts": 1,
 };
 const SERVER_DIR = join(import.meta.dir, "../../src/server");
 
@@ -20,7 +18,7 @@ describe("server tool test seams", () => {
     for (const file of readdirSync(SERVER_DIR, { recursive: true, encoding: "utf8" })
       .filter((name) => name.endsWith(".ts"))
       .sort()) {
-      const source = readFileSync(join(SERVER_DIR, file), "utf8");
+      const source = readGuardFile(join(SERVER_DIR, file));
       const count = [
         ...source.matchAll(
           /export function (set|reset)[A-Z]\w*(Factory|ForTesting|ForTests|Dependencies)\b/g,

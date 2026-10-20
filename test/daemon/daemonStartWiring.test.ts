@@ -1,13 +1,25 @@
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { DaemonBroker } from "../../src/daemon/daemonCore/DaemonBroker";
+import { daemonSocketServerDouble } from "../../src/daemon/daemonSocketServer";
 import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
+import {
+  FakeDaemonHttpTokenStore,
+  FileDaemonHttpTokenStore,
+  type DaemonHttpTokenStore,
+} from "../../src/daemon/daemonHttpToken";
+import { FakeHttpServer } from "../fakes/FakeHttpServer";
+import type { HttpListener } from "../../src/daemon/daemonHttpIngress";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import * as buildIdentity from "../../src/daemon/buildIdentity";
 import { daemonProcessOptions } from "../../src/daemon/daemonOptionScopes";
 import type { DaemonOptions } from "../../src/daemon/types";
@@ -23,7 +35,7 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-import * as videoManager from "../../src/server/videoRecordingManager";
+import * as videoManager from "../../src/daemon/videoRecordingManager";
 import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
 import { DEFAULT_VIDEO_RECORDING_CONFIG, VideoRecorderService } from "../../src/features/video";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -43,9 +55,16 @@ class InertIncumbentGuard extends IncumbentOwnerGuard {
   }
 }
 
-async function makeDaemon(options: DaemonOptions, guard = new InertIncumbentGuard()) {
+async function makeDaemon(
+  options: DaemonOptions,
+  guard = new InertIncumbentGuard(),
+  tokenStore: DaemonHttpTokenStore = new FakeDaemonHttpTokenStore(),
+  httpServer?: HttpListener,
+) {
   const timer = new FakeTimer();
   const daemon = new Daemon(options, {
+    httpTokenStore: tokenStore,
+    httpServerFactory: httpServer ? () => httpServer : undefined,
     timer,
     deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
     idGenerator: new FakeIdGenerator(),
@@ -53,7 +72,7 @@ async function makeDaemon(options: DaemonOptions, guard = new InertIncumbentGuar
     processGenerationToken: () => "memory-generation",
     incumbentOwnerGuard: guard,
   });
-  return { daemon, internals: daemon, timer };
+  return { daemon, internals: daemon, timer, tokenStore };
 }
 
 describe("Daemon.start() tool-call-end wiring", () => {
@@ -244,10 +263,26 @@ describe("Daemon.start() tool-call-end wiring", () => {
     }
   });
 
-  test("startup redrives recorder teardowns after pool initialization before binding the control socket", async () => {
-    const { daemon, internals } = await makeDaemon({ port: 3161, debug: true });
+  test("startup prepares the HTTP token before binding and publishes it after binding", async () => {
+    const server = new FakeHttpServer(false);
+    const listener: HttpListener = server;
+    const { daemon, internals, tokenStore } = await makeDaemon(
+      { port: 3161, debug: true },
+      undefined,
+      undefined,
+      server,
+    );
+    tokenStore.write("stale-token");
     const events: string[] = [];
     const spies = [
+      spyOn(listener, "listen").mockImplementation((_port, _host, callback) => {
+        expect(tokenStore.read()).toBe("stale-token");
+        events.push("listen");
+        queueMicrotask(() => {
+          callback();
+        });
+        return server;
+      }),
       spyOn(internals, "initializeDatabase").mockResolvedValue(undefined),
       spyOn(internals, "initializeDevicePoolWithTimeout").mockImplementation(async () => {
         events.push("pool");
@@ -262,7 +297,19 @@ describe("Daemon.start() tool-call-end wiring", () => {
       writeExitRecord: () => {},
       writeEarlyOwnerRecord: async () => {},
       openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
-      startHttpIngress: async () => {},
+      prepareHttpToken: () => {
+        internals.testHooks.processStartHost().prepareHttpToken();
+        events.push("prepare");
+      },
+      publishHttpToken: () => {
+        internals.testHooks.processStartHost().publishHttpToken();
+        expect(tokenStore.read()).not.toBe("stale-token");
+        events.push("token");
+      },
+      startHttpIngress: async () => {
+        await internals.testHooks.httpIngress.start();
+        events.push("http");
+      },
       sweepStaleAppearanceConfigs: async () => {},
       redriveRecorderTeardowns: async () => {
         events.push("redrive");
@@ -275,12 +322,138 @@ describe("Daemon.start() tool-call-end wiring", () => {
     };
     try {
       await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
-      expect(events).toEqual(["pool", "redrive", "bind"]);
+      expect(events).toEqual(["prepare", "listen", "http", "token", "pool", "redrive", "bind"]);
     } finally {
       spies.reverse().forEach((spy) => spy.mockRestore());
       internals.testHooks.stopSessionTimers();
     }
   });
+
+  test("starts broker recovery exactly once after the control socket bind", async () => {
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    daemon.testHooks.overrideStartupStages({ stopAfterFailedStartup: async () => {} });
+    const start = mock(() => {});
+    const install = spyOn(DaemonBroker.prototype, "installSessionBroker").mockResolvedValue({
+      start,
+    });
+    const spies = [
+      install,
+      spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(false),
+      spyOn(daemon, "initializeDatabase").mockResolvedValue(undefined),
+      spyOn(daemon, "initializeDevicePoolWithTimeout").mockResolvedValue(undefined),
+      spyOn(daemon, "initializeIosServices").mockResolvedValue(undefined),
+      spyOn(logger, "info").mockImplementation(() => {}),
+    ];
+    const bind = mock(async () => {
+      expect(install).toHaveBeenCalledTimes(1);
+      expect(start).not.toHaveBeenCalled();
+      return daemonSocketServerDouble({ isListening: () => true });
+    });
+    const host: DaemonStartHost = {
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      prepareHttpToken: () => {},
+      publishHttpToken: () => {},
+      startHttpIngress: async () => {},
+      sweepStaleAppearanceConfigs: async () => {},
+      redriveRecorderTeardowns: async () => true,
+      bindControlSocket: bind,
+      startServicesAfterSocketBind: async () => {
+        expect(bind).toHaveBeenCalledTimes(1);
+        expect(start).toHaveBeenCalledTimes(1);
+      },
+      startMaintenanceMonitors: () => {},
+    };
+    try {
+      // startOn runs the real startThroughSocketBind and startAfterSocketBind stages.
+      await daemon.startOn(host);
+      expect(bind).toHaveBeenCalledTimes(1);
+      expect(start).toHaveBeenCalledTimes(1);
+    } finally {
+      spies.reverse().forEach((spy) => spy.mockRestore());
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("token publication failure after HTTP binding stops startup before device discovery", async () => {
+    const { daemon, tokenStore } = await makeDaemon({ port: 3161 });
+    const database = spyOn(daemon, "initializeDatabase").mockResolvedValue(undefined);
+    const write = spyOn(tokenStore, "write").mockImplementation(() => {
+      throw new Error("Token publication failed");
+    });
+    let bound = false;
+    const startHttpIngress = async () => {
+      bound = true;
+    };
+    const host: DaemonStartHost = {
+      ...daemon.testHooks.processStartHost(),
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      startHttpIngress,
+    };
+    try {
+      await expect(daemon.startOn(host)).rejects.toThrow("Token publication failed");
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(bound).toBe(true);
+      expect(tokenStore.read()).toBeUndefined();
+    } finally {
+      write.mockRestore();
+      database.mockRestore();
+      daemon.testHooks.stopSessionTimers();
+    }
+  });
+
+  test.each([false, true])(
+    "failed HTTP bind preserves an existing token file (strictPort=%s)",
+    async (strictPort) => {
+      const directory = mkdtempSync(join(tmpdir(), "am-token-bind-"));
+      const path = join(directory, "daemon.token");
+      const store = new FileDaemonHttpTokenStore(path);
+      store.write("running-daemon-token");
+      const server = new FakeHttpServer(false);
+      const { daemon } = await makeDaemon(
+        { port: 3161, strictPort },
+        undefined,
+        new FileDaemonHttpTokenStore(path),
+        server,
+      );
+      const database = spyOn(daemon, "initializeDatabase").mockResolvedValue(undefined);
+      const listen = spyOn(server, "listen").mockImplementation(() => {
+        queueMicrotask(() =>
+          server.emit("error", Object.assign(new Error("bind EADDRINUSE"), { code: "EADDRINUSE" })),
+        );
+        return server;
+      });
+      const host: DaemonStartHost = {
+        ...daemon.testHooks.processStartHost(),
+        enterProcess: () => {},
+        publishForwardLeaseOwner: () => {},
+        writeExitRecord: () => {},
+        writeEarlyOwnerRecord: async () => {},
+        openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+        startHttpIngress: () => daemon.testHooks.httpIngress.start(),
+      };
+      try {
+        await expect(daemon.startOn(host)).rejects.toThrow(
+          strictPort ? "already in use" : "EADDRINUSE",
+        );
+        expect(listen).toHaveBeenCalledTimes(1);
+        expect(readFileSync(path, "utf8")).toBe("running-daemon-token");
+      } finally {
+        listen.mockRestore();
+        database.mockRestore();
+        daemon.testHooks.stopSessionTimers();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   test.each([
     { broker: false, bound: false, migrate: false },

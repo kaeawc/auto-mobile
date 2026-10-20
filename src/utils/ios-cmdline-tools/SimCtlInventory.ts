@@ -1,4 +1,5 @@
 import {
+  type SimCtlCatalog,
   AppleDevice,
   AppleDeviceRuntime,
   AppleDeviceType,
@@ -19,6 +20,8 @@ import { logger } from "../logger";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice } from "../../models";
 
 import { Timer } from "../SystemTimer";
+import { TTLCache } from "../cache/Cache";
+import { SingleFlight } from "../cache/SingleFlight";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 
@@ -76,7 +79,64 @@ export interface SimCtlInventoryContext {
   getDeviceInfo(udid: string): Promise<AppleDevice | null>;
   invalidateDeviceListCache(): void;
 }
+interface CatalogState {
+  cache: TTLCache<string, SimCtlCatalog>;
+  flight: SingleFlight<number, SimCtlCatalog>;
+  generation: number;
+}
+
 export class SimCtlInventory {
+  // Production clients share defaultTimer; fake timers keep independent hosts isolated.
+  private static readonly catalogs = new WeakMap<Timer, CatalogState>();
+
+  private catalogState(): CatalogState {
+    let state = SimCtlInventory.catalogs.get(this.context.timer);
+    if (!state) {
+      state = {
+        cache: new TTLCache(this.context.timer, { ttlMs: 60_000, maxEntries: 1 }),
+        flight: new SingleFlight(),
+        generation: 0,
+      };
+      SimCtlInventory.catalogs.set(this.context.timer, state);
+    }
+    return state;
+  }
+
+  async getCatalogChecked(signal = getAbortSignal()): Promise<SimCtlCatalog> {
+    signal?.throwIfAborted();
+    const state = this.catalogState();
+    const cached = state.cache.get("catalog");
+    if (cached) {
+      return cached;
+    }
+    const generation = state.generation;
+    return state.flight.run(
+      generation,
+      (flightSignal) =>
+        runWithAbortSignal(undefined, async () => {
+          const [runtimes, deviceTypes] = await Promise.all([
+            this.getRuntimesChecked(undefined, flightSignal),
+            this.getDeviceTypesChecked(flightSignal),
+          ]);
+          flightSignal?.throwIfAborted();
+          const catalog = { runtimes, deviceTypes };
+          // Invalidation fences a listing that began before a failed create.
+          if (state.generation === generation) {
+            state.cache.set("catalog", catalog);
+          }
+          return catalog;
+        }),
+      signal,
+      { cancelWhenAllWaitersAbort: true },
+    );
+  }
+
+  private invalidateCatalog(): void {
+    const state = this.catalogState();
+    state.generation++;
+    state.cache.clear();
+  }
+
   /** Read-only cache diagnostics; invalidation is the sole public mutation seam. */
   static deviceListSnapshots(): {
     cached: readonly DeviceInfo[] | null;
@@ -133,7 +193,13 @@ export class SimCtlInventory {
   private static recordedDeviceListRequestSequence = 0;
 
   private static inFlightDeviceListRequestSequence: number | null = null;
+  private static readonly simulatorDisplays = new Map<
+    string,
+    { lastUsedAt?: string; displays?: SimulatorDisplay[] }
+  >();
+
   static invalidateDeviceListCache(): void {
+    SimCtlInventory.simulatorDisplays.clear();
     SimCtlInventory.deviceListCache = null;
     SimCtlInventory.lastGoodDeviceList = null;
     SimCtlInventory.inFlightDeviceList = null;
@@ -379,48 +445,67 @@ export class SimCtlInventory {
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
-    const devices: DeviceInfo[] = [];
-    for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-      for (const device of runtimeDevices) {
-        logger.debug(`Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`);
-        const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
-        const profile = device.deviceTypeIdentifier
-          ? await this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
-          : null;
-        const displays = await this.displaysForBootedSimulator(device, deadlineMs, signal);
-        const deviceDisplays = simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
-        devices.push({
-          name: device.name,
-          platform: "ios",
-          deviceId: device.udid,
-          isRunning: device.state === "Booted",
-          state: device.state,
-          isAvailable: device.isAvailable,
-          availabilityError: device.availabilityError,
-          iosVersion,
-          osVersion: iosVersion,
-          formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
-          deviceType: device.deviceTypeIdentifier,
-          runtimeId,
-          runtime: runtimeId,
-          model: simulatorModel(device.model, profile),
-          // Simulator processes execute on the host architecture; this does not
-          // require another simctl invocation.
-          architecture: this.context.hostArchitecture,
-          screenWidth: profile?.pixelWidth ?? undefined,
-          screenHeight: profile?.pixelHeight ?? undefined,
-          screenDensity: profile?.dpi ?? undefined,
-          ...(deviceDisplays ? { displays: deviceDisplays } : {}),
-          capabilityInventory: iosSimulatorCapabilityInventory({
+    this.retireStoppedSimulatorDisplays(simulatorList);
+    const devices = await Promise.all(
+      Object.entries(simulatorList.devices).flatMap(([runtimeId, runtimeDevices]) =>
+        runtimeDevices.map(async (device): Promise<DeviceInfo> => {
+          logger.debug(
+            `Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`,
+          );
+          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
+          const [profile, displays] = await Promise.all([
+            device.deviceTypeIdentifier
+              ? this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
+              : Promise.resolve(null),
+            this.displaysForBootedSimulator(device, deadlineMs, signal),
+          ]);
+          const deviceDisplays = simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
+          return {
+            name: device.name,
+            platform: "ios",
+            deviceId: device.udid,
+            isRunning: device.state === "Booted",
+            state: device.state,
             isAvailable: device.isAvailable,
             availabilityError: device.availabilityError,
+            iosVersion,
+            osVersion: iosVersion,
+            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
+            deviceType: device.deviceTypeIdentifier,
+            runtimeId,
             runtime: runtimeId,
-          }),
-        } as DeviceInfo);
-      }
-    }
+            model: simulatorModel(device.model, profile),
+            // Simulator processes execute on the host architecture; this does not
+            // require another simctl invocation.
+            architecture: this.context.hostArchitecture,
+            screenWidth: profile?.pixelWidth ?? undefined,
+            screenHeight: profile?.pixelHeight ?? undefined,
+            screenDensity: profile?.dpi ?? undefined,
+            ...(deviceDisplays ? { displays: deviceDisplays } : {}),
+            capabilityInventory: iosSimulatorCapabilityInventory({
+              isAvailable: device.isAvailable,
+              availabilityError: device.availabilityError,
+              runtime: runtimeId,
+            }),
+          } as DeviceInfo;
+        }),
+      ),
+    );
     devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
     return devices;
+  }
+
+  private retireStoppedSimulatorDisplays(simulatorList: SimulatorList): void {
+    const bootedIds = new Set(
+      Object.values(simulatorList.devices).flatMap((devices) =>
+        devices.filter((device) => device.state === "Booted").map((device) => device.udid),
+      ),
+    );
+    for (const udid of SimCtlInventory.simulatorDisplays.keys()) {
+      if (!bootedIds.has(udid)) {
+        SimCtlInventory.simulatorDisplays.delete(udid);
+      }
+    }
   }
 
   async displaysForBootedSimulator(
@@ -429,15 +514,45 @@ export class SimCtlInventory {
     signal: AbortSignal | undefined,
   ): Promise<SimulatorDisplay[]> {
     if (device.state !== "Booted") {
+      SimCtlInventory.simulatorDisplays.delete(device.udid);
       return [];
+    }
+    // Duo panels can change with fold state without a new boot timestamp.
+    const cacheable = !device.deviceTypeIdentifier?.endsWith(".iPhone-Duo");
+    const cached = SimCtlInventory.simulatorDisplays.get(device.udid);
+    if (cacheable && cached?.displays && cached.lastUsedAt === device.lastUsedAt) {
+      return cached.displays;
     }
     const remainingMs =
       deadlineMs === undefined ? undefined : deadlineMs - this.context.timer.now();
     if (remainingMs !== undefined && remainingMs <= 0) {
       return [];
     }
+    return this.enumerateBootedSimulatorDisplays(device, remainingMs, signal, cacheable);
+  }
+
+  private async enumerateBootedSimulatorDisplays(
+    device: AppleDevice,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+    cacheable: boolean,
+  ): Promise<SimulatorDisplay[]> {
+    const entry: { lastUsedAt?: string; displays?: SimulatorDisplay[] } = {
+      lastUsedAt: device.lastUsedAt,
+    };
+    SimCtlInventory.simulatorDisplays.set(device.udid, entry);
     try {
-      return await this.context.enumerateDisplays(device.udid, remainingMs, signal);
+      const displays = await this.context.enumerateDisplays(device.udid, timeoutMs, signal);
+      // Empty startup reads must be retried on the next listing.
+      // An invalidation or a newer incarnation must not be overwritten by this read.
+      if (
+        cacheable &&
+        displays.length > 0 &&
+        SimCtlInventory.simulatorDisplays.get(device.udid) === entry
+      ) {
+        entry.displays = displays;
+      }
+      return displays;
     } catch (error) {
       if (signal?.aborted) {
         throw error;
@@ -528,7 +643,7 @@ export class SimCtlInventory {
 
     try {
       const devices = options.bypassCache
-        ? await this.listDevicesForBootedCheck(timeoutMs, options.signal)
+        ? await this.listDevicesForBootedCheck(timeoutMs, options.signal, true)
         : await this.sharedDeviceList();
       if (
         requestSequence !== undefined &&
@@ -625,7 +740,7 @@ export class SimCtlInventory {
       this.context.timer.now() - cached.timestamp < SimCtlInventory.DEVICE_LIST_CACHE_TTL
         ? cached.devices
         : options.bypassCache
-          ? await this.listDevicesForBootedCheck(timeoutMs, signal)
+          ? await this.listDevicesForBootedCheck(timeoutMs, signal, true)
           : await this.raceOwnDeadline(this.sharedDeviceList(), timeoutMs, signal);
     // A listing served from (or just recorded into) the cache keeps its recorded
     // stamp; only an unrecorded read is a new observation.
@@ -670,8 +785,14 @@ export class SimCtlInventory {
   async listDevicesForBootedCheck(
     timeoutMs: number | undefined,
     signal: AbortSignal | undefined,
+    refreshDisplays = false,
   ): Promise<DeviceInfo[]> {
+    if (refreshDisplays) {
+      SimCtlInventory.simulatorDisplays.clear();
+    }
     const deadlineMs = timeoutMs === undefined ? undefined : this.context.timer.now() + timeoutMs;
+    // Start optional static metadata alongside the raw list, without making it a readiness gate.
+    void this.context.deviceTypeProfiles.prepare?.();
     const simulatorList = await this.context.listSimulators(timeoutMs, signal);
     return this.mapSimulatorListToDeviceInfos(simulatorList, deadlineMs, signal);
   }
@@ -812,6 +933,12 @@ export class SimCtlInventory {
         undefined,
         signal,
       );
+    } catch (error) {
+      if (/invalid (?:runtime|device type)/i.test(errorMessage(error))) {
+        this.invalidateCatalog();
+      }
+      logger.warn(`Failed to create iOS simulator ${name}: ${errorMessage(error)}`, error);
+      throw error;
     } finally {
       // A freshly created simulator must be visible to the very next
       // listSimulatorImages() call, otherwise the provisioning path boots off a

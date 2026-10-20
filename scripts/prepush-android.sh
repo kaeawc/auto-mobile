@@ -153,7 +153,7 @@ run_sdk_api_check() {
 
 # Lint also consumes non-Kotlin inputs, so run before Kotlin-only early exits.
 # Module selection is shared with the PR Detekt job (one script, no drift).
-lint_selection="$(printf '%s\n' "${android_changes[@]}" | bash scripts/android/select-lint-modules.sh)"
+lint_selection="$(printf '%s\n' ${android_changes[@]+"${android_changes[@]}"} | bash scripts/android/select-lint-modules.sh)"
 if [[ "$root_gradle_changed" == true ]]; then
   lint_selection=all
 fi
@@ -171,7 +171,7 @@ if [[ "$lint_all" == true ]]; then
   (cd android && ./gradlew lintDebug --continue)
 elif [[ "${#lint_tasks[@]}" -gt 0 ]]; then
   echo "==> Android lint (${lint_tasks[*]})"
-  (cd android && ./gradlew "${lint_tasks[@]}" --continue)
+  (cd android && ./gradlew ${lint_tasks[@]+"${lint_tasks[@]}"} --continue)
 fi
 
 if [[ "$lint_all" == true || "$lint_baseline_changed" == true || "${#lint_tasks[@]}" -gt 0 ]]; then

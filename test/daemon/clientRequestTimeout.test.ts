@@ -2,7 +2,7 @@ import {
   MCP_ARGUMENT_BUDGET_CASES,
   MALFORMED_MCP_BUDGETS,
 } from "../helpers/mcpArgumentBudgetCases";
-import { describe, expect, test, beforeEach } from "bun:test";
+import { describe, expect, spyOn, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import {
   DaemonClient,
@@ -26,10 +26,14 @@ import {
   DEFAULT_START_DEVICE_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../../src/utils/deviceTimeouts";
-import { PROGRESS_NOTIFICATION_METHOD } from "../../src/daemon/types";
+import {
+  PROGRESS_NOTIFICATION_METHOD,
+  REQUEST_BUDGET_NOTIFICATION_METHOD,
+} from "../../src/daemon/types";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
@@ -883,4 +887,218 @@ test("client sends observe's legacy nested alias budget", async () => {
     { waitFor: { elementId: "missing", timeoutMs: 600_000 } },
     630_000,
   );
+});
+
+describe("DaemonClient lengthens its backstop to the daemon's resolved budget (#13797)", () => {
+  function setup() {
+    const timer = new FakeTimer();
+    const socket = new FakeSocket();
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
+    client.testHooks.attachSocket(socket);
+    const notifyBudget = (requestId: string, timeoutMs: number) =>
+      client.testHooks.simulateIncomingData(
+        Buffer.from(
+          JSON.stringify({
+            type: "daemon_notification",
+            method: REQUEST_BUDGET_NOTIFICATION_METHOD,
+            requestId,
+            timeoutMs,
+          }) + "\n",
+        ),
+      );
+    return { client, timer, socket, notifyBudget };
+  }
+
+  test("a tools/call frame tells the daemon the client understands budget notices", async () => {
+    const { client, socket } = setup();
+    const outcome = client.callTool("openLink", {}).catch((error: unknown) => error);
+    try {
+      expect(socket.getWrittenMessages(daemonRequestFrameSchema)[0]).toMatchObject({
+        acceptsRequestBudget: true,
+      });
+    } finally {
+      await client.close();
+      await outcome;
+    }
+  });
+
+  test("a larger daemon budget defers the backstop and cancels only at the new deadline", async () => {
+    const { client, timer, socket, notifyBudget } = setup();
+    const outcome = client.callTool("openLink", {}).catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    const sent = request.timeoutMs!;
+    try {
+      notifyBudget(request.id, sent + 60_000);
+      timer.advanceTime(sent + responseGraceMs);
+      expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
+      expect(socket.getWrittenMessages(daemonRequestFrameSchema)).toHaveLength(1);
+
+      timer.advanceTime(60_000 - 1);
+      expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
+      timer.advanceTime(1);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+      expect(socket.getWrittenMessages(daemonRequestFrameSchema)[1]).toMatchObject({
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: request.id },
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("a smaller or equal budget never shortens the backstop", async () => {
+    const { client, timer, socket, notifyBudget } = setup();
+    const outcome = client.callTool("openLink", {}).catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    const sent = request.timeoutMs!;
+    try {
+      notifyBudget(request.id, sent);
+      notifyBudget(request.id, 1);
+      timer.advanceTime(sent + responseGraceMs - 1);
+      expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
+      timer.advanceTime(1);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("progress after a larger budget notice does not shrink the backstop back (#13797)", async () => {
+    const { client, timer, socket, notifyBudget } = setup();
+    const outcome = client.callTool("openLink", {}, "tok-budget").catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    const sent = request.timeoutMs!;
+    const resolved = sent + 600_000;
+    const progress = () =>
+      client.testHooks.simulateIncomingData(
+        Buffer.from(
+          JSON.stringify({
+            type: "daemon_notification",
+            method: PROGRESS_NOTIFICATION_METHOD,
+            progressToken: "tok-budget",
+            requestId: request.id,
+            progress: 1,
+            total: 1,
+          }) + "\n",
+        ),
+      );
+    try {
+      notifyBudget(request.id, resolved);
+      timer.advanceTime(sent + 1_000);
+      progress();
+      // Well past the budget the request was sent with and past the default progress ceiling.
+      timer.advanceTime(resolved - sent - 2_000);
+      expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
+      timer.advanceTime(1_000 + responseGraceMs);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("a notice for an unknown or finished request is ignored", async () => {
+    const { client, notifyBudget } = setup();
+    try {
+      expect(() => notifyBudget("nope", 999_999)).not.toThrow();
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", () => {
+  function setup() {
+    const timer = new FakeTimer();
+    const socket = new FakeSocket();
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
+    client.testHooks.attachSocket(socket);
+    return { client, timer, socket };
+  }
+
+  test("a lost reply cancels the daemon-side request by default", async () => {
+    const { client, timer, socket } = setup();
+    const outcome = client
+      .callDaemonMethod("daemon/status", {}, { timeoutMs: 5000 })
+      .catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    try {
+      timer.advanceTime(request.timeoutMs! + responseGraceMs);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+      const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
+      expect(frames[1]).toMatchObject({
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: request.id },
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("cancelOnTimeout:false times the wait out without cancelling the daemon's work", async () => {
+    const { client, timer, socket } = setup();
+    const outcome = client
+      .callDaemonMethod("daemon/prepareSession", {}, { timeoutMs: 5000, cancelOnTimeout: false })
+      .catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    try {
+      timer.advanceTime(request.timeoutMs! + responseGraceMs);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+      expect(socket.getWrittenMessages(daemonRequestFrameSchema)).toHaveLength(1);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("a late answer to a cancelOnTimeout:false request is dropped without an unknown-id warning", async () => {
+    const { client, timer, socket } = setup();
+    const warn = spyOn(logger, "warn");
+    const outcome = client
+      .callDaemonMethod("daemon/prepareSession", {}, { timeoutMs: 5000, cancelOnTimeout: false })
+      .catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    try {
+      timer.advanceTime(request.timeoutMs! + responseGraceMs);
+      expect(await outcome).toBeInstanceOf(McpTimeoutError);
+      client.testHooks.simulateIncomingData(
+        Buffer.from(
+          JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: {} }) +
+            "\n",
+        ),
+      );
+      expect(
+        warn.mock.calls.filter(([message]) => String(message).includes("unknown request ID")),
+      ).toEqual([]);
+    } finally {
+      warn.mockRestore();
+      await client.close();
+    }
+  });
+
+  test("cancelOnTimeout:false still cancels when the caller aborts", async () => {
+    const { client, socket } = setup();
+    const controller = new AbortController();
+    const outcome = client
+      .callDaemonMethod(
+        "daemon/prepareSession",
+        {},
+        {
+          timeoutMs: 5000,
+          cancelOnTimeout: false,
+          signal: controller.signal,
+          abortMode: "request",
+        },
+      )
+      .catch((error: unknown) => error);
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
+    try {
+      controller.abort(new Error("proxy closing"));
+      expect(await outcome).toBeInstanceOf(DaemonUnavailableError);
+      expect(socket.getWrittenMessages(daemonRequestFrameSchema)[1]).toMatchObject({
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: request.id },
+      });
+    } finally {
+      await client.close();
+    }
+  });
 });

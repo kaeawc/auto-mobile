@@ -61,9 +61,10 @@ export class ElementResolver {
     // Keyboard keys are not part of what `observe` presents, so an action's selector
     // cannot see them (issue #10225). Indices stay snapshot indices, so only the
     // searched list shrinks.
+    const available = snapshot.searchedNodes ?? snapshot.nodes;
     const searched = intent.excludeImeKeys
-      ? snapshot.nodes.filter((node) => !isImeKeyEntry(node))
-      : snapshot.nodes;
+      ? available.filter((node) => !isImeKeyEntry(node))
+      : available;
     return this.resolveInNodes(snapshot, selector, intent, searched);
   }
 
@@ -724,7 +725,7 @@ export class ElementResolver {
         selector.match ?? "exact",
         intent,
         selector.caseSensitive,
-        guardNamespaceNodes(snapshot.nodes, intent),
+        guardNamespaceNodes(snapshot.nodes, intent, snapshot.searchedNodes),
       );
     }
     if (selector.testTag !== undefined) {

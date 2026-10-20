@@ -50,10 +50,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-class NavigationFacetTest {
+internal abstract class NavigationFacetFixture {
 
   /** In-memory graph so nothing the facet touches reaches a real socket. */
-  private fun testGraph(): AutoMobileGraphProvider {
+  protected fun testGraph(): AutoMobileGraphProvider {
     val client = FakeAutoMobileClient()
     return object : AutoMobileGraphProvider {
       override val autoMobileClient = client
@@ -65,10 +65,10 @@ class NavigationFacetTest {
     }
   }
 
-  private fun column(deviceId: String = "dev-1") =
+  protected fun column(deviceId: String = "dev-1") =
     DeviceColumn(deviceId = deviceId, name = "Pixel", platform = Platform.Android)
 
-  private fun screen(name: String) =
+  protected fun screen(name: String) =
     ScreenNode(
       id = name.lowercase(),
       name = name,
@@ -79,7 +79,7 @@ class NavigationFacetTest {
     )
 
   /** A [NavigationDataSource] that returns a fixed result and counts invocations. */
-  private class StubNavigationDataSource(private val result: Result<NavigationGraph>) :
+  protected class StubNavigationDataSource(private val result: Result<NavigationGraph>) :
     NavigationDataSource {
     val callCount = AtomicInteger(0)
 
@@ -89,7 +89,7 @@ class NavigationFacetTest {
     }
   }
 
-  private fun navUpdate(appId: String?, currentScreen: String? = null) =
+  protected fun navUpdate(appId: String?, currentScreen: String? = null) =
     NavigationGraphStreamUpdate(
       timestamp = 1L,
       appId = appId,
@@ -98,6 +98,41 @@ class NavigationFacetTest {
       currentScreen = currentScreen,
     )
 
+  /** A [SharedFlow] that throws on collection, to simulate a stream read/parse failure. */
+  protected fun throwingNavFlow(error: Throwable): SharedFlow<NavigationGraphStreamUpdate> =
+    object : SharedFlow<NavigationGraphStreamUpdate> {
+      override val replayCache: List<NavigationGraphStreamUpdate> = emptyList()
+
+      override suspend fun collect(collector: FlowCollector<NavigationGraphStreamUpdate>): Nothing =
+        throw error
+    }
+
+  protected fun screenWithShot(name: String, screenshotUri: String) =
+    screen(name).copy(screenshotUri = screenshotUri)
+
+  /** A [ScreenshotLoader] that records load/invalidate calls; returns no bitmap (unused here). */
+  protected class RecordingScreenshotLoader : ScreenshotLoader {
+    // Cross-thread: load() runs on Dispatchers.IO, invalidate() on the composition thread.
+    val loaded = CopyOnWriteArrayList<String>()
+    val invalidated = CopyOnWriteArrayList<String>()
+
+    override suspend fun load(uri: String): ImageBitmap? {
+      loaded += uri
+      return null
+    }
+
+    override fun invalidate(uri: String) {
+      invalidated += uri
+    }
+
+    override fun clearCache() = Unit
+
+    override fun cacheSize(): Int = 0
+  }
+}
+
+@OptIn(ExperimentalTestApi::class)
+internal class NavigationFacetTest : NavigationFacetFixture() {
   @Test
   fun `stream build context reaches dashboard provenance and null restores fallback`() =
     runComposeUiTest {
@@ -476,7 +511,10 @@ class NavigationFacetTest {
       }
       onNodeWithContentDescription("Fog focus available").assertExists()
     }
+}
 
+@OptIn(ExperimentalTestApi::class)
+internal class NavigationFacetAppGraphTest : NavigationFacetFixture() {
   @Test
   fun `two same-app panes render the same shared app graph`() = runComposeUiTest {
     val shared = NavigationGraph(listOf(screen("Home")), emptyList())
@@ -868,16 +906,10 @@ class NavigationFacetTest {
         onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
       )
     }
+}
 
-  /** A [SharedFlow] that throws on collection, to simulate a stream read/parse failure. */
-  private fun throwingNavFlow(error: Throwable): SharedFlow<NavigationGraphStreamUpdate> =
-    object : SharedFlow<NavigationGraphStreamUpdate> {
-      override val replayCache: List<NavigationGraphStreamUpdate> = emptyList()
-
-      override suspend fun collect(collector: FlowCollector<NavigationGraphStreamUpdate>): Nothing =
-        throw error
-    }
-
+@OptIn(ExperimentalTestApi::class)
+internal class NavigationFacetRecoveryTest : NavigationFacetFixture() {
   @Test
   fun `routes a throwing stream collection to the retryable error state instead of crashing`() =
     runComposeUiTest {
@@ -1196,29 +1228,6 @@ class NavigationFacetTest {
 
     assertEquals("a provider swap must re-resolve the loader", 2, used.size)
     assertNotSame("the loader must come from the new provider after a swap", used[0], used[1])
-  }
-
-  private fun screenWithShot(name: String, screenshotUri: String) =
-    screen(name).copy(screenshotUri = screenshotUri)
-
-  /** A [ScreenshotLoader] that records load/invalidate calls; returns no bitmap (unused here). */
-  private class RecordingScreenshotLoader : ScreenshotLoader {
-    // Cross-thread: load() runs on Dispatchers.IO, invalidate() on the composition thread.
-    val loaded = CopyOnWriteArrayList<String>()
-    val invalidated = CopyOnWriteArrayList<String>()
-
-    override suspend fun load(uri: String): ImageBitmap? {
-      loaded += uri
-      return null
-    }
-
-    override fun invalidate(uri: String) {
-      invalidated += uri
-    }
-
-    override fun clearCache() = Unit
-
-    override fun cacheSize(): Int = 0
   }
 
   @Test

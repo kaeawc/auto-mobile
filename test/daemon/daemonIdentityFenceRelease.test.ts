@@ -12,7 +12,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): FakeDeviceManager {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [...devices];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
   return deviceManager;
 }
 

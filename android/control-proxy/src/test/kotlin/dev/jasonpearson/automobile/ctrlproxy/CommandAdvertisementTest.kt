@@ -79,7 +79,9 @@ class CommandAdvertisementTest {
   @Test
   fun `complete advertisement contains every sealed request on each supported API`() {
     for (sdk in listOf(29, 30, 31, 32, 33, 34, 35, 36)) {
-      val commands = WebSocketServer(port = 0, scope = scope, sdkInt = { sdk }).supportedCommands()
+      val commands =
+        WebSocketServer(port = 0, scope = scope, options = WebSocketServerOptions(sdkInt = { sdk }))
+          .supportedCommands()
       assertTrue("All sealed requests on API $sdk", commands.containsAll(sealedRequestTypes))
       assertTrue("Request ID echo on API $sdk", commands.contains("request_id_echo_v1"))
       assertCoreCommands(commands)
@@ -158,7 +160,11 @@ class CommandAdvertisementTest {
   @Test
   fun `advertised requests match the wire decoder discriminator names`() {
     val commands =
-      WebSocketServer(port = 0, scope = scope, sdkInt = { GestureDisplayRouting.DISPLAY_API })
+      WebSocketServer(
+          port = 0,
+          scope = scope,
+          options = WebSocketServerOptions(sdkInt = { GestureDisplayRouting.DISPLAY_API }),
+        )
         .supportedCommands()
         .filterNot { it in knownFlags }
     // protocolJson.decodeFromString<WebSocketRequest> uses this sealed serializer's subtype lookup.
@@ -178,7 +184,11 @@ class CommandAdvertisementTest {
     // Every sealed subtype must therefore be dispatched; a new subtype grows this expected set
     // automatically, so replacing the hierarchy derivation with an incomplete static list fails.
     val advertisedRequests =
-      WebSocketServer(port = 0, scope = scope, sdkInt = { GestureDisplayRouting.DISPLAY_API })
+      WebSocketServer(
+          port = 0,
+          scope = scope,
+          options = WebSocketServerOptions(sdkInt = { GestureDisplayRouting.DISPLAY_API }),
+        )
         .supportedCommands()
         .toSet() - knownFlags
     assertEquals(sealedRequestTypes, advertisedRequests)

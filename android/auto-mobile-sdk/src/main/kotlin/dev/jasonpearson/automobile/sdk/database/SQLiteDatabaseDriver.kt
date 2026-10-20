@@ -719,7 +719,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         }
       }
     } catch (e: SQLiteReadOnlyDatabaseException) {
-      if (mapReadOnlyFailureToPolicyError) throw DatabaseError.MutationNotAllowed()
+      if (mapReadOnlyFailureToPolicyError) throw DatabaseError.MutationNotAllowed().initCause(e)
       throw databaseError(e)
     } catch (e: SQLiteException) {
       throw databaseError(e)
@@ -813,12 +813,8 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       val db = cached.database
       val needsWritableConnection = !readOnly && db.isReadOnly
       val needsExactReadOnlyConnection = readOnly && requireExactReadOnly && !db.isReadOnly
-      if (
-        identity == null ||
-          identity != cached.identity ||
-          needsWritableConnection ||
-          needsExactReadOnlyConnection
-      ) {
+      val identityChanged = identity == null || identity != cached.identity
+      if (identityChanged || needsWritableConnection || needsExactReadOnlyConnection) {
         closeDatabase(db)
         openDatabases.remove(path)
       } else {

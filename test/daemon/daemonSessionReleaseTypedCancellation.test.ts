@@ -38,7 +38,7 @@ const OWNER_CONNECTION = "typed-cancellation-owner";
 function stubPoolDiscovery(devicePool: DevicePool): void {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
 }
 
 function expectTerminalRefusal(execution: ActiveExecution, reason: string): void {
@@ -271,7 +271,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       const devicePool = daemon.getDevicePool();
       const deviceManager = new FakeDeviceManager();
       deviceManager.bootedDevices = [DEVICE, DERIVED_DEVICE];
-      Object.assign(devicePool, { deviceManager });
+      devicePool.testHooks.deviceManager = deviceManager;
       await devicePool.initializeWithDevices([DEVICE, DERIVED_DEVICE]);
       await devicePool.bindOrReuseDeviceSession({
         sessionId: BASE,

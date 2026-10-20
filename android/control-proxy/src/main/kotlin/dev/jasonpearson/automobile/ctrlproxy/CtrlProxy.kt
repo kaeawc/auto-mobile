@@ -2052,20 +2052,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           WebSocketServer(
             port = 8765,
             scope = serviceScope,
-            messageHandler = queuedHandler,
-            onClientDisconnected = { client ->
-              queuedHandler.disconnect(client)
-              gestureController.cancelStreamsOwnedBy(client)
-              // Its in-flight host requests have no socket to answer on, even if another remains.
-              hostPrototypeHttp.onHostLost(client)
-            },
-            onClientCountChanged = { count, session ->
-              if (count == 0) hostPrototypeHttp.onHostLost()
-              serviceScope.launch { prototypes.onClientCountChanged(count, session) }
-            },
-            onPrototypeResponse = hostPrototypeHttp::onResponse,
-            onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
-            onPermanentStartFailure = { disableSelf() },
+            options =
+              WebSocketServerOptions(
+                messageHandler = queuedHandler,
+                onClientDisconnected = { client ->
+                  queuedHandler.disconnect(client)
+                  gestureController.cancelStreamsOwnedBy(client)
+                  // Its in-flight host requests have no socket to answer on, even if another
+                  // remains.
+                  hostPrototypeHttp.onHostLost(client)
+                },
+                onClientCountChanged = { count, session ->
+                  if (count == 0) hostPrototypeHttp.onHostLost()
+                  serviceScope.launch { prototypes.onClientCountChanged(count, session) }
+                },
+                onPrototypeResponse = hostPrototypeHttp::onResponse,
+                onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
+                onPermanentStartFailure = { disableSelf() },
+              ),
           )
         webSocketLifecycle.replace(webSocketServer)
         webSocketServer.start()

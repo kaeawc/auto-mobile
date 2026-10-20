@@ -28,9 +28,7 @@ internal class TapGestureClassifier(private val slopPx: Int, private val timeout
         val duration = nowMs - downTime
         val dx = x - downX
         val dy = y - downY
-        if (
-          hadDown && dx * dx + dy * dy < slopPx * slopPx && duration >= 0 && duration < timeoutMs
-        ) {
+        if (hadDown && dx * dx + dy * dy < slopPx * slopPx && isWithinTapTimeout(duration)) {
           Result.Tap(x, y, duration)
         } else {
           Result.NotTap
@@ -38,6 +36,8 @@ internal class TapGestureClassifier(private val slopPx: Int, private val timeout
       }
       Action.OTHER -> Result.NoDecision
     }
+
+  private fun isWithinTapTimeout(duration: Long): Boolean = duration >= 0 && duration < timeoutMs
 
   internal enum class Action {
     DOWN,

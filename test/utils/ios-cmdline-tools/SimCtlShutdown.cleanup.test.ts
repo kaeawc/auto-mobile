@@ -7,10 +7,13 @@ import {
 import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 
-function harness(states: string[]) {
+function harness(states: string[], autoAdvance = true) {
   const timer = new FakeTimer();
-  timer.enableAutoAdvance();
+  if (autoAdvance) {
+    timer.enableAutoAdvance();
+  }
   const lease = {
     state: { mutex: new Mutex(), lastBootSucceeded: true, ownerToken: {} },
     release: () => {},
@@ -30,6 +33,79 @@ function harness(states: string[]) {
 }
 
 describe("failed boot cleanup settlement", () => {
+  test("confirms Shutdown after a transient state read failure", async () => {
+    const h = harness(["Shutdown"]);
+    const budgets: number[] = [];
+    h.context.readSimulatorState = async (_udid, timeout) => {
+      budgets.push(timeout);
+      if (budgets.length === 1) {
+        throw new Error("discovery temporarily unavailable");
+      }
+      return "Shutdown";
+    };
+
+    await h.shutdown.shutdownAfterFailedStart("sim", h.lease);
+
+    expect(budgets).toEqual([60_000, 59_000]);
+    expect(h.timer.getSleepHistory()).toEqual([1_000]);
+    expect(h.timer.now()).toBe(1_000);
+    expect(h.lease.state.lastBootSucceeded).toBe(false);
+    expect(h.lease.state.ownerToken).toBeUndefined();
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("reports the last read error when discovery fails until the cleanup deadline", async () => {
+    const h = harness(["Shutdown"]);
+    let reads = 0;
+    h.context.readSimulatorState = async () => {
+      throw new Error(`discovery failure ${++reads}`);
+    };
+
+    const failure = await h.shutdown
+      .shutdownAfterFailedStart("sim", h.lease)
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) {
+      throw new Error("Expected cleanup to fail with an error");
+    }
+    expect(failure.message).toContain("cleanup timed out");
+    expect(failure.message).toContain("discovery failure 60");
+    expect(reads).toBe(60);
+    expect(h.timer.now()).toBe(DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS);
+    expect(h.lease.state.lastBootSucceeded).toBe(true);
+    expect(h.lease.state.ownerToken).toBeDefined();
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("honours cancellation during the retry backoff without another read", async () => {
+    const h = harness(["Shutdown"], false);
+    const controller = new AbortController();
+    const reason = new Error("cleanup cancelled");
+    let reads = 0;
+    h.context.readSimulatorState = async () => {
+      reads++;
+      h.timer.setTimeout(() => controller.abort(reason), 250);
+      throw new Error("discovery unavailable");
+    };
+    const outcome = h.shutdown
+      .shutdownSimulatorCoordinated(
+        "sim",
+        DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+        controller.signal,
+        h.lease.state.ownerToken,
+      )
+      .catch((error: unknown) => error);
+
+    expect(
+      await settleByFakeEvents(h.timer, outcome, { description: "cleanup cancellation" }),
+    ).toBe(reason);
+    expect(reads).toBe(1);
+    expect(h.timer.now()).toBe(250);
+    expect(h.lease.state.lastBootSucceeded).toBe(true);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("waits for Shutting Down to become Shutdown", async () => {
     const h = harness(["Shutting Down", "Shutdown"]);
     await h.shutdown.shutdownAfterFailedStart("sim", h.lease);

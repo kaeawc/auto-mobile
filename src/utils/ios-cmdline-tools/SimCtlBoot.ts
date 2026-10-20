@@ -249,12 +249,21 @@ export class SimCtlBoot {
         `[iOS] Boot cleanup for ${udid} was unconfirmed: ${errorMessage(cleanupError)}`,
         cleanupError,
       );
-      // Keep the original identity and subtype so timeout/retry classification survives.
+      // Shared abort reasons belong to every signal consumer; annotate only a copy.
+      if (error instanceof Error && error === getAbortSignal()?.reason) {
+        error =
+          error instanceof DOMException
+            ? new DOMException(error.message, error.name)
+            : Object.create(Object.getPrototypeOf(error), Object.getOwnPropertyDescriptors(error));
+      }
+      // Keep owned error identity and subtype so timeout/retry classification survives.
       if (error instanceof Error && Object.isExtensible(error)) {
+        const note = `Simulator cleanup was unconfirmed: ${errorMessage(cleanupError)}`;
         Object.defineProperties(error, {
+          message: { value: `${error.message} ${note}`, writable: true, configurable: true },
           cleanupError: { value: cleanupError, configurable: true },
           cleanupNote: {
-            value: `Simulator cleanup was unconfirmed: ${errorMessage(cleanupError)}`,
+            value: note,
             configurable: true,
           },
         });

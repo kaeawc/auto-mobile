@@ -172,34 +172,52 @@ export class SimCtlShutdown {
     signal?: AbortSignal,
   ): Promise<void> {
     let state: string | undefined;
+    let lastReadError: string | undefined;
     for (let attempt = 1; ; attempt++) {
-      const remainingMs = this.remainingCleanupMs(udid, deadlineMs, state);
-      state = await raceWithDeadline(
-        () => this.context.readSimulatorState(udid, remainingMs, signal),
-        {
-          timer: this.context.timer,
-          timeoutMs: remainingMs,
-          signal,
-          label: `iOS simulator ${udid} cleanup state read`,
-        },
-      );
+      signal?.throwIfAborted();
+      const remainingMs = this.remainingCleanupMs(udid, deadlineMs, state, lastReadError);
+      try {
+        state = await raceWithDeadline(
+          () => this.context.readSimulatorState(udid, remainingMs, signal),
+          {
+            timer: this.context.timer,
+            timeoutMs: remainingMs,
+            signal,
+            label: `iOS simulator ${udid} cleanup state read`,
+          },
+        );
+      } catch (error) {
+        signal?.throwIfAborted();
+        lastReadError = errorMessage(error);
+        // A failed discovery read cannot confirm shutdown; retry within the shared budget.
+        logger.warn(`[iOS] Cleanup state read failed for ${udid}: ${lastReadError}`, error);
+      }
       if (state === "Shutdown") {
         return;
       }
-      await this.context.timer.sleep(
-        Math.min(
-          SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt),
-          this.remainingCleanupMs(udid, deadlineMs, state),
-        ),
+      const delayMs = Math.min(
+        SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt),
+        this.remainingCleanupMs(udid, deadlineMs, state, lastReadError),
       );
+      await raceWithDeadline(() => this.context.timer.sleep(delayMs), {
+        timer: this.context.timer,
+        signal,
+        label: `iOS simulator ${udid} cleanup polling`,
+      });
     }
   }
 
-  private remainingCleanupMs(udid: string, deadlineMs: number, state?: string): number {
+  private remainingCleanupMs(
+    udid: string,
+    deadlineMs: number,
+    state?: string,
+    lastReadError?: string,
+  ): number {
     const remainingMs = deadlineMs - this.context.timer.now();
     if (remainingMs <= 0) {
       throw new ActionableError(
-        `iOS simulator ${udid} cleanup timed out before reaching Shutdown (state: ${state ?? "unknown"}).`,
+        `iOS simulator ${udid} cleanup timed out before reaching Shutdown (state: ${state ?? "unknown"}).` +
+          (lastReadError === undefined ? "" : ` Last state read failed: ${lastReadError}`),
       );
     }
     return remainingMs;

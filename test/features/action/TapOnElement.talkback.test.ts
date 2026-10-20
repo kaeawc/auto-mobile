@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { afterEach, beforeEach, describe, expect, mock, test, spyOn } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -1187,10 +1188,9 @@ describe("TapOnElement screen-reader navigation result", () => {
     });
     command.refreshViewHierarchy = async () => observation.viewHierarchy ?? null;
     coordinate?.driver.setElements([targetElement], 0);
-    spyOn(command, "observedInteraction").mockImplementation(async (block) => ({
-      ...(await block(observation)),
-      observation,
-    }));
+    spyOn(command, "observedInteraction").mockImplementation(
+      runBlockWithEnvelope(() => observation, { observation }),
+    );
     if (!observation.viewHierarchy) {
       throw new Error("Expected target hierarchy");
     }

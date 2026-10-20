@@ -229,7 +229,12 @@ test.each(["reservation", "shutdown", "deferred release"])(
       release = reservation?.release;
     }
     if (kind === "deferred release") {
-      Reflect.get(h.pool, "deferredDeviceReleases").set(h.device.deviceId, {});
+      h.pool.testHooks.deferredDeviceReleases.set(h.device.deviceId, {
+        device: h.pool.getDevice(h.device.deviceId)!,
+        sessionId: "pending",
+        assignmentCount: 0,
+        cleanup: Promise.resolve(),
+      });
     }
     try {
       const result = await h.screen.executeDeviceRead(undefined, "none");

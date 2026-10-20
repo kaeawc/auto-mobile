@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../../helpers/observedInteractionStub";
 import { BaseVisualChange } from "../../../../src/features/action/BaseVisualChange";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -83,7 +84,7 @@ function harness({
     displayTransitions: transitions,
   });
   // Isolate dispatch timing from BaseVisualChange's unrelated post-observe polling.
-  action.observedInteraction = async (run) => run(platformObservation);
+  action.observedInteraction = runBlockWith(platformObservation);
   const commands = () => adb.getAllCommands().filter((command) => command.includes("touchscreen"));
   const legs = () =>
     route === "ctrlproxy"

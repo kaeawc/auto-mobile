@@ -1077,7 +1077,7 @@ arranged(
 arranged("a successful device rebind with display omitted clears the old pin", async () => {
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [device, { ...device, deviceId: "other" }]);
-  Reflect.set(pool, "deviceManager", utils);
+  pool.testHooks.deviceManager = utils;
   await pool.initializeWithDevices([device, { ...device, deviceId: "other" }]);
   sessions.setDisplayPin("one", "inner");
   const response = await ToolRegistry.getTool("setActiveDevice")!.handler({

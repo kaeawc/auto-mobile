@@ -168,22 +168,17 @@ Two `tsgo --noEmit` passes run in CI (`scripts/typecheck-baseline.sh`):
 
 ```bash
 bun run typecheck             # src (tsconfig.json): NO baseline, any error fails
-bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json) vs the count baseline
-bun run typecheck:test:update # regenerate the test baseline after fixing errors
+bun run typecheck:test        # every test/**/*.ts (tsconfig.test.json): NO baseline, any error fails
 ```
 
-The src baseline reached zero and was deleted (issues #3001, #11787). The test gate
-(`scripts/typecheck-test-baseline.txt`) is a count-only one-way ratchet of compact
-`<file> <TScode> <count>` rows: a count may shrink, a higher count or new file/code pair
-fails, and `typecheck:test:update` refuses to grow without
-`bash scripts/typecheck-baseline.sh --project=test --update --allow-grow`. Both projects
-resolve `bun:*` modules and the `Bun` global from `@types/bun` via the `types` list in
-their tsconfig; if it is missing the gate exits 4 on TS2688 / unresolved `bun:` modules in
-every mode (never baselined), so a broken install cannot pass silently. Run time is about
-2 s (src) and 6 s (test). The baseline is version-sensitive: `@typescript/native-preview`
-is a dated preview build, so regenerate it in the same PR that bumps it (the
-`# generated-with:` header records the version and the gate warns on drift). When you FIX
-test type errors, run `bun run typecheck:test:update` and commit the smaller baseline.
+Both baselines reached zero and were deleted (issues #3001, #11787): there is no
+type-error baseline and no `--update` path, so any type error in `src/` or `test/` fails.
+Both projects resolve `bun:*` modules and the `Bun` global from `@types/bun` via the
+`types` list in their tsconfig; if it is missing the gate exits 4 on TS2688 / unresolved
+`bun:` modules, so a broken install cannot pass silently. Run time is about 2 s (src) and
+6 s (test). `as any` and `as unknown as` in `test/` are hard `oxlint` errors
+(`auto-mobile/no-as-any`, `auto-mobile/no-unknown-cast`); the former test cast baselines
+are deleted too. Fix the code (typed fakes, `Pick<>` views, `satisfies`, type guards).
 
 ## oxlint ratchet baseline
 

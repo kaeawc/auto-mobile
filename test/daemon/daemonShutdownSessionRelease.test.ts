@@ -32,7 +32,7 @@ import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): void {
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [...devices];
-  Object.assign(devicePool, { deviceManager });
+  devicePool.testHooks.deviceManager = deviceManager;
 }
 
 describe("Daemon shutdown session release (issue #5303)", () => {
@@ -98,7 +98,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     // One allocation attempt proves another session cannot claim the busy device.
-    Object.assign(pool, { DEVICE_WAIT_TIMEOUT_MS: 1000 });
+    pool.testHooks.DEVICE_WAIT_TIMEOUT_MS = 1000;
     const device: BootedDevice = {
       name: "Physical Android",
       deviceId: "release-device",

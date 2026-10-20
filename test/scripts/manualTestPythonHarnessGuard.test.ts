@@ -61,7 +61,7 @@ test("resolve emits only the server entry point and sanitized env", async () => 
     throw new Error(result.message);
   }
   const value = JSON.parse(result.stdout);
-  expect(probes).toEqual([deps.env.AUTOMOBILE_DAEMON_SOCKET_PATH]);
+  expect([deps.env.AUTOMOBILE_DAEMON_SOCKET_PATH]).toEqual(probes);
   expect(value.command).toBe("/bin/bun");
   expect(value.args).toEqual(["/built/index.js"]);
   expect(value.env).toEqual(deps.env);
@@ -252,7 +252,7 @@ test("resolve requires the exact private control socket to answer before checkin
     message:
       "Run private-daemon.ts start first; a Python stdio client must not wake a dead daemon. Injected socket refusal",
   });
-  expect(probes).toEqual([deps.env.AUTOMOBILE_DAEMON_SOCKET_PATH]);
+  expect([deps.env.AUTOMOBILE_DAEMON_SOCKET_PATH]).toEqual(probes);
 });
 test("resolve supplies the default reason when the socket probe has none", async () => {
   const { deps } = fixture();

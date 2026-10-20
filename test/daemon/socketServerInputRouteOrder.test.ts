@@ -23,64 +23,61 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     "/fake/order.sock",
     createFakeDaemonState(),
     new FakeTimer(),
-  );
-  server["resolveInputTargetDevice"] = async (_platform, _deviceId, _session, action, bypass) => {
+  ).testHooks.input;
+  server.resolveInputTargetDevice = async (_platform, _deviceId, _session, action, bypass) => {
     events.push(`resolve:${action}:${bypass === true}`);
     return androidDevice;
   };
-  server["runTrackedKeyedDeviceInput"] = async (method, _device, operation) => {
+  server.runTrackedKeyedDeviceInput = async (method, _device, operation) => {
     events.push(`keyed:${method}`);
     const controller = new AbortController();
     return await operation(controller.signal, () => events.push("dispatching"));
   };
-  server["requireCurrentFrameContext"] = (_device, frameContext, label) => {
+  server.requireCurrentFrameContext = (_device, frameContext, label) => {
     events.push(`frame:${label}:${frameContext}`);
     if (options.frameRefusal) {
       throw new Error("stale frame");
     }
   };
-  server["remainingInputBudgetMs"] = (method) => {
+  server.remainingInputBudgetMs = (method) => {
     events.push(`budget:${method}`);
     if (options.budgetRefusal) {
       throw new Error("budget spent");
     }
     return 1000;
   };
-  server["dispatchFencedInput"] = async (gesture, _signal, _timeout, _send, onDispatch) => {
+  server.dispatchFencedInput = async (gesture, _signal, _timeout, _send, onDispatch) => {
     events.push(`dispatch:${gesture}`);
     onDispatch?.();
     return { success: true } as never;
   };
-  server["executeSocketInputKey"] = (async (
-    _key: unknown,
-    options: { dispatching?: () => void },
-  ) => {
+  server.executeSocketInputKey = (async (_key: unknown, options: { dispatching?: () => void }) => {
     events.push("dispatch:key");
     options.dispatching?.();
     return { success: true };
   }) as never;
-  server["executeInputTypeText"] = (async (...args: unknown[]) => {
+  server.executeInputTypeText = (async (...args: unknown[]) => {
     events.push("dispatch:typeText");
     (args[args.length - 1] as (() => void) | undefined)?.();
     return { success: true };
   }) as never;
-  server["liftingStrokeOnSessionRefusal"] = async (kind, _session, _device, _id, run) => {
+  server.liftingStrokeOnSessionRefusal = async (kind, _session, _device, _id, run) => {
     events.push(`lift:${kind}`);
     return await run();
   };
-  server["captureStrokeAdmission"] = () => {
+  server.captureStrokeAdmission = () => {
     events.push("admission");
     return {} as never;
   };
-  server["forwardGestureFrame"] = ((_client: unknown, kind: string) => {
+  server.forwardGestureFrame = ((_client: unknown, kind: string) => {
     events.push(`dispatch:gesture:${kind}`);
     return Promise.resolve({ success: true });
   }) as never;
-  server["forwardGestureStart"] = (() => {
+  server.forwardGestureStart = (() => {
     events.push("dispatch:gesture:start");
     return Promise.resolve({ success: true });
   }) as never;
-  server["trackAckedGestureFrame"] = async (kind) => {
+  server.trackAckedGestureFrame = async (kind) => {
     events.push(`track:${kind}`);
   };
   return { server, events };
@@ -126,7 +123,7 @@ async function drive(route: Route, options: Parameters<typeof harness>[0] = {}) 
   } as never;
   const request = { id: "1", type: "mcp_request", method: route.method, params: route.params };
   try {
-    await server["dispatchInputRoute"](
+    await server.dispatchInputRoute(
       inputRouteFor(route.method)!,
       request as DaemonRequest,
       "socket-session",
@@ -251,7 +248,7 @@ describe("input/* route step order (#11813)", () => {
 
   test("an owner that left is refused before the frame and budget checks", async () => {
     const { server, events } = harness();
-    server["runTrackedKeyedDeviceInput"] = async (method, _device, operation) => {
+    server.runTrackedKeyedDeviceInput = async (method, _device, operation) => {
       events.push(`keyed:${method}`);
       const controller = new AbortController();
       controller.abort(new Error("owner left"));
@@ -264,7 +261,7 @@ describe("input/* route step order (#11813)", () => {
       params: { ...BASE, ...FRAME, x: 1, y: 2 },
     };
     await expect(
-      server["dispatchInputRoute"](inputRouteFor("input/tap")!, request as DaemonRequest, "s", {}),
+      server.dispatchInputRoute(inputRouteFor("input/tap")!, request as DaemonRequest, "s", {}),
     ).rejects.toThrow("owner left");
     expect(events).toEqual(["resolve:input/tap:false", "keyed:input/tap"]);
   });

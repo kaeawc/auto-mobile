@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -96,7 +97,7 @@ test("tapOn text selection dispatches the derived right-hand target's centre wit
     screenSize: { width: 951, height: 669 },
   });
   const points: Array<{ x: number; y: number }> = [];
-  tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
+  tap.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
   tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
   });

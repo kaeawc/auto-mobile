@@ -40,7 +40,7 @@ describe("runShutdownCleanupStages", () => {
         ),
       ).rejects.toBeInstanceOf(AggregateError);
 
-      expect(calls).toEqual(stageNames);
+      expect(calls).toEqual([...stageNames]);
       expect(warnings).toEqual([
         {
           message: `Shutdown cleanup stage ${failingStage} failed`,
@@ -71,7 +71,7 @@ describe("runShutdownCleanupStages", () => {
       aggregate = error;
     }
 
-    expect(calls).toEqual(stageNames);
+    expect(calls).toEqual([...stageNames]);
     expect(aggregate).toBeInstanceOf(AggregateError);
     expect((aggregate as AggregateError).errors).toEqual([firstFailure, lastFailure]);
   });
@@ -86,7 +86,7 @@ describe("runShutdownCleanupStages", () => {
       ),
     ).resolves.toBeUndefined();
 
-    expect(calls).toEqual(stageNames);
+    expect(calls).toEqual([...stageNames]);
     expect(warnings).toEqual([]);
   });
 });

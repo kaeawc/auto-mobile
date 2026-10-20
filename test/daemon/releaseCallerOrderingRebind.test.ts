@@ -56,7 +56,7 @@ describe("explicit rebind release caller ordering", () => {
       });
       restores.push(() => rebound.mockRestore());
       // Observe the existing private collaborator without replacing the production bind flow.
-      const autolock = Reflect.get(pool, "autolockManager") as DeviceAutolockManager;
+      const autolock = pool.testHooks.autolockManager as DeviceAutolockManager;
       const clear = autolock.clearRebindAutolockLock.bind(autolock);
       const cleared = spyOn(autolock, "clearRebindAutolockLock").mockImplementation((...args) => {
         events.push(["autolock.clearRebindAutolockLock", ...args]);

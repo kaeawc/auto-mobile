@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -230,7 +231,7 @@ describe("tapOn iOS multi-panel screen size", () => {
     });
     const observation = replace(tap, hierarchy);
     const points: Array<{ x: number; y: number }> = [];
-    tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
+    tap.observedInteraction = runBlockWithEnvelope(() => observation, { observation });
     tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
       points.push({ x, y });
     });

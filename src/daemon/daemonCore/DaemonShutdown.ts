@@ -118,6 +118,7 @@ export interface DaemonShutdownHost {
     | "setShutdownFallbackReleaseNotifications"
   >;
   stopManagedAdbServer: () => ManagedAdbServerShutdown;
+  removeHttpToken: () => void;
   stop: DaemonShutdown["stop"];
   getDaemonFileCleanupOptions: DaemonIdentity["getDaemonFileCleanupOptions"];
   closeManagedExecutionRelease: DaemonBroker["closeManagedExecutionRelease"];
@@ -496,9 +497,10 @@ export class DaemonShutdown {
       // this one is still alive and still writing, and unlinks a launch log out
       // from under it (issue #6194). The unconditional `process.once("exit", ...)`
       // cleanup remains as a safety net for shutdown paths that never reach here.
-      shutdownStage("daemon files", "pid and socket file removal", () =>
-        this.host.cleanupDaemonFilesForShutdown(),
-      ),
+      shutdownStage("daemon files", "pid, socket and token file removal", async () => {
+        this.host.removeHttpToken();
+        await this.host.cleanupDaemonFilesForShutdown();
+      }),
     ];
   }
 

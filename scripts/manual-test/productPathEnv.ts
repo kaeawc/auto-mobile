@@ -22,6 +22,7 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   { name: "AUTOMOBILE_DAEMON_SOCKET_PATH", kind: "state", owner: "harness", scope: "daemon" },
   { name: "AUTOMOBILE_DAEMON_PID_FILE_PATH", kind: "state", owner: "harness", scope: "daemon" },
   { name: "AUTOMOBILE_DAEMON_LOCK_FILE_PATH", kind: "state", owner: "harness", scope: "daemon" },
+  { name: "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH", kind: "state", owner: "harness", scope: "daemon" },
   { name: "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH", kind: "state", owner: "harness", scope: "daemon" },
   {
     name: "AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR",
@@ -173,6 +174,7 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS",
   "AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE",
   "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
+  "AUTOMOBILE_DAEMON_HTTP_TOKEN",
   "AUTOMOBILE_DAEMON_LAUNCHER_PID",
   "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET",
   "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",

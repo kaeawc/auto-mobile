@@ -1047,6 +1047,7 @@ internal class McpDaemonClientTypedInputTest : McpDaemonClientInputFixture() {
       McpHttpClient(
           dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
             "http://localhost:1/auto-mobile/streamable",
+            tokenProvider = DaemonHttpTokenProvider { null },
           ),
         )
         .inputTap(

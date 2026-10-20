@@ -261,6 +261,19 @@ export const DAEMON_ENV = {
     default: "/tmp state file",
     doc: "Daemon lock file path override.",
   },
+  DAEMON_TOKEN_FILE_PATH: {
+    name: "AUTOMOBILE_DAEMON_TOKEN_FILE_PATH",
+    kind: "path",
+    default: "POSIX: /tmp state file; Windows: per-user auto-mobile directory",
+    doc: "Daemon HTTP bearer token file path override.",
+  },
+  DAEMON_HTTP_TOKEN: {
+    name: "AUTOMOBILE_DAEMON_HTTP_TOKEN",
+    kind: "string",
+    default: "unset",
+    internal: true,
+    doc: "Client override for the daemon HTTP bearer token.",
+  },
   DAEMON_TIMEOUT_MS: {
     name: "AUTOMOBILE_DAEMON_TIMEOUT_MS",
     legacyName: "AUTO_MOBILE_DAEMON_TIMEOUT_MS",

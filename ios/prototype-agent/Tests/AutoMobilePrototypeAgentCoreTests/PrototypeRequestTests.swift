@@ -41,11 +41,11 @@ final class PrototypeRequestTests: XCTestCase {
             #""onSuccess":[{"type":"setState","key":"loaded","value":true}],"onError":[{"type":"emit","name":"failed"}]}]"#
 
     private func labels(_ events: [PrototypeEvent]) -> [String] {
-        events.map { "\($0.kind):\($0.name ?? "-")" }
+        events.map { "\($0.wireKind):\($0.name ?? "-")" }
     }
 
     private func requestEvent(_ events: [PrototypeEvent]) throws -> [String: JSONValue] {
-        let event = try XCTUnwrap(events.first { $0.kind == "emit" && $0.name == PrototypeRequestEvent.name })
+        let event = try XCTUnwrap(events.first { $0.wireKind == "emit" && $0.name == PrototypeRequestEvent.name })
         guard case let .object(payload) = event.payload else { throw XCTSkip("payload is not an object") }
         return payload
     }

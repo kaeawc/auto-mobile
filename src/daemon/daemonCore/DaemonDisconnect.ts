@@ -35,9 +35,13 @@ import {
 import { serverConfig } from "../../utils/ServerConfig";
 import { onAdbMissingDevice } from "../../utils/android-cmdline-tools/AdbDeviceHealth";
 import type { DaemonSessions } from "./DaemonSessions";
-import type { DaemonRecordingHost } from "../daemon";
-import { getProcessWideAdbServerResetCohort } from "../daemon";
-import { isProcessWideAdbServerReset } from "../daemon";
+import type { DaemonRecordingHost } from "../daemonStartHost";
+import {
+  getProcessWideAdbServerResetCohort,
+  type CapturedDisconnectCleanup,
+} from "./disconnectTargets";
+export type { CapturedDisconnectCleanup } from "./disconnectTargets";
+import { isProcessWideAdbServerReset } from "./disconnectTargets";
 
 type LogDisconnectMissesArgs =
   Parameters<typeof logDisconnectMisses> extends [unknown, ...infer Rest] ? Rest : never;
@@ -53,14 +57,6 @@ interface CapturedDisconnectRecoveryOptions {
 }
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
-export interface CapturedDisconnectCleanup {
-  pooledDeviceAtDisconnect: PooledDevice | null;
-  assignmentCountAtDisconnect: number | undefined;
-  sessionIdAtDisconnect: string | null;
-  sessionAtDisconnect: Session | null;
-  forceGenerationAtDisconnect: number | undefined;
-  adbServerResetTarget: PooledDevice | undefined;
-}
 export interface DaemonDisconnectHost extends Pick<
   DaemonRecordingHost,
   "listActiveVideoRecordings"

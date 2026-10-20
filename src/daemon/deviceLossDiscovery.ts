@@ -64,16 +64,19 @@ export async function discoverAndReconcile(
     planActive,
     platform = "either",
     bypassAndroidDeviceListCache = false,
+    bypassIosDeviceListCache = false,
     heldDevices = [],
   }: {
     planActive: boolean;
     heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
+    bypassIosDeviceListCache?: boolean;
   },
 ) {
   const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
     bypassAndroidDeviceListCache,
+    bypassIosDeviceListCache,
     skipAndroidProfileEnrichment: true,
     // An unpooled held device still needs liveness evidence from its own source.
     skipPhysicalIosDiscovery: ![

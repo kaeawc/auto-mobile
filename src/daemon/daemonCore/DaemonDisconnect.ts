@@ -304,6 +304,19 @@ export class DaemonDisconnect {
     this.host.lifecycle.deviceDisconnectMonitor()!.start();
   }
 
+  /** Platforms with a watched device that already has a counted miss awaiting confirmation. */
+  private platformsConfirmingAbsence(
+    activeRecordings: Parameters<typeof collectDisconnectCandidates>[2],
+  ): ReadonlySet<"android" | "ios"> {
+    const misses = this.host.lifecycle.deviceDisconnectMisses();
+    const { candidatePlatforms } = this.collectDisconnectCandidates(activeRecordings);
+    return new Set(
+      [...candidatePlatforms].flatMap(([deviceId, platform]) =>
+        (misses.get(deviceId) ?? 0) > 0 ? [platform] : [],
+      ),
+    );
+  }
+
   private discoverAndReconcile(
     deviceManager: Parameters<typeof discoverAndReconcile>[1],
     options: Parameters<typeof discoverAndReconcile>[2],
@@ -807,9 +820,16 @@ export class DaemonDisconnect {
       assignedDevice: deviceId,
       platform,
     }));
+    // A miss must come from an independent observation: a TTL-cached listing from the previous
+    // tick would count one absence twice toward the threshold (#13551). The first miss always
+    // comes from a new snapshot (the cached one is what the previous tick already saw), so only
+    // sweeps that already hold a miss force a fresh listing, per platform; steady state is cached.
+    const confirming = this.platformsConfirmingAbsence(activeRecordings);
     let discovery = await this.discoverAndReconcile(deviceManager, {
       planActive,
       heldDevices,
+      bypassAndroidDeviceListCache: confirming.has("android"),
+      bypassIosDeviceListCache: confirming.has("ios"),
     });
     let succeededPlatforms = discovery.succeededPlatforms;
     let bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
@@ -849,6 +869,7 @@ export class DaemonDisconnect {
           planActive,
           heldDevices,
           bypassAndroidDeviceListCache: true,
+          bypassIosDeviceListCache: confirming.has("ios"),
         });
         succeededPlatforms = discovery.succeededPlatforms;
         bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));

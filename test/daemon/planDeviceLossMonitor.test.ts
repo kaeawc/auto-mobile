@@ -418,11 +418,13 @@ describe("confirmed plan device loss", () => {
       expect(h.manager.calls.slice(0, 2)).toEqual([
         {
           bypassAndroidDeviceListCache: false,
+          bypassIosDeviceListCache: false,
           skipAndroidProfileEnrichment: true,
           skipPhysicalIosDiscovery: true,
         },
         {
           bypassAndroidDeviceListCache: true,
+          bypassIosDeviceListCache: false,
           skipAndroidProfileEnrichment: true,
           skipPhysicalIosDiscovery: true,
         },

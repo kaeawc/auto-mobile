@@ -16,6 +16,7 @@ import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.serialization.json.JsonArray
 
 /**
@@ -230,14 +231,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     key: String,
   ) = Unit
 
-  override suspend fun setPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) = Unit
+  override suspend fun setPreference(request: SetPreference) = Unit
 
   override suspend fun removePreference(
     requestId: String?,
@@ -549,14 +543,16 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     key: String,
   ) = record("getPreference", requestId, packageName, fileName, key)
 
-  override suspend fun setPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) = record("setPreference", requestId, packageName, fileName, key, value, type)
+  override suspend fun setPreference(request: SetPreference) =
+    record(
+      "setPreference",
+      request.requestId,
+      request.packageName,
+      request.fileName,
+      request.key,
+      request.value,
+      request.valueType,
+    )
 
   override suspend fun removePreference(
     requestId: String?,

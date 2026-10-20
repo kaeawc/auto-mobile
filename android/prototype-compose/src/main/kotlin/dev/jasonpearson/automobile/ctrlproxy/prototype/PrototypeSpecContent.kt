@@ -145,7 +145,8 @@ private fun prototypeAnnotatedText(
 
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
 @Composable
-internal fun PrototypeRuntimeContent(
+@InternalAutoMobilePrototypeApi
+fun PrototypeRuntimeContent(
   runtime: PrototypeRuntime,
   images: PrototypeImageCache? = null,
   fonts: PrototypeFontCache? = null,
@@ -262,7 +263,7 @@ fun PrototypeSpecContent(
  * sheet windows, which wrap their content: filling there would grow the window over the app, which
  * it would then block from touches and from `observe`.
  */
-internal val LocalPrototypeFillsWindow = compositionLocalOf { false }
+@InternalAutoMobilePrototypeApi val LocalPrototypeFillsWindow = compositionLocalOf { false }
 
 /**
  * Gives a content box that measured empty the whole bounded space it was offered. A root whose

@@ -78,7 +78,11 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
     {
       lang: "kotlin",
       ext: ".kt",
-      dirs: ["android/auto-mobile-sdk/src/main/kotlin", "android/control-proxy/src/main/kotlin"],
+      dirs: [
+        "android/auto-mobile-sdk/src/main/kotlin",
+        "android/control-proxy/src/main/kotlin",
+        "android/prototype-compose/src/main/kotlin",
+      ],
       excludes: ["/test/", "/androidTest/"],
       pairs: [
         {

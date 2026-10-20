@@ -60,7 +60,8 @@ class PrototypeLifecycle(
   }
 
   /** An independent timer slot with the same injected scheduler and live device/session facts. */
-  internal fun fork(): PrototypeLifecycle =
+  @InternalAutoMobilePrototypeApi
+  fun fork(): PrototypeLifecycle =
     PrototypeLifecycle(scheduler, ttlMillis, isBlocked, observerSession, clientCount)
 
   fun arm(delayMillis: Long = ttlMillis, onExpired: suspend (Long) -> Unit) {

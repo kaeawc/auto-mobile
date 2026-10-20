@@ -45,7 +45,8 @@ object CoroutinePrototypeSettleTimer : PrototypeSettleTimer {
  * Runs inline on main, otherwise posts and awaits the actual result. Once enqueued, a mutation
  * completes even if its caller is cancelled; this prevents abandoned adds and half-applied flags.
  */
-internal suspend fun <T> PrototypeMainThread.onMain(work: () -> T): T {
+@InternalAutoMobilePrototypeApi
+suspend fun <T> PrototypeMainThread.onMain(work: () -> T): T {
   if (isMainThread()) return work()
   return suspendCoroutine { continuation ->
     val accepted = post {

@@ -28,13 +28,15 @@ object NoPrototypeImeInset : PrototypeImeInset {
 }
 
 /** The facts about one accessibility window that locate the keyboard. */
-internal data class PrototypeImeWindow(val type: Int, val top: Int, val bottom: Int)
+@InternalAutoMobilePrototypeApi
+data class PrototypeImeWindow(val type: Int, val top: Int, val bottom: Int)
 
 /**
  * Pixels between the keyboard's top edge and [screenBottomPx]: the topmost input-method window with
  * non-empty bounds that reaches into the screen. Anything else is 0.
  */
-internal fun imeLiftPx(windows: List<PrototypeImeWindow>, screenBottomPx: Int): Int {
+@InternalAutoMobilePrototypeApi
+fun imeLiftPx(windows: List<PrototypeImeWindow>, screenBottomPx: Int): Int {
   val top =
     windows
       .filter { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.bottom > it.top }
@@ -47,7 +49,8 @@ internal fun imeLiftPx(windows: List<PrototypeImeWindow>, screenBottomPx: Int): 
  * fullscreen already fills the screen, floating windows stay where their spec put them, and
  * top/side sheets are not anchored to the bottom edge.
  */
-internal fun prototypeImeShiftPx(placement: PrototypePlacement, liftPx: Int): Int =
+@InternalAutoMobilePrototypeApi
+fun prototypeImeShiftPx(placement: PrototypePlacement, liftPx: Int): Int =
   if (placement is PrototypePlacement.Sheet && placement.edge == PrototypePlacement.Edge.BOTTOM)
     liftPx.coerceAtLeast(0)
   else 0

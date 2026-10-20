@@ -104,7 +104,8 @@ internal val PrototypeAppearance.dark: Boolean
  * goes straight to the system setting. [override] stands in for the system setting only: it never
  * beats an explicit mode or a screen colour the author painted.
  */
-internal fun prototypeResolveAppearance(
+@InternalAutoMobilePrototypeApi
+fun prototypeResolveAppearance(
   root: PrototypeRenderNode,
   explicit: PrototypeSpecTheme?,
   deviceDark: Boolean,
@@ -145,7 +146,8 @@ internal fun prototypeResolveAppearance(
  * The palette [shown] is drawn with. Device dynamic colour is left out, as in
  * [prototypeReachablePalettes]: its roles are opaque like the baseline ones.
  */
-internal fun prototypeShownPalette(shown: PrototypeShownTheme): PrototypePalette {
+@InternalAutoMobilePrototypeApi
+fun prototypeShownPalette(shown: PrototypeShownTheme): PrototypePalette {
   val dark = shown.appearance.dark
   return PrototypePalette(
     prototypeColorScheme(shown.themeSpec),

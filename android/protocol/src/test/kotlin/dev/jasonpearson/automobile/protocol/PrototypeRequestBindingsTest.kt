@@ -211,6 +211,23 @@ class PrototypeRequestBindingsTest : PrototypeRequestTestSupport() {
   }
 
   @Test
+  fun `blocked destination code round trips and is serialized in metadata`() {
+    val code = PrototypeRequestErrorCode.BLOCKED_DESTINATION
+    assertEquals("blocked_destination", code.wireValue)
+    assertEquals(code, PrototypeRequestErrorCode.fromWire("blocked_destination"))
+    val result =
+      applied(
+        "{}",
+        "/data/feed",
+        PrototypeRequestResponse.Failed(PrototypeRequestError(code, "Blocked destination")),
+      )
+    assertEquals(
+      JsonPrimitive("blocked_destination"),
+      result.data!!["feed__meta"]!!.jsonObject["error"]!!.jsonObject["code"],
+    )
+  }
+
+  @Test
   fun `a transport failure writes only error metadata`() {
     val failure =
       PrototypeRequestResponse.Failed(

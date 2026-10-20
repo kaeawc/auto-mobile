@@ -73,6 +73,7 @@ export class IosBaselineReset {
   ): Promise<BootedDevice> {
     try {
       return await this.dependencies.iosBootInstrumentation.run(
+        // The callback ignores remainingMs; bootSimulator uses its own timeout.
         { udid, runtime: profile.runtimeId, timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS },
         async () => {
           // Admission samples asynchronously; fence ownership immediately before the mutation.

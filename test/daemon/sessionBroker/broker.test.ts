@@ -515,7 +515,7 @@ describe("session-only broker lifecycle", () => {
     await ready("next");
   });
 
-  test("reset capacity refusal preserves the device and typed error until a retry succeeds", async () => {
+  test("reset capacity refusal returns cleanup_pending and preserves the device until recovery", async () => {
     broker = new SessionBroker({ ...options, reuseCleanDevices: true });
     const first = await ready("first");
     const refusal = new BootCapacityExhaustedError(
@@ -524,16 +524,20 @@ describe("session-only broker lifecycle", () => {
     );
     devices.resetError = refusal;
 
-    await expect(broker.release(first)).rejects.toBe(refusal);
+    expect(await broker.release(first)).toEqual({ sessionUuid: first, outcome: "cleanup_pending" });
+    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
     expect((await options.store.listResources())[0].state).toBe("resetting");
     expect(devices.destroyed).toEqual([]);
     expect(await broker.status("first")).toMatchObject({ cleanupPending: true });
     await broker.recover();
+    expect(devices.resetResources).toHaveLength(2);
+    expect((await options.store.getRequest("first"))?.state).toBe("releasing");
     expect((await options.store.listResources())[0].state).toBe("resetting");
     expect(devices.destroyed).toEqual([]);
 
     devices.resetError = undefined;
     await broker.recover();
+    expect(devices.resetResources).toHaveLength(3);
     expect((await options.store.listResources())[0].state).toBe("idle");
     expect(await broker.release(first)).toMatchObject({ outcome: "released" });
     await ready("second");

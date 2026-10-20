@@ -230,6 +230,24 @@ describe("IosBaselineReset", () => {
     ]);
   });
 
+  test("a non-capacity boot failure does not permit a Shutdown retry", async () => {
+    const h = harness({
+      inventories: [[image()], [image("Shutdown")], [image("Shutdown")]],
+      bootSimulator: async () => {
+        throw new Error("boot failed");
+      },
+    });
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toThrow("boot failed");
+    expect(h.events).toContain(`boot:${UDID}`);
+    h.events.length = 0;
+
+    await expect(h.resetter.reset(DEVICE, PROFILE, h.assertOwned)).rejects.toThrow(
+      "lacks authoritative Booted",
+    );
+    expect(h.events).toEqual(["list:3"]);
+  });
+
   test("a deferred boot refuses changed identity before any retry mutation", async () => {
     const h = harness({
       inventories: [

@@ -861,10 +861,14 @@ export class SessionBroker {
       return "idle";
     } catch (error) {
       // Admission refusal leaves a healthy erased simulator shut down. Keep the durable reset
-      // pending and let release/recovery retry it, preserving the typed retryable error.
+      // pending and let recovery retry it; the consumer's release is already durable.
       if (error instanceof BootCapacityExhaustedError) {
-        throw error;
+        logger.warn(
+          `Session ${sessionUuid} clean release awaits boot capacity: ${errorMessage(error)}`,
+        );
+        return "pending";
       }
+      // A failed or timed-out gate sample is not a capacity refusal and falls through to destruction.
       // Native execution/journal fences still prevent destructive work before the drain joins.
       logger.warn(
         `Session ${sessionUuid} could not finish its clean release: ${errorMessage(error)}`,

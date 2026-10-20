@@ -138,3 +138,27 @@ commit_all() { git -C "$repo_dir" add -A; git -C "$repo_dir" commit -qm fixture;
   [[ "$output" == *"scripts/scratch-only.sh"* ]]
   [[ "$output" != *"scripts/module.ts"* ]]
 }
+
+@test "git grep fallback classifies the same as ripgrep and per-stage timing goes to stderr" {
+  printf '#!/bin/bash\n' > "$repo_dir/scripts/a.sh"
+  printf '#!/bin/bash\n' > "$repo_dir/scripts/orphan.sh"
+  printf 'run: scripts/a.sh\n' > "$repo_dir/docs/use.md"
+  commit_all
+  run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh" --report
+  with_default="$(grep -v "stage " <<<"$output")"
+  SCRIPTS_REFERENCED_SCANNER=git-grep run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh" --report
+  [ "$with_default" == "$(grep -v "stage " <<<"$output")" ]
+  [[ "$output" == *"UNREFERENCED scripts/orphan.sh"* ]]
+  [[ "$output" != *"scripts/a.sh"* ]]
+  SCRIPTS_REFERENCED_SCANNER=git-grep run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh"
+  [[ "$output" == *"stage token-scan:"* ]]
+}
+
+@test "a binary file mentioning a script does not count as a reference" {
+  printf '#!/bin/bash\n' > "$repo_dir/scripts/bin-only.sh"
+  printf 'scripts/bin-only.sh\0\001' > "$repo_dir/docs/blob.bin"
+  commit_all
+  run "$repo_dir/scripts/conventions/validate-scripts-referenced.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"UNREFERENCED scripts/bin-only.sh"* ]]
+}

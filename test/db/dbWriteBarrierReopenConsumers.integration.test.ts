@@ -71,15 +71,15 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
   describe("TelemetryRecorder", () => {
     function makeLogInput(): RecordLogEventInput {
       return {
-        deviceId: "test-device",
-        sessionId: "test-session",
-        filterName: "test-filter",
         timestamp: 1000,
         applicationId: "com.example",
         level: 4,
+        deviceId: null,
+        sessionId: null,
+        filterName: "",
         tag: "t",
         message: "m",
-      } satisfies RecordLogEventInput;
+      };
     }
 
     test("resolves the barrier per write, not the construction-time instance (acceptance #1)", async () => {

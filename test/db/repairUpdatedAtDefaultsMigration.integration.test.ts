@@ -401,11 +401,9 @@ describe("2026_07_05_000_repair_updated_at_defaults migration (#2937)", () => {
     });
 
     test("runs as part of the real migration chain (migration is registered)", async () => {
-      const executed = await db
-        .withTables<{ kysely_migration: { name: string } }>()
-        .selectFrom("kysely_migration")
-        .select("name")
-        .execute();
+      const { rows: executed } = await sql<{
+        name: string;
+      }>`SELECT name FROM kysely_migration`.execute(db);
       const names = executed.map((r) => r.name);
       expect(names).toContain("2026_07_05_000_repair_updated_at_defaults");
     });

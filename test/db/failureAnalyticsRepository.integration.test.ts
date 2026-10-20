@@ -611,10 +611,10 @@ describe("FailureAnalyticsRepository", () => {
         occurrence_id: `occ-${i}`,
         group_id: `grp-${i}`,
         type: "crash" as const,
+        severity: "critical" as const,
         title: `Failure ${i}`,
         timestamp: 1000 + i,
         acknowledged: 0,
-        severity: "critical" as const,
       }));
       for (let i = 0; i < rows.length; i += 100) {
         await db

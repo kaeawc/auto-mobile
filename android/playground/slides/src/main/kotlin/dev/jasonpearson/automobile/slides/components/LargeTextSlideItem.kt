@@ -55,8 +55,7 @@ fun LargeTextSlideItem(
           color = titleColor,
         ),
       modifier = Modifier.weight(if (subtitle != null) 0.5f else 0.5f),
-      isLandscape = isLandscape,
-      hasSubtitle = subtitle != null,
+      fitting = TextFitting(isLandscape = isLandscape, hasSubtitle = subtitle != null),
     )
 
     // Optional subtitle
@@ -69,11 +68,14 @@ fun LargeTextSlideItem(
             color = subtitleColor,
             fontWeight = FontWeight.Normal,
           ),
-        maxFontSize = 48f,
-        minFontSize = 12f,
         modifier = Modifier.weight(0.3f).padding(top = 16.dp),
-        isLandscape = isLandscape,
-        hasSubtitle = false,
+        fitting =
+          TextFitting(
+            maxFontSize = 48f,
+            minFontSize = 12f,
+            isLandscape = isLandscape,
+            hasSubtitle = false,
+          ),
       )
     }
   }
@@ -88,11 +90,9 @@ private fun AutoResizingText(
   text: String,
   style: TextStyle,
   modifier: Modifier = Modifier,
-  maxFontSize: Float = 96f,
-  minFontSize: Float = 12f,
-  isLandscape: Boolean,
-  hasSubtitle: Boolean,
+  fitting: TextFitting,
 ) {
+  val (maxFontSize, minFontSize, isLandscape, hasSubtitle) = fitting
   val maxLines =
     when {
       isLandscape && hasSubtitle -> 2
@@ -169,3 +169,10 @@ fun LargeResizingTextSlideItemLandscapePreview() {
 fun LargeResizingTextSlideItemTitleOnlyLandscapePreview() {
   MaterialTheme { LargeTextSlideItem(title = "AutoMobile") }
 }
+
+private data class TextFitting(
+  val maxFontSize: Float = 96f,
+  val minFontSize: Float = 12f,
+  val isLandscape: Boolean,
+  val hasSubtitle: Boolean,
+)

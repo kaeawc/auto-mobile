@@ -59,6 +59,12 @@ write_junit_report_with_lines() {
 setup() {
   # scripts/test-ts.sh resolves ROOT with pwd -P; a checkout reached through a
   # symlink (macOS /tmp -> /private/tmp) makes $PWD differ from what it prints.
+  # Stubbed lanes own their own pool and load source. Defaults/retry tests must
+  # not inherit the invoking host's limits or consume another lane's slots.
+  export AUTOMOBILE_COORDINATION_DIR="$BATS_TEST_TMPDIR/coordination"
+  export AUTOMOBILE_TEST_LOADAVG_FILE="$BATS_TEST_TMPDIR/loadavg"
+  echo 0 > "$AUTOMOBILE_TEST_LOADAVG_FILE"
+  unset AUTOMOBILE_HOST_TEST_SLOTS AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   ROOT_PHYS="$(pwd -P)"
   SHARD_SCRATCH="$BATS_TEST_TMPDIR/scratch"
   export AUTOMOBILE_TEST_TS_SCRATCH_DIR="$SHARD_SCRATCH"
@@ -68,6 +74,9 @@ setup() {
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
   unset RUNNER_OS AUTOMOBILE_TEST_TIMEOUT_MS AUTOMOBILE_UNIT_TEST_WORKERS \
     AUTOMOBILE_INTEGRATION_TEST_WORKERS AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE
+  # Host load limits must not override the defaults asserted by stubbed lanes.
+  # Tests that exercise retries or wall budgets set their own values explicitly.
+  unset AUTOMOBILE_UNIT_SHARD_RETRIES AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
   # Chunking and shared-process knobs are lane tuning that a caller shell (CI job env,
   # orchestrator) may export; every test that depends on them sets them explicitly.
   unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \
@@ -197,6 +206,14 @@ if [[ "$1" == test && -n "${STUB_SHARED_FAIL:-}" && " $* " != *" --isolate "* ]]
 fi
 if [[ "$1" == test && -n "${STUB_BUN_TEST_MODE_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" >> "$STUB_BUN_TEST_MODE_FILE"
+fi
+# Coverage now records process groups through the portable watchdog. Inject
+# the command's timeout status while asserting its inherited wall budget.
+if [[ ( "$1" == test || ( "$1" == --config=* && "${2:-}" == test ) ) && -n "${STUB_BUN_WALL_EXIT:-}" ]]; then
+  if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
+    printf '%s\n' "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" >> "$STUB_BUN_WALL_FILE"
+  fi
+  exit "$STUB_BUN_WALL_EXIT"
 fi
 if [[ -n "${STUB_BUN_EXIT:-}" ]]; then exit "$STUB_BUN_EXIT"; fi
 if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
@@ -1695,30 +1712,21 @@ EOF
 }
 
 @test "coverage wall timeout is 720 seconds" {
-  cat > "$STUB_BIN/timeout" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/timeout-args"
-exit 124
-EOF
-  chmod +x "$STUB_BIN/timeout"
-
-  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  wall_file="$BATS_TEST_TMPDIR/wall-budgets"
+  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" \
+    STUB_BUN_WALL_EXIT=124 STUB_BUN_WALL_FILE="$wall_file" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 720 ' "$BATS_TEST_TMPDIR/timeout-args"
+  [ "$(sort -u "$wall_file")" = 720 ]
 
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 bash "$SCRIPT" coverage
+  : > "$wall_file"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 \
+    STUB_BUN_WALL_EXIT=124 STUB_BUN_WALL_FILE="$wall_file" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 33 ' "$BATS_TEST_TMPDIR/timeout-args"
+  [ "$(sort -u "$wall_file")" = 33 ]
 }
 
 @test "coverage wall timeout prints a diagnostic on deadline" {
-  cat > "$STUB_BIN/timeout" <<'EOF'
-#!/usr/bin/env bash
-exit 124
-EOF
-  chmod +x "$STUB_BIN/timeout"
-
-  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  run env PATH="$STUB_BIN:$PATH" STUB_BUN_WALL_EXIT=124 bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget"* ]]
   [[ "$output" == *"shard 1/2"* ]]
@@ -1752,7 +1760,7 @@ EOF
       coverage) label="Coverage"; expected_budget=720 ;;
       stress) label="Stress"; expected_budget=300 ;;
     esac
-    run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "$mode"
+    run env PATH="$STUB_BIN:$PATH" STUB_BUN_WALL_EXIT=124 bash "$SCRIPT" "$mode"
     [ "$status" -eq 124 ]
     [[ "$output" != *"bad substitution"* ]]
     [[ "$output" == *"${label} test run exceeded its ${expected_budget}s wall-clock budget"* ]]

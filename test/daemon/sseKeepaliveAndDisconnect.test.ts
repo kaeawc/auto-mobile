@@ -391,7 +391,7 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.get("sim-1")).toBe(1);
   });
 
-  test("retains candidates without misses when all platform discovery fails", () => {
+  test("holds candidate misses when all platform discovery fails", () => {
     const misses = new Map<string, number>([["device-1", 2]]);
 
     const result = runDisconnectPoll(
@@ -404,7 +404,7 @@ describe("disconnect monitor miss counting", () => {
 
     expect(result.skippedAllDiscoveryFailed).toBe(true);
     expect(result.disconnected).toEqual([]);
-    expect(misses.has("device-1")).toBe(false);
+    expect(misses.get("device-1")).toBe(2);
   });
 
   test("miss-counts only candidates whose platform discovery succeeds", () => {
@@ -468,7 +468,7 @@ describe("disconnect monitor miss counting", () => {
     expect(result.skippedAllDiscoveryFailed).toBe(true);
     expect(result.disconnected).toEqual([]);
     expect(result.missed).toEqual([]);
-    expect(misses.has("emulator-5554")).toBe(false);
+    expect(misses.get("emulator-5554")).toBe(1);
   });
 
   test("fresh booted scan clears a stale forced missing flag", () => {
@@ -639,7 +639,7 @@ describe("disconnect monitor miss counting", () => {
 
     expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(result.disconnected).toEqual([]);
-    expect(misses.has("sim-1")).toBe(false);
+    expect(misses.get("sim-1")).toBe(2);
   });
 
   test("miss-counts a device once its platform discovery succeeds", () => {

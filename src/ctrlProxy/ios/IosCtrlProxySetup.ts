@@ -1,3 +1,5 @@
+import { CtrlProxyRunnerExitedDuringStartupError } from "./CtrlProxyRunnerExitedDuringStartupError";
+import { CtrlProxyLaunchTimeoutError } from "./CtrlProxyLaunchTimeoutError";
 import type { IosCtrlProxyRuntime } from "./IosCtrlProxyRuntime";
 import { CtrlProxyStartupRecoveryInterruptedError } from "./CtrlProxyStartupRecoveryInterruptedError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -137,6 +139,7 @@ export class IosCtrlProxySetup {
         message: "Failed to setup CtrlProxy",
         error: errorMsg,
         recoveryInterrupted: error instanceof CtrlProxyStartupRecoveryInterruptedError,
+        ...startupFailureClassification(error),
         perfTiming: perf.getTimings(),
       };
     }
@@ -329,4 +332,14 @@ export class IosCtrlProxySetup {
       iosVersion: null, // iOS version is not sourced from device info.
     };
   }
+}
+
+/** Keep terminal setup result shapes unchanged; only typed launch failures opt into retry. */
+function startupFailureClassification(
+  error: unknown,
+): Pick<CtrlProxyIosSetupResult, "retryableStartupFailure"> {
+  return error instanceof CtrlProxyRunnerExitedDuringStartupError ||
+    error instanceof CtrlProxyLaunchTimeoutError
+    ? { retryableStartupFailure: true }
+    : {};
 }

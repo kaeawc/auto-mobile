@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import {
+  createGuardSourceReader,
   guardDirectoryEntries,
   parseGuardSource,
   readGuardFile,
@@ -18,6 +19,31 @@ const facts = (source: string) => collectSourceFacts(parseGuardSource("fixture.t
 
 describe("collectSourceFacts (mutations the guards rely on)", () => {
   const scratch = useScratchRoot("ast-guard-cache-");
+  test.each(["win32", "darwin"] as const)(
+    "guard source reader handles unchanged stat identity on %s",
+    (platform) => {
+      let source = 'import "s1";';
+      let reads = 0;
+      const stat = { dev: 1n, ino: 2n, mtimeNs: 3n, ctimeNs: 4n, size: 12n };
+      const read = createGuardSourceReader({
+        platform,
+        stat: () => stat,
+        readFile: () => {
+          reads++;
+          return source;
+        },
+      });
+      expect(read("fixture.ts")).toBe(source);
+      expect(read("fixture.ts")).toBe(source);
+      source = 'import "s2";';
+      expect(read("fixture.ts")).toBe(platform === "win32" ? source : 'import "s1";');
+      expect(reads).toBe(platform === "win32" ? 3 : 1);
+      stat.ctimeNs++;
+      expect(read("fixture.ts")).toBe(source);
+      expect(reads).toBe(platform === "win32" ? 4 : 2);
+    },
+  );
+
   test("module specifiers cover static, dynamic, re-export and require forms", () => {
     expect(
       facts(
@@ -37,7 +63,7 @@ describe("collectSourceFacts (mutations the guards rely on)", () => {
     expect(typeScriptFiles(root)).toEqual([file]);
     expect(facts(readGuardFile(file)).moduleSpecifiers).toEqual(["s1"]);
     expect(readGuardFile(pathToFileURL(file))).toBe(readGuardFile(file));
-    // Same size and restored mtime: ctime must invalidate the read.
+    // Same size and restored mtime: re-read on Windows, use ctime elsewhere.
     writeFileSync(file, 'import "s2";');
     utimesSync(file, 0, 0);
     expect(facts(readGuardFile(file)).moduleSpecifiers).toEqual(["s2"]);

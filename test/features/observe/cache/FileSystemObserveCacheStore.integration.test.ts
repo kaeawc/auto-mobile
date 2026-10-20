@@ -171,7 +171,9 @@ describe("FileSystemObserveCacheStore", function () {
     await cache.put("device-1", makeResult("fresh"), cache.currentGeneration("device-1"));
     expect(cache.getRecentInMemoryForDevice("device-1")?.updatedAt).toBe("fresh");
     expect([...fs.getWrittenFiles().keys()]).toEqual([
-      path.join(cacheDir, `observe_device-1_${timer.now()}_iprocess-1_g1.json`),
+      path
+        .join(cacheDir, `observe_device-1_${timer.now()}_iprocess-1_g1.json`)
+        .replaceAll("\\", "/"),
     ]);
   });
 

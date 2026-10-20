@@ -73,48 +73,7 @@ internal class PackageController(
         )
       },
     ) {
-      val infos =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          packageManager()
-            .getInstalledPackages(
-              PackageManager.PackageInfoFlags.of(0L),
-            )
-        } else {
-          @Suppress("DEPRECATION") packageManager().getInstalledPackages(0)
-        }
-      // Launchability comes from ONE batched MAIN/LAUNCHER query rather than a
-      // per-package getLaunchIntentForPackage, which would accept MAIN/INFO and
-      // disagree with the adb fallback for the same install (#6924 review).
-      val launchablePackages = launchablePackageNames(packageManager())
-      val records = mutableListOf<InstalledPackageRecord>()
-      for (info in infos) {
-        val isSystem =
-          (info.applicationInfo?.flags ?: 0) and
-            (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-        if (!includeSystem && isSystem) continue
-        val versionCode =
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
-          else @Suppress("DEPRECATION") info.versionCode.toLong()
-        // The same batched MAIN/LAUNCHER query that establishes launchability also carries the
-        // label shown by launchers. Its helper falls back safely when an app disappears mid-list.
-        val label =
-          preferredInstalledPackageLabel(
-            info.packageName,
-            info.applicationInfo,
-            launchablePackages,
-            packageManager(),
-          )
-        records.add(
-          InstalledPackageRecord(
-            packageName = info.packageName,
-            isSystem = isSystem,
-            versionName = info.versionName,
-            versionCode = versionCode,
-            label = label,
-            launchable = launchablePackages?.packageNames?.contains(info.packageName),
-          ),
-        )
-      }
+      val records = installedPackageRecords(includeSystem)
       val totalTime = timeProvider.currentTimeMillis() - startTime
       broadcastInstalledPackagesResult(
         InstalledPackagesOutcome(
@@ -127,6 +86,53 @@ internal class PackageController(
         ),
       )
     }
+  }
+
+  private fun installedPackageRecords(includeSystem: Boolean): List<InstalledPackageRecord> {
+    val infos =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        packageManager()
+          .getInstalledPackages(
+            PackageManager.PackageInfoFlags.of(0L),
+          )
+      } else {
+        @Suppress("DEPRECATION") packageManager().getInstalledPackages(0)
+      }
+    // Launchability comes from ONE batched MAIN/LAUNCHER query rather than a
+    // per-package getLaunchIntentForPackage, which would accept MAIN/INFO and
+    // disagree with the adb fallback for the same install (#6924 review).
+    val launchablePackages = launchablePackageNames(packageManager())
+    val records = mutableListOf<InstalledPackageRecord>()
+    for (info in infos) {
+      val isSystem =
+        (info.applicationInfo?.flags ?: 0) and
+          (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+      if (!includeSystem && isSystem) continue
+      val versionCode =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+        else @Suppress("DEPRECATION") info.versionCode.toLong()
+      // The same batched MAIN/LAUNCHER query that establishes launchability also carries the
+      // label shown by launchers. Its helper falls back safely when an app disappears mid-list.
+      val label =
+        preferredInstalledPackageLabel(
+          info.packageName,
+          info.applicationInfo,
+          launchablePackages,
+          packageManager(),
+        )
+      records.add(
+        InstalledPackageRecord(
+          packageName = info.packageName,
+          isSystem = isSystem,
+          versionName = info.versionName,
+          versionCode = versionCode,
+          label = label,
+          launchable = launchablePackages?.packageNames?.contains(info.packageName),
+        ),
+      )
+    }
+
+    return records
   }
 
   /** Read package metadata via PackageManager. */
@@ -142,107 +148,29 @@ internal class PackageController(
           is PackageManager.NameNotFoundException -> {
             Log.w(TAG, "Package not found: $packageName", e)
             broadcastPackageInfoResult(
-              PackageInfoOutcome(
-                requestId = requestId,
-                success = false,
-                packageName = packageName,
-                isSystem = false,
-                applicationLabel = null,
-                versionName = null,
-                versionCode = null,
-                installerPackage = null,
-                firstInstallTime = null,
-                lastUpdateTime = null,
-                allowBackup = null,
-                requestedPermissions = emptyList(),
-                grantedPermissions = emptyMap(),
-                mainActivity = null,
-                error = "Package not installed or not visible: $packageName",
-                totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+              failedPackageInfo(
+                requestId,
+                packageName,
+                "Package not installed or not visible: $packageName",
+                timeProvider.currentTimeMillis() - startTime,
               ),
             )
           }
           else -> {
             Log.e(TAG, "performPackageInfo failed for $packageName", e)
             broadcastPackageInfoResult(
-              PackageInfoOutcome(
-                requestId = requestId,
-                success = false,
-                packageName = packageName,
-                isSystem = false,
-                applicationLabel = null,
-                versionName = null,
-                versionCode = null,
-                installerPackage = null,
-                firstInstallTime = null,
-                lastUpdateTime = null,
-                allowBackup = null,
-                requestedPermissions = emptyList(),
-                grantedPermissions = emptyMap(),
-                mainActivity = null,
-                error = "Failed to read package info: ${e.message}",
-                totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+              failedPackageInfo(
+                requestId,
+                packageName,
+                "Failed to read package info: ${e.message}",
+                timeProvider.currentTimeMillis() - startTime,
               ),
             )
           }
         }
       },
     ) {
-      val flags = if (includePermissions) PackageManager.GET_PERMISSIONS else 0
-      val info =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          packageManager()
-            .getPackageInfo(
-              packageName,
-              PackageManager.PackageInfoFlags.of(flags.toLong()),
-            )
-        } else {
-          @Suppress("DEPRECATION") packageManager().getPackageInfo(packageName, flags)
-        }
-
-      val appInfo = info.applicationInfo
-      val isSystem =
-        (appInfo?.flags ?: 0) and
-          (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-      val applicationLabel = appInfo?.let { packageManager().getApplicationLabel(it).toString() }
-      val versionCode =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
-        else @Suppress("DEPRECATION") info.versionCode.toLong()
-      val installerPackage = installerPackage(packageName)
-      val allowBackup = appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
-      val requested = info.requestedPermissions?.toList().orEmpty()
-      val granted = grantedPermissions(info, requested, includePermissions)
-      val mainActivity =
-        try {
-          packageManager().getLaunchIntentForPackage(packageName)?.component?.flattenToShortString()
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: SecurityException) {
-          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
-          null
-        }
-
-      val totalTime = timeProvider.currentTimeMillis() - startTime
-      broadcastPackageInfoResult(
-        PackageInfoOutcome(
-          requestId = requestId,
-          success = true,
-          packageName = packageName,
-          isSystem = isSystem,
-          applicationLabel = applicationLabel,
-          versionName = info.versionName,
-          versionCode = versionCode,
-          installerPackage = installerPackage,
-          firstInstallTime = info.firstInstallTime,
-          lastUpdateTime = info.lastUpdateTime,
-          allowBackup = allowBackup,
-          requestedPermissions = requested,
-          grantedPermissions = granted,
-          mainActivity = mainActivity,
-          error = null,
-          totalTimeMs = totalTime,
-        ),
-      )
+      readPackageInfo(requestId, packageName, includePermissions, startTime)
     }
   }
 
@@ -284,6 +212,69 @@ internal class PackageController(
       Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
       null
     }
+  }
+
+  private suspend fun readPackageInfo(
+    requestId: String?,
+    packageName: String,
+    includePermissions: Boolean,
+    startTime: Long,
+  ) {
+    val flags = if (includePermissions) PackageManager.GET_PERMISSIONS else 0
+    val info =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        packageManager()
+          .getPackageInfo(
+            packageName,
+            PackageManager.PackageInfoFlags.of(flags.toLong()),
+          )
+      } else {
+        @Suppress("DEPRECATION") packageManager().getPackageInfo(packageName, flags)
+      }
+
+    val appInfo = info.applicationInfo
+    val isSystem =
+      (appInfo?.flags ?: 0) and
+        (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+    val applicationLabel = appInfo?.let { packageManager().getApplicationLabel(it).toString() }
+    val versionCode =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+      else @Suppress("DEPRECATION") info.versionCode.toLong()
+    val installerPackage = installerPackage(packageName)
+    val allowBackup = appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
+    val requested = info.requestedPermissions?.toList().orEmpty()
+    val granted = grantedPermissions(info, requested, includePermissions)
+    val mainActivity =
+      try {
+        packageManager().getLaunchIntentForPackage(packageName)?.component?.flattenToShortString()
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: SecurityException) {
+        Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
+        null
+      }
+
+    val totalTime = timeProvider.currentTimeMillis() - startTime
+    broadcastPackageInfoResult(
+      PackageInfoOutcome(
+        requestId = requestId,
+        success = true,
+        packageName = packageName,
+        isSystem = isSystem,
+        applicationLabel = applicationLabel,
+        versionName = info.versionName,
+        versionCode = versionCode,
+        installerPackage = installerPackage,
+        firstInstallTime = info.firstInstallTime,
+        lastUpdateTime = info.lastUpdateTime,
+        allowBackup = allowBackup,
+        requestedPermissions = requested,
+        grantedPermissions = granted,
+        mainActivity = mainActivity,
+        error = null,
+        totalTimeMs = totalTime,
+      ),
+    )
   }
 
   /** Resolve the launcher activity component for a package. */
@@ -405,3 +396,28 @@ private inline fun <T> withPackageFailures(onFailure: (Exception) -> T, block: (
   } catch (e: java.io.IOException) {
     onFailure(e)
   }
+
+private fun failedPackageInfo(
+  requestId: String?,
+  packageName: String,
+  error: String,
+  totalTimeMs: Long,
+): PackageInfoOutcome =
+  PackageInfoOutcome(
+    requestId = requestId,
+    success = false,
+    packageName = packageName,
+    isSystem = false,
+    applicationLabel = null,
+    versionName = null,
+    versionCode = null,
+    installerPackage = null,
+    firstInstallTime = null,
+    lastUpdateTime = null,
+    allowBackup = null,
+    requestedPermissions = emptyList(),
+    grantedPermissions = emptyMap(),
+    mainActivity = null,
+    error = error,
+    totalTimeMs = totalTimeMs,
+  )

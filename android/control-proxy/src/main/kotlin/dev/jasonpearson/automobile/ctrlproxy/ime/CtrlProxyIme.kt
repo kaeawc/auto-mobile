@@ -386,21 +386,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     val connection = currentInputConnection
     if (isInputStarted && connection != null) {
       if (delivery == ImeTextDelivery.CLEAR_FIELD) {
-        val cleared =
-          clearImeField(
-            finishComposing = connection::finishComposingText,
-            readBefore = { connection.getTextBeforeCursor(it, 0) },
-            readAfter = { connection.getTextAfterCursor(it, 0) },
-            deleteSurrounding = connection::deleteSurroundingText,
-          )
-        val result =
-          if (cleared.success && !editorSyncSucceeded(InputConnectionAdapter(connection, this)))
-            cleared.copy(
-              success = false,
-              error = "Input connection lost while syncing clear",
-              partialApplication = true,
-            )
-          else cleared
+        val result = ConnectedField(connection).clear()
         driver.restoreIfNeeded(priorImeId)
         onResult(result)
         if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
@@ -430,6 +416,30 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       },
       minOf(INPUT_CONNECTION_POLL_MS, deadlineMs - SystemClock.uptimeMillis()).coerceAtLeast(0),
     )
+  }
+
+  private inner class ConnectedField(
+    private val connection: android.view.inputmethod.InputConnection,
+  ) {
+    fun clear(): ImeCommitResult {
+      val cleared =
+        clearImeField(
+          finishComposing = connection::finishComposingText,
+          readBefore = { connection.getTextBeforeCursor(it, 0) },
+          readAfter = { connection.getTextAfterCursor(it, 0) },
+          deleteSurrounding = connection::deleteSurroundingText,
+        )
+      return if (
+        cleared.success &&
+          !editorSyncSucceeded(InputConnectionAdapter(connection, this@CtrlProxyIme))
+      )
+        cleared.copy(
+          success = false,
+          error = "Input connection lost while syncing clear",
+          partialApplication = true,
+        )
+      else cleared
+    }
   }
 
   private fun createSink(): ImeCommitSink =

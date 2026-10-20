@@ -80,13 +80,25 @@ class LaunchCancellationRethrowTest {
     val source = locateSource("CaCertificateController.kt").readText()
     val result = LaunchCancellationScanner.scan(source)
 
-    // Four actions and two broadcast helpers; the bodyless sender declaration is skipped.
-    assertEquals(6, result.launchBlocks)
+    // Four actions, the removal operation, and two broadcast helpers; the sender is bodyless.
+    assertEquals(7, result.launchBlocks)
+    val code = KotlinSourceScan.maskLiteralsAndComments(source)
+    val declaration = code.indexOf("suspend fun performRemoveCaCertificate(")
+    assertTrue(declaration >= 0)
+    val paramsOpen = code.indexOf('(', declaration)
+    val paramsEnd = KotlinSourceScan.matchParen(code, paramsOpen)
+    val bodyOpen = code.indexOf('{', paramsEnd)
+    val body = code.substring(bodyOpen, KotlinSourceScan.matchBrace(code, bodyOpen))
+    assertTrue(
+      body
+        .replace(Regex("\\s+"), "")
+        .contains("RemoveCertificate(alias,certificate).run(requestId,startTime)"),
+    )
     assertActionsUseFailureHelper(
       source,
       "withCaPolicyFailures",
       "performInstallCaCertificate",
-      "performRemoveCaCertificate",
+      "run",
     )
   }
 
@@ -110,7 +122,8 @@ class LaunchCancellationRethrowTest {
     val source = locateSource("PackageController.kt").readText()
     val result = LaunchCancellationScanner.scan(source)
 
-    assertEquals(6, result.launchBlocks)
+    // Three actions, three broadcasts, and the extracted package metadata reader.
+    assertEquals(7, result.launchBlocks)
     assertActionsUseFailureHelper(
       source,
       "withPackageFailures",

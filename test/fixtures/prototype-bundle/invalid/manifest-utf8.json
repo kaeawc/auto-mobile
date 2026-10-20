@@ -1,0 +1,14 @@
+{
+  "description": "manifest utf8",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "bundle.json",
+      "base64": "/w=="
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "bundle.json"
+  }
+}

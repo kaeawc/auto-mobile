@@ -1,0 +1,14 @@
+{
+  "description": "dos directory",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "attrs": 16
+    }
+  ],
+  "expected": {
+    "code": "entry_not_allowed",
+    "entry": "spec.json"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "unknown flags",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "flags": 16
+    }
+  ],
+  "expected": {
+    "code": "flags_unsupported",
+    "entry": "spec.json"
+  }
+}

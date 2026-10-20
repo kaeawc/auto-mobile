@@ -1,0 +1,18 @@
+{
+  "description": "ratio",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "method": 8,
+      "repeat": {
+        "byte": 65,
+        "count": 8192
+      }
+    }
+  ],
+  "expected": {
+    "code": "ratio_exceeded",
+    "entry": "spec.json"
+  }
+}

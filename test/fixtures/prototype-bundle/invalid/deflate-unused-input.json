@@ -1,0 +1,16 @@
+{
+  "description": "deflate unused input",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "text": "Hello",
+      "method": 8,
+      "rawBase64": "80jNyckHAHg="
+    }
+  ],
+  "expected": {
+    "code": "extra_data",
+    "entry": "spec.json"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "crc",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "crc": 1
+    }
+  ],
+  "expected": {
+    "code": "crc_mismatch",
+    "entry": "spec.json"
+  }
+}

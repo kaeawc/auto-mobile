@@ -1,0 +1,14 @@
+{
+  "description": "font sha",
+  "base": "assets_fonts",
+  "overrides": [
+    {
+      "name": "$font",
+      "base64": "AAAAAA=="
+    }
+  ],
+  "expected": {
+    "code": "sha_mismatch",
+    "entry": "$font"
+  }
+}

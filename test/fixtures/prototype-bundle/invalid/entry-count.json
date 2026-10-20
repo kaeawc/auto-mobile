@@ -1,0 +1,10 @@
+{
+  "description": "entry count",
+  "base": "minimal",
+  "limits": {
+    "maxEntries": 1
+  },
+  "expected": {
+    "code": "too_many_entries"
+  }
+}

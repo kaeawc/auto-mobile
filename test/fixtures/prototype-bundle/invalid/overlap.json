@@ -1,0 +1,17 @@
+{
+  "description": "overlap",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "index": 1,
+      "offset": 42,
+      "type": "u32",
+      "value": 0
+    }
+  ],
+  "expected": {
+    "code": "extra_data",
+    "entry": "spec.json"
+  }
+}

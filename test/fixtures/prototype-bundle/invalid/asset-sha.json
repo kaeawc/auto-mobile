@@ -1,0 +1,14 @@
+{
+  "description": "asset sha",
+  "base": "assets_fonts",
+  "overrides": [
+    {
+      "name": "$image",
+      "base64": "BAUG"
+    }
+  ],
+  "expected": {
+    "code": "sha_mismatch",
+    "entry": "$image"
+  }
+}

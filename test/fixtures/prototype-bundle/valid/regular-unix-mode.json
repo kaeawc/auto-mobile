@@ -1,0 +1,11 @@
+{
+  "description": "regular unix mode",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "attrs": 2175008768
+    }
+  ],
+  "expected": "accept"
+}

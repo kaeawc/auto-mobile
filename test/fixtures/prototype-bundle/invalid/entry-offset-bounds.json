@@ -1,0 +1,16 @@
+{
+  "description": "entry offset bounds",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "offset": 42,
+      "type": "u32",
+      "value": 4294967294
+    }
+  ],
+  "expected": {
+    "code": "extra_data",
+    "entry": "spec.json"
+  }
+}

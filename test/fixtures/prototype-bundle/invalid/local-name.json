@@ -1,0 +1,17 @@
+{
+  "description": "local name",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "local",
+      "index": 1,
+      "offset": 30,
+      "type": "base64",
+      "value": "eA=="
+    }
+  ],
+  "expected": {
+    "code": "size_mismatch",
+    "entry": "spec.json"
+  }
+}

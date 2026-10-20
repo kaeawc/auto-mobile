@@ -1,0 +1,20 @@
+{
+  "description": "unreferenced manifest asset",
+  "base": "assets_fonts",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "hello"
+    }
+  },
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "bundle.json"
+  }
+}

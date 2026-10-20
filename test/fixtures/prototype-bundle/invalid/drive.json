@@ -1,0 +1,14 @@
+{
+  "description": "drive",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "C:/spec.json",
+      "text": "x"
+    }
+  ],
+  "expected": {
+    "code": "path_traversal",
+    "entry": "C:/spec.json"
+  }
+}

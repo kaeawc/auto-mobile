@@ -1,0 +1,5 @@
+{
+  "description": "minimal",
+  "base": "minimal",
+  "expected": "accept"
+}

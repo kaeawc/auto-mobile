@@ -1,0 +1,5 @@
+{
+  "description": "assets fonts",
+  "base": "assets_fonts",
+  "expected": "accept"
+}

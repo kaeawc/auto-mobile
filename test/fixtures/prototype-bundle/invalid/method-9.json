@@ -1,0 +1,14 @@
+{
+  "description": "method 9",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "method": 9
+    }
+  ],
+  "expected": {
+    "code": "unsupported_method",
+    "entry": "spec.json"
+  }
+}

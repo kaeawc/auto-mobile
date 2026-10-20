@@ -1115,6 +1115,9 @@ test/features/prototype/PrototypeHttpExecutor.test.ts
 test/features/prototype/PrototypeShownSpecs.test.ts
 test/features/prototype/PrototypeStatusStore.test.ts
 test/features/prototype/PrototypeTransport.test.ts
+test/features/prototype/bundle/bundleCorpus.test.ts
+test/features/prototype/bundle/bundleEntryLimits.test.ts
+test/features/prototype/bundle/canonicalBundleExport.test.ts
 test/features/prototype/ios/iosPrototypeBundleId.test.ts
 test/features/prototype/ios/iosPrototypeDataContainerWriter.test.ts
 test/features/prototype/ios/iosPrototypeIconRenderer.test.ts

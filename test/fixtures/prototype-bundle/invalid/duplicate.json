@@ -1,0 +1,13 @@
+{
+  "description": "duplicate",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "spec.json"
+    }
+  ],
+  "expected": {
+    "code": "duplicate_entry",
+    "entry": "spec.json"
+  }
+}

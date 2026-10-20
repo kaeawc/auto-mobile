@@ -1,0 +1,15 @@
+{
+  "description": "eocd size",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "eocd",
+      "offset": 12,
+      "type": "u32",
+      "value": 1
+    }
+  ],
+  "expected": {
+    "code": "eocd_invalid"
+  }
+}

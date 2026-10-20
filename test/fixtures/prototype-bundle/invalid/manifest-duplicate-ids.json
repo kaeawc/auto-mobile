@@ -1,0 +1,18 @@
+{
+  "description": "manifest duplicate ids",
+  "base": "assets_fonts",
+  "manifest": {
+    "fonts": [
+      {
+        "id": "image",
+        "file": "fonts/b40711a88c7039756fb8a73827eabe2c0fe5a0346ca7e0a104adc0fc764f528d.ttf",
+        "sha256": "b40711a88c7039756fb8a73827eabe2c0fe5a0346ca7e0a104adc0fc764f528d",
+        "mediaType": "font/ttf"
+      }
+    ]
+  },
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "bundle.json"
+  }
+}

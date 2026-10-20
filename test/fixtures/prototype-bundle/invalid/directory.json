@@ -1,0 +1,13 @@
+{
+  "description": "directory",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "assets/"
+    }
+  ],
+  "expected": {
+    "code": "entry_not_allowed",
+    "entry": "assets/"
+  }
+}

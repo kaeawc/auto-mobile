@@ -1,0 +1,11 @@
+{
+  "description": "expanded cap",
+  "base": "minimal",
+  "limits": {
+    "maxExpandedBytes": 32
+  },
+  "expected": {
+    "code": "expanded_too_large",
+    "entry": "bundle.json"
+  }
+}

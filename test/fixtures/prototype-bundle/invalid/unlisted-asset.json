@@ -1,0 +1,14 @@
+{
+  "description": "unlisted asset",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "assets/0000000000000000000000000000000000000000000000000000000000000000.png",
+      "text": "x"
+    }
+  ],
+  "expected": {
+    "code": "entry_not_allowed",
+    "entry": "assets/0000000000000000000000000000000000000000000000000000000000000000.png"
+  }
+}

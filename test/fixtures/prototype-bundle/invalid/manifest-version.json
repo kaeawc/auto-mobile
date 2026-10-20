@@ -1,0 +1,11 @@
+{
+  "description": "manifest version",
+  "base": "minimal",
+  "manifest": {
+    "bundleFormatVersion": 2
+  },
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "bundle.json"
+  }
+}

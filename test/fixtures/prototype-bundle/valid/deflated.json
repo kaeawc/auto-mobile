@@ -1,0 +1,11 @@
+{
+  "description": "deflated",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "method": 8
+    }
+  ],
+  "expected": "accept"
+}

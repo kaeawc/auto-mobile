@@ -1,0 +1,14 @@
+{
+  "description": "device",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "attrs": 570359808
+    }
+  ],
+  "expected": {
+    "code": "unix_mode_not_regular",
+    "entry": "spec.json"
+  }
+}

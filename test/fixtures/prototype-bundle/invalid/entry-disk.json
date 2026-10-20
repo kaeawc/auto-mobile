@@ -1,0 +1,17 @@
+{
+  "description": "entry disk",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "index": 1,
+      "offset": 34,
+      "type": "u16",
+      "value": 1
+    }
+  ],
+  "expected": {
+    "code": "multi_disk",
+    "entry": "spec.json"
+  }
+}

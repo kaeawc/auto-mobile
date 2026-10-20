@@ -1,0 +1,11 @@
+{
+  "description": "utf8 flag",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "flags": 2048
+    }
+  ],
+  "expected": "accept"
+}

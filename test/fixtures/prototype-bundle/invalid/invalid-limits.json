@@ -1,0 +1,10 @@
+{
+  "description": "invalid limits",
+  "base": "minimal",
+  "limits": {
+    "maxRatio": 0
+  },
+  "expected": {
+    "code": "limits_invalid"
+  }
+}

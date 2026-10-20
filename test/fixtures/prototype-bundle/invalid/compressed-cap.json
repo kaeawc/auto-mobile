@@ -1,0 +1,10 @@
+{
+  "description": "compressed cap",
+  "base": "minimal",
+  "limits": {
+    "maxCompressedBytes": 32
+  },
+  "expected": {
+    "code": "compressed_too_large"
+  }
+}

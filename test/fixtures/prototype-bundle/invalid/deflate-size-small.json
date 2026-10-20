@@ -1,0 +1,15 @@
+{
+  "description": "deflate size small",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "method": 8,
+      "expandedSize": 1
+    }
+  ],
+  "expected": {
+    "code": "size_mismatch",
+    "entry": "spec.json"
+  }
+}

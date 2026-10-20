@@ -1,0 +1,8 @@
+{
+  "description": "eocd",
+  "base": "minimal",
+  "truncate": 1,
+  "expected": {
+    "code": "eocd_invalid"
+  }
+}

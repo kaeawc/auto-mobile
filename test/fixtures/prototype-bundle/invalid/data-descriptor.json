@@ -1,0 +1,14 @@
+{
+  "description": "data descriptor",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "flags": 8
+    }
+  ],
+  "expected": {
+    "code": "flags_unsupported",
+    "entry": "spec.json"
+  }
+}

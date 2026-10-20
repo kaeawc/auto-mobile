@@ -1,0 +1,13 @@
+{
+  "description": "non ascii",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "\u00e9"
+    }
+  ],
+  "expected": {
+    "code": "non_ascii_name",
+    "entry": "\u00e9"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "description": "missing manifest",
+  "base": "minimal",
+  "omit": ["bundle.json"],
+  "expected": {
+    "code": "missing_entry",
+    "entry": "bundle.json"
+  }
+}

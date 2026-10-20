@@ -1,0 +1,17 @@
+{
+  "description": "local crc",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "local",
+      "index": 1,
+      "offset": 14,
+      "type": "u32",
+      "value": 1
+    }
+  ],
+  "expected": {
+    "code": "size_mismatch",
+    "entry": "spec.json"
+  }
+}

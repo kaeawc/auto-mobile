@@ -1,0 +1,13 @@
+{
+  "description": "macosx",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "__MACOSX/foo"
+    }
+  ],
+  "expected": {
+    "code": "entry_not_allowed",
+    "entry": "__MACOSX/foo"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "unix permissions only",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "attrs": 27525120
+    }
+  ],
+  "expected": {
+    "code": "unix_mode_not_regular",
+    "entry": "spec.json"
+  }
+}

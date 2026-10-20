@@ -1,0 +1,17 @@
+{
+  "description": "version needed",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "index": 1,
+      "offset": 6,
+      "type": "u16",
+      "value": 45
+    }
+  ],
+  "expected": {
+    "code": "zip64_unsupported",
+    "entry": "spec.json"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "nul",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "spec.json\u0000",
+      "text": "x"
+    }
+  ],
+  "expected": {
+    "code": "path_traversal",
+    "entry": "spec.json\u0000"
+  }
+}

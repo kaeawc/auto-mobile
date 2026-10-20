@@ -1,0 +1,14 @@
+{
+  "description": "backslash",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "a\\b",
+      "text": "x"
+    }
+  ],
+  "expected": {
+    "code": "path_traversal",
+    "entry": "a\\b"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "zip64 size",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "expandedSize": 4294967295
+    }
+  ],
+  "expected": {
+    "code": "zip64_unsupported",
+    "entry": "spec.json"
+  }
+}

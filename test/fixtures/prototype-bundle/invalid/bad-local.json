@@ -1,0 +1,16 @@
+{
+  "description": "bad local",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "local",
+      "offset": 0,
+      "type": "u32",
+      "value": 0
+    }
+  ],
+  "expected": {
+    "code": "zip_invalid",
+    "entry": "bundle.json"
+  }
+}

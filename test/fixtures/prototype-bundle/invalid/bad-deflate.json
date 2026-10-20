@@ -1,0 +1,15 @@
+{
+  "description": "bad deflate",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "method": 8,
+      "rawBase64": "////"
+    }
+  ],
+  "expected": {
+    "code": "inflate_invalid",
+    "entry": "spec.json"
+  }
+}

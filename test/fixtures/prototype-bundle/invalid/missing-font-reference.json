@@ -1,0 +1,25 @@
+{
+  "description": "missing font reference",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "fontFamily": {
+          "asset": "missing-font"
+        }
+      }
+    }
+  },
+  "expected": {
+    "code": "missing_entry",
+    "entry": "missing-font"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "description": "storage policy",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x"
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:local"]
+    },
+    "state": {
+      "local": "authored"
+    }
+  },
+  "expected": {
+    "code": "spec_invalid",
+    "entry": "spec.json"
+  }
+}

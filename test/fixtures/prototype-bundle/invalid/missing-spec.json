@@ -1,0 +1,9 @@
+{
+  "description": "missing spec",
+  "base": "minimal",
+  "omit": ["spec.json"],
+  "expected": {
+    "code": "missing_entry",
+    "entry": "spec.json"
+  }
+}

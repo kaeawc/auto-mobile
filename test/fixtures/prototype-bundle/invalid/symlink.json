@@ -1,0 +1,14 @@
+{
+  "description": "symlink",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "attrs": 2717843456
+    }
+  ],
+  "expected": {
+    "code": "unix_mode_not_regular",
+    "entry": "spec.json"
+  }
+}

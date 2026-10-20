@@ -1,0 +1,20 @@
+{
+  "description": "missing reference",
+  "base": "minimal",
+  "spec": {
+    "id": "minimal",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "asset": "missing"
+    }
+  },
+  "expected": {
+    "code": "missing_entry",
+    "entry": "missing"
+  }
+}

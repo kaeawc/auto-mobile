@@ -1,0 +1,14 @@
+{
+  "description": "interior slip",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "assets/../spec.json",
+      "text": "x"
+    }
+  ],
+  "expected": {
+    "code": "path_traversal",
+    "entry": "assets/../spec.json"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "manifest",
+  "base": "minimal",
+  "manifest": {
+    "label": "forbidden"
+  },
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "bundle.json"
+  }
+}

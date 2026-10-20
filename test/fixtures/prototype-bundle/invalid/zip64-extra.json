@@ -1,0 +1,14 @@
+{
+  "description": "zip64 extra",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "extraBase64": "AQAAAA=="
+    }
+  ],
+  "expected": {
+    "code": "zip64_unsupported",
+    "entry": "spec.json"
+  }
+}

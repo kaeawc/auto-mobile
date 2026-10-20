@@ -1,0 +1,14 @@
+{
+  "description": "strong encryption",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "flags": 64
+    }
+  ],
+  "expected": {
+    "code": "encrypted",
+    "entry": "spec.json"
+  }
+}

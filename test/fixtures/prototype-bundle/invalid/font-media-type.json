@@ -1,0 +1,25 @@
+{
+  "description": "OpenType signature cannot be declared as TrueType",
+  "base": "assets_fonts",
+  "omit": ["fonts/bf5e8ffa51a9e748985800c1d3d7f1a2a6ae7435136593ca8d9637e3f87c699c.ttf"],
+  "manifest": {
+    "fonts": [
+      {
+        "id": "font",
+        "file": "fonts/7ff30fcf2251a8e9cf8e5175d75e90b3c02656f9a344b10948a4d96bb568d74e.ttf",
+        "sha256": "7ff30fcf2251a8e9cf8e5175d75e90b3c02656f9a344b10948a4d96bb568d74e",
+        "mediaType": "font/ttf"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "name": "fonts/7ff30fcf2251a8e9cf8e5175d75e90b3c02656f9a344b10948a4d96bb568d74e.ttf",
+      "text": "OTTO"
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "fonts/7ff30fcf2251a8e9cf8e5175d75e90b3c02656f9a344b10948a4d96bb568d74e.ttf"
+  }
+}

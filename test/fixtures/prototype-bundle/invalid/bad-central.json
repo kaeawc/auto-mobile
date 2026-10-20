@@ -1,0 +1,15 @@
+{
+  "description": "bad central",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "offset": 0,
+      "type": "u32",
+      "value": 0
+    }
+  ],
+  "expected": {
+    "code": "zip_invalid"
+  }
+}

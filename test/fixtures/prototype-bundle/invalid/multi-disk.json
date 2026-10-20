@@ -1,0 +1,15 @@
+{
+  "description": "multi disk",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "eocd",
+      "offset": 4,
+      "type": "u16",
+      "value": 1
+    }
+  ],
+  "expected": {
+    "code": "multi_disk"
+  }
+}

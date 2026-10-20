@@ -1,0 +1,9 @@
+{
+  "description": "spec",
+  "base": "minimal",
+  "spec": {},
+  "expected": {
+    "code": "spec_invalid",
+    "entry": "spec.json"
+  }
+}

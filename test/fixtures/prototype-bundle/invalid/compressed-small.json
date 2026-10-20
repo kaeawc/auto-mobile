@@ -1,0 +1,14 @@
+{
+  "description": "compressed small",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "compressedSize": 20
+    }
+  ],
+  "expected": {
+    "code": "size_mismatch",
+    "entry": "spec.json"
+  }
+}

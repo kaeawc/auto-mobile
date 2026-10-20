@@ -194,3 +194,8 @@ test/fixtures/docs-site/*.html text eol=lf
 test/fixtures/android-pin-dialog/*.json text eol=lf
 test/fixtures/android-pin-dialog/*.xml text eol=lf
 test/fixtures/android-pin-dialog/*.md text eol=lf
+
+# Cross-language prototype bundle recipes are text, including hostile byte directives.
+test/fixtures/prototype-bundle/*.json text eol=lf
+test/fixtures/prototype-bundle/valid/*.json text eol=lf
+test/fixtures/prototype-bundle/invalid/*.json text eol=lf

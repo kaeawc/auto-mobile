@@ -1,0 +1,17 @@
+{
+  "description": "entry comment",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "central",
+      "index": 1,
+      "offset": 32,
+      "type": "u16",
+      "value": 1
+    }
+  ],
+  "expected": {
+    "code": "extra_data",
+    "entry": "spec.json"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "description": "bomb",
+  "base": "minimal",
+  "limits": {
+    "maxExpandedBytes": 1024
+  },
+  "overrides": [
+    {
+      "name": "spec.json",
+      "method": 8,
+      "repeat": {
+        "byte": 65,
+        "count": 8192
+      },
+      "expandedSize": 1
+    }
+  ],
+  "expected": {
+    "code": "expanded_too_large",
+    "entry": "spec.json"
+  }
+}

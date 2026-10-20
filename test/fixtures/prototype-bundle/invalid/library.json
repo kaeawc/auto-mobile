@@ -1,0 +1,13 @@
+{
+  "description": "library",
+  "base": "minimal",
+  "entries": [
+    {
+      "name": "library.json"
+    }
+  ],
+  "expected": {
+    "code": "entry_not_allowed",
+    "entry": "library.json"
+  }
+}

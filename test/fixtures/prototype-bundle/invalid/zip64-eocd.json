@@ -1,0 +1,15 @@
+{
+  "description": "zip64 eocd",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "eocd",
+      "offset": 12,
+      "type": "u32",
+      "value": 4294967295
+    }
+  ],
+  "expected": {
+    "code": "zip64_unsupported"
+  }
+}

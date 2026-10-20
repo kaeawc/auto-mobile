@@ -1,0 +1,17 @@
+{
+  "description": "local flags",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "local",
+      "index": 1,
+      "offset": 6,
+      "type": "u16",
+      "value": 2048
+    }
+  ],
+  "expected": {
+    "code": "size_mismatch",
+    "entry": "spec.json"
+  }
+}

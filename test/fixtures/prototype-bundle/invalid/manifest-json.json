@@ -1,0 +1,14 @@
+{
+  "description": "manifest json",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "bundle.json",
+      "text": "{"
+    }
+  ],
+  "expected": {
+    "code": "manifest_invalid",
+    "entry": "bundle.json"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "malformed extra",
+  "base": "minimal",
+  "overrides": [
+    {
+      "name": "spec.json",
+      "extraBase64": "AQ=="
+    }
+  ],
+  "expected": {
+    "code": "zip_invalid",
+    "entry": "spec.json"
+  }
+}

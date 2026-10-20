@@ -1,0 +1,8 @@
+{
+  "description": "trailing",
+  "base": "minimal",
+  "trailingBase64": "eA==",
+  "expected": {
+    "code": "extra_data"
+  }
+}

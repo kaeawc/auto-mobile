@@ -1,0 +1,11 @@
+{
+  "description": "sha",
+  "base": "minimal",
+  "manifest": {
+    "specSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "expected": {
+    "code": "sha_mismatch",
+    "entry": "spec.json"
+  }
+}

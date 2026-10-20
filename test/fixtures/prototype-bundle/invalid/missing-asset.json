@@ -1,0 +1,9 @@
+{
+  "description": "missing asset",
+  "base": "assets_fonts",
+  "omit": ["assets/039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81.png"],
+  "expected": {
+    "code": "missing_entry",
+    "entry": "$image"
+  }
+}

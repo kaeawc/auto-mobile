@@ -1,0 +1,17 @@
+{
+  "description": "local method",
+  "base": "minimal",
+  "patches": [
+    {
+      "region": "local",
+      "index": 1,
+      "offset": 8,
+      "type": "u16",
+      "value": 8
+    }
+  ],
+  "expected": {
+    "code": "size_mismatch",
+    "entry": "spec.json"
+  }
+}

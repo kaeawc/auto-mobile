@@ -3,7 +3,6 @@ import type { DeviceDiscoveryError, PlatformDeviceManager } from "../devices/dev
 import type { BootedDevice } from "../models";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { TransitionalSimulator } from "../models/TransitionalSimulator";
-import { getAbortSignal } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 
@@ -29,6 +28,8 @@ export async function adbOfflineHeldDevices(input: {
   discovered: readonly BootedDevice[];
   devicePool: Pick<DevicePool, "getAssignedDevices"> | null | undefined;
   deviceManager: Pick<PlatformDeviceManager, "getAndroidListedDeviceStates">;
+  /** Cancel signal for the state probe; callers resolve it (undefined = uncancellable). */
+  signal: AbortSignal | undefined;
   /**
    * What a failed probe means. `throw` refuses with `discovery_incomplete`; a callback receives
    * the failure so a listing can mark its observation incomplete and still list what it has;
@@ -51,7 +52,7 @@ export async function adbOfflineHeldDevices(input: {
   try {
     states = await deviceManager.getAndroidListedDeviceStates(
       held.map((pooled) => pooled.id),
-      { signal: getAbortSignal() },
+      { signal: input.signal },
     );
   } catch (error) {
     logger.warn(

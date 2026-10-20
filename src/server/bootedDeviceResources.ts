@@ -660,6 +660,7 @@ async function adbOfflineHeldDeviceDescriptions(
     discovered: input.discovered,
     devicePool: input.devicePool,
     deviceManager: input.deviceManager,
+    signal: getAbortSignal() ?? new AbortController().signal,
     onProbeFailure: input.onProbeFailure,
   });
   return held.map(({ device, avdName, adbState }) =>

@@ -21,6 +21,7 @@ import { describeDevice, projectConfiguredImage } from "../daemon/deviceDescript
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
+import { getAbortSignal } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
   BOOTED_DEVICE_RESOURCE_URIS,
@@ -67,6 +68,7 @@ async function transitionalHeldListing(input: {
     discovered,
     devicePool: pool,
     deviceManager,
+    signal: getAbortSignal() ?? new AbortController().signal,
     onProbeFailure: (failure) => {
       probeFailure = failure;
     },

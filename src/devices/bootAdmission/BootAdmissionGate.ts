@@ -391,6 +391,7 @@ export class BootAdmissionLedger {
     return {
       count: boots.length,
       boots: boots.map((entry) => ({
+        deviceId: entry.deviceId,
         processId: entry.processId,
         handedOff: entry.handedOff === true,
       })),

@@ -300,6 +300,20 @@ interaction (tap/swipe/drag/pinch, key and text input, clipboard), app managemen
 (launch/terminate/install/uninstall), and device management (list/provision/kill
 devices, set the active device).
 
+## Android Lint
+
+Run `cd android && ./gradlew lintDebug --continue`. The Android pre-push gate
+runs lint for affected modules (all modules for Gradle/build-logic changes);
+the CI Detekt job runs it for every Android module. New warnings fail the build.
+Remaining findings live in each module's `lint-baseline.xml`; clean modules have
+no baseline. Baselines may only shrink, both in total and for each issue id per
+module. After fixing a module, remove its baseline and regenerate with
+`./gradlew :<module>:lintDebug -Dlint.baselines.continue=true`. Keep the generated
+file only if nonempty, then run `./gradlew :<module>:lintDebug --rerun-tasks` once
+to refresh AGP's cached baseline creation result. Never use `--allow-grow` when
+updating baselines. `scripts/android/check-lint-baseline-shrink.sh` checks
+HEAD against the merge-base with origin/main; pre-push includes local edits too.
+
 # Android Notification Group Handling (Hard-Won Knowledge)
 
 When Android collapses 2+ notifications from the same app into a group,

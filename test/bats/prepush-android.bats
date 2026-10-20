@@ -4,10 +4,14 @@ SCRIPT="scripts/prepush-android.sh"
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  export GIT_AUTHOR_NAME=test GIT_COMMITTER_NAME=test
+  export GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_EMAIL=test@example.com
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
 }
 
 copy_prepush_fixture() {
-  mkdir -p "${fixture_repo}/scripts/lib" "${fixture_repo}/scripts/ktfmt"
+  mkdir -p "${fixture_repo}/scripts/lib" "${fixture_repo}/scripts/ktfmt" "${fixture_repo}/scripts/android"
+  cp "${REPO_ROOT}/scripts/android/check-lint-baseline-shrink.sh" "${fixture_repo}/scripts/android/"
   cp "${REPO_ROOT}/${SCRIPT}" "${fixture_repo}/${SCRIPT}"
   cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${fixture_repo}/scripts/lib/vcs-diff.sh"
 }
@@ -37,7 +41,12 @@ teardown() {
 }
 
 @test "is a successful no-op when there are no Android changes" {
-  cd "$REPO_ROOT"
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  copy_prepush_fixture
+  cd "$fixture_repo"
+  git init -q
+  git add .
+  git commit -qm initial
   run env ANDROID_PREPUSH_BASE_REF=HEAD bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
@@ -62,9 +71,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Detekt config"
   base_sha="$(git rev-parse HEAD)"
@@ -103,9 +109,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial SDK API baseline"
   base_sha="$(git rev-parse HEAD)"
@@ -147,9 +150,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android module and SDK API baseline"
   base_sha="$(git rev-parse HEAD)"
@@ -191,9 +191,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android module and Detekt config"
   base_sha="$(git rev-parse HEAD)"
@@ -239,9 +236,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android module and Detekt config"
   base_sha="$(git rev-parse HEAD)"
@@ -290,9 +284,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android module and Detekt config"
   base_sha="$(git rev-parse HEAD)"
@@ -329,9 +320,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial fixture"
 
@@ -353,9 +341,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android build"
   tree_sha="$(git write-tree)"
@@ -417,9 +402,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android build"
   base_sha="$(git rev-parse HEAD)"
@@ -457,9 +439,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android module"
   base_sha="$(git rev-parse HEAD)"
@@ -498,9 +477,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial Android build logic"
   base_sha="$(git rev-parse HEAD)"
@@ -543,9 +519,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial modules"
   base_sha="$(git rev-parse HEAD)"
@@ -587,9 +560,6 @@ SCRIPT
 
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm "initial modules"
   base_sha="$(git rev-parse HEAD)"
@@ -622,9 +592,6 @@ SCRIPT
   printf '%s\n' 'class X' > "${fixture_repo}/android/foo/src/main/kotlin/X.kt"
   cd "${fixture_repo}"
   git init -q
-  git config user.email t@t.t
-  git config user.name t
-  git config commit.gpgsign false
   git add -A
   git commit -qm initial
   base_sha="$(git rev-parse HEAD)"
@@ -637,4 +604,79 @@ SCRIPT
   grep -qx partial "${invocations_file}"
   grep -Fx 'scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job' "${invocations_file}"
   grep -Fx 'Android unit tests=skip:0' "${invocations_file}"
+}
+
+lint_fixture() {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  copy_prepush_fixture
+  mkdir -p "$fixture_repo/android/foo/src/main/res/values" "$fixture_repo/android/bar/src/main"
+  printf 'plugins { id("automobile.android-library") }\n' > "$fixture_repo/android/foo/build.gradle.kts"
+  printf 'plugins { id("automobile.android-application") }\n' > "$fixture_repo/android/bar/build.gradle.kts"
+  printf '<resources/>\n' > "$fixture_repo/android/foo/src/main/res/values/strings.xml"
+  printf '<manifest/>\n' > "$fixture_repo/android/bar/src/main/AndroidManifest.xml"
+  cat > "$fixture_repo/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GRADLEW_INVOCATIONS_FILE"
+SCRIPT
+  chmod +x "$fixture_repo/android/gradlew"
+  cd "$fixture_repo"
+  git init -q
+  git add .
+  git commit -qm initial
+  base_sha="$(git rev-parse HEAD)"
+}
+
+@test "lint selects and deduplicates owners of unstaged resources and manifests" {
+  lint_fixture
+  printf '<resources><string name="x">x</string></resources>\n' > android/foo/src/main/res/values/strings.xml
+  printf '<resources/>\n' > android/foo/src/main/res/values/new.xml
+  printf '<manifest package="test"/>\n' > android/bar/src/main/AndroidManifest.xml
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$invocations_file")" = ':bar:lintDebug :foo:lintDebug --continue' ]
+  [[ "$output" == *'shrink-only'* ]]
+}
+
+@test "lint runs for deleted resources" {
+  lint_fixture
+  rm android/foo/src/main/res/values/strings.xml
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$invocations_file")" = ':foo:lintDebug --continue' ]
+}
+
+@test "new local baseline cannot bypass the pre-push shrink guard" {
+  lint_fixture
+  printf '<issues><issue id="New"/></issues>\n' > android/foo/lint-baseline.xml
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'new baseline'* ]]
+  [ "$(cat "$invocations_file")" = ':foo:lintDebug --continue' ]
+}
+
+@test "lint failure propagates from pre-push" {
+  lint_fixture
+  printf '<manifest package="test"/>\n' > android/bar/src/main/AndroidManifest.xml
+  printf '#!/usr/bin/env bash\nexit 7\n' > android/gradlew
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" bash "$SCRIPT"
+  [ "$status" -eq 7 ]
+}
+
+@test "Gradle properties select lint for all modules" {
+  lint_fixture
+  printf 'android.useAndroidX=true\n' > android/gradle.properties
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx 'lintDebug --continue' "$invocations_file"
+  grep -qx help "$invocations_file"
+}
+
+@test "the shrink guard rejects a baseline outside an Android plugin module" {
+  lint_fixture
+  mkdir -p android/config
+  printf '<issues/>\n' > android/config/lint-baseline.xml
+  run env ANDROID_PREPUSH_BASE_REF="$base_sha" GRADLEW_INVOCATIONS_FILE="$invocations_file" bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'new baseline'* ]]
 }

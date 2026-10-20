@@ -1,0 +1,426 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="ScopedStorage"
+        message="WRITE_EXTERNAL_STORAGE is deprecated (and is not granted) when targeting Android 13+. If you need to write to shared storage, use the `MediaStore.createWriteRequest` intent."
+        errorLine1="  &lt;uses-permission android:name=&quot;android.permission.WRITE_EXTERNAL_STORAGE&quot; />"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="40"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="ScopedStorage"
+        message="READ_EXTERNAL_STORAGE is deprecated (and is not granted) when targeting Android 13+. If you need to query or interact with MediaStore or media files on the shared storage, you should instead use one or more new storage permissions: `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO` or `READ_MEDIA_AUDIO`."
+        errorLine1="  &lt;uses-permission android:name=&quot;android.permission.READ_EXTERNAL_STORAGE&quot; />"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="41"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 9.8.1 is available: 9.8.2"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-9.8.1-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/wrapper/gradle-wrapper.properties"
+            line="3"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of org.jetbrains.kotlin:kotlin-stdlib than 2.2.21 is available: 2.4.21"
+        errorLine1="build-kotlin-consumer = &quot;2.2.21&quot;           # Published runner/test-plan consumer floor"
+        errorLine2="                        ~~~~~~~~">
+        <location
+            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
+            line="17"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.window:window than 1.5.0 is available: 1.5.1"
+        errorLine1="androidx-window = &quot;1.5.0&quot;"
+        errorLine2="                  ~~~~~~~">
+        <location
+            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
+            line="33"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation3:navigation3-runtime than 1.1.5 is available: 1.2.0"
+        errorLine1="navigation3 = &quot;1.1.5&quot;              # Used in playground app"
+        errorLine2="              ~~~~~~~">
+        <location
+            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
+            line="60"
+            column="15"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.navigation3:navigation3-ui than 1.1.5 is available: 1.2.0"
+        errorLine1="navigation3 = &quot;1.1.5&quot;              # Used in playground app"
+        errorLine2="              ~~~~~~~">
+        <location
+            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
+            line="60"
+            column="15"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-serialization-json than 1.11.0 is available: 1.12.0"
+        errorLine1="kotlinx-serialization-json = &quot;1.11.0&quot;"
+        errorLine2="                             ~~~~~~~~">
+        <location
+            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
+            line="64"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.compose than 1.12.1 is available: 1.12.2"
+        errorLine1="compose-multiplatform = &quot;1.12.1&quot;"
+        errorLine2="                        ~~~~~~~~">
+        <location
+            file="$HOME/kaeawc/auto-mobile/.claude/worktrees/lane-K1-16/android/gradle/libs.versions.toml"
+            line="77"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenWidthDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    else screenPx(configuration.screenWidthDp),"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeImages.kt"
+            line="148"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenHeightDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    else screenPx(configuration.screenHeightDp),"
+        errorLine2="                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeImages.kt"
+            line="150"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun fillAuthoredAxes(style: PrototypeStyle): Modifier {"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeImages.kt"
+            line="262"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun prototypeNodeModifier("
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1244"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun authoredSizeModifier("
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1587"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun dimensionModifier("
+        errorLine2="            ~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1612"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun wrapContent(modifier: Modifier, horizontal: Boolean): Modifier ="
+        errorLine2="            ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1627"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun RowScope.rowWeight(child: PrototypeRenderNode): Modifier ="
+        errorLine2="                     ~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1643"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun ColumnScope.columnWeight(child: PrototypeRenderNode): Modifier ="
+        errorLine2="                        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1647"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun sizeConstraintModifier(modifier: Modifier, style: PrototypeStyle): Modifier ="
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1651"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier = Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="417"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="456"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier = Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="508"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="  parentModifier: Modifier,"
+        errorLine2="  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeSpecContent.kt"
+            line="1700"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="DiscouragedApi"
+        message="Use of this function is discouraged because resource reflection makes it harder to perform build optimizations and compile-time verification of code. It is much more efficient to retrieve resources by identifier (e.g. `R.foo.bar`) than by name (e.g. `getIdentifier(&quot;bar&quot;, &quot;foo&quot;, null)`)."
+        errorLine1="            val id = resources.getIdentifier(name, &quot;dimen&quot;, &quot;android&quot;)"
+        errorLine2="                               ~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+            line="1201"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="UnclosedTrace"
+        message="The `beginSection()` call is not always closed with a matching `endSection()` because the code in between may return early"
+        errorLine1="  override fun begin(name: String) = Trace.beginSection(name)"
+        errorLine2="                                           ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeTrace.kt"
+            line="66"
+            column="44"/>
+    </issue>
+
+    <issue
+        id="UseRequiresApi"
+        message="Use `@RequiresApi(Build.VERSION_CODES.R)` instead of `@TargetApi` to propagate the requirement to callers of `open`"
+        errorLine1="  @TargetApi(Build.VERSION_CODES.R)"
+        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeDisplays.kt"
+            line="76"
+            column="3"/>
+    </issue>
+
+    <issue
+        id="UseRequiresApi"
+        message="Use `@RequiresApi(Build.VERSION_CODES.R)` instead of `@TargetApi` to propagate the requirement to callers of `navigationBarBottomPx`"
+        errorLine1="@TargetApi(Build.VERSION_CODES.R)"
+        errorLine2="~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeInsetFloor.kt"
+            line="62"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="InsecureBaseConfiguration"
+        message="Insecure Base Configuration"
+        errorLine1="  &lt;base-config cleartextTrafficPermitted=&quot;true&quot;>"
+        errorLine2="                                          ~~~~">
+        <location
+            file="src/main/res/xml/network_security_config.xml"
+            line="9"
+            column="43"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableLongStateOf` instead of `mutableStateOf`"
+        errorLine1="  var revealCounter by mutableStateOf(0L)"
+        errorLine2="                       ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeEscape.kt"
+            line="32"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-hdpi/ic_launcher_scene.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-mdpi/ic_launcher_scene.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xhdpi/ic_launcher_scene.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xxhdpi/ic_launcher_scene.png"/>
+    </issue>
+
+    <issue
+        id="IconLauncherShape"
+        message="Launcher icons should not fill every pixel of their square region; see the design guide for details">
+        <location
+            file="src/main/res/mipmap-xxxhdpi/ic_launcher_scene.png"/>
+    </issue>
+
+    <issue
+        id="ViewConstructor"
+        message="Custom view `PrototypeComposeView` is missing constructor used by tools: `(Context)` or `(Context,AttributeSet)` or `(Context,AttributeSet,int)`"
+        errorLine1="internal class PrototypeComposeView("
+        errorLine2="               ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/PrototypeHost.kt"
+            line="787"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="    val bitmap = Bitmap.createBitmap(edge, edge, Bitmap.Config.ARGB_8888)"
+        errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/AndroidPinnedShortcutPlatform.kt"
+            line="54"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.get` instead?"
+        errorLine1="        val background = decoded.getPixel(0, 0)"
+        errorLine2="                         ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/AndroidPinnedShortcutPlatform.kt"
+            line="61"
+            column="26"/>
+    </issue>
+
+</issues>

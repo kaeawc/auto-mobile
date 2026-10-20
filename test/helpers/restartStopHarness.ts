@@ -107,7 +107,7 @@ export function restartStopHarness() {
       deviceId: platform === "android" ? "emulator-5554" : "restart-sim",
     };
     manager.setBootedDevices(platform, [device]);
-    manager.setDeviceImages(platform, [device]);
+    manager.setDeviceImages(platform, [{ ...device, isRunning: true }]);
     const persistence = new FakeDeviceSessionPersistence();
     const sessions = new SessionManager(timer, persistence, {
       barrier: () => new FakeDbWriteBarrier(),

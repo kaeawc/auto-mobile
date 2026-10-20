@@ -285,7 +285,12 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
     test("a never-sent result under an aborted signal also throws the reason", async () => {
       const proxy = new FakeIOSCtrlProxy();
       const controller = new AbortController();
-      proxy.setSwipeResult({ success: false, error: "not connected", dispatched: false });
+      proxy.setSwipeResult({
+        success: false,
+        error: "not connected",
+        dispatched: false,
+        totalTimeMs: 0,
+      });
       const pending = proxy.requestSwipe({
         x1: 1,
         y1: 2,

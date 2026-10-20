@@ -1,6 +1,7 @@
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import type { SpawnOptions } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useScratchRoot } from "../helpers/scratchRoot";
@@ -75,15 +76,7 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, args: string[], _options: SpawnOptions) => {
         captured = [...args];
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeChildProcess(new FakeTimer());
       },
     };
 

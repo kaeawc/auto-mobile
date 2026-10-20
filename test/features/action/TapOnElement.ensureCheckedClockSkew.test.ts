@@ -140,12 +140,13 @@ async function runEnsureChecked(
     effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
     observation: current,
   });
-  const result = await tap.execute({
+  const tapOptions = {
     text: "Wi-Fi",
-    action: "tap",
+    action: "tap" as const,
     ensureChecked: true,
     skipUiStability: true,
-  });
+  };
+  const result = await tap.execute(tapOptions);
   const postActionFloors = screen.floors.filter((floor): floor is number => (floor ?? 0) > 0);
   return { result, postActionFloors, deviceClockReads, hostTapTime, deviceTapTime };
 }

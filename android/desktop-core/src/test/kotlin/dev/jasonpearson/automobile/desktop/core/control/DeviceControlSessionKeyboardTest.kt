@@ -53,7 +53,7 @@ class DeviceControlSessionKeyboardTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
 
-    val consumed = session.key(testSnapshot(deviceId = "emulator-5554"), escape())
+    val consumed = session.key(testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")), escape())
     advanceUntilIdle()
 
     assertTrue(consumed, "a forwarded keystroke is consumed")
@@ -73,7 +73,10 @@ class DeviceControlSessionKeyboardTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
 
-    session.key(testSnapshot(deviceId = "emulator-5554"), DeviceKeyStroke(character = 'a'))
+    session.key(
+      testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")),
+      DeviceKeyStroke(character = 'a'),
+    )
     advanceUntilIdle()
 
     val call = client.inputTypeTextCalls.single()
@@ -101,7 +104,7 @@ class DeviceControlSessionKeyboardTest {
 
     val consumed =
       listOf('a', 'b', 'c').map { character ->
-        session.key(testSnapshot(), DeviceKeyStroke(character = character))
+        session.key(testSnapshot(TestSnapshotSpec()), DeviceKeyStroke(character = character))
       }
     advanceUntilIdle()
 
@@ -121,8 +124,8 @@ class DeviceControlSessionKeyboardTest {
     val published = mutableListOf<String?>()
     val session = session(scope, client, publishError = { published.add(it) })
 
-    val accented = session.key(testSnapshot(), DeviceKeyStroke(character = 'é'))
-    val euro = session.key(testSnapshot(), DeviceKeyStroke(character = '€'))
+    val accented = session.key(testSnapshot(TestSnapshotSpec()), DeviceKeyStroke(character = 'é'))
+    val euro = session.key(testSnapshot(TestSnapshotSpec()), DeviceKeyStroke(character = '€'))
     advanceUntilIdle()
 
     assertFalse(accented, "an untypable character must reach the host")
@@ -158,7 +161,7 @@ class DeviceControlSessionKeyboardTest {
 
     val consumed =
       session.key(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DeviceKeyStroke(character = 'A', modifiers = DeviceKeyModifiers(shift = true)),
       )
     advanceUntilIdle()
@@ -182,7 +185,7 @@ class DeviceControlSessionKeyboardTest {
 
     val consumed =
       session.key(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DeviceKeyStroke(
           key = DeviceKeyboardKey.Tab,
           character = '\t',
@@ -237,7 +240,7 @@ class DeviceControlSessionKeyboardTest {
     val session = session(scope, client)
 
     session.key(
-      testSnapshot(deviceId = "emulator-5554"),
+      testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")),
       DeviceKeyStroke(key = DeviceKeyboardKey.Enter, character = '\n'),
     )
     advanceUntilIdle()
@@ -259,7 +262,7 @@ class DeviceControlSessionKeyboardTest {
 
     val consumed =
       session.key(
-        testSnapshot(),
+        testSnapshot(TestSnapshotSpec()),
         DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(meta = true)),
       )
     advanceUntilIdle()
@@ -283,7 +286,7 @@ class DeviceControlSessionKeyboardTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
-    val snapshot = testSnapshot()
+    val snapshot = testSnapshot(TestSnapshotSpec())
 
     session.tap(snapshot, DevicePoint(x = 360, y = 780, inBounds = true))
     session.key(snapshot, DeviceKeyStroke(character = 'a'))
@@ -301,7 +304,7 @@ class DeviceControlSessionKeyboardTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val session = session(scope, FakeAutoMobileClient())
 
-    session.key(testSnapshot(sequence = 5L), DeviceKeyStroke(character = 'a'))
+    session.key(testSnapshot(TestSnapshotSpec(sequence = 5L)), DeviceKeyStroke(character = 'a'))
     advanceUntilIdle()
 
     assertEquals(PostInputRefreshState.AwaitingSnapshot, session.refreshState)
@@ -324,7 +327,7 @@ class DeviceControlSessionKeyboardTest {
     val published = mutableListOf<String?>()
     val session = session(scope, client, publishError = { published.add(it) })
 
-    session.key(testSnapshot(), DeviceKeyStroke(key = DeviceKeyboardKey.Enter))
+    session.key(testSnapshot(TestSnapshotSpec()), DeviceKeyStroke(key = DeviceKeyboardKey.Enter))
     advanceUntilIdle()
 
     assertEquals(
@@ -346,7 +349,7 @@ class DeviceControlSessionKeyboardTest {
     val client = FakeAutoMobileClient()
     val session = session(scope, client)
 
-    session.key(testSnapshot(), DeviceKeyStroke(character = 'a'))
+    session.key(testSnapshot(TestSnapshotSpec()), DeviceKeyStroke(character = 'a'))
     session.reset()
     advanceUntilIdle()
 

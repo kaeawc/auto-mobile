@@ -101,7 +101,8 @@ class DeviceScreenViewKeyboardTest {
     Box(
       Modifier.focusTarget().onPreviewKeyEvent { event ->
         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-        if (standDown && !event.isMetaPressed && !event.isCtrlPressed && !event.isAltPressed) {
+        val hasModifier = event.isMetaPressed || event.isCtrlPressed || event.isAltPressed
+        if (standDown && !hasModifier) {
           return@onPreviewKeyEvent false
         }
         when (event.key) {
@@ -128,7 +129,7 @@ class DeviceScreenViewKeyboardTest {
         onElementHovered = {},
         elementMap = mapOf("root" to root),
         controlMode = DeviceScreenControlMode.Control,
-        controlSnapshot = snapshot(),
+        controlSnapshot = keyboardSnapshot(),
         onControlTap = { _, _ -> true },
         onControlKey = { _, stroke ->
           observed.forwarded.add(stroke)
@@ -198,10 +199,12 @@ class DeviceScreenViewKeyboardTest {
     setContent {
       MaterialTheme {
         hostedView(
-          observed,
-          DeviceScreenControlMode.Control,
-          forwardsEverything = true,
-          otherFocus = elsewhere,
+          HostedViewSpec(
+            observed,
+            DeviceScreenControlMode.Control,
+            forwardsEverything = true,
+            otherFocus = elsewhere,
+          ),
         )
       }
     }
@@ -246,7 +249,7 @@ class DeviceScreenViewKeyboardTest {
             onElementHovered = {},
             elementMap = mapOf("root" to root),
             controlMode = DeviceScreenControlMode.Control,
-            controlSnapshot = snapshot(),
+            controlSnapshot = keyboardSnapshot(),
             onControlTap = { _, _ -> true },
             onControlKey = { _, _ -> true },
             onControlFocusChanged = { focusStates.add(it) },
@@ -262,15 +265,18 @@ class DeviceScreenViewKeyboardTest {
     assertTrue(focusStates.lastOrNull() == false, "losing focus is reported too")
   }
 
+  private data class HostedViewSpec(
+    val observed: Observed,
+    val mode: DeviceScreenControlMode,
+    val forwardsEverything: Boolean,
+    val otherFocus: FocusRequester? = null,
+    val snapshot: DeviceFrameSnapshot? = keyboardSnapshot(),
+    val selectedElementId: String? = null,
+  )
+
   @Composable
-  private fun hostedView(
-    observed: Observed,
-    mode: DeviceScreenControlMode,
-    forwardsEverything: Boolean,
-    otherFocus: FocusRequester? = null,
-    snapshot: DeviceFrameSnapshot? = snapshot(),
-    selectedElementId: String? = null,
-  ) {
+  private fun hostedView(spec: HostedViewSpec) {
+    val (observed, mode, forwardsEverything, otherFocus, snapshot, selectedElementId) = spec
     Box(
       Modifier.onKeyEvent { event ->
         // Only key-downs are recorded: the view forwards on KeyDown and deliberately leaves the
@@ -308,7 +314,9 @@ class DeviceScreenViewKeyboardTest {
     val observed = Observed()
     setContent {
       MaterialTheme {
-        hostedView(observed, DeviceScreenControlMode.Control, forwardsEverything = true)
+        hostedView(
+          HostedViewSpec(observed, DeviceScreenControlMode.Control, forwardsEverything = true),
+        )
       }
     }
 
@@ -334,7 +342,9 @@ class DeviceScreenViewKeyboardTest {
     val observed = Observed()
     setContent {
       MaterialTheme {
-        hostedView(observed, DeviceScreenControlMode.Control, forwardsEverything = false)
+        hostedView(
+          HostedViewSpec(observed, DeviceScreenControlMode.Control, forwardsEverything = false),
+        )
       }
     }
 
@@ -357,7 +367,9 @@ class DeviceScreenViewKeyboardTest {
       val observed = Observed()
       setContent {
         MaterialTheme {
-          hostedView(observed, DeviceScreenControlMode.Control, forwardsEverything = true)
+          hostedView(
+            HostedViewSpec(observed, DeviceScreenControlMode.Control, forwardsEverything = true),
+          )
         }
       }
 
@@ -378,7 +390,9 @@ class DeviceScreenViewKeyboardTest {
     val observed = Observed()
     setContent {
       MaterialTheme {
-        hostedView(observed, DeviceScreenControlMode.Control, forwardsEverything = false)
+        hostedView(
+          HostedViewSpec(observed, DeviceScreenControlMode.Control, forwardsEverything = false),
+        )
       }
     }
 
@@ -407,10 +421,12 @@ class DeviceScreenViewKeyboardTest {
         // A selection is what gives the inspector view keyboard focus, so this is the state in
         // which it actually receives key events — anything less would pass vacuously.
         hostedView(
-          observed,
-          DeviceScreenControlMode.Inspector,
-          forwardsEverything = true,
-          selectedElementId = "root",
+          HostedViewSpec(
+            observed,
+            DeviceScreenControlMode.Inspector,
+            forwardsEverything = true,
+            selectedElementId = "root",
+          ),
         )
       }
     }
@@ -434,10 +450,12 @@ class DeviceScreenViewKeyboardTest {
     setContent {
       MaterialTheme {
         hostedView(
-          observed,
-          DeviceScreenControlMode.Control,
-          forwardsEverything = true,
-          otherFocus = elsewhere,
+          HostedViewSpec(
+            observed,
+            DeviceScreenControlMode.Control,
+            forwardsEverything = true,
+            otherFocus = elsewhere,
+          ),
         )
       }
     }
@@ -462,10 +480,12 @@ class DeviceScreenViewKeyboardTest {
     setContent {
       MaterialTheme {
         hostedView(
-          observed,
-          DeviceScreenControlMode.Control,
-          forwardsEverything = true,
-          snapshot = null,
+          HostedViewSpec(
+            observed,
+            DeviceScreenControlMode.Control,
+            forwardsEverything = true,
+            snapshot = null,
+          ),
         )
       }
     }
@@ -483,7 +503,9 @@ class DeviceScreenViewKeyboardTest {
     val observed = Observed()
     setContent {
       MaterialTheme {
-        hostedView(observed, DeviceScreenControlMode.Control, forwardsEverything = true)
+        hostedView(
+          HostedViewSpec(observed, DeviceScreenControlMode.Control, forwardsEverything = true),
+        )
       }
     }
 
@@ -492,24 +514,24 @@ class DeviceScreenViewKeyboardTest {
 
     assertEquals(1, observed.forwarded.size, "one press is one forwarded keystroke")
   }
-
-  private fun snapshot(sequence: Long = 1L) =
-    DeviceFrameSnapshot(
-      deviceId = "emulator-5554",
-      sequence = sequence,
-      capturedAtMs = 1_000L,
-      source = DeviceFrameSource.Screenshot,
-      frameWidth = 1080,
-      frameHeight = 2340,
-      deviceWidth = 1080,
-      deviceHeight = 2340,
-      screenshotData = null,
-      hierarchy = null,
-      coordinateSpace = null,
-      captureSequence = sequence,
-      frameContext = "epoch:$sequence",
-      screenshotSequence = sequence,
-      hierarchySequence = sequence,
-      liveFrameSequence = null,
-    )
 }
+
+private fun keyboardSnapshot(sequence: Long = 1L) =
+  DeviceFrameSnapshot(
+    deviceId = "emulator-5554",
+    sequence = sequence,
+    capturedAtMs = 1_000L,
+    source = DeviceFrameSource.Screenshot,
+    frameWidth = 1080,
+    frameHeight = 2340,
+    deviceWidth = 1080,
+    deviceHeight = 2340,
+    screenshotData = null,
+    hierarchy = null,
+    coordinateSpace = null,
+    captureSequence = sequence,
+    frameContext = "epoch:$sequence",
+    screenshotSequence = sequence,
+    hierarchySequence = sequence,
+    liveFrameSequence = null,
+  )

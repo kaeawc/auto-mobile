@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.mcp
 
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /** Response from automobile:devices/booted resource */
@@ -180,6 +182,7 @@ data class DeviceLockStateInfo(
 
 /** Parser for device resource responses */
 object DeviceResourceParser {
+  private val log = LoggerFactory.getLogger("DeviceResourceParser")
   private val json = Json {
     ignoreUnknownKeys = true
     isLenient = true
@@ -188,7 +191,8 @@ object DeviceResourceParser {
   fun parseBootedDevices(jsonString: String): BootedDevicesResponse? {
     return try {
       json.decodeFromString<BootedDevicesResponse>(jsonString)
-    } catch (e: Exception) {
+    } catch (e: kotlinx.serialization.SerializationException) {
+      log.warn("Could not parse device resource: ${e.message}", e)
       null
     }
   }
@@ -196,7 +200,8 @@ object DeviceResourceParser {
   fun parseDeviceImages(jsonString: String): DeviceImagesResponse? {
     return try {
       json.decodeFromString<DeviceImagesResponse>(jsonString)
-    } catch (e: Exception) {
+    } catch (e: kotlinx.serialization.SerializationException) {
+      log.warn("Could not parse device resource: ${e.message}", e)
       null
     }
   }
@@ -204,7 +209,8 @@ object DeviceResourceParser {
   fun parseLockStates(jsonString: String): DeviceLockStatesResponse? {
     return try {
       json.decodeFromString<DeviceLockStatesResponse>(jsonString)
-    } catch (e: Exception) {
+    } catch (e: kotlinx.serialization.SerializationException) {
+      log.warn("Could not parse device resource: ${e.message}", e)
       null
     }
   }

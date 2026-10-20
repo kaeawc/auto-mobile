@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.FailuresStreamSocketClien
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresTimelineRequest
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,9 @@ class StreamingFailuresDataSource(
       Result.Error(e, "Failures stream socket not available: ${e.message}")
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      Result.Error(e, "Failed to load failures: ${e.message}")
+    } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to load failures: ${e.message}")
     }
   }
@@ -79,7 +82,9 @@ class StreamingFailuresDataSource(
       Result.Error(e, "Failures stream socket not available: ${e.message}")
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      Result.Error(e, "Failed to load timeline: ${e.message}")
+    } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to load timeline: ${e.message}")
     }
   }
@@ -110,7 +115,9 @@ class StreamingFailuresDataSource(
       Result.Error(e, "Failures stream socket not available: ${e.message}")
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      Result.Error(e, "Failed to load failures: ${e.message}")
+    } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to load failures: ${e.message}")
     }
   }
@@ -144,7 +151,9 @@ class StreamingFailuresDataSource(
       Result.Error(e, "Failures stream socket not available: ${e.message}")
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      Result.Error(e, "Failed to poll notifications: ${e.message}")
+    } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to poll notifications: ${e.message}")
     }
   }
@@ -166,7 +175,9 @@ class StreamingFailuresDataSource(
       Result.Error(e, "Failures stream socket not available: ${e.message}")
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IOException) {
+      Result.Error(e, "Failed to acknowledge notifications: ${e.message}")
+    } catch (e: IllegalArgumentException) {
       Result.Error(e, "Failed to acknowledge notifications: ${e.message}")
     }
   }

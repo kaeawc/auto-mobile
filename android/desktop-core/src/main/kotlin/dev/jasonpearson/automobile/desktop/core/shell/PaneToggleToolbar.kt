@@ -29,22 +29,19 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
  */
 @Composable
 fun PaneToggleToolbar(
-  showLeftPane: Boolean,
-  onToggleLeft: () -> Unit,
-  showRightPane: Boolean,
-  onToggleRight: () -> Unit,
-  showBottomPane: Boolean,
-  onToggleBottom: () -> Unit,
   modifier: Modifier = Modifier,
+  options: PaneToggles,
 ) {
-  Row(
-    modifier = modifier,
-    horizontalArrangement = Arrangement.spacedBy(2.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    PaneToggleButton(symbol = "\u25EB", selected = showLeftPane, onClick = onToggleLeft)
-    PaneToggleButton(symbol = "\u2B13", selected = showBottomPane, onClick = onToggleBottom)
-    PaneToggleButton(symbol = "\u25E8", selected = showRightPane, onClick = onToggleRight)
+  return with(options) {
+    Row(
+      modifier = modifier,
+      horizontalArrangement = Arrangement.spacedBy(2.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      PaneToggleButton(symbol = "\u25EB", selected = showLeftPane, onClick = onToggleLeft)
+      PaneToggleButton(symbol = "\u2B13", selected = showBottomPane, onClick = onToggleBottom)
+      PaneToggleButton(symbol = "\u25E8", selected = showRightPane, onClick = onToggleRight)
+    }
   }
 }
 
@@ -92,3 +89,12 @@ private fun PaneToggleButton(
     )
   }
 }
+
+data class PaneToggles(
+  val showLeftPane: Boolean,
+  val onToggleLeft: () -> Unit,
+  val showRightPane: Boolean,
+  val onToggleRight: () -> Unit,
+  val showBottomPane: Boolean,
+  val onToggleBottom: () -> Unit,
+)

@@ -1,3 +1,5 @@
+import { runOutsideRequestContext } from "../utils/AbortContext";
+import type { SdkCapabilityQueryOptions } from "../features/observe/ios/CtrlProxySdkCapabilities";
 import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   type SessionManager,
@@ -13,7 +15,7 @@ import { NetworkState } from "../utils/NetworkState";
 
 /** Pushes a device's current host-side network state (rules + simulation) to it. */
 export interface NetworkDeviceStatePusher {
-  push(deviceId: string): Promise<void>;
+  push(deviceId: string, options?: SdkCapabilityQueryOptions): Promise<void>;
 }
 
 /**
@@ -22,9 +24,9 @@ export interface NetworkDeviceStatePusher {
  * pushes its (now empty) state.
  */
 export const defaultNetworkDeviceStatePusher: NetworkDeviceStatePusher = {
-  async push(deviceId: string): Promise<void> {
+  async push(deviceId: string, options?: SdkCapabilityQueryOptions): Promise<void> {
     AndroidCtrlProxyClient.getExistingInstance(deviceId)?.syncNetworkStateToDevice();
-    await IOSCtrlProxyClient.getExistingInstance(deviceId)?.syncNetworkStateFromHost();
+    await IOSCtrlProxyClient.getExistingInstance(deviceId)?.syncNetworkStateFromHost(options);
   },
 };
 
@@ -32,17 +34,32 @@ export interface NetworkStateSessionCleanupOptions {
   /** Resolved lazily per call so a replaced singleton is always honoured. */
   state?: () => NetworkState;
   pusher?: NetworkDeviceStatePusher;
-  timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
+  timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
 }
 
-async function pushClearedState(pusher: NetworkDeviceStatePusher, deviceId: string): Promise<void> {
+async function pushClearedState(
+  pusher: NetworkDeviceStatePusher,
+  deviceId: string,
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
+): Promise<void> {
+  const controller = new AbortController();
+  const deadlineMs = timer.now() + SESSION_RELEASE_TEARDOWN_CAP_MS;
+  const handle = timer.setTimeout(
+    () => controller.abort(new Error("Network cleanup deadline expired")),
+    SESSION_RELEASE_TEARDOWN_CAP_MS,
+  );
+  handle.unref?.();
   try {
-    await pusher.push(deviceId);
+    await runOutsideRequestContext(() =>
+      pusher.push(deviceId, { deadlineMs, abortSignal: controller.signal }),
+    );
   } catch (error) {
     logger.warn(
       `[networkState] Failed to push cleared network state to ${deviceId}: ${errorMessage(error)}`,
       error,
     );
+  } finally {
+    timer.clearTimeout(handle);
   }
 }
 
@@ -83,10 +100,14 @@ export function registerNetworkStateSessionCleanup(
     // iOS probes capability before reading CURRENT rules; simulation is read after
     // that push settles. Android reads and sends synchronously. A late push therefore
     // delivers the current holder's host state, never a captured cleared snapshot.
-    manager.registerPendingDeviceCleanup(deviceId, pushClearedState(pusher, deviceId), {
-      name: "push cleared network state",
-      leftover: "the released session's network mock rules and error simulation",
-    });
+    manager.registerPendingDeviceCleanup(
+      deviceId,
+      pushClearedState(pusher, deviceId, options.timer ?? defaultTimer),
+      {
+        name: "push cleared network state",
+        leftover: "the released session's network mock rules and error simulation",
+      },
+    );
   };
   manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
     cleanup(sessionId, deviceId, releaseOptions);
@@ -111,10 +132,15 @@ export function createOwnerlessNetworkStateAcquisitionCleanup(
     if (!state.clearSessionlessDeviceState(deviceId)) {
       return;
     }
-    registerBoundedAcquisitionCleanup(manager, deviceId, pusher.push(deviceId), {
-      timer: options.timer ?? defaultTimer,
-      capMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
-      label: "push cleared network state",
-    });
+    registerBoundedAcquisitionCleanup(
+      manager,
+      deviceId,
+      pushClearedState(pusher, deviceId, options.timer ?? defaultTimer),
+      {
+        timer: options.timer ?? defaultTimer,
+        capMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
+        label: "push cleared network state",
+      },
+    );
   };
 }

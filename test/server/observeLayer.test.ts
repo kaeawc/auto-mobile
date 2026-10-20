@@ -1,6 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { observeToolScreen } from "../helpers/observeToolScreen";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../src/models";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import {
@@ -30,7 +30,6 @@ async function observe(
 ) {
   const screen = options.screen ?? new FakeObserveScreen();
   screen.setObserveResult(result);
-  const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
   try {
     registerObserveTools({
       hidesPrototypeForScreenshot: async () => options.hidesPrototype ?? false,
@@ -42,7 +41,6 @@ async function observe(
       tool.schema.parse({ screenshot: "none", ...args }),
     );
   } finally {
-    notify.mockRestore();
     ToolRegistry.clearTools();
   }
 }
@@ -225,4 +223,12 @@ describe("observe layer screenshot with device-side prototype hiding (#9305)", (
     );
     expect(structured(response).screenshotIncludesPrototype).toBeUndefined();
   });
+});
+
+let notify: ReturnType<typeof spyOn<typeof ResourceRegistry, "notifyResourcesUpdated">>;
+beforeEach(() => {
+  notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
+});
+afterEach(() => {
+  notify.mockRestore();
 });

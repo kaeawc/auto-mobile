@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { beforeEach, afterEach, describe, expect, test, spyOn } from "bun:test";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
 import type { NodeAttributes, ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
 import { isAndroidDocumentsUiRow } from "../../../src/features/action/androidCoordinateTapPolicy";
@@ -13,9 +13,7 @@ function n(attrs: NodeAttributes, ...children: ViewHierarchyNode[]): ViewHierarc
 }
 
 function createTapOnElement(): TapOnElement {
-  const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    {} as AndroidCtrlProxyClient,
-  );
+  clientSpy.mockReturnValue({} as AndroidCtrlProxyClient);
   try {
     return new TapOnElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
@@ -170,4 +168,12 @@ test("resolves the second repeated row and preserves its preview control", () =>
   const resolvedPreview = tap.resolveTapTargetElement(preview, hierarchy, "tap", false);
   expect(resolvedPreview.usedParent).toBe(false);
   expect(isAndroidDocumentsUiRow(resolvedPreview.element)).toBe(false);
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+afterEach(() => {
+  clientSpy.mockRestore();
 });

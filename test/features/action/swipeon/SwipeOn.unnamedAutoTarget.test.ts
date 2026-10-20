@@ -4,7 +4,7 @@ import {
 } from "../../../helpers/flatHierarchyFixture";
 import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { observeResultFromFixture } from "../../../helpers/observeFixture";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import type { AutoTargetSelectorService } from "../../../../src/features/action/swipeon/types";
@@ -61,7 +61,7 @@ function harness({
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const ctrl = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
+  clientSpy.mockReturnValue(ctrl);
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();
   observe.setObserveResult(() => (gesture.getSwipeCalls().length ? after : before));
@@ -505,4 +505,9 @@ test("unnamed captured container avoids a clickable sibling overlay using bounds
   expect(result.y1).toBeLessThan(1700);
   expectEndpointsInside(result, largest);
   expect(result.warning).not.toContain("No unobstructed swipe area");
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 });

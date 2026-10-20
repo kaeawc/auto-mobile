@@ -1,6 +1,6 @@
 import { wireCapture } from "../../helpers/wireCapture";
 import { buildObserveResult } from "../../helpers/observeFixture";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ObserveResult } from "../../../src/models";
 import type { SwipeOnOptions } from "../../../src/models";
@@ -268,4 +268,8 @@ describe("UIStateExtractor child-text characterization", () => {
       { text: "Explicit label" },
     ]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

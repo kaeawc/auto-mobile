@@ -71,7 +71,6 @@ async function harness(options: DefaultManagedSpecResolverOptions = {}, emptyIos
     });
   }
   const before = await registry.getAssignment(key);
-  const journal = spyOn(registry, "openBindingJournal");
   const acquire = (spec: BindingRequestedSpec, signal?: AbortSignal) =>
     reconciler.reconcile({
       key,
@@ -82,6 +81,7 @@ async function harness(options: DefaultManagedSpecResolverOptions = {}, emptyIos
       signal,
     });
   const expectIntact = async () => {
+    const journal = registry.openBindingJournal;
     expect(deleter.calls).toEqual([]);
     expect(provisioner.calls).toEqual([]);
     expect(journal).not.toHaveBeenCalled();
@@ -102,7 +102,9 @@ async function harness(options: DefaultManagedSpecResolverOptions = {}, emptyIos
     claims,
     key,
     before,
-    journal,
+    get journal() {
+      return registry.openBindingJournal;
+    },
     acquire,
     expectIntact,
   };
@@ -127,6 +129,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("absent default profile removes the never-bound empty iOS binding", async () => {
     const h = await harness({}, true);
+    spyOn(h.registry, "openBindingJournal");
     h.profiles.ids = ["pixel_9"];
     expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
       outcome: "failed",
@@ -139,6 +142,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("unreadable catalog removes the never-bound empty iOS binding", async () => {
     const h = await harness({}, true);
+    spyOn(h.registry, "openBindingJournal");
     h.profiles.read = async () => {
       throw new Error("catalog read failed");
     };
@@ -153,6 +157,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("incomplete Android discovery removes the never-bound empty iOS binding before catalog lookup", async () => {
     const h = await harness({}, true);
+    spyOn(h.registry, "openBindingJournal");
     h.inventory.complete = false;
     const listed = spyOn(h.inventory, "list");
     const result = expectFailed(await h.acquire({ runtime: RUNTIME }));
@@ -169,6 +174,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("empty iOS binding adopts an Android leftover without reading an unreadable catalog", async () => {
     const h = await harness({}, true);
+    spyOn(h.registry, "openBindingJournal");
     const name = bindingDeviceName(h.key, 3, "leftover");
     h.inventory.devices.push({
       name,
@@ -193,6 +199,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("valid default profile creates on Android in an empty iOS binding", async () => {
     const h = await harness({}, true);
+    spyOn(h.registry, "openBindingJournal");
     expect(await h.acquire({ runtime: RUNTIME })).toMatchObject({
       outcome: "ready",
       disposition: "created",
@@ -208,6 +215,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("unknown explicit profile leaves the assigned AVD and its binding intact", async () => {
     const h = await harness();
+    spyOn(h.registry, "openBindingJournal");
     const result = expectFailed(await h.acquire({ runtime: RUNTIME, deviceType: UNKNOWN }));
     expect(result).toMatchObject({
       outcome: "failed",
@@ -220,6 +228,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("unreadable catalog safely refuses replacement", async () => {
     const h = await harness();
+    spyOn(h.registry, "openBindingJournal");
     h.profiles.read = async () => {
       throw new Error("catalog read failed");
     };
@@ -234,6 +243,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("an absent configured default refuses creation for an omitted model", async () => {
     const h = await harness({ androidDefaultDeviceType: UNKNOWN });
+    spyOn(h.registry, "openBindingJournal");
     await h.registry.commitBinding(
       h.key,
       { generation: 1, stableDeviceId: OLD },
@@ -259,6 +269,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     "omitted-model reuse ignores %s",
     async (mode) => {
       const h = await harness({ androidDefaultDeviceType: UNKNOWN });
+      spyOn(h.registry, "openBindingJournal");
       if (mode === "unreadable catalog") {
         h.profiles.read = async () => {
           throw new Error("unreadable");
@@ -277,6 +288,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("valid explicit profile replaces as before and reads the catalog exactly once", async () => {
     const h = await harness();
+    spyOn(h.registry, "openBindingJournal");
     const result = await h.acquire({ runtime: RUNTIME, deviceType: "pixel_9" });
     expect(result).toMatchObject({ outcome: "ready", disposition: "replaced" });
     expect(h.deleter.stableIds()).toEqual([OLD]);
@@ -287,6 +299,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("replacement reads the profile catalog before checking device claims", async () => {
     const h = await harness();
+    spyOn(h.registry, "openBindingJournal");
     const order: string[] = [];
     h.profiles.read = async () => {
       order.push("catalog");
@@ -302,6 +315,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     expect(claims).toHaveBeenCalledWith(expect.objectContaining({ name: OLD }));
 
     const unknown = await harness();
+    spyOn(unknown.registry, "openBindingJournal");
     const unknownClaims = spyOn(unknown.claims, "describe");
     const refused = expectFailed(await unknown.acquire({ runtime: RUNTIME, deviceType: UNKNOWN }));
     expect(refused.failure?.code).toBe("spec_unsupported");
@@ -312,6 +326,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test.each(["cancel", "timeout"])("%s wins over a pending catalog read failure", async (mode) => {
     const h = await harness();
+    spyOn(h.registry, "openBindingJournal");
     const controller = new AbortController();
     const pending = Promise.withResolvers<string[]>();
     h.profiles.read = () => pending.promise;
@@ -346,6 +361,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     "only exact profile IDs match, refusing %s",
     async (deviceType) => {
       const h = await harness();
+      spyOn(h.registry, "openBindingJournal");
       const result = expectFailed(await h.acquire({ runtime: RUNTIME, deviceType }));
       expect(result.failure?.code).toBe("spec_unsupported");
       await h.expectIntact();
@@ -354,6 +370,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("adopting a matching leftover does not read the catalog", async () => {
     const h = await harness({ androidDefaultDeviceType: UNKNOWN });
+    spyOn(h.registry, "openBindingJournal");
     await h.registry.commitBinding(
       h.key,
       { generation: 1, stableDeviceId: OLD },
@@ -377,6 +394,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("a resolver without a profile catalog retains legacy creation behavior", async () => {
     const h = await harness({ androidProfileCatalog: undefined });
+    spyOn(h.registry, "openBindingJournal");
     const result = await h.acquire({ runtime: RUNTIME, deviceType: UNKNOWN });
     expect(result).toMatchObject({ outcome: "ready", disposition: "replaced" });
     expect(h.provisioner.created()[0]?.spec.deviceType).toBe(UNKNOWN);

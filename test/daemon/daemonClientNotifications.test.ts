@@ -1,9 +1,11 @@
-import { describe, expect, spyOn, test } from "bun:test";
-import { logger } from "../../src/utils/logger";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { describe, expect, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
 import { isDaemonNotification, type DaemonNotification } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+
+const logs = useCapturedLogs();
 
 // Issue #3223: the daemon control socket carries server-pushed notification
 // frames alongside request/response frames. These tests drive the private
@@ -43,21 +45,18 @@ describe("DaemonClient notification frames", () => {
     );
     const received: string[] = [];
     client.onNotification((notification) => received.push(notification.method));
-    const errors = spyOn(logger, "error").mockImplementation(() => {});
-    try {
-      client.testHooks.simulateIncomingData(
-        Buffer.from('\n  \n{bad}\n{"type":"daemon_notification",'),
-      );
-      expect(received).toEqual([]);
-      expect(errors).toHaveBeenCalledTimes(1);
-      client.testHooks.simulateIncomingData(
-        Buffer.from('"method":"notifications/tools/list_changed"}\n'),
-      );
-      expect(received).toEqual(["notifications/tools/list_changed"]);
-      expect(errors).toHaveBeenCalledTimes(1);
-    } finally {
-      errors.mockRestore();
-    }
+    logs.clear();
+
+    client.testHooks.simulateIncomingData(
+      Buffer.from('\n  \n{bad}\n{"type":"daemon_notification",'),
+    );
+    expect(received).toEqual([]);
+    expect(logs.calls("error")).toHaveLength(1);
+    client.testHooks.simulateIncomingData(
+      Buffer.from('"method":"notifications/tools/list_changed"}\n'),
+    );
+    expect(received).toEqual(["notifications/tools/list_changed"]);
+    expect(logs.calls("error")).toHaveLength(1);
   });
 
   test("routes notification frames to registered handlers", () => {

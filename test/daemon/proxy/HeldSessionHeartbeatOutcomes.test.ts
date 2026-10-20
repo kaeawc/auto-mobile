@@ -1,5 +1,5 @@
-import { describe, expect, spyOn, test } from "bun:test";
-import { logger } from "../../../src/utils/logger";
+import { useCapturedLogs } from "../../helpers/captureLogs";
+import { describe, expect, test } from "bun:test";
 import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/DaemonBoundSessionExpiredError";
 import { HeldSessionNotFoundError } from "../../../src/daemon/proxy/HeldSessionNotFoundError";
 import {
@@ -14,6 +14,8 @@ import {
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
 } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+const logs = useCapturedLogs();
 
 const LEASH_MS = 10_000;
 
@@ -223,17 +225,14 @@ describe("HeldSessionHeartbeatOutcomes", () => {
     test("noteLivenessOwnerConflict warns once per session until a success clears it", () => {
       const h = harness();
       h.hold("a");
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        h.outcomes.noteLivenessOwnerConflict("a");
-        h.outcomes.noteLivenessOwnerConflict("a");
-        expect(warn).toHaveBeenCalledTimes(1);
-        h.outcomes.recordHeldSessionHeartbeatSuccess("a", false);
-        h.outcomes.noteLivenessOwnerConflict("a");
-        expect(warn).toHaveBeenCalledTimes(2);
-      } finally {
-        warn.mockRestore();
-      }
+      logs.clear();
+
+      h.outcomes.noteLivenessOwnerConflict("a");
+      h.outcomes.noteLivenessOwnerConflict("a");
+      expect(logs.calls("warn")).toHaveLength(1);
+      h.outcomes.recordHeldSessionHeartbeatSuccess("a", false);
+      h.outcomes.noteLivenessOwnerConflict("a");
+      expect(logs.calls("warn")).toHaveLength(2);
     });
 
     test("a reported hold that is only running out never exhausts the leash", () => {

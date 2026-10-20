@@ -1,8 +1,10 @@
-import { expect, spyOn, test } from "bun:test";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { expect, test } from "bun:test";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { MCP_QUEUE_TIMEOUT_ERROR_CODE, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
-import { logger } from "../../src/utils/logger";
+
+useCapturedLogs();
 
 /**
  * The queue-deadline refusal is `retryable: true` in the MCP tool result (nothing was
@@ -19,15 +21,11 @@ test("a queue-deadline failure frame says retryable like its MCP result does", (
     origin: "test",
     code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
   });
-  const logged = spyOn(logger, "error").mockImplementation(() => {});
-  try {
-    const result = JSON.parse(
-      shapeToolCallError(error, { toolName: "executePlan", source: "MCP" }).content[0].text,
-    );
-    expect(result).toMatchObject({ code: "daemon_queue_timeout", retryable: true });
-    const frame = mcpRequestFailureDetails(error, undefined);
-    expect(frame).toMatchObject({ code: "daemon_queue_timeout", retryable: true });
-  } finally {
-    logged.mockRestore();
-  }
+
+  const result = JSON.parse(
+    shapeToolCallError(error, { toolName: "executePlan", source: "MCP" }).content[0].text,
+  );
+  expect(result).toMatchObject({ code: "daemon_queue_timeout", retryable: true });
+  const frame = mcpRequestFailureDetails(error, undefined);
+  expect(frame).toMatchObject({ code: "daemon_queue_timeout", retryable: true });
 });

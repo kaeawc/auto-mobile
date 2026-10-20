@@ -1,8 +1,9 @@
+import { useCapturedLogs } from "../helpers/captureLogs";
 import {
   MCP_ARGUMENT_BUDGET_CASES,
   MALFORMED_MCP_BUDGETS,
 } from "../helpers/mcpArgumentBudgetCases";
-import { describe, expect, spyOn, test, beforeEach } from "bun:test";
+import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import {
   DaemonClient,
@@ -33,10 +34,12 @@ import {
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
-import { logger } from "../../src/utils/logger";
+
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
+
+const logs = useCapturedLogs();
 
 function createBlackHoleSocket(): Duplex {
   return new Duplex({
@@ -1051,7 +1054,7 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
 
   test("a late answer to a cancelOnTimeout:false request is dropped without an unknown-id warning", async () => {
     const { client, timer, socket } = setup();
-    const warn = spyOn(logger, "warn");
+    logs.clear();
     const outcome = client
       .callDaemonMethod("daemon/prepareSession", {}, { timeoutMs: 5000, cancelOnTimeout: false })
       .catch((error: unknown) => error);
@@ -1066,10 +1069,9 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
         ),
       );
       expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("unknown request ID")),
+        logs.calls("warn").filter(([message]) => String(message).includes("unknown request ID")),
       ).toEqual([]);
     } finally {
-      warn.mockRestore();
       await client.close();
     }
   });

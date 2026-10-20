@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -9,7 +10,7 @@ import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisi
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonRequest } from "../../src/daemon/types";
 import type { BootedDevice } from "../../src/models";
-import { logger } from "../../src/utils/logger";
+
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -18,6 +19,8 @@ import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
+
+const logs = useCapturedLogs();
 
 // #11305: availableDevices means "allocation can lend it", so the handlers must refresh the
 // broker-binding snapshot and foreign ownership before counting, not answer from a stale cache.
@@ -115,23 +118,20 @@ describe("daemon availableDevices and refreshDevices refresh ownership before co
   });
 
   test("an unreadable binding registry fails the call instead of reporting devices idle", async () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const pool = await makePool({
-        bindingExclusion: new RegistryBindingExclusion(async () => {
-          throw new Error("registry locked");
-        }, timer),
-      });
+    logs.clear();
 
-      for (const method of ["daemon/availableDevices", "daemon/refreshDevices"]) {
-        const response = await handleDaemonRequest(request(method), stateFor(pool));
-        expect(response.success).toBe(false);
-        expect(response.result).toBeUndefined();
-        expect(response.error).toContain("registry locked");
-      }
-      expect(warn).toHaveBeenCalled();
-    } finally {
-      warn.mockRestore();
+    const pool = await makePool({
+      bindingExclusion: new RegistryBindingExclusion(async () => {
+        throw new Error("registry locked");
+      }, timer),
+    });
+
+    for (const method of ["daemon/availableDevices", "daemon/refreshDevices"]) {
+      const response = await handleDaemonRequest(request(method), stateFor(pool));
+      expect(response.success).toBe(false);
+      expect(response.result).toBeUndefined();
+      expect(response.error).toContain("registry locked");
     }
+    expect(logs.at("warn").length).toBeGreaterThan(0);
   });
 });

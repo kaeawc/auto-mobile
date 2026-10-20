@@ -1,8 +1,11 @@
-import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
+import { useCapturedLogs } from "../../helpers/captureLogs";
+import { describe, expect, test } from "bun:test";
 import { DefaultIosAppBundleGuard } from "../../../src/ctrlProxy/ios/IosAppBundleGuard";
-import { logger } from "../../../src/utils/logger";
+
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+const logs = useCapturedLogs();
 
 const APP_BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy";
 
@@ -46,27 +49,24 @@ describe("IosAppBundleGuard", () => {
             isHashVerificationSkipped: () => false,
             getExpectedAppHash: () => "expected-hash",
           });
-          const warn = spyOn(logger, "warn").mockImplementation(() => {});
-          try {
+          logs.clear();
+
+          await guard[method]();
+          expect(uninstalls).toHaveLength(1);
+          expect(uninstalls[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
+          expect(uninstalls[0][3]).toBeUndefined();
+          expect(lookups[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
+          expect(executor.getExecutedCommands()).toEqual([]);
+          expect(executor.getSpawnedProcesses()).toEqual([]);
+          if (fails) {
+            expect(
+              logs.calls("warn").some(([message]) => String(message).includes("uninstall failed")),
+            ).toBe(true);
+          }
+          if (method === "uninstallLegacyAppIfPresent") {
             await guard[method]();
-            expect(uninstalls).toHaveLength(1);
-            expect(uninstalls[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
-            expect(uninstalls[0][3]).toBeUndefined();
-            expect(lookups[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
-            expect(executor.getExecutedCommands()).toEqual([]);
-            expect(executor.getSpawnedProcesses()).toEqual([]);
-            if (fails) {
-              expect(
-                warn.mock.calls.some(([message]) => String(message).includes("uninstall failed")),
-              ).toBe(true);
-            }
-            if (method === "uninstallLegacyAppIfPresent") {
-              await guard[method]();
-              expect(lookups).toHaveLength(1);
-              expect(lookups[0][3]).toEqual({ throwOnLookupTimeout: true });
-            }
-          } finally {
-            warn.mockRestore();
+            expect(lookups).toHaveLength(1);
+            expect(lookups[0][3]).toEqual({ throwOnLookupTimeout: true });
           }
         });
       }
@@ -97,8 +97,4 @@ describe("IosAppBundleGuard", () => {
 
     expect(lookups).toEqual([]);
   });
-});
-
-afterEach(() => {
-  mock.restore();
 });

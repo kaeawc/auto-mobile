@@ -1,4 +1,5 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { describe, expect, test } from "bun:test";
 import {
   managedExecutionSessionsFrom,
   type ManagedExecutionSessionManager,
@@ -16,7 +17,8 @@ import type {
   SessionReleaseSnapshot,
   SessionReleaseOptions,
 } from "../../src/daemon/sessionManager";
-import { logger } from "../../src/utils/logger";
+
+const logs = useCapturedLogs();
 
 describe("daemon release pool consumers", () => {
   test.each(["success", "session", "pool"] as const)(
@@ -121,6 +123,7 @@ describe("daemon release pool consumers", () => {
           callback = cb;
         },
         releaseSession: async (...args) => {
+          expect(logs.none("warn")).toBe(true);
           events.push(["session.releaseSession", ...args]);
           if (failure === "session") {
             throw error;
@@ -128,40 +131,36 @@ describe("daemon release pool consumers", () => {
           return "d1";
         },
       };
-      const warn = spyOn(logger, "warn").mockImplementation((...args) => {
-        events.push(["warn", ...args]);
-      });
-      try {
-        const cascade = registerDerivedLabelSessionReleaseCascade(
-          manager,
-          {
-            releaseDevice: async (...args) => {
-              events.push(["pool.releaseDevice", ...args]);
-              throw error;
-            },
+      logs.clear();
+
+      const cascade = registerDerivedLabelSessionReleaseCascade(
+        manager,
+        {
+          releaseDevice: async (...args) => {
+            expect(logs.none("warn")).toBe(true);
+            events.push(["pool.releaseDevice", ...args]);
+            throw error;
           },
-          { cancelDeviceSessionExecutions: async () => 0, cancelDeviceExecutions: async () => 0 },
-        );
-        callback(
-          "base",
-          "base-device",
-          "explicit-release",
-          {} as SessionReleaseSnapshot,
-          {} as SessionReleaseOptions,
-        );
-        await cascade.settled();
-        expect(events).toEqual([
-          ["session.releaseSession", "base:label", "explicit-release"],
-          ...(failure === "pool" ? [["pool.releaseDevice", "d1", "base:label"]] : []),
-          [
-            "warn",
-            "[DeviceLabelMap] Failed to release label session base:label with its base base",
-            error,
-          ],
-        ]);
-      } finally {
-        warn.mockRestore();
-      }
+        },
+        { cancelDeviceSessionExecutions: async () => 0, cancelDeviceExecutions: async () => 0 },
+      );
+      callback(
+        "base",
+        "base-device",
+        "explicit-release",
+        {} as SessionReleaseSnapshot,
+        {} as SessionReleaseOptions,
+      );
+      await cascade.settled();
+      expect([...events, ...logs.calls("warn").map((call) => ["warn", ...call])]).toEqual([
+        ["session.releaseSession", "base:label", "explicit-release"],
+        ...(failure === "pool" ? [["pool.releaseDevice", "d1", "base:label"]] : []),
+        [
+          "warn",
+          "[DeviceLabelMap] Failed to release label session base:label with its base base",
+          error,
+        ],
+      ]);
     },
   );
 

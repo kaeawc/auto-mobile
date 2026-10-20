@@ -1,5 +1,6 @@
+import { useCapturedLogs } from "../helpers/captureLogs";
 import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import * as path from "path";
 import {
@@ -9,9 +10,11 @@ import {
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { logger } from "../../src/utils/logger";
+
 import type { BootedDevice, ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+const logs = useCapturedLogs();
 
 // Issue #10199. These tests run the manager on a REAL AdbClient so the ambient
 // abort-signal check (`signal ?? getAbortSignal()`) is exercised; FakeAdbExecutor
@@ -303,7 +306,7 @@ describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
 
     test("an unreadable live list falls back to the remembered one and says so", async () => {
       let reads = 0;
-      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      logs.clear();
       const { manager, executed } = createHarness((command) => {
         if (command === SETTINGS_GET && ++reads >= 2) {
           throw new Error("settings read failed");
@@ -311,16 +314,12 @@ describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
         return undefined;
       });
 
-      try {
-        expect(await manager.rebindIfUnhealthy()).toBe(true);
+      expect(await manager.rebindIfUnhealthy()).toBe(true);
 
-        expect(readdWrites(executed)).toEqual([`${SETTINGS_PUT} '${otherService}:${component}'`]);
-        expect(
-          warn.mock.calls.some((call) => String(call[0]).includes("remembered service list")),
-        ).toBe(true);
-      } finally {
-        warn.mockRestore();
-      }
+      expect(readdWrites(executed)).toEqual([`${SETTINGS_PUT} '${otherService}:${component}'`]);
+      expect(
+        logs.calls("warn").some((call) => String(call[0]).includes("remembered service list")),
+      ).toBe(true);
     });
   });
 });

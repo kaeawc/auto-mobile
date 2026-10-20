@@ -1,12 +1,15 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { describe, expect, test } from "bun:test";
 import { createReadOnlyBindingRegistry } from "../../src/daemon/readOnlyBindingRegistry";
 import {
   DeviceOwnershipView,
   createDefaultDeviceOwnershipSources,
 } from "../../src/daemon/deviceOwnershipView";
 import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
-import { logger } from "../../src/utils/logger";
+
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
+
+const logs = useCapturedLogs();
 
 describe("createReadOnlyBindingRegistry", () => {
   test("a missing registry file is never opened or created", async () => {
@@ -24,7 +27,7 @@ describe("createReadOnlyBindingRegistry", () => {
   });
 
   test("an unreadable registry logs and reads as no holder", async () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    logs.clear();
     const registry = createReadOnlyBindingRegistry({
       exists: () => true,
       open: async () => {
@@ -32,8 +35,7 @@ describe("createReadOnlyBindingRegistry", () => {
       },
     });
     expect(await registry.findDeviceHolder("android", "Pixel_8")).toBeNull();
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    expect(logs.at("warn").length).toBeGreaterThan(0);
   });
 
   test("the exec owner reaches the ownership view and the handle is closed", async () => {

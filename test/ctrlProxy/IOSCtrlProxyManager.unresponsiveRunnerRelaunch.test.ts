@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import type { IosCtrlProxyBuilderSurface } from "../../src/ctrlProxy/IosCtrlProxyBuilderSurface";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
-import { logger } from "../../src/utils/logger";
+
 import { PortManager } from "../../src/utils/PortManager";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
@@ -14,6 +15,8 @@ import {
 } from "../../src/utils/ProcessSupervisor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
+
+useCapturedLogs();
 
 // #10649: a caller such as getApple extends the shared health-poll deadline to its
 // whole acquisition budget. A runner frozen at launch must still be relaunched
@@ -127,7 +130,6 @@ function createHarness(
 
 describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
   let prevHealthMaxAttempts: string | undefined;
-  const restores: Array<() => void> = [];
 
   beforeEach(() => {
     prevHealthMaxAttempts = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
@@ -135,16 +137,9 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     IOSCtrlProxyManager.resetInstances();
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
-    for (const level of ["info", "warn", "debug"] as const) {
-      const spy = spyOn(logger, level).mockImplementation(() => {});
-      restores.push(() => spy.mockRestore());
-    }
   });
 
   afterEach(() => {
-    for (const restore of restores.splice(0)) {
-      restore();
-    }
     if (prevHealthMaxAttempts === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
     } else {

@@ -1,5 +1,5 @@
-import { describe, expect, spyOn, test } from "bun:test";
-import { logger } from "../../../src/utils/logger";
+import { useCapturedLogs } from "../../helpers/captureLogs";
+import { describe, expect, test } from "bun:test";
 import {
   BoundSessionHeartbeat,
   type BoundSessionHeartbeatPort,
@@ -19,6 +19,8 @@ import {
   DAEMON_SESSION_NOT_FOUND_CODE,
 } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+const logs = useCapturedLogs();
 
 const LEASH_MS = 10_000;
 
@@ -316,14 +318,12 @@ describe("BoundSessionHeartbeat.sendBoundSessionHeartbeat", () => {
     const h = harness();
     h.bind("a");
     h.answers.error = { code: DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE };
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      await h.bound.sendBoundSessionHeartbeat();
-      await h.bound.sendBoundSessionHeartbeat();
-      expect(warn).toHaveBeenCalledTimes(1);
-    } finally {
-      warn.mockRestore();
-    }
+    logs.clear();
+
+    await h.bound.sendBoundSessionHeartbeat();
+    await h.bound.sendBoundSessionHeartbeat();
+    expect(logs.calls("warn")).toHaveLength(1);
+
     expect(h.state.livenessSupersessionLogged).toBe(true);
     expect(h.state.livenessAcks.has("a")).toBe(true);
     expect(h.log).toEqual([]);

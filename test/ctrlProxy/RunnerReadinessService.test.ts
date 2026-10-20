@@ -1,7 +1,8 @@
+import { useCapturedLogs } from "../helpers/captureLogs";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
-import { describe, expect, test, spyOn } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
-import { logger } from "../../src/utils/logger";
+
 import type { BootedDevice, ViewHierarchyResult } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
@@ -28,6 +29,8 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 
 import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
+
+const logs = useCapturedLogs();
 
 const androidDevice = (deviceId = "emulator-5554"): BootedDevice => ({
   deviceId,
@@ -2429,22 +2432,19 @@ describe("RunnerReadinessService", () => {
     const client = new FakeReadinessClient();
     client.connected = false;
     client.connectionResults = [false, true];
-    const warning = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const { service } = createService({ androidManager: manager, androidClient: client });
-      await service.ensureReady({
-        device: androidDevice(),
-        requestedIdentity: "platform=android",
-        totalDeadlineMs: 10_000,
-        readinessTimeoutMs: 10_000,
-      });
-      expect(client.connectionCalls).toBe(2);
-      expect(
-        warning.mock.calls.some(([message]) => String(message).includes("inspection unavailable")),
-      ).toBe(true);
-    } finally {
-      warning.mockRestore();
-    }
+    logs.clear();
+
+    const { service } = createService({ androidManager: manager, androidClient: client });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+    expect(client.connectionCalls).toBe(2);
+    expect(
+      logs.calls("warn").some(([message]) => String(message).includes("inspection unavailable")),
+    ).toBe(true);
   });
 
   test("surfaces a rebind mutation failure instead of treating it as inspection", async () => {

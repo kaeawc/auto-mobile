@@ -1,11 +1,14 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { useCapturedLogs } from "../../helpers/captureLogs";
+import { describe, expect, test } from "bun:test";
 import {
   LatestBindingKeeper,
   type LatestBindingKeeperPort,
 } from "../../../src/daemon/proxy/LatestBindingKeeper";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
-import { logger } from "../../../src/utils/logger";
+
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+const logs = useCapturedLogs();
 
 const INTERVAL_MS = 1_000;
 const LEASH_MS = 5_000;
@@ -207,13 +210,10 @@ describe("LatestBindingKeeper.stopBoundSessionHeartbeat", () => {
   test("warns when the keeper did not settle before shutdown", async () => {
     const h = harness();
     h.keeperState.stopSettles = false;
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      await expect(h.keeper.stopBoundSessionHeartbeat()).resolves.toBe(false);
-      expect(warn).toHaveBeenCalledTimes(1);
-    } finally {
-      warn.mockRestore();
-    }
+    logs.clear();
+
+    await expect(h.keeper.stopBoundSessionHeartbeat()).resolves.toBe(false);
+    expect(logs.calls("warn")).toHaveLength(1);
   });
 });
 

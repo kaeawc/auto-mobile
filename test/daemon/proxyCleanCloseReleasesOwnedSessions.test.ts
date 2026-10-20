@@ -1,4 +1,5 @@
-import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { afterEach, beforeAll, expect, test } from "bun:test";
 import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
@@ -17,7 +18,8 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
-import { logger } from "../../src/utils/logger";
+
+const logs = useCapturedLogs();
 
 interface Rig {
   proxy: DaemonMcpProxy;
@@ -175,28 +177,25 @@ test("wedged releases run in parallel and close at the per-call bound", async ()
   await rig.proxy.callTool("getAndroid", { deviceId: "one" });
   await rig.proxy.callTool("getAndroid", { deviceId: "two" });
   rig.wedge();
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    let done = false;
-    const firstClose = rig.proxy.close();
-    expect(rig.proxy.close()).toBe(firstClose);
-    const closing = firstClose.then(() => {
-      done = true;
-    });
-    await drainMicrotasks(64);
-    expect(releases(rig)).toHaveLength(2);
-    await rig.timer.advanceTimeAsync(BROKER_EXECUTION_RELEASE_TIMEOUT_MS - 1);
-    expect(done).toBe(false);
-    expect(rig.client.isConnected()).toBe(true);
-    await rig.timer.advanceTimeAsync(1);
-    await closing;
-    expect(done).toBe(true);
-    expect(rig.client.isConnected()).toBe(false);
-    expect(BROKER_EXECUTION_RELEASE_TIMEOUT_MS).toBeLessThan(PROCESS_SHUTDOWN_TIMEOUT_MS);
-    expect(warn.mock.calls).toHaveLength(2);
-  } finally {
-    warn.mockRestore();
-  }
+  logs.clear();
+
+  let done = false;
+  const firstClose = rig.proxy.close();
+  expect(rig.proxy.close()).toBe(firstClose);
+  const closing = firstClose.then(() => {
+    done = true;
+  });
+  await drainMicrotasks(64);
+  expect(releases(rig)).toHaveLength(2);
+  await rig.timer.advanceTimeAsync(BROKER_EXECUTION_RELEASE_TIMEOUT_MS - 1);
+  expect(done).toBe(false);
+  expect(rig.client.isConnected()).toBe(true);
+  await rig.timer.advanceTimeAsync(1);
+  await closing;
+  expect(done).toBe(true);
+  expect(rig.client.isConnected()).toBe(false);
+  expect(BROKER_EXECUTION_RELEASE_TIMEOUT_MS).toBeLessThan(PROCESS_SHUTDOWN_TIMEOUT_MS);
+  expect(logs.calls("warn")).toHaveLength(2);
 });
 
 test("configured initial binding survives close", async () => {

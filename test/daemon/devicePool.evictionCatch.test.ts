@@ -1,12 +1,13 @@
+import { useCapturedLogs } from "../helpers/captureLogs";
 import { makePool } from "../helpers/makePool";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import { describe, it, expect, afterEach, spyOn, mock } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { logger } from "../../src/utils/logger";
+
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import {
   clearAndroidImeQuarantine,
@@ -14,6 +15,8 @@ import {
   withAndroidImeLock,
 } from "../../src/features/action/androidImeLock";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+
+const logs = useCapturedLogs();
 
 // Regression for #3593: the emulator-exit eviction was a fire-and-forget
 // `void this.evictStartedDeviceAfterProcessExit(...)` with no rejection handler.
@@ -56,7 +59,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
 
   it("logs a warning and does not throw when eviction rejects on process exit", async () => {
     await arrangeHarness();
-    const warnSpy = spyOn(logger, "warn");
+    logs.clear();
     const evictError = new Error("removeDevice failed");
     // Force the eviction chain to reject.
     let evictCalls = 0;
@@ -74,9 +77,12 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     child.emit("close", 1, null);
 
     const hasLoggedEviction = (): boolean =>
-      warnSpy.mock.calls.some(
-        (call) => typeof call[0] === "string" && call[0].includes("Failed to evict emulator-5554"),
-      );
+      logs
+        .calls("warn")
+        .some(
+          (call) =>
+            typeof call[0] === "string" && call[0].includes("Failed to evict emulator-5554"),
+        );
 
     // Let the rejected eviction promise settle through the .catch (microtasks only).
     for (let turn = 0; turn < 50 && !hasLoggedEviction(); turn++) {
@@ -86,7 +92,6 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     expect(evictCalls).toBe(1);
     expect(hasLoggedEviction()).toBe(true);
 
-    warnSpy.mockRestore();
     restoreEvict();
   });
 
@@ -455,8 +460,4 @@ describe("device identity replacement IME quarantine", () => {
       "IME state is unknown",
     );
   });
-});
-
-afterEach(() => {
-  mock.restore();
 });

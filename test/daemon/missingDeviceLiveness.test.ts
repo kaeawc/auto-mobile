@@ -1,5 +1,6 @@
+import { useCapturedLogs } from "../helpers/captureLogs";
 import { statusOf } from "../../src/daemon/deviceBinding";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import {
   MissingDeviceLiveness,
@@ -18,8 +19,10 @@ import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline
 import type { ExecResult } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { logger } from "../../src/utils/logger";
+
 import { registerDeviceResourceInvalidation } from "../../src/daemon/deviceResourceInvalidation";
+
+const logs = useCapturedLogs();
 
 const deviceId = "emulator-5554";
 
@@ -630,20 +633,19 @@ describe("MissingDeviceLiveness", () => {
       await h.timer.sleep(5);
       throw failure;
     };
-    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      expect(await h.liveness.ensurePooledDevicePresent(device, true, false, false)).toBe(false);
-      await flushUntil(() => h.timer.getPendingSleepCount() === 1);
-      expect(statusOf(device)).toBe("error");
-      h.timer.advanceTime(5);
-      await flushUntil(() =>
-        warnSpy.mock.calls.some(([message]) =>
+    logs.clear();
+
+    expect(await h.liveness.ensurePooledDevicePresent(device, true, false, false)).toBe(false);
+    await flushUntil(() => h.timer.getPendingSleepCount() === 1);
+    expect(statusOf(device)).toBe("error");
+    h.timer.advanceTime(5);
+    await flushUntil(() =>
+      logs
+        .calls("warn")
+        .some(([message]) =>
           String(message).includes(`Deferred eviction failed for ${deviceId}: ${failure}`),
         ),
-      );
-      expect(h.calls).toEqual(["record"]);
-    } finally {
-      warnSpy.mockRestore();
-    }
+    );
+    expect(h.calls).toEqual(["record"]);
   });
 });

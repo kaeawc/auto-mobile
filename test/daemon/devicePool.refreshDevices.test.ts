@@ -1,8 +1,9 @@
+import { useCapturedLogs } from "../helpers/captureLogs";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { afterEach, describe, expect, test, beforeEach, spyOn } from "bun:test";
+import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
@@ -16,7 +17,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { ExecutionTracker } from "../../src/daemon/executionTracker";
-import { logger } from "../../src/utils/logger";
+
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
   DeferredDeviceSessionPersistence,
@@ -31,6 +32,8 @@ import {
   requirePooledDevice,
   withProcessPlatform,
 } from "../helpers/devicePoolSuite";
+
+const logs = useCapturedLogs();
 
 useSessionIdleWindowForSuite();
 
@@ -601,21 +604,19 @@ describe("DevicePool", () => {
           const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
           tracker.bindDeviceExecution(oldDeviceWork.id, device.deviceId);
           tracker.bindDeviceExecution(recovery.id, device.deviceId);
-          const warn = spyOn(logger, "warn").mockImplementation(() => {});
-          try {
-            await replaceDevice(branch, undefined);
+          logs.clear();
 
-            expect(oldDeviceWork.abortController.signal.aborted).toBe(false);
-            expect(recovery.abortController.signal.aborted).toBe(false);
-            const replacementWarnings = warn.mock.calls
-              .map(([message]) => message)
-              .filter((message) => message.startsWith("[DevicePool] Left old-device work running"));
-            expect(replacementWarnings).toEqual([
-              `[DevicePool] Left old-device work running for ${device.deviceId} because the System UI ANR recovery execution is unknown`,
-            ]);
-          } finally {
-            warn.mockRestore();
-          }
+          await replaceDevice(branch, undefined);
+
+          expect(oldDeviceWork.abortController.signal.aborted).toBe(false);
+          expect(recovery.abortController.signal.aborted).toBe(false);
+          const replacementWarnings = logs
+            .calls("warn")
+            .map(([message]) => message)
+            .filter((message) => message.startsWith("[DevicePool] Left old-device work running"));
+          expect(replacementWarnings).toEqual([
+            `[DevicePool] Left old-device work running for ${device.deviceId} because the System UI ANR recovery execution is unknown`,
+          ]);
         },
       );
 

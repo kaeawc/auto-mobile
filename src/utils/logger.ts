@@ -924,41 +924,45 @@ const closeCurrentLogStream = async (timer: Timer = defaultTimer): Promise<void>
   }
 };
 
+export type LoggerSink = Pick<Logger, "debug" | "info" | "warn" | "error">;
+let testSink: LoggerSink | undefined;
+
+/** Installs a test sink, returning its predecessor for unconditional restoration. */
+export function setLoggerSinkForTesting(sink: LoggerSink | undefined): LoggerSink | undefined {
+  const previous = testSink;
+  testSink = sink;
+  return previous;
+}
+
 // Logger object with all methods
 export const logger: Logger = {
-  /**
-   * Sets the current log level
-   */
+  /** Sets the current log level */
   setLogLevel(level: LogLevel): void {
     currentLogLevel = level;
   },
 
-  /**
-   * Gets the current log level
-   */
+  /** Gets the current log level */
   getLogLevel(): LogLevel {
     return currentLogLevel;
   },
 
-  /**
-   * Enables logging to STDOUT in addition to log files
-   */
+  /** Enables logging to STDOUT in addition to log files */
   enableStdoutLogging(): void {
     // Structured logs must never share stdout with MCP JSON-RPC traffic.
     logToStdout = logFormat === "text";
   },
 
-  /**
-   * Disables logging to STDOUT
-   */
+  /** Disables logging to STDOUT */
   disableStdoutLogging(): void {
     logToStdout = false;
   },
 
-  /**
-   * Logs a debug message
-   */
+  /** Logs a debug message */
   debug(message: string, ...args: any[]): void {
+    if (testSink) {
+      testSink.debug(message, ...args);
+      return;
+    }
     if (currentLogLevel <= LogLevel.DEBUG) {
       trackWrite(
         writeToLogFile("DEBUG", message, args).catch((err) => {
@@ -968,10 +972,12 @@ export const logger: Logger = {
     }
   },
 
-  /**
-   * Logs an info message
-   */
+  /** Logs an info message */
   info(message: string, ...args: any[]): void {
+    if (testSink) {
+      testSink.info(message, ...args);
+      return;
+    }
     if (currentLogLevel <= LogLevel.INFO) {
       trackWrite(
         writeToLogFile("INFO", message, args).catch((err) => {
@@ -981,10 +987,12 @@ export const logger: Logger = {
     }
   },
 
-  /**
-   * Logs a warning message
-   */
+  /** Logs a warning message */
   warn(message: string, ...args: any[]): void {
+    if (testSink) {
+      testSink.warn(message, ...args);
+      return;
+    }
     if (currentLogLevel <= LogLevel.WARN) {
       trackWrite(
         writeToLogFile("WARN", message, args).catch((err) => {
@@ -994,10 +1002,12 @@ export const logger: Logger = {
     }
   },
 
-  /**
-   * Logs an error message
-   */
+  /** Logs an error message */
   error(message: string, ...args: any[]): void {
+    if (testSink) {
+      testSink.error(message, ...args);
+      return;
+    }
     if (currentLogLevel <= LogLevel.ERROR) {
       trackWrite(
         writeToLogFile("ERROR", message, args).catch((err) => {
@@ -1007,16 +1017,12 @@ export const logger: Logger = {
     }
   },
 
-  /**
-   * Awaits any in-flight fire-and-forget log writes. See interface docs.
-   */
+  /** Awaits any in-flight fire-and-forget log writes. See interface docs. */
   async flush(): Promise<void> {
     await lastWrite;
   },
 
-  /**
-   * Flushes queued writes and closes the log stream.
-   */
+  /** Flushes queued writes and closes the log stream. */
   close(): void {
     stopRotationWatchdog();
     const closingStream = logStream;

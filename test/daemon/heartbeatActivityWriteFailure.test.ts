@@ -1,15 +1,18 @@
+import { useCapturedLogs } from "../helpers/captureLogs";
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { effectiveLastHeartbeat } from "../../src/daemon/livenessOwnerLease";
 import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 import type { DeviceSessionActivityUpdate } from "../../src/db/deviceSessionRepository";
 import { getDbWriteBarrier, InMemoryDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import { logger } from "../../src/utils/logger";
+
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
+
+const logs = useCapturedLogs();
 
 /**
  * #11079: a heartbeat is acknowledged before its activity write settles, so the write's outcome
@@ -45,7 +48,6 @@ describe("heartbeat activity writes (#11079)", () => {
   let manager: SessionManager;
   let monitor: SessionHeartbeatMonitor;
   let released: string[];
-  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -62,14 +64,13 @@ describe("heartbeat activity writes (#11079)", () => {
       },
       timer,
     );
-    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    logs.clear();
     await manager.createSession(SESSION, "emulator-5554", "android");
   });
 
   afterEach(async () => {
     await monitor.stop();
     manager.stopCleanupTimer();
-    warn.mockRestore();
   });
 
   /** Heartbeat every proxy interval for `durationMs`, letting each scan and write settle. */
@@ -96,9 +97,9 @@ describe("heartbeat activity writes (#11079)", () => {
     // Each heartbeat retries the unstored row, and each failure is logged at warn.
     expect(persistence.writes.length).toBeGreaterThan(1);
     expect(
-      warn.mock.calls.some(([message]) =>
-        String(message).includes("Failed to record heartbeat activity"),
-      ),
+      logs
+        .calls("warn")
+        .some(([message]) => String(message).includes("Failed to record heartbeat activity")),
     ).toBe(true);
     await drainUntil(() => barrier.inFlightCount() === 0, {
       description: "rejected heartbeat activity writes to settle",

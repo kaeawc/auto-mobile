@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { useCapturedLogs } from "../helpers/captureLogs";
+import { describe, it, expect, beforeEach } from "bun:test";
 import {
   createNavigationGraphRequestHandler,
   convertSummaryToStreamData,
@@ -6,11 +7,13 @@ import {
 } from "../../src/daemon/navigationGraphRequestHandler";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { NavigationGraphSummary } from "../../src/utils/interfaces/NavigationGraph";
-import { logger } from "../../src/utils/logger";
+
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { ackFrameSchema, navigationGraphFrameSchema } from "../helpers/wireMessageSchemas";
+
+const logs = useCapturedLogs();
 
 const EMPTY_SUMMARY: NavigationGraphSummary = {
   appId: null,
@@ -66,17 +69,6 @@ class TestableServer extends DeviceDataStreamSocketServer {
 }
 
 describe("createNavigationGraphRequestHandler", () => {
-  let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
-
-  beforeEach(() => {
-    warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    warnSpy.mockClear();
-  });
-
-  afterEach(() => {
-    warnSpy.mockRestore();
-  });
-
   it("rethrows an ActionableError when the export fails, instead of swallowing to null", async () => {
     const exporter = new FakeExporter({ kind: "reject", error: new Error("boom") });
     const handler = createNavigationGraphRequestHandler(exporter);
@@ -91,8 +83,8 @@ describe("createNavigationGraphRequestHandler", () => {
     const handler = createNavigationGraphRequestHandler(exporter);
 
     await expect(handler(null)).rejects.toThrow();
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0][0]).toContain("Failed to export navigation graph on request");
+    expect(logs.calls("warn")).toHaveLength(1);
+    expect(logs.calls("warn")[0][0]).toContain("Failed to export navigation graph on request");
   });
 
   it("returns a non-null empty graph on the no-app / empty-graph success path", async () => {

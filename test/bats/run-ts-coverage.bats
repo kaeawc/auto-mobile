@@ -13,6 +13,7 @@
 SCRIPT="scripts/ci/run-ts-coverage.sh"
 
 setup() {
+  export AUTOMOBILE_RUNNER_CALIBRATION=0
   command -v rg >/dev/null 2>&1 || skip "ripgrep (rg) not installed"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -43,7 +44,9 @@ while [[ "\$#" -gt 0 ]]; do
     dir="\${2%.xml}"
     mkdir -p "\$dir"
     printf 'TN:\nSF:src/a.ts\nDA:1,1\nLF:1\nLH:1\nend_of_record\n' > "\$dir/lcov.info"
-    printf '<testsuites tests="1"><testsuite name="s" tests="1"><testcase name="c" classname="s" file="f" time="0"/></testsuite></testsuites>\n' > "\$2"
+    if [[ "\${STUB_OMIT_JUNIT:-}" != all && "\${2##*/}" != "\${STUB_OMIT_JUNIT:-}" ]]; then
+      printf '<testsuites tests="1"><testsuite name="s" tests="1"><testcase name="c" classname="s" file="f" time="0"/></testsuite></testsuites>\n' > "\$2"
+    fi
   fi
   shift
 done
@@ -161,4 +164,39 @@ EOF
   [[ "$output" == *"::group::Unclean coverage log: coverage/shards/shard-2-chunk-2.log"* ]]
   [[ "$output" == *"::error::coverage: FAIL: coverage shard 1 chunk 1/2 exited with status 1"* ]]
   [[ "$output" == *"::error::coverage: FAIL: coverage shard 2 chunk 2/2 exited with status 1"* ]]
+}
+
+@test "WriteFailed cannot recover a log with both zero and nonzero failure summaries" {
+  STUB_LOG="$WORK_DIR/mixed.log"
+  printf '0 fail\n10 fail\nerror: An internal error occurred (WriteFailed)\n' > "$STUB_LOG"
+  make_bun_stub
+  run env PATH="$STUB_DIR:$PATH" bash "$SCRIPT" "$WORK_DIR/out.log"
+  [ "$status" -ne 0 ]
+}
+
+@test "WriteFailed recovery requires JUnit for every planned chunk" {
+  STUB_LOG="$WORK_DIR/pass.log"
+  printf '42 pass\n0 fail\nerror: An internal error occurred (WriteFailed)\n' > "$STUB_LOG"
+  make_bun_stub
+  # A single missing chunk must fail even when other XML reports are present.
+  for missing in shard-1-chunk-2.xml all; do
+    run env PATH="$STUB_DIR:$PATH" STUB_OMIT_JUNIT="$missing" bash "$SCRIPT" "$WORK_DIR/out.log"
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"continuing to verify coverage output"* ]]
+  done
+}
+
+@test "surfaces contention signatures independently of their descriptive wording" {
+  STUB_LOG="$WORK_DIR/contention.log"
+  {
+    printf 'RUNNER-CONTENDED: unit shard 1 fixture\n'
+    printf 'RUNNER-STARVED-SUSPECTED: all 2 unit shards fixture\n'
+    for ((i=0; i<260; i+=1)); do printf 'filler %s\n' "$i"; done
+    printf '1 fail\n'
+  } > "$STUB_LOG"
+  make_bun_stub
+  run env PATH="$STUB_DIR:$PATH" bash "$SCRIPT" "$WORK_DIR/out.log"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"::error::coverage: RUNNER-CONTENDED: unit shard 1 fixture"* ]]
+  [[ "$output" == *"::error::coverage: RUNNER-STARVED-SUSPECTED: all 2 unit shards fixture"* ]]
 }

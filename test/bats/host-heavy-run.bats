@@ -144,3 +144,17 @@ hold() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"AUTOMOBILE_HEAVY_CHECK_SLOTS must be a positive integer"* ]]
 }
+
+@test "host_heavy_oxlint passes its own arguments and adds --threads only when capped" {
+  cd "$REPO_ROOT"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/usr/bin/env bash\necho "oxlint args=[$*]"\n' > "$BATS_TEST_TMPDIR/bin/oxlint"
+  chmod +x "$BATS_TEST_TMPDIR/bin/oxlint"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run heavy host_heavy_oxlint --fix src
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"oxlint args=[--fix src]"* ]]
+  hold 3
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" run heavy host_heavy_oxlint --fix src
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"oxlint args=[--threads 1 --fix src]"* ]]
+}

@@ -2,40 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$timestamp &lt; cursor.timestamp || (timestamp == cursor.timestamp &amp;&amp; (cursor.idsAtTimestamp == null || identity in cursor.idsAtTimestamp.orEmpty()))</ID>
-    <ID>ComplexCondition:AutoMobileSDK.kt:AutoMobileSDK$!_isEnabled || name.isBlank() || context == null || navigationOnlyMode</ID>
-    <ID>ComplexCondition:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$identity == null || identity != cached.identity || needsWritableConnection || needsExactReadOnlyConnection</ID>
-    <ID>ComplexCondition:TapGestureClassifier.kt:TapGestureClassifier$hadDown &amp;&amp; dx * dx + dy * dy &lt; slopPx * slopPx &amp;&amp; duration &gt;= 0 &amp;&amp; duration &lt; timeoutMs</ID>
-    <ID>CyclomaticComplexMethod:AutoMobileCrashes.kt:AutoMobileCrashes$private fun broadcastCrash</ID>
-    <ID>CyclomaticComplexMethod:AutoMobileNetwork.kt:AutoMobileNetwork$fun recordRequest</ID>
-    <ID>CyclomaticComplexMethod:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$override fun intercept: Response</ID>
-    <ID>CyclomaticComplexMethod:DatabaseInspectorProvider.kt:DatabaseInspectorProvider$@JvmSynthetic internal fun callWithCapabilities: Bundle</ID>
-    <ID>CyclomaticComplexMethod:DatabaseInspectorProvider.kt:DatabaseInspectorProvider$internal fun handleExecuteSQL: JSONObject</ID>
-    <ID>CyclomaticComplexMethod:EventBatchReplay.kt:internal fun replayEventBatches</ID>
-    <ID>CyclomaticComplexMethod:EventPersistence.kt:FileEventPersistence$internal fun serializeEvents: String</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun openDatabase: SQLiteDatabase</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun readPragmaValueEnd: Int?</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun requireSingleStatement</ID>
-    <ID>CyclomaticComplexMethod:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun scanSqlTokens</ID>
-    <ID>CyclomaticComplexMethod:SdkCapabilityJson.kt:fun decodeSdkCapabilitySnapshot: SdkCapabilitySnapshotResult</ID>
-    <ID>CyclomaticComplexMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$internal fun broadcastBatch</ID>
-    <ID>CyclomaticComplexMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
-    <ID>CyclomaticComplexMethod:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$override fun call: Bundle</ID>
-    <ID>EmptyFunctionBlock:AutoMobileClickTracker.kt:AutoMobileClickTracker.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:AutoMobileLog.kt:AutoMobileLog${}</ID>
-    <ID>InstanceOfCheckForException:DatabaseInspectorProvider.kt:DatabaseInspectorProvider$e is DatabaseError.SqlError</ID>
-    <ID>InstanceOfCheckForException:SdkEventBuffer.kt:SdkEventBuffer$error is UnsentEventBatchesException</ID>
     <ID>LargeClass:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver : DatabaseDriver</ID>
-    <ID>LongMethod:AutoMobileCrashes.kt:AutoMobileCrashes$private fun broadcastCrash</ID>
-    <ID>LongMethod:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$override fun intercept: Response</ID>
-    <ID>LongMethod:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$private fun handleErrorSimulation: Response</ID>
-    <ID>LongMethod:AutoMobileSDK.kt:AutoMobileSDK$@RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) fun initialize</ID>
-    <ID>LongMethod:AutoMobileSDK.kt:AutoMobileSDK$fun shutdown</ID>
-    <ID>LongMethod:EventPersistence.kt:FileEventPersistence$@Suppress("CyclomaticComplexMethod") private fun deserializeEvent: SdkEvent?</ID>
-    <ID>LongMethod:EventPersistence.kt:FileEventPersistence$internal fun serializeEvents: String</ID>
-    <ID>LongMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$internal fun broadcastBatch</ID>
-    <ID>LongMethod:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
-    <ID>LongMethod:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$override fun call: Bundle</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:AutoMobileNetwork$fun startCapture: NetworkCaptureSession?</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:NetworkCaptureSession</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:NetworkCaptureSession$fun complete</ID>
@@ -55,12 +22,6 @@
     <ID>LongParameterList:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer$constructor</ID>
-    <ID>NestedBlockDepth:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$private fun scanSqlTokens</ID>
-    <ID>SwallowedException:AutoMobileCrashes.kt:AutoMobileCrashes.AutoMobileExceptionHandler$t: Throwable</ID>
-    <ID>SwallowedException:Navigation3Adapter.kt:Navigation3Adapter$e: Exception</ID>
-    <ID>SwallowedException:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: Exception</ID>
-    <ID>SwallowedException:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: SQLiteReadOnlyDatabaseException</ID>
-    <ID>SwallowedException:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$e: IllegalArgumentException</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$error: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileBiometrics.kt:AutoMobileBiometrics$e: Exception</ID>
@@ -107,7 +68,5 @@
     <ID>TooManyFunctions:SdkEventBuffer.kt:SdkEventBuffer</ID>
     <ID>TooManyFunctions:SharedPreferencesDriverImpl.kt:SharedPreferencesDriverImpl : SharedPreferencesDriver</ID>
     <ID>TooManyFunctions:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider : ContentProvider</ID>
-    <ID>UnnecessarySafeCall:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$response.body?.contentLength()</ID>
-    <ID>UnnecessarySafeCall:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$extras?.getLong("sinceSequence", 0L)</ID>
   </CurrentIssues>
 </SmellBaseline>

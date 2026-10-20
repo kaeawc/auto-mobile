@@ -489,10 +489,13 @@ fun StorageDashboard(
                 if (result is Result.Success) {
                   keyValueFiles =
                     keyValueFiles.applyKeyValueEditIfGenerationUnchanged(
-                      fileName,
-                      key,
-                      value,
-                      type,
+                      edit =
+                        KeyValueEdit(
+                          fileName,
+                          key,
+                          value,
+                          type,
+                        ),
                       preSaveGeneration,
                       storageUpdateGenerations[generationKey] ?: 0L,
                     )

@@ -62,11 +62,14 @@ fun LeftSidebarPanel(
     verticalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     McpConnectionSection(
-      dataSourceMode = dataSourceMode,
-      onDataSourceModeChanged = onDataSourceModeChanged,
-      onProcessConnected = onProcessConnected,
-      connectedProcess = connectedProcess,
-      onRetryDetection = onRetryDetection,
+      options =
+        McpConnectionOptions(
+          dataSourceMode = dataSourceMode,
+          onDataSourceModeChanged = onDataSourceModeChanged,
+          onProcessConnected = onProcessConnected,
+          connectedProcess = connectedProcess,
+          onRetryDetection = onRetryDetection,
+        ),
       modifier = Modifier.fillMaxWidth(),
     )
 

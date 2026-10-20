@@ -72,16 +72,16 @@ class NodeActionControllerTest {
       events += "forget"
     }
 
-    override suspend fun sendActionResult(
-      requestId: String?,
-      action: String,
-      success: Boolean,
-      error: String?,
-      totalTimeMs: Long,
-      alreadySatisfied: Boolean,
-    ) {
+    override suspend fun sendActionResult(outcome: NodeActionResult) {
       events += "result"
-      results += Result(requestId, action, success, error, alreadySatisfied)
+      results +=
+        Result(
+          outcome.requestId,
+          outcome.action,
+          outcome.success,
+          outcome.error,
+          outcome.alreadySatisfied,
+        )
     }
   }
 

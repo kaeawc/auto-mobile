@@ -44,7 +44,10 @@ class HierarchyCoalescingTest {
         scope = backgroundScope,
         timeProvider = FakeTime(),
         stats = stats,
-        extractHierarchy = { _, _ -> ViewHierarchy(packageName = "idle") },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> ViewHierarchy(packageName = "idle") },
+          ),
       )
 
     advanceTimeBy(1_000)
@@ -64,10 +67,16 @@ class HierarchyCoalescingTest {
       HierarchyDebouncer(
         scope = backgroundScope,
         timeProvider = time,
-        quickDebounceMs = 5,
-        unsolicitedIntervalMs = 250,
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 5,
+            unsolicitedIntervalMs = 250,
+          ),
         stats = stats,
-        extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-$state") },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-$state") },
+          ),
       )
 
     debouncer.onAccessibilityEvent()
@@ -111,9 +120,15 @@ class HierarchyCoalescingTest {
         HierarchyDebouncer(
           scope = backgroundScope,
           timeProvider = time,
-          unsolicitedIntervalMs = 0,
+          config =
+            HierarchyDebouncerConfig(
+              unsolicitedIntervalMs = 0,
+            ),
           stats = stats,
-          extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-$state") },
+          dependencies =
+            HierarchyDebouncerDependencies(
+              extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-$state") },
+            ),
         )
 
       debouncer.onAccessibilityEvent()
@@ -151,13 +166,16 @@ class HierarchyCoalescingTest {
         scope = backgroundScope,
         timeProvider = time,
         stats = stats,
-        extractHierarchy = { _, _ ->
-          if (state == 0) {
-            state = 1
-            repeat(20) { debouncer.onAccessibilityEvent() }
-          }
-          ViewHierarchy(packageName = "state-$state")
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ ->
+              if (state == 0) {
+                state = 1
+                repeat(20) { debouncer.onAccessibilityEvent() }
+              }
+              ViewHierarchy(packageName = "state-$state")
+            },
+          ),
       )
     debouncer.onAccessibilityEvent()
     advanceTimeBy(5)
@@ -181,15 +199,21 @@ class HierarchyCoalescingTest {
       HierarchyDebouncer(
         scope = backgroundScope,
         timeProvider = time,
-        quickDebounceMs = 5,
-        unsolicitedIntervalMs = 250,
+        config =
+          HierarchyDebouncerConfig(
+            quickDebounceMs = 5,
+            unsolicitedIntervalMs = 250,
+          ),
         stats = stats,
-        beforeDebounceLock = {
-          if (++lockAttempts == 1) {
-            debouncer.setUnsolicitedIntervalMs(0)
-          }
-        },
-        extractHierarchy = { _, _ -> ViewHierarchy(packageName = "current") },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            beforeDebounceLock = {
+              if (++lockAttempts == 1) {
+                debouncer.setUnsolicitedIntervalMs(0)
+              }
+            },
+            extractHierarchy = { _, _ -> ViewHierarchy(packageName = "current") },
+          ),
       )
 
     debouncer.onAccessibilityEvent()
@@ -221,7 +245,10 @@ class HierarchyCoalescingTest {
         scope = backgroundScope,
         timeProvider = time,
         stats = stats,
-        extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-$state") },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-$state") },
+          ),
       )
     debouncer.onAccessibilityEvent()
     state = 1
@@ -243,17 +270,20 @@ class HierarchyCoalescingTest {
         scope = backgroundScope,
         timeProvider = time,
         stats = stats,
-        beforeDebounceCompletion = {
-          if (++completions == 1) {
-            debouncer.extractAfterQuiescenceSuspending(
-              quiescenceMs = 0,
-              maxWaitMs = 1,
-              initialEventWaitMs = 0,
-            )
-            debouncer.onAccessibilityEvent()
-          }
-        },
-        extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-${++calls}") },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            beforeDebounceCompletion = {
+              if (++completions == 1) {
+                debouncer.extractAfterQuiescenceSuspending(
+                  quiescenceMs = 0,
+                  maxWaitMs = 1,
+                  initialEventWaitMs = 0,
+                )
+                debouncer.onAccessibilityEvent()
+              }
+            },
+            extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-${++calls}") },
+          ),
       )
 
     debouncer.onAccessibilityEvent()
@@ -274,9 +304,12 @@ class HierarchyCoalescingTest {
         scope = backgroundScope,
         timeProvider = FakeTime(),
         stats = stats,
-        extractHierarchy = { disabled, _ ->
-          ViewHierarchy(packageName = if (disabled) "explicit" else "default")
-        },
+        dependencies =
+          HierarchyDebouncerDependencies(
+            extractHierarchy = { disabled, _ ->
+              ViewHierarchy(packageName = if (disabled) "explicit" else "default")
+            },
+          ),
       )
 
     debouncer.onAccessibilityEvent()

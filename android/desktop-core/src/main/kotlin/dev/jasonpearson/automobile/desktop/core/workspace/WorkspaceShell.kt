@@ -61,6 +61,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.shell.UpdateReadyButton
+import dev.jasonpearson.automobile.desktop.core.shell.VerticalSplitOptions
 import dev.jasonpearson.automobile.desktop.core.shell.VerticalSplitPane
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
@@ -747,6 +748,16 @@ private fun DeviceColumnView(
     DeviceColumnHeader(column, displayName, onAction)
     val tool = column.activeTool
     VerticalSplitPane(
+      options =
+        VerticalSplitOptions(
+          showSecond = tool != null,
+          firstPaneFraction = firstPaneFraction(column),
+          minFirstDp = 48.dp,
+          minSecondDp = 48.dp,
+          onFractionChanged = {
+            onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it))
+          },
+        ),
       first = {
         PaneMainContent(
           column,
@@ -764,12 +775,7 @@ private fun DeviceColumnView(
           DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.fillMaxSize())
         }
       },
-      showSecond = tool != null,
       modifier = Modifier.weight(1f),
-      firstPaneFraction = firstPaneFraction(column),
-      minFirstDp = 48.dp,
-      minSecondDp = 48.dp,
-      onFractionChanged = { onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it)) },
     )
   }
 }

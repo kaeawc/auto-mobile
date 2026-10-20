@@ -5,6 +5,12 @@ internal fun interface GestureDeadline {
   fun schedule(delayMs: Long, onTimeout: () -> Unit): () -> Unit
 }
 
+/** The timer and monotonic clock used to pace continued drag strokes. */
+internal data class DragStrokeDependencies(
+  val deadline: GestureDeadline,
+  val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
+)
+
 /**
  * Dispatch a fixed plan through the streaming stroke adapter. Unlike a live stream, a drag has a
  * deadline per segment and must attempt to lift its continued pointer before reporting failure.
@@ -18,12 +24,14 @@ internal fun interface GestureDeadline {
 internal class DragStrokeSession<S>(
   private val plan: List<GestureSegment>,
   private val dispatcher: StrokeDispatcher<S>,
-  private val deadline: GestureDeadline,
+  timing: DragStrokeDependencies,
   private val displayId: Int?,
   private val logError: (Exception) -> Unit,
   private val onFinished: (Boolean, String?) -> Unit,
-  private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
+  private val deadline = timing.deadline
+  private val nowMs = timing.nowMs
+
   private var previous: S? = null
   private var liftFrom: Pair<S, GesturePoint>? = null
   private var generation = 0

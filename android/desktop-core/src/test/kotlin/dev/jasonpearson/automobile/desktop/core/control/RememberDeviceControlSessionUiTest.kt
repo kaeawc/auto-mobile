@@ -22,7 +22,8 @@ import kotlinx.coroutines.cancel
  * site that hands the session the raw provider; this does.
  */
 @OptIn(ExperimentalTestApi::class)
-class RememberDeviceControlSessionUiTest {
+internal class RememberDeviceControlSessionUiTest :
+  RememberDeviceControlSessionUiDispatcherFixture() {
 
   private class RecordingAllocation(private val allowed: Boolean = true) : DesktopInputAllocation {
     val requested = mutableListOf<String>()
@@ -38,7 +39,7 @@ class RememberDeviceControlSessionUiTest {
   @Test
   fun `a tap allocates its device to the desktop session before the daemon sees it`() =
     runComposeUiTest {
-      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val scope = CoroutineScope(testDispatcher)
       val allocation = RecordingAllocation()
       val client = FakeAutoMobileClient()
       lateinit var session: DeviceControlSession
@@ -52,12 +53,12 @@ class RememberDeviceControlSessionUiTest {
             nowMs = { 1_000L },
             publishError = {},
             streamingEnabled = false,
-            uiContext = Dispatchers.Unconfined,
-            ioDispatcher = Dispatchers.Unconfined,
+            uiContext = testDispatcher,
+            ioDispatcher = testDispatcher,
           )
       }
 
-      assertTrue(session.tap(testSnapshot(deviceId = "emulator-5554"), point))
+      assertTrue(session.tap(testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")), point))
       waitForIdle()
 
       assertEquals(listOf("emulator-5554"), allocation.requested)
@@ -68,7 +69,7 @@ class RememberDeviceControlSessionUiTest {
   @Test
   fun `a refused allocation keeps the tap from the daemon and shows the error`() =
     runComposeUiTest {
-      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val scope = CoroutineScope(testDispatcher)
       val allocation = RecordingAllocation(allowed = false)
       val client = FakeAutoMobileClient()
       val errors = mutableListOf<String?>()
@@ -83,12 +84,12 @@ class RememberDeviceControlSessionUiTest {
             nowMs = { 1_000L },
             publishError = { errors += it },
             streamingEnabled = false,
-            uiContext = Dispatchers.Unconfined,
-            ioDispatcher = Dispatchers.Unconfined,
+            uiContext = testDispatcher,
+            ioDispatcher = testDispatcher,
           )
       }
 
-      session.tap(testSnapshot(deviceId = "emulator-5554"), point)
+      session.tap(testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")), point)
       waitForIdle()
 
       assertEquals(listOf("emulator-5554"), allocation.requested)
@@ -99,7 +100,7 @@ class RememberDeviceControlSessionUiTest {
 
   @Test
   fun `a swapped provider and allocation take effect behind the one session`() = runComposeUiTest {
-    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val scope = CoroutineScope(testDispatcher)
     val first = FakeAutoMobileClient()
     val second = FakeAutoMobileClient()
     val firstAllocation = RecordingAllocation()
@@ -119,8 +120,8 @@ class RememberDeviceControlSessionUiTest {
           nowMs = { 1_000L },
           publishError = {},
           streamingEnabled = false,
-          uiContext = Dispatchers.Unconfined,
-          ioDispatcher = Dispatchers.Unconfined,
+          uiContext = testDispatcher,
+          ioDispatcher = testDispatcher,
         )
     }
     val held = session
@@ -128,7 +129,7 @@ class RememberDeviceControlSessionUiTest {
     provider.value = { second }
     allocation.value = secondAllocation
     waitForIdle()
-    held.tap(testSnapshot(deviceId = "emulator-5554"), point)
+    held.tap(testSnapshot(TestSnapshotSpec(deviceId = "emulator-5554")), point)
     waitForIdle()
 
     assertTrue(first.inputTapCalls.isEmpty() && firstAllocation.requested.isEmpty())
@@ -139,7 +140,7 @@ class RememberDeviceControlSessionUiTest {
 
   @Test
   fun `swapping the provider resets what the previous one left pending`() = runComposeUiTest {
-    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val scope = CoroutineScope(testDispatcher)
     val provider = mutableStateOf<() -> AutoMobileClient>({ FakeAutoMobileClient() })
     lateinit var session: DeviceControlSession
     setContent {
@@ -152,11 +153,11 @@ class RememberDeviceControlSessionUiTest {
           nowMs = { 1_000L },
           publishError = {},
           streamingEnabled = false,
-          uiContext = Dispatchers.Unconfined,
-          ioDispatcher = Dispatchers.Unconfined,
+          uiContext = testDispatcher,
+          ioDispatcher = testDispatcher,
         )
     }
-    session.tap(testSnapshot(), point)
+    session.tap(testSnapshot(TestSnapshotSpec()), point)
     waitForIdle()
     assertTrue(session.refreshState != PostInputRefreshState.Idle, "the tap awaits a refresh")
 
@@ -179,3 +180,7 @@ class RememberDeviceControlSessionUiTest {
     assertTrue("DeviceControlSession(" !in host.replace("rememberDeviceControlSession(", ""))
   }
 }
+
+internal abstract class RememberDeviceControlSessionUiDispatcherFixture(
+  protected val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+)

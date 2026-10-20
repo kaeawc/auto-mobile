@@ -32,7 +32,7 @@ import {
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
 } from "../../src/daemon/types";
 import { declaresDeviceSessionSuspect } from "../../src/daemon/deviceSessionResult";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { SessionSuspectError } from "../../src/daemon/sessionManager";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -746,7 +746,7 @@ describe("proxy liveness stalls (#10053)", () => {
           }),
       );
       const ordinary = proxy.ensureConnected().catch((error: unknown) => error);
-      const recovery = Reflect.get(proxy, "livenessRecovery");
+      const recovery = proxy.getInternalsForTesting().livenessRecovery;
       if (!(recovery instanceof LivenessRecovery)) {
         throw new Error("Proxy liveness recovery seam is missing");
       }
@@ -896,7 +896,7 @@ describe("proxy liveness stalls (#10053)", () => {
 
   describe("delta findings F1-F6", () => {
     function recoveryOf(proxy: DaemonMcpProxy): LivenessRecovery {
-      const recovery = Reflect.get(proxy, "livenessRecovery");
+      const recovery = proxy.getInternalsForTesting().livenessRecovery;
       if (!(recovery instanceof LivenessRecovery)) {
         throw new Error("Missing liveness recovery seam");
       }
@@ -904,7 +904,7 @@ describe("proxy liveness stalls (#10053)", () => {
     }
 
     function handoverCount(proxy: DaemonMcpProxy): number {
-      const map = Reflect.get(proxy, "stallHandovers");
+      const map = proxy.getInternalsForTesting().stallHandovers;
       if (!(map instanceof Map)) {
         throw new Error("Missing handover seam");
       }
@@ -1208,15 +1208,6 @@ describe("proxy liveness stalls (#10053)", () => {
   });
 
   describe("review fixes (PR 10115)", () => {
-    /** A private map on the proxy, read without a type assertion. */
-    function trackedBy(proxy: DaemonMcpProxy, field: string): Map<string, unknown> {
-      const value = Reflect.get(proxy, field);
-      if (!(value instanceof Map)) {
-        throw new Error(`${field} is not a Map`);
-      }
-      return value;
-    }
-
     test("F3: a proxy displaced while stalled is handed over as lost, with its session fenced", async () => {
       const proxy = createProxy(2_000);
       await acquire(proxy, "getAndroid");
@@ -1305,9 +1296,9 @@ describe("proxy liveness stalls (#10053)", () => {
       expect(clientsCreated).toBe(clientsBefore);
       expect(handovers).toEqual([]);
       // F11: nothing is kept per session for what the proxy no longer holds.
-      expect(trackedBy(proxy, "livenessAcks").has("android-session")).toBe(false);
-      expect(trackedBy(proxy, "sessionDeviceIds").has("android-session")).toBe(false);
-      expect(trackedBy(proxy, "livenessAcks").has("ios-session")).toBe(true);
+      expect(proxy.getInternalsForTesting().livenessAcks.has("android-session")).toBe(false);
+      expect(proxy.getInternalsForTesting().sessionDeviceIds.has("android-session")).toBe(false);
+      expect(proxy.getInternalsForTesting().livenessAcks.has("ios-session")).toBe(true);
     });
 
     test("F6: recovery does not replace the socket beneath a tool call in flight", async () => {
@@ -1350,9 +1341,11 @@ describe("proxy liveness stalls (#10053)", () => {
       await advanceUntilHandover();
 
       // The session stays resumable by UUID: its device and the pending handover are kept.
-      expect(trackedBy(proxy, "sessionDeviceIds").get("android-session")).toBe("emulator-5554");
-      expect(trackedBy(proxy, "stallHandovers").has("android-session")).toBe(true);
-      expect(trackedBy(proxy, "livenessAcks").has("android-session")).toBe(false);
+      expect(proxy.getInternalsForTesting().sessionDeviceIds.get("android-session")).toBe(
+        "emulator-5554",
+      );
+      expect(proxy.getInternalsForTesting().stallHandovers.has("android-session")).toBe(true);
+      expect(proxy.getInternalsForTesting().livenessAcks.has("android-session")).toBe(false);
     });
   });
 

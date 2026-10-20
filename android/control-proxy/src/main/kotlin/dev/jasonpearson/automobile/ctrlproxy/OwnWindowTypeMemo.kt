@@ -67,13 +67,15 @@ internal class OwnWindowTypeMemo(
 internal data class OwnWindowEventDecision(val skip: Boolean, val windowType: Int?)
 
 internal fun ownWindowEventDecision(
-  eventPackage: String?,
-  ownPackage: String,
-  windowId: Int,
+  event: OwnWindowEvent,
   memo: OwnWindowTypeMemo,
   appLayerShowing: () -> Boolean,
   resolve: () -> Int?,
 ): OwnWindowEventDecision {
+  val eventPackage = event.eventPackage
+  val ownPackage = event.ownPackage
+  val windowId = event.windowId
+
   if (eventPackage != ownPackage) return OwnWindowEventDecision(false, null)
   val type = memo.windowType(windowId, resolve = resolve)
   val showing = type == AccessibilityWindowInfo.TYPE_SYSTEM && appLayerShowing()

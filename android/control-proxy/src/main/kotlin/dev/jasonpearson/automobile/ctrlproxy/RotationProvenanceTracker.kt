@@ -74,16 +74,7 @@ internal class DisplayRotationChangeSignal(
     val transition =
       current ?: lastDisplays[displayId]?.copy(change = change, panelFingerprint = null)
     val previous = lastDisplays[displayId]
-    val isUnchangedDisplay =
-      change == "changed" &&
-        current != null &&
-        previous != null &&
-        current.width == previous.width &&
-        current.height == previous.height &&
-        current.state == previous.state &&
-        current.panelUniqueId == previous.panelUniqueId &&
-        current.panelFingerprint == previous.panelFingerprint &&
-        current.rotation == previous.rotation
+    val isUnchangedDisplay = change == "changed" && sameDisplay(current, previous)
     if (isUnchangedDisplay) return
     if (change == "removed") {
       lastDisplays.remove(displayId)
@@ -243,4 +234,15 @@ internal class RotationProvenanceTracker(private val changeSignal: RotationChang
     changeSignal.unregister()
     isRegistered = false
   }
+}
+
+private fun sameDisplay(current: DisplayTransition?, previous: DisplayTransition?): Boolean {
+  return current != null &&
+    previous != null &&
+    current.width == previous.width &&
+    current.height == previous.height &&
+    current.state == previous.state &&
+    current.panelUniqueId == previous.panelUniqueId &&
+    current.panelFingerprint == previous.panelFingerprint &&
+    current.rotation == previous.rotation
 }

@@ -26,7 +26,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { ActionableError } from "../../src/models/ActionableError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 
 /**
  * #6227: `createToolExecutionContext`'s persisted daemon-session path — a

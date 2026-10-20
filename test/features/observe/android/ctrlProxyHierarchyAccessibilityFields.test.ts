@@ -114,7 +114,7 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
           ? {}
           : Object.fromEntries(fields.map((key) => [key, absence === "null" ? null : ""]));
       const converted = convert({ ...withoutHint, ...omitted });
-      expect(converted.hierarchy).toStrictEqual({
+      const expectedHierarchy = {
         node: {
           text: "Ada",
           class: "android.widget.EditText",
@@ -125,7 +125,8 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
           "view-id": "first-name",
           bounds: { left: 0, top: 0, right: 200, bottom: 40 },
         },
-      });
+      };
+      expect(converted.hierarchy).toStrictEqual(expectedHierarchy);
       if (!converted.hierarchy.node) {
         throw new Error("Expected converted root");
       }

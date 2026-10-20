@@ -14,7 +14,7 @@ import {
   DeviceShuttingDownError,
 } from "../../src/models/deviceAcquisitionRefusals";
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { createTeardownFailureResponse } from "../../src/server/deviceTools";
 import {
   SessionNoLongerOwnsDeviceError,

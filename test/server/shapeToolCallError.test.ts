@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
-import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import {
   DeviceAssignedToBindingError,
   BindingDiscoveryIncompleteError,

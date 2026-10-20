@@ -1,4 +1,4 @@
-import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
+import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";

@@ -548,12 +548,12 @@ describe("device scenario CLI routing with injected fake contexts", () => {
     expect(f.calls.some((c) => c.startsWith("permit:"))).toBe(true);
   });
   test.each([
-    ["daemon-restart-with-live-sessions"],
-    ["parallel-acquire", "--device", "--max-devices", "5"],
-    ["parallel-acquire", "--device", "--crash"],
-    ["parallel-acquire", "--device", "--device"],
-    ["daemon-restart-with-live-sessions", "--crash"],
-  ])("rejects invalid device invocation %j before constructing a context", async (...args) => {
+    { args: ["daemon-restart-with-live-sessions"] },
+    { args: ["parallel-acquire", "--device", "--max-devices", "5"] },
+    { args: ["parallel-acquire", "--device", "--crash"] },
+    { args: ["parallel-acquire", "--device", "--device"] },
+    { args: ["daemon-restart-with-live-sessions", "--crash"] },
+  ])("rejects invalid device invocation %j before constructing a context", async ({ args }) => {
     let constructed = false;
     expect(
       await runBrokerScenarioCli(

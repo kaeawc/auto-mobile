@@ -5,6 +5,7 @@ import {
   defaultPolicy,
   resolvePolicy,
   type PolicyConfig,
+  type IgnoreReason,
 } from "../../../../scripts/ci/attestation/validators/trustPolicy";
 import { fixture, NOW } from "./helpers";
 
@@ -136,18 +137,20 @@ test("all independent failures are collected without duplicate codes", () => {
   const result = decideAttestation(f.envelope, f.ctx, defaultPolicy());
   expect(result.decision).toBe("ignore");
   expect([...result.reasons].sort()).toEqual(
-    [
-      "signature-algorithm-unsupported",
-      "signature-unverified",
-      "identity-mismatch",
-      "hash-mismatch",
-      "stale-base",
-      "result-not-success",
-      "stale-attestation",
-      "environment-mismatch",
-      "key-revoked",
-      "key-expired",
-    ].sort(),
+    (
+      [
+        "signature-algorithm-unsupported",
+        "signature-unverified",
+        "identity-mismatch",
+        "hash-mismatch",
+        "stale-base",
+        "result-not-success",
+        "stale-attestation",
+        "environment-mismatch",
+        "key-revoked",
+        "key-expired",
+      ] satisfies IgnoreReason[]
+    ).sort(),
   );
 });
 

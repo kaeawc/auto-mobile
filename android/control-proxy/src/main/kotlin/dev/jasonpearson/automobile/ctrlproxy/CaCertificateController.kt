@@ -10,16 +10,25 @@ import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 
+/** Platform access bound to the service's device-admin component and private storage. */
+internal data class CaCertificateDependencies(
+  val devicePolicy: CaCertificateController.DevicePolicy,
+  val packageName: String,
+  val filesDir: () -> File,
+)
+
 /** Device-owner CA certificate operations, with service and platform access supplied per call. */
 internal class CaCertificateController(
-  private val devicePolicy: DevicePolicy,
-  private val packageName: String,
-  private val filesDir: () -> File,
+  dependencies: CaCertificateDependencies,
   private val perfProvider: PerfProvider,
   private val timeProvider: TimeProvider,
   private val resultBroadcaster: ResultBroadcaster,
   private val responseSender: ResponseSender,
 ) {
+  private val devicePolicy = dependencies.devicePolicy
+  private val packageName = dependencies.packageName
+  private val filesDir = dependencies.filesDir
+
   /** The DevicePolicyManager operations bound to the service's device-admin component. */
   interface DevicePolicy {
     fun isDeviceOwnerApp(packageName: String): Boolean
@@ -108,7 +117,9 @@ internal class CaCertificateController(
       }
       perfProvider.end()
       val totalTime = timeProvider.currentTimeMillis() - startTime
-      broadcastCaCertResult(requestId, "install", success, alias, error, totalTime)
+      broadcastCaCertResult(
+        CaCertificateResult(requestId, "install", success, alias, error, totalTime),
+      )
     }
   }
 
@@ -119,12 +130,14 @@ internal class CaCertificateController(
     if (payload == null) {
       val totalTime = timeProvider.currentTimeMillis() - startTime
       broadcastCaCertResult(
-        requestId,
-        "install",
-        false,
-        null,
-        "Certificate file is empty or unreadable: $devicePath",
-        totalTime,
+        CaCertificateResult(
+          requestId,
+          "install",
+          false,
+          null,
+          "Certificate file is empty or unreadable: $devicePath",
+          totalTime,
+        ),
       )
       return
     }
@@ -218,7 +231,9 @@ internal class CaCertificateController(
     } finally {
       perfProvider.end()
       val totalTime = timeProvider.currentTimeMillis() - startTime
-      broadcastCaCertResult(requestId, "remove", success, resolvedAlias, error, totalTime)
+      broadcastCaCertResult(
+        CaCertificateResult(requestId, "remove", success, resolvedAlias, error, totalTime),
+      )
     }
   }
 
@@ -396,22 +411,15 @@ internal class CaCertificateController(
   }
 
   /** Broadcast CA certificate result to WebSocket clients */
-  private suspend fun broadcastCaCertResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    alias: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
+  private suspend fun broadcastCaCertResult(outcome: CaCertificateResult) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping CA cert result broadcast")
       return
     }
 
-    resultBroadcaster.guard(requestId, "ca_cert_result") {
+    resultBroadcaster.guard(outcome.requestId, "ca_cert_result") {
       responseSender.broadcastWithPerf { perfTiming ->
-        caCertResultFrame(requestId, action, success, alias, error, totalTimeMs, perfTiming)
+        caCertResultFrame(outcome, perfTiming)
       }
       Log.d(TAG, "Broadcasted ca_cert_result to ${responseSender.getConnectionCount()} clients")
     }
@@ -433,12 +441,14 @@ internal class CaCertificateController(
     resultBroadcaster.guard(requestId, "device_owner_status_result") {
       responseSender.broadcastWithPerf { perfTiming ->
         deviceOwnerStatusResultFrame(
-          requestId,
-          packageName,
-          isDeviceOwner,
-          isAdminActive,
-          error,
-          totalTimeMs,
+          DeviceOwnerResult(
+            requestId = requestId,
+            packageName = packageName,
+            isDeviceOwner = isDeviceOwner,
+            isAdminActive = isAdminActive,
+            error = error,
+            totalTimeMs = totalTimeMs,
+          ),
           perfTiming,
         )
       }

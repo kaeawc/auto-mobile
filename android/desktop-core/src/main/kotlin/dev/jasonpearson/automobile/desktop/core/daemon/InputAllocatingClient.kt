@@ -56,30 +56,40 @@ class InputAllocatingClient(
   override fun callToolChecked(name: String, arguments: JsonObject): JsonElement =
     checkToolResponse(callTool(name, arguments), DaemonJson)
 
-  override fun inputTap(
-    x: Double,
-    y: Double,
-    platform: String,
-    deviceId: String?,
-    duration: Int?,
-    frameContext: String?,
-  ): InputActionResult =
-    allocated("input/tap", platform, deviceId) {
-      delegate.inputTap(x, y, platform, deviceId, duration, frameContext)
+  override fun inputTap(input: TapInput): InputActionResult =
+    with(input) {
+      allocated("input/tap", platform, deviceId) {
+        delegate.inputTap(
+          input =
+            TapInput(
+              x = x,
+              y = y,
+              platform = platform,
+              deviceId = deviceId,
+              duration = duration,
+              frameContext = frameContext,
+            ),
+        )
+      }
     }
 
-  override fun inputSwipe(
-    startX: Double,
-    startY: Double,
-    endX: Double,
-    endY: Double,
-    platform: String,
-    deviceId: String?,
-    durationMs: Int?,
-    frameContext: String?,
-  ): InputActionResult =
-    allocated("input/swipe", platform, deviceId) {
-      delegate.inputSwipe(startX, startY, endX, endY, platform, deviceId, durationMs, frameContext)
+  override fun inputSwipe(input: SwipeInput): InputActionResult =
+    with(input) {
+      allocated("input/swipe", platform, deviceId) {
+        delegate.inputSwipe(
+          input =
+            SwipeInput(
+              startX = startX,
+              startY = startY,
+              endX = endX,
+              endY = endY,
+              platform = platform,
+              deviceId = deviceId,
+              durationMs = durationMs,
+              frameContext = frameContext,
+            ),
+        )
+      }
     }
 
   override fun inputPressButton(
@@ -92,16 +102,21 @@ class InputAllocatingClient(
       delegate.inputPressButton(button, platform, deviceId, frameContext)
     }
 
-  override fun inputTypeText(
-    text: String,
-    platform: String,
-    deviceId: String?,
-    submit: Boolean?,
-    append: Boolean,
-    frameContext: String?,
-  ): InputActionResult =
-    allocated("input/typeText", platform, deviceId) {
-      delegate.inputTypeText(text, platform, deviceId, submit, append, frameContext)
+  override fun inputTypeText(input: TextInput): InputActionResult =
+    with(input) {
+      allocated("input/typeText", platform, deviceId) {
+        delegate.inputTypeText(
+          input =
+            TextInput(
+              text = text,
+              platform = platform,
+              deviceId = deviceId,
+              submit = submit,
+              append = append,
+              frameContext = frameContext,
+            ),
+        )
+      }
     }
 
   override fun inputKey(
@@ -117,50 +132,44 @@ class InputAllocatingClient(
   // Key-value edits are device mutations (#10827): claim the device for the desktop session, then
   // send as it. A refused claim reports a typed failure instead of reaching the daemon. The reads
   // (resources) never come through here, so they only watch.
-  override fun setKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-    platform: String,
-    sessionUuid: String?,
-  ): SetKeyValueResult =
-    if (!allocation.awaitInputAllowed(deviceId)) {
-      SetKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
-    } else {
-      delegate.setKeyValue(
-        deviceId,
-        appId,
-        fileName,
-        key,
-        value,
-        type,
-        platform,
-        sessionUuid ?: sessionUuidProvider(),
-      )
+  override fun setKeyValue(input: SetKeyValueRequest): SetKeyValueResult =
+    with(input) {
+      if (!allocation.awaitInputAllowed(deviceId)) {
+        SetKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
+      } else {
+        delegate.setKeyValue(
+          input =
+            SetKeyValueRequest(
+              deviceId = deviceId,
+              appId = appId,
+              fileName = fileName,
+              key = key,
+              value = value,
+              type = type,
+              platform = platform,
+              sessionUuid = sessionUuid ?: sessionUuidProvider(),
+            ),
+        )
+      }
     }
 
-  override fun removeKeyValue(
-    deviceId: String,
-    appId: String,
-    fileName: String,
-    key: String,
-    platform: String,
-    sessionUuid: String?,
-  ): RemoveKeyValueResult =
-    if (!allocation.awaitInputAllowed(deviceId)) {
-      RemoveKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
-    } else {
-      delegate.removeKeyValue(
-        deviceId,
-        appId,
-        fileName,
-        key,
-        platform,
-        sessionUuid ?: sessionUuidProvider(),
-      )
+  override fun removeKeyValue(input: RemoveKeyValueRequest): RemoveKeyValueResult =
+    with(input) {
+      if (!allocation.awaitInputAllowed(deviceId)) {
+        RemoveKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
+      } else {
+        delegate.removeKeyValue(
+          input =
+            RemoveKeyValueRequest(
+              deviceId = deviceId,
+              appId = appId,
+              fileName = fileName,
+              key = key,
+              platform = platform,
+              sessionUuid = sessionUuid ?: sessionUuidProvider(),
+            ),
+        )
+      }
     }
 
   override fun clearKeyValueFile(

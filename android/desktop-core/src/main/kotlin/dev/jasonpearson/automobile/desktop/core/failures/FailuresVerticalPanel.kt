@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.tabs.PanelHeader
 import dev.jasonpearson.automobile.desktop.core.tabs.VerticalCollapsibleTab
+import dev.jasonpearson.automobile.desktop.core.tabs.VerticalTabOptions
 
 /**
  * Vertical panel wrapper for FailuresDashboard with collapse support. Shows a badge with failure
@@ -44,21 +45,24 @@ fun FailuresVerticalPanel(
   modifier: Modifier = Modifier,
 ) {
   VerticalCollapsibleTab(
-    title = "Failures",
-    isCollapsed = isCollapsed,
-    onToggle = onToggle,
-    widthPx = widthPx,
-    onWidthChange = onWidthChange,
-    resizeHandleOnLeft = true,
-    collapsedContent = {
-      FailuresCollapsedContent(
-        dateRangeLabel = dateRangeLabel,
-        crashCount = crashCount,
-        anrCount = anrCount,
-        toolFailureCount = toolFailureCount,
-        nonFatalCount = nonFatalCount,
-      )
-    },
+    options =
+      VerticalTabOptions(
+        title = "Failures",
+        isCollapsed = isCollapsed,
+        onToggle = onToggle,
+        widthPx = widthPx,
+        onWidthChange = onWidthChange,
+        resizeHandleOnLeft = true,
+        collapsedContent = {
+          FailuresCollapsedContent(
+            dateRangeLabel = dateRangeLabel,
+            crashCount = crashCount,
+            anrCount = anrCount,
+            toolFailureCount = toolFailureCount,
+            nonFatalCount = nonFatalCount,
+          )
+        },
+      ),
   ) {
     Column(modifier = modifier.fillMaxSize()) {
       PanelHeader(

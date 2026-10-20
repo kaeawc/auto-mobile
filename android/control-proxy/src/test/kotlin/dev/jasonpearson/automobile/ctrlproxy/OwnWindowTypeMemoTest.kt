@@ -25,11 +25,24 @@ class OwnWindowTypeMemoTest {
       true
     }
     repeat(BURST_COUNT) {
-      assertTrue(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, showing, resolve).skip)
+      assertTrue(
+        ownWindowEventDecision(
+            OwnWindowEvent(own, own, OWN_WINDOW_ID),
+            memo = memo,
+            appLayerShowing = showing,
+            resolve = resolve,
+          )
+          .skip,
+      )
       for (foreign in listOf("com.example.app", null)) {
         assertEquals(
           OwnWindowEventDecision(false, null),
-          ownWindowEventDecision(foreign, own, FOREIGN_WINDOW_ID, memo, showing, resolve),
+          ownWindowEventDecision(
+            OwnWindowEvent(foreign, own, FOREIGN_WINDOW_ID),
+            memo = memo,
+            appLayerShowing = showing,
+            resolve = resolve,
+          ),
         )
       }
     }
@@ -57,7 +70,15 @@ class OwnWindowTypeMemoTest {
       type
     }
     repeat(BURST_COUNT) {
-      assertFalse(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, { true }, resolve).skip)
+      assertFalse(
+        ownWindowEventDecision(
+            OwnWindowEvent(own, own, OWN_WINDOW_ID),
+            memo = memo,
+            appLayerShowing = { true },
+            resolve = resolve,
+          )
+          .skip,
+      )
       now++
     }
     assertEquals(1, resolutions) // 0 through 99 ms occupy one 250 ms retry window.
@@ -69,10 +90,26 @@ class OwnWindowTypeMemoTest {
     assertEquals(2, resolutions)
     type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
     now = RETRY_MS * 2 - 1
-    assertFalse(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, { true }, resolve).skip)
+    assertFalse(
+      ownWindowEventDecision(
+          OwnWindowEvent(own, own, OWN_WINDOW_ID),
+          memo = memo,
+          appLayerShowing = { true },
+          resolve = resolve,
+        )
+        .skip,
+    )
     now++
     repeat(BURST_COUNT) {
-      assertTrue(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, { true }, resolve).skip)
+      assertTrue(
+        ownWindowEventDecision(
+            OwnWindowEvent(own, own, OWN_WINDOW_ID),
+            memo = memo,
+            appLayerShowing = { true },
+            resolve = resolve,
+          )
+          .skip,
+      )
       now++
     }
     assertEquals(EXPECTED_RETRY_RESOLUTIONS, resolutions)
@@ -181,11 +218,9 @@ class OwnWindowTypeMemoTest {
         repeat(BURST_COUNT) {
           val decision =
             ownWindowEventDecision(
-              own,
-              own,
-              OWN_WINDOW_ID,
-              memo,
-              {
+              OwnWindowEvent(own, own, OWN_WINDOW_ID),
+              memo = memo,
+              appLayerShowing = {
                 stateReads++
                 showing
               },
@@ -216,11 +251,35 @@ class OwnWindowTypeMemoTest {
       resolutions++
       AccessibilityWindowInfo.TYPE_SYSTEM
     }
-    assertFalse(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, state, resolve).skip)
+    assertFalse(
+      ownWindowEventDecision(
+          OwnWindowEvent(own, own, OWN_WINDOW_ID),
+          memo = memo,
+          appLayerShowing = state,
+          resolve = resolve,
+        )
+        .skip,
+    )
     showing = true
-    assertTrue(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, state, resolve).skip)
+    assertTrue(
+      ownWindowEventDecision(
+          OwnWindowEvent(own, own, OWN_WINDOW_ID),
+          memo = memo,
+          appLayerShowing = state,
+          resolve = resolve,
+        )
+        .skip,
+    )
     showing = false
-    assertFalse(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, state, resolve).skip)
+    assertFalse(
+      ownWindowEventDecision(
+          OwnWindowEvent(own, own, OWN_WINDOW_ID),
+          memo = memo,
+          appLayerShowing = state,
+          resolve = resolve,
+        )
+        .skip,
+    )
     assertEquals(1, resolutions)
     assertEquals(SYSTEM_EVENT_COUNT, stateReads)
   }
@@ -234,10 +293,26 @@ class OwnWindowTypeMemoTest {
       resolutions++
       type
     }
-    assertTrue(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, { true }, resolve).skip)
+    assertTrue(
+      ownWindowEventDecision(
+          OwnWindowEvent(own, own, OWN_WINDOW_ID),
+          memo = memo,
+          appLayerShowing = { true },
+          resolve = resolve,
+        )
+        .skip,
+    )
     memo.clear()
     type = AccessibilityWindowInfo.TYPE_INPUT_METHOD
-    assertFalse(ownWindowEventDecision(own, own, OWN_WINDOW_ID, memo, { true }, resolve).skip)
+    assertFalse(
+      ownWindowEventDecision(
+          OwnWindowEvent(own, own, OWN_WINDOW_ID),
+          memo = memo,
+          appLayerShowing = { true },
+          resolve = resolve,
+        )
+        .skip,
+    )
     assertEquals(2, resolutions)
   }
 
@@ -277,7 +352,11 @@ class OwnWindowTypeMemoTest {
     repeat(BURST_COUNT) {
       assertEquals(
         OwnWindowEventDecision(false, null),
-        ownWindowEventDecision(own, own, -1, memo, { error("No state read") }) {
+        ownWindowEventDecision(
+          OwnWindowEvent(own, own, -1),
+          memo = memo,
+          appLayerShowing = { error("No state read") },
+        ) {
           error("No resolution")
         },
       )

@@ -8,11 +8,8 @@ src/daemon/deviceDisconnectHandler.ts -> src/server/bootedDeviceResources
 src/daemon/deviceDisconnectHandler.ts -> src/server/deviceImageResources
 src/daemon/deviceLossDiscovery.ts -> src/server/videoRecordingManager
 src/daemon/deviceSnapshotSocketServer.ts -> src/server/deviceSnapshotManager
-src/daemon/failuresPushSocketServer.ts -> src/server/failuresResources
-src/daemon/failuresStreamSocketTypes.ts -> src/server/failuresResources
 src/daemon/missingDeviceLiveness.ts -> src/server/bootedDeviceResources
 src/daemon/missingDeviceLiveness.ts -> src/server/deviceImageResources
-src/daemon/socketServer.ts -> src/server/shapeToolCallError
 src/daemon/statelessMcpServerFactory.ts -> src/server
 src/daemon/videoRecordingSocketServer.ts -> src/server/videoRecordingManager
 src/daemon/webrtcStreamSocketServer.ts -> src/server/webrtcStreamManager

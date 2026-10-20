@@ -30,6 +30,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
@@ -86,29 +87,21 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
-import dev.jasonpearson.automobile.protocol.AnrData
-import dev.jasonpearson.automobile.protocol.AnrEvent
-import dev.jasonpearson.automobile.protocol.BroadcastEventData
-import dev.jasonpearson.automobile.protocol.BroadcastEventResponse
 import dev.jasonpearson.automobile.protocol.CrashData
 import dev.jasonpearson.automobile.protocol.CrashEvent
 import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
-import dev.jasonpearson.automobile.protocol.LifecycleEventData
-import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
 import dev.jasonpearson.automobile.protocol.NavigationEventData
 import dev.jasonpearson.automobile.protocol.NavigationEventResponse
-import dev.jasonpearson.automobile.protocol.NetworkEventData
-import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PermissionResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDrag
+import dev.jasonpearson.automobile.protocol.RequestGestureEnd
 import dev.jasonpearson.automobile.protocol.RequestGestureStart
 import dev.jasonpearson.automobile.protocol.RequestGlobalAction
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
@@ -121,24 +114,12 @@ import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
-import dev.jasonpearson.automobile.protocol.SdkAnrEvent
-import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
-import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
-import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
-import dev.jasonpearson.automobile.protocol.SdkLogEvent
-import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
-import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
-import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
-import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
-import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
-import dev.jasonpearson.automobile.protocol.WebSocketFrameData
-import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
+import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
@@ -183,14 +164,10 @@ internal fun findNodeByResourceId(
 
     val nodeResourceId = node.viewIdResourceName
     if (
-      nodeResourceId != null &&
-        (nodeResourceId == resourceId || nodeResourceId.endsWith(":id/$resourceId"))
-    ) {
-      if (!requireOnScreen) return node
-      val bounds = Rect()
-      node.getBoundsInScreen(bounds)
-      if (!ElementBounds(bounds).isCompletelyOffscreen(screenDimensions)) return node
-    }
+      resourceIdMatches(nodeResourceId, resourceId) &&
+        (!requireOnScreen || nodeIsOnScreen(node, screenDimensions))
+    )
+      return node
 
     for (i in 0 until node.childCount) {
       val child = node.getChild(i) ?: continue
@@ -212,6 +189,19 @@ internal fun findNodeByResourceId(
     }
   }
   return findMatch(root, requireOnScreen = false)
+}
+
+private fun resourceIdMatches(nodeResourceId: String?, resourceId: String): Boolean =
+  nodeResourceId != null &&
+    (nodeResourceId == resourceId || nodeResourceId.endsWith(":id/$resourceId"))
+
+private fun nodeIsOnScreen(
+  node: AccessibilityNodeInfo,
+  screenDimensions: ScreenDimensions?,
+): Boolean {
+  val bounds = Rect()
+  node.getBoundsInScreen(bounds)
+  return !ElementBounds(bounds).isCompletelyOffscreen(screenDimensions)
 }
 
 /** Resolve dimensions from the lookup root without querying or selecting other windows. */
@@ -254,12 +244,8 @@ internal data class NodeSelectorFields(
 
 internal fun nodeSelectorMatches(selector: NodeSelector, fields: NodeSelectorFields): Boolean {
   if (!selector.hasCriteria()) return false
-  if (
-    selector.resourceId != null &&
-      (fields.resourceId == null ||
-        (fields.resourceId != selector.resourceId &&
-          !fields.resourceId.endsWith(":id/${selector.resourceId}")))
-  ) {
+  val resourceId = selector.resourceId
+  if (resourceId != null && !resourceIdMatches(fields.resourceId, resourceId)) {
     return false
   }
   if (selector.testTag != null && fields.testTag != selector.testTag) return false
@@ -1083,24 +1069,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   private val caCertificateController by lazy {
     CaCertificateController(
-      devicePolicy =
-        object : CaCertificateController.DevicePolicy {
-          override fun isDeviceOwnerApp(packageName: String) =
-            devicePolicyManager.isDeviceOwnerApp(packageName)
+      dependencies =
+        CaCertificateDependencies(
+          devicePolicy =
+            object : CaCertificateController.DevicePolicy {
+              override fun isDeviceOwnerApp(packageName: String) =
+                devicePolicyManager.isDeviceOwnerApp(packageName)
 
-          override fun isAdminActive() = devicePolicyManager.isAdminActive(deviceAdminComponent)
+              override fun isAdminActive() = devicePolicyManager.isAdminActive(deviceAdminComponent)
 
-          override fun installCaCert(certBytes: ByteArray) =
-            devicePolicyManager.installCaCert(deviceAdminComponent, certBytes)
+              override fun installCaCert(certBytes: ByteArray) =
+                devicePolicyManager.installCaCert(deviceAdminComponent, certBytes)
 
-          override fun uninstallCaCert(certBytes: ByteArray) =
-            devicePolicyManager.uninstallCaCert(deviceAdminComponent, certBytes)
+              override fun uninstallCaCert(certBytes: ByteArray) =
+                devicePolicyManager.uninstallCaCert(deviceAdminComponent, certBytes)
 
-          override fun getInstalledCaCerts(): List<ByteArray> =
-            devicePolicyManager.getInstalledCaCerts(deviceAdminComponent)
-        },
-      packageName = packageName,
-      filesDir = { filesDir },
+              override fun getInstalledCaCerts(): List<ByteArray> =
+                devicePolicyManager.getInstalledCaCerts(deviceAdminComponent)
+            },
+          packageName = packageName,
+          filesDir = { filesDir },
+        ),
       perfProvider = perfProvider,
       timeProvider = timeProvider,
       resultBroadcaster = resultBroadcaster,
@@ -1275,9 +1264,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       serviceScope = serviceScope,
       viewHierarchyExtractor = viewHierarchyExtractor,
       displayController = displayController,
-      perfProvider = perfProvider,
-      timeProvider = timeProvider,
-      workStats = workStats,
+      diagnostics =
+        HierarchyDiagnosticsDependencies(
+          perfProvider = perfProvider,
+          timeProvider = timeProvider,
+          workStats = workStats,
+        ),
       jsonCompact = jsonCompact,
     )
   }
@@ -1358,21 +1350,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
 
-          override suspend fun sendActionResult(
-            requestId: String?,
-            action: String,
-            success: Boolean,
-            error: String?,
-            totalTimeMs: Long,
-            alreadySatisfied: Boolean,
-          ) =
+          override suspend fun sendActionResult(outcome: NodeActionResult) =
             this@CtrlProxy.broadcastActionResult(
-              requestId,
-              action,
-              success,
-              error,
-              totalTimeMs,
-              alreadySatisfied,
+              outcome.requestId,
+              outcome.action,
+              outcome.success,
+              outcome.error,
+              outcome.totalTimeMs,
+              outcome.alreadySatisfied,
             )
         },
       perfProvider = perfProvider,
@@ -1486,26 +1471,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       serviceScope = serviceScope,
       perfProvider = perfProvider,
       timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      jsonCompact = jsonCompact,
-      responseSender =
-        object : TextInputController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+      responses =
+        TextInputResponseDependencies(
+          resultBroadcaster = resultBroadcaster,
+          jsonCompact = jsonCompact,
+          responseSender =
+            object : TextInputController.ResponseSender {
+              override fun isRunning() =
+                ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
-          override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
-          }
+              override suspend fun broadcastWithPerf(
+                messageBuilder: (perfTiming: JsonElement?) -> String,
+              ) {
+                webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+              }
 
-          override suspend fun broadcastWithPerfSync(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) {
-            webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
-          }
+              override suspend fun broadcastWithPerfSync(
+                messageBuilder: (perfTiming: JsonElement?) -> String,
+              ) {
+                webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
+              }
 
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+              override fun connectionCount() = webSocketServer.getConnectionCount()
+            },
+        ),
     )
   /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
   private val imeController by lazy {
@@ -1523,25 +1512,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             CtrlProxyIme.current()?.let { ime ->
               object : ImeController.ImeTarget {
                 override fun commitText(
-                  text: String,
-                  priorImeId: String?,
-                  isCancelled: () -> Boolean,
-                  delivery: ImeTextDelivery,
-                  timeoutMs: Long?,
-                  requestDeadlineMs: Long,
-                  trace: Boolean,
+                  request: ImeCommitRequest,
                   onResult: (ImeCommitResult) -> Unit,
-                ) =
-                  ime.commitText(
-                    text,
-                    priorImeId,
-                    isCancelled,
-                    delivery,
-                    timeoutMs,
-                    requestDeadlineMs,
-                    trace,
-                    onResult,
-                  )
+                ) = ime.commitText(request, onResult)
               }
             }
 
@@ -1640,19 +1613,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)
         },
       scope = { serviceScope },
-      perfProvider = perfProvider,
-      timeProvider = timeProvider,
-      resultBroadcaster = resultBroadcaster,
-      responseSender =
-        object : GestureController.ResponseSender {
-          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+      reporting =
+        GestureReportingDependencies(
+          perfProvider = perfProvider,
+          timeProvider = timeProvider,
+          resultBroadcaster = resultBroadcaster,
+          responseSender =
+            object : GestureController.ResponseSender {
+              override fun isRunning() =
+                ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
-          override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) = webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+              override suspend fun broadcastWithPerf(
+                messageBuilder: (perfTiming: JsonElement?) -> String,
+              ) = webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
 
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-        },
+              override fun connectionCount() = webSocketServer.getConnectionCount()
+            },
+        ),
       gestureThreadFactory = { gestureThreadFactory() },
     )
   @Volatile private var lastWindowClassName: String? = null
@@ -1722,49 +1699,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         override fun isSystemApp(packageName: String) = resolveSystemApp(packageName)
 
         override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
-          with(event) {
-            broadcastPackageEvent(action, packageName, userId, uid, isSystem, removedForAllUsers)
-          }
+          broadcastPackageEvent(event)
       },
     )
 
   private val failureReportHost =
     object : FailureReportHost {
       override suspend fun onHandledException(report: HandledExceptionReport) =
-        with(report) {
-          broadcastHandledExceptionEvent(
-            timestamp = timestamp,
-            exceptionClass = exceptionClass,
-            exceptionMessage = exceptionMessage,
-            stackTrace = stackTrace,
-            customMessage = customMessage,
-            currentScreen = currentScreen,
-            packageName = packageName,
-            appVersion = appVersion,
-            deviceModel = deviceModel,
-            deviceManufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          )
-        }
+        broadcastHandledExceptionEvent(report)
 
-      override suspend fun onCrash(report: CrashReport) =
-        with(report) {
-          broadcastCrashEvent(
-            timestamp = timestamp,
-            exceptionClass = exceptionClass,
-            exceptionMessage = exceptionMessage,
-            stackTrace = stackTrace,
-            threadName = threadName,
-            currentScreen = currentScreen,
-            packageName = packageName,
-            appVersion = appVersion,
-            deviceModel = deviceModel,
-            deviceManufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          )
-        }
+      override suspend fun onCrash(report: CrashReport) = broadcastCrashEvent(report)
     }
 
   private val handledExceptionReceiver = HandledExceptionReceiver(serviceScope, failureReportHost)
@@ -2123,20 +2067,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           WebSocketServer(
             port = 8765,
             scope = serviceScope,
-            messageHandler = queuedHandler,
-            onClientDisconnected = { client ->
-              queuedHandler.disconnect(client)
-              gestureController.cancelStreamsOwnedBy(client)
-              // Its in-flight host requests have no socket to answer on, even if another remains.
-              hostPrototypeHttp.onHostLost(client)
-            },
-            onClientCountChanged = { count, session ->
-              if (count == 0) hostPrototypeHttp.onHostLost()
-              serviceScope.launch { prototypes.onClientCountChanged(count, session) }
-            },
-            onPrototypeResponse = hostPrototypeHttp::onResponse,
-            onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
-            onPermanentStartFailure = { disableSelf() },
+            options =
+              WebSocketServerOptions(
+                messageHandler = queuedHandler,
+                onClientDisconnected = { client ->
+                  queuedHandler.disconnect(client)
+                  gestureController.cancelStreamsOwnedBy(client)
+                  // Its in-flight host requests have no socket to answer on, even if another
+                  // remains.
+                  hostPrototypeHttp.onHostLost(client)
+                },
+                onClientCountChanged = { count, session ->
+                  if (count == 0) hostPrototypeHttp.onHostLost()
+                  serviceScope.launch { prototypes.onClientCountChanged(count, session) }
+                },
+                onPrototypeResponse = hostPrototypeHttp::onResponse,
+                onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
+                onPermanentStartFailure = { disableSelf() },
+              ),
           )
         webSocketLifecycle.replace(webSocketServer)
         webSocketServer.start()
@@ -2358,15 +2306,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         scope = scope,
         dispatcher = dispatcher,
         delegate = delegate,
-        reply = ::replyToQueuedCommand,
-        hasRequestOwner = { requestId ->
-          ::webSocketServer.isInitialized &&
-            webSocketServer.isRunning() &&
-            webSocketServer.hasRequestOwner(requestId)
-        },
-        logError = { message, error -> Log.e(TAG, message, error) },
-        logWarning = { message -> Log.w(TAG, message) },
-        logDebug = { message -> Log.d(TAG, message) },
+        replies =
+          ConnectionReplyDependencies(
+            reply = ::replyToQueuedCommand,
+            hasRequestOwner = { requestId ->
+              ::webSocketServer.isInitialized &&
+                webSocketServer.isRunning() &&
+                webSocketServer.hasRequestOwner(requestId)
+            },
+          ),
+        logging =
+          ConnectionLogDependencies(
+            logError = { message, error -> Log.e(TAG, message, error) },
+            logWarning = { message -> Log.w(TAG, message) },
+            logDebug = { message -> Log.d(TAG, message) },
+          ),
         capacity = capacity,
       )
     return QueuedWebSocketMessageHandler(delegate, commands)
@@ -2422,13 +2376,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
     gestureController.performTapCoordinates(
-      requestId,
-      x,
-      y,
-      50L,
-      frameContext,
-      displayId,
-      doubleTap = true,
+      RequestTapCoordinates(
+        requestId = requestId,
+        x = x,
+        y = y,
+        duration = 50L,
+        frameContext = frameContext,
+        displayId = displayId,
+        doubleTap = true,
+      ),
     )
   }
 
@@ -2441,7 +2397,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    gestureController.performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
+    gestureController.performTapCoordinates(
+      RequestTapCoordinates(
+        requestId = requestId,
+        x = x,
+        y = y,
+        duration = duration,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
+    )
   }
 
   override suspend fun requestSwipe(request: RequestSwipe) {
@@ -2455,7 +2420,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
-    gestureController.performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
+    gestureController.performSwipe(
+      RequestSwipe(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        duration = duration,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
+    )
   }
 
   override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
@@ -2469,15 +2445,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     gestureController.performTwoFingerSwipe(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      offset,
-      displayId,
-      request.fingerCount,
+      RequestTwoFingerSwipe(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        duration = duration,
+        offset = offset,
+        displayId = displayId,
+        fingerCount = request.fingerCount,
+      ),
     )
   }
 
@@ -2495,16 +2473,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
     gestureController.performDrag(
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      frameContext,
-      displayId,
+      RequestDrag(
+        requestId = requestId,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        pressDurationMs = pressDurationMs,
+        dragDurationMs = dragDurationMs,
+        holdDurationMs = holdDurationMs,
+        frameContext = frameContext,
+        displayId = displayId,
+      ),
     )
   }
 
@@ -2519,25 +2499,29 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     gestureController.performPinch(
-      requestId,
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      displayId,
+      RequestPinch(
+        requestId = requestId,
+        centerX = centerX,
+        centerY = centerY,
+        distanceStart = distanceStart,
+        distanceEnd = distanceEnd,
+        rotationDegrees = rotationDegrees,
+        duration = duration,
+        displayId = displayId,
+      ),
     )
   }
 
   override suspend fun requestGestureStart(request: RequestGestureStart) {
     gestureController.startStream(
-      request.requestId,
-      request.gestureId,
-      request.x,
-      request.y,
-      request.displayId,
-      CommandOriginContext.currentClient(),
+      RequestGestureStart(
+        requestId = request.requestId,
+        gestureId = request.gestureId,
+        x = request.x,
+        y = request.y,
+        displayId = request.displayId,
+      ),
+      requester = CommandOriginContext.currentClient(),
     )
   }
 
@@ -2558,11 +2542,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     cancel: Boolean,
   ) {
     gestureController.endStream(
-      requestId,
-      gestureId,
-      x,
-      y,
-      cancel,
+      RequestGestureEnd(
+        requestId = requestId,
+        gestureId = gestureId,
+        x = x,
+        y = y,
+        cancel = cancel,
+      ),
       requester = CommandOriginContext.currentClient(),
     )
   }
@@ -2617,7 +2603,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       StaleFrameContextAction.SET_TEXT ->
         textInputController.broadcastSetTextResult(requestId, false, error, 0)
       StaleFrameContextAction.IME_ACTION ->
-        textInputController.broadcastImeActionResult(requestId, action.wireName, false, error, 0)
+        textInputController.broadcastImeActionResult(
+          ImeActionFrameResult(
+            requestId = requestId,
+            action = action.wireName,
+            success = false,
+            error = error,
+            totalTimeMs = 0,
+          ),
+        )
       StaleFrameContextAction.GLOBAL_ACTION ->
         webSocketServer.broadcast(
           dev.jasonpearson.automobile.protocol.GlobalActionResult(
@@ -2980,14 +2974,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     key: String,
   ) = storageController.handleGetPreference(requestId, packageName, fileName, key)
 
-  override suspend fun setPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) = storageController.handleSetPreference(requestId, packageName, fileName, key, value, type)
+  override suspend fun setPreference(request: SetPreference) =
+    storageController.handleSetPreference(request)
 
   override suspend fun removePreference(
     requestId: String?,
@@ -3171,10 +3159,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val eventPackage = event.packageName?.toString()
     val ownWindowDecision =
       ownWindowEventDecision(
-        eventPackage,
-        packageName,
-        event.windowId,
-        ownWindowTypeMemo,
+        OwnWindowEvent(eventPackage, packageName, event.windowId),
+        memo = ownWindowTypeMemo,
         appLayerShowing = {
           ::prototypeController.isInitialized && prototypeController.isAppLayerShowing
         },
@@ -3267,30 +3253,35 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private suspend fun broadcastPackageEvent(
-    action: String,
-    packageName: String,
-    userId: Int,
-    uid: Int?,
-    isSystem: Boolean?,
-    removedForAllUsers: Boolean,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping package event broadcast")
-      return
-    }
+  private suspend fun broadcastPackageEvent(event: PackageBroadcastEvent) {
+    with(event) {
+      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+        Log.d(TAG, "WebSocket server not running, skipping package event broadcast")
+        return
+      }
 
-    try {
-      val timestamp = timeProvider.currentTimeMillis()
-      val message =
-        packageEventFrame(timestamp, action, packageName, userId, uid, isSystem, removedForAllUsers)
-      webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting package event", e)
+      try {
+        val timestamp = timeProvider.currentTimeMillis()
+        val message =
+          packageEventFrame(
+            PackageEventResult(
+              timestamp = timestamp,
+              action = action,
+              packageName = packageName,
+              userId = userId,
+              uid = uid,
+              isSystem = isSystem,
+              removedForAllUsers = removedForAllUsers,
+            ),
+          )
+        webSocketServer.broadcast(message)
+        Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")
+      } catch (e: CancellationException) {
+        // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error broadcasting package event", e)
+      }
     }
   }
 
@@ -3764,104 +3755,82 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Broadcast handled exception event to WebSocket clients using typed protocol */
-  private suspend fun broadcastHandledExceptionEvent(
-    timestamp: Long,
-    exceptionClass: String,
-    exceptionMessage: String?,
-    stackTrace: String,
-    customMessage: String?,
-    currentScreen: String?,
-    packageName: String,
-    appVersion: String?,
-    deviceModel: String,
-    deviceManufacturer: String,
-    osVersion: String,
-    sdkInt: Int,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping handled exception broadcast")
-      return
-    }
+  private suspend fun broadcastHandledExceptionEvent(report: HandledExceptionReport) {
+    with(report) {
+      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+        Log.d(TAG, "WebSocket server not running, skipping handled exception broadcast")
+        return
+      }
 
-    try {
-      // Fall back to now because the legacy intent timestamp extra defaults to 0.
-      val response =
-        handledExceptionEventResponse(
-          timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
-          exceptionClass = exceptionClass,
-          exceptionMessage = exceptionMessage,
-          stackTrace = stackTrace,
-          customMessage = customMessage,
-          currentScreen = currentScreen,
-          packageName = packageName,
-          appVersion = appVersion,
-          deviceModel = deviceModel,
-          deviceManufacturer = deviceManufacturer,
-          osVersion = osVersion,
-          sdkInt = sdkInt,
+      try {
+        // Fall back to now because the legacy intent timestamp extra defaults to 0.
+        val response =
+          handledExceptionEventResponse(
+            timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
+            exceptionClass = exceptionClass,
+            exceptionMessage = exceptionMessage,
+            stackTrace = stackTrace,
+            customMessage = customMessage,
+            currentScreen = currentScreen,
+            packageName = packageName,
+            appVersion = appVersion,
+            deviceModel = deviceModel,
+            deviceManufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
+          )
+
+        webSocketServer.broadcast(response)
+        Log.d(
+          TAG,
+          "Broadcasted handled exception to ${webSocketServer.getConnectionCount()} clients: $exceptionClass",
         )
-
-      webSocketServer.broadcast(response)
-      Log.d(
-        TAG,
-        "Broadcasted handled exception to ${webSocketServer.getConnectionCount()} clients: $exceptionClass",
-      )
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting handled exception event", e)
+      } catch (e: CancellationException) {
+        // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error broadcasting handled exception event", e)
+      }
     }
   }
 
   /** Broadcast crash event to WebSocket clients using typed protocol */
-  private suspend fun broadcastCrashEvent(
-    timestamp: Long,
-    exceptionClass: String,
-    exceptionMessage: String?,
-    stackTrace: String,
-    threadName: String,
-    currentScreen: String?,
-    packageName: String,
-    appVersion: String?,
-    deviceModel: String,
-    deviceManufacturer: String,
-    osVersion: String,
-    sdkInt: Int,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping crash broadcast")
-      return
-    }
+  private suspend fun broadcastCrashEvent(report: CrashReport) {
+    with(report) {
+      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+        Log.d(TAG, "WebSocket server not running, skipping crash broadcast")
+        return
+      }
 
-    try {
-      // Fall back to now because the legacy intent timestamp extra defaults to 0.
-      val response =
-        crashEventResponse(
-          timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
-          exceptionClass = exceptionClass,
-          exceptionMessage = exceptionMessage,
-          stackTrace = stackTrace,
-          threadName = threadName,
-          currentScreen = currentScreen,
-          packageName = packageName,
-          appVersion = appVersion,
-          deviceModel = deviceModel,
-          deviceManufacturer = deviceManufacturer,
-          osVersion = osVersion,
-          sdkInt = sdkInt,
+      try {
+        // Fall back to now because the legacy intent timestamp extra defaults to 0.
+        val response =
+          crashEventResponse(
+            timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
+            exceptionClass = exceptionClass,
+            exceptionMessage = exceptionMessage,
+            stackTrace = stackTrace,
+            threadName = threadName,
+            currentScreen = currentScreen,
+            packageName = packageName,
+            appVersion = appVersion,
+            deviceModel = deviceModel,
+            deviceManufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
+          )
+
+        webSocketServer.broadcast(response)
+        Log.i(
+          TAG,
+          "Broadcasted crash to ${webSocketServer.getConnectionCount()} clients: $exceptionClass on thread $threadName",
         )
-
-      webSocketServer.broadcast(response)
-      Log.i(
-        TAG,
-        "Broadcasted crash to ${webSocketServer.getConnectionCount()} clients: $exceptionClass on thread $threadName",
-      )
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting crash event", e)
+      } catch (e: CancellationException) {
+        // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error broadcasting crash event", e)
+      }
     }
   }
 
@@ -3874,97 +3843,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
 
     try {
-      val response =
-        when (event) {
-          is SdkNetworkRequestEvent ->
-            NetworkEventResponse(
-              timestamp = event.timestamp,
-              event =
-                NetworkEventData(
-                  url = event.url,
-                  method = event.method,
-                  statusCode = event.statusCode,
-                  durationMs = event.durationMs,
-                  requestBodySize = event.requestBodySize,
-                  responseBodySize = event.responseBodySize,
-                  protocol = event.protocol,
-                  host = event.host,
-                  path = event.path,
-                  error = event.error,
-                  applicationId = event.applicationId,
-                  requestHeaders = event.requestHeaders,
-                  responseHeaders = event.responseHeaders,
-                  requestBody = event.requestBody,
-                  responseBody = event.responseBody,
-                  contentType = event.contentType,
-                ),
-            )
-          is SdkWebSocketFrameEvent ->
-            WebSocketFrameResponse(
-              timestamp = event.timestamp,
-              event =
-                WebSocketFrameData(
-                  connectionId = event.connectionId,
-                  url = event.url,
-                  direction = event.direction.name.lowercase(),
-                  frameType = event.frameType.name.lowercase(),
-                  payloadSize = event.payloadSize,
-                  success = event.success,
-                  applicationId = event.applicationId,
-                ),
-            )
-          // SdkLogEvent no longer broadcast from SDK — logs captured via logcat reader
-          is SdkLogEvent -> null
-          is SdkBroadcastEvent ->
-            BroadcastEventResponse(
-              timestamp = event.timestamp,
-              event =
-                BroadcastEventData(
-                  action = event.action,
-                  categories = event.categories,
-                  extraKeys = event.extraKeys,
-                  applicationId = event.applicationId,
-                ),
-            )
-          is SdkLifecycleEvent ->
-            LifecycleEventResponse(
-              timestamp = event.timestamp,
-              event =
-                LifecycleEventData(
-                  kind = event.kind,
-                  details = event.details,
-                  applicationId = event.applicationId,
-                ),
-            )
-          is SdkAnrEvent ->
-            AnrEvent(
-              timestamp = event.timestamp,
-              event =
-                AnrData(
-                  pid = event.pid,
-                  processName = event.processName,
-                  importance = event.importance,
-                  trace = event.trace,
-                  reason = event.reason,
-                  packageName = event.applicationId ?: "unknown",
-                  appVersion = event.appVersion,
-                  deviceInfo =
-                    DeviceInfo(
-                      model = event.deviceInfo?.model ?: "unknown",
-                      manufacturer = event.deviceInfo?.manufacturer ?: "unknown",
-                      osVersion = event.deviceInfo?.osVersion ?: "unknown",
-                      sdkInt = event.deviceInfo?.sdkInt ?: 0,
-                    ),
-                ),
-            )
-          // Existing event types handled by their own receivers — skip here
-          is SdkNavigationEvent,
-          is SdkHandledExceptionEvent,
-          is SdkCrashEvent,
-          is SdkNotificationActionEvent,
-          is SdkRecompositionSnapshotEvent,
-          is SdkEventBatch -> null
-        }
+      val response = sdkEventResponse(event)
 
       response?.let { webSocketServer.broadcast(it, mode, waitForClient) }
     } catch (e: CancellationException) {

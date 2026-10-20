@@ -1,10 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
-import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import kotlinx.coroutines.CoroutineScope
@@ -48,17 +48,8 @@ class ImeControllerTest {
   private class FakeIme(var result: ImeCommitResult) : ImeController.ImeTarget {
     var committed: String? = null
 
-    override fun commitText(
-      text: String,
-      priorImeId: String?,
-      isCancelled: () -> Boolean,
-      delivery: ImeTextDelivery,
-      timeoutMs: Long?,
-      requestDeadlineMs: Long,
-      trace: Boolean,
-      onResult: (ImeCommitResult) -> Unit,
-    ) {
-      committed = text
+    override fun commitText(request: ImeCommitRequest, onResult: (ImeCommitResult) -> Unit) {
+      committed = request.text
       onResult(result)
     }
   }
@@ -129,8 +120,11 @@ class ImeControllerTest {
         resultBroadcaster = ResultBroadcaster(broadcastError = {}, logError = { _, _ -> }),
         jsonCompact = Json { encodeDefaults = true },
         responseSender = sender,
-        uptimeMillis = { clock[0] },
-        pause = { clock[0] += it },
+        config =
+          ImeConfig(
+            uptimeMillis = { clock[0] },
+            pause = { clock[0] += it },
+          ),
       )
     return Fixture(host, sender, controller, clock)
   }

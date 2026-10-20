@@ -12,7 +12,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 // fleet tests do) the test flips `state` on captured entries.
 
 interface CapturedList {
-  devices: Record<string, Array<Record<string, unknown>>>;
+  devices: Record<string, Array<{ udid: string; isAvailable: boolean; state: string }>>;
 }
 
 function listingWithStates(states: string[]): { payload: string; udids: string[] } {
@@ -22,7 +22,10 @@ function listingWithStates(states: string[]): { payload: string; udids: string[]
   const entries = Object.values(captured.devices)
     .flat()
     .filter((device) => device.isAvailable !== false);
-  const flipped = states.map((state, index) => ({ ...entries[index], state }));
+  const flipped = states.map((state, index): Record<string, unknown> => ({
+    ...entries[index],
+    state,
+  }));
   return {
     payload: JSON.stringify({
       ...captured,

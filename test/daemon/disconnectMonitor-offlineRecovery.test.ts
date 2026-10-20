@@ -8,6 +8,7 @@ import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
 import type { BootedDevice } from "../../src/models";
 import { Daemon } from "../../src/daemon/daemon";
+import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
@@ -175,7 +176,13 @@ function monitorHarness(
   },
 ) {
   const timer = new FakeTimer();
-  const device = { id: "emulator-5554", platform: "android", incarnation: 1 };
+  const device = {
+    id: "emulator-5554",
+    platform: "android",
+    incarnation: 1,
+    status: "busy" as const,
+    sessionId: "owner",
+  };
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
     deviceDisconnectMonitor: null,
@@ -191,8 +198,11 @@ function monitorHarness(
       reconcileDiscoveryObservation: async () => {},
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAndroidTransportAliases: (): string[] => [],
-      getAllDevices: () => [device],
-      isDeviceLeasedForAndroidStartup: () => false,
+      ...({
+        getAllDevices: () => [device],
+        getDevice: (id) => (id === device.id ? device : null),
+        isDeviceLeasedForAndroidStartup: () => false,
+      } satisfies DisconnectMonitorPool),
       releaseAdbServerResetCohortReservations: async () => {},
     },
     sessionManager: {
@@ -309,12 +319,10 @@ test("alternating successful and failed offline probes do not repeat global reco
       return [{ deviceId: "emulator-5554", state: "offline" as const }];
     }
   }
-  const client = new AndroidEmulatorClient(
-    undefined,
-    null,
-    new FakeTimer(),
-    new FakeAdbClientFactory(new ProbeExecutor()),
-  );
+  const client = new AndroidEmulatorClient({
+    timer: new FakeTimer(),
+    adbFactory: new FakeAdbClientFactory(new ProbeExecutor()),
+  });
   let reconnects = 0;
   class OfflineManager extends FakeDeviceManager {
     async getAndroidOfflineDeviceIds(ids: Iterable<string>) {

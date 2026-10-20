@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -41,7 +41,7 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
       (error: unknown) => error as InputDeviceOwnedError,
     );
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     spies = [
       spyOn(logger, "info").mockImplementation(() => {}),
       spyOn(logger, "warn").mockImplementation(() => {}),
@@ -69,20 +69,26 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
       executionTracker.cancelSessionlessDeviceUse(deviceId);
     });
     tools = new RealToolCallPath([held, free]).install();
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      HOLDER_CONNECTION,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: HOLDER_CONNECTION,
+    });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
     );
-  });
+  }
 
   afterEach(() => {
     tools.uninstall();
@@ -93,7 +99,7 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
     }
   });
 
-  test("a device a live session holds is refused, typed, before readiness", async () => {
+  arranged("a device a live session holds is refused, typed, before readiness", async () => {
     const error = await refusal(tools.call("setActiveDevice", { deviceId: held.deviceId }));
 
     expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
@@ -102,7 +108,7 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
     expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
   });
 
-  test("a device an autolock owner holds is refused, typed, before readiness", async () => {
+  arranged("a device an autolock owner holds is refused, typed, before readiness", async () => {
     pool.getDevice(free.deviceId)!.autolockSessionId = "autolock-owner";
 
     const error = await refusal(tools.call("setActiveDevice", { deviceId: free.deviceId }));
@@ -112,7 +118,7 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
     expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
   });
 
-  test("the holder's own connection selects its device as its session (#10994)", async () => {
+  arranged("the holder's own connection selects its device as its session (#10994)", async () => {
     const result = await tools.call("setActiveDevice", {
       deviceId: held.deviceId,
       __mcpSessionId: HOLDER_CONNECTION,
@@ -122,27 +128,30 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
     expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
   });
 
-  test("a free device is still selected and pinned", async () => {
+  arranged("a free device is still selected and pinned", async () => {
     await tools.call("setActiveDevice", { deviceId: free.deviceId });
 
     expect(tools.deviceSessionManager.getExplicitDevicePin()?.deviceId).toBe(free.deviceId);
   });
 
-  test("a session acquiring the device during readiness cancels the selection before the pin", async () => {
-    const release = Promise.withResolvers<void>();
-    const entered = Promise.withResolvers<void>();
-    tools.deviceSessionManager.setEnsureDeviceReadyHook(async () => {
-      entered.resolve();
-      await release.promise;
-    });
-    const outcome = refusal(tools.call("setActiveDevice", { deviceId: free.deviceId }));
-    await entered.promise;
+  arranged(
+    "a session acquiring the device during readiness cancels the selection before the pin",
+    async () => {
+      const release = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      tools.deviceSessionManager.setEnsureDeviceReadyHook(async () => {
+        entered.resolve();
+        await release.promise;
+      });
+      const outcome = refusal(tools.call("setActiveDevice", { deviceId: free.deviceId }));
+      await entered.promise;
 
-    await manager.createSession("late-holder", free.deviceId, "android");
-    release.resolve();
-    const error = await outcome;
+      await manager.createSession("late-holder", free.deviceId, "android");
+      release.resolve();
+      const error = await outcome;
 
-    expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
-  });
+      expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(tools.deviceSessionManager.getExplicitDevicePin()).toBeUndefined();
+    },
+  );
 });

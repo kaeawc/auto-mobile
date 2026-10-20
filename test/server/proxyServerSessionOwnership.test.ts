@@ -1,4 +1,4 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
@@ -6,11 +6,11 @@ import { ambiguousSessionSelectorResult, createProxyMcpServer } from "../../src/
 import { DaemonAmbiguousSessionSelectorError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { appendHeartbeatExpiryMessage } from "../../src/server/deviceSessionResult";
+import { appendHeartbeatExpiryMessage } from "../../src/daemon/deviceSessionResult";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 

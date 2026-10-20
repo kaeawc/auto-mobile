@@ -1,4 +1,4 @@
-import { Client } from "./v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { exampleSessionBrokerDeviceName } from "../../src/daemon/sessionBroker/deviceNaming";
 import "../../scripts/manual-test/harnessLogSink";

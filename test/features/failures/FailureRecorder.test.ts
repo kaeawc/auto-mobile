@@ -7,8 +7,9 @@ import type {
   RecordNonFatalInput,
 } from "../../../src/features/failures/FailureRecorder";
 import type { RecordFailureInput } from "../../../src/db/failureAnalyticsRepository";
-import type { StackTraceElement } from "../../../src/server/failuresResources";
+import type { StackTraceElement } from "../../../src/models/failureAnalytics";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 
 /**
  * Fake FailureAnalyticsRepository that captures recordFailure calls in memory.
@@ -72,10 +73,12 @@ const baseContext = {
   sessionId: "session-1",
 };
 
+type FailureTelemetryEvent = Parameters<TelemetryRecorder["recordFailureTelemetry"]>[0];
+
 class FakeTelemetryRecorder {
-  pushed: Array<{ type: string; stackTrace?: unknown }> = [];
-  recordFailureTelemetry(event: Record<string, unknown>): void {
-    this.pushed.push(event as any);
+  pushed: FailureTelemetryEvent[] = [];
+  recordFailureTelemetry(event: FailureTelemetryEvent): void {
+    this.pushed.push(event);
   }
 }
 
@@ -90,7 +93,7 @@ describe("FailureRecorder", () => {
     timer = new FakeTimer();
     telemetry = new FakeTelemetryRecorder();
     // Use the constructor DI to inject our fakes
-    recorder = new FailureRecorder(repo as any, timer, telemetry);
+    recorder = new FailureRecorder(repo, timer, telemetry);
   });
 
   describe("recordToolFailure", () => {
@@ -198,7 +201,7 @@ describe("FailureRecorder", () => {
     // and order-sensitive (CRASH/FATAL beat TIMEOUT/CONNECTION/NOT_FOUND, which
     // beat SKIPPED/IGNORED). Boundary rows pin that precedence, case-sensitivity
     // and the empty/undefined fallbacks.
-    const cases: Array<[string, string | undefined, string]> = [
+    const cases: Array<[string, string | undefined, "critical" | "high" | "medium" | "low"]> = [
       ["undefined error code is medium", undefined, "medium"],
       ["empty error code is medium", "", "medium"],
       ["APP_CRASH is critical", "APP_CRASH", "critical"],
@@ -311,7 +314,7 @@ describe("FailureRecorder", () => {
     // exceptionType -> severity. Critical (OutOfMemory/StackOverflow/Fatal) is
     // checked before high (NullPointer/IllegalState/SecurityException), which is
     // checked before low (NumberFormat/ParseException); everything else is medium.
-    const cases: Array<[string, string, string]> = [
+    const cases: Array<[string, string, "critical" | "high" | "medium" | "low"]> = [
       ["OutOfMemoryError is critical", "OutOfMemoryError", "critical"],
       ["StackOverflowError is critical", "StackOverflowError", "critical"],
       ["FatalException is critical", "FatalException", "critical"],
@@ -476,7 +479,7 @@ describe("FailureRecorder", () => {
 
     // Handled (non-fatal) errors top out at medium (Security/IllegalState/
     // NullPointer); everything else is low.
-    const cases: Array<[string, string, string]> = [
+    const cases: Array<[string, string, "critical" | "high" | "medium" | "low"]> = [
       ["SecurityException is medium", "SecurityException", "medium"],
       ["IllegalStateException is medium", "IllegalStateException", "medium"],
       ["NullPointerException is medium", "NullPointerException", "medium"],
@@ -655,7 +658,7 @@ describe("FailureRecorder", () => {
     });
 
     test("createForTesting returns a new instance", () => {
-      const instance = FailureRecorder.createForTesting(repo as any);
+      const instance = FailureRecorder.createForTesting(repo);
       expect(instance).toBeInstanceOf(FailureRecorder);
     });
   });
@@ -737,7 +740,7 @@ describe("FailureRecorder", () => {
         ...baseContext,
       });
 
-      expect((telemetry.pushed[0] as any).timestamp).toBe(9999);
+      expect(telemetry.pushed[0].timestamp).toBe(9999);
     });
   });
 });

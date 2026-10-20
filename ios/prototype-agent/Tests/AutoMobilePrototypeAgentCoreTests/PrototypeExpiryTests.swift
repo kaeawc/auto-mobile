@@ -44,8 +44,8 @@ private final class ExpiryHarness {
     var events: [PrototypeEvent] = []
     var tracker = PrototypeClientTracker<Int>()
     let clock = ExpiryClock()
-    lazy var timer = PrototypeIdleTimer(clock: clock) { [unowned self] in
-        dismiss(.ttl)
+    lazy var timer = PrototypeIdleTimer(clock: clock) { [weak self] in
+        self?.dismiss(.ttl)
     }
 
     func show(_ spec: PrototypeSpec) {
@@ -54,7 +54,7 @@ private final class ExpiryHarness {
         if tracker.count < 1 { dismiss(.disconnect) }
     }
 
-    func dismiss(_ reason: PrototypeDismissReason) {
+    func dismiss(_ reason: PrototypeSessionDismissReason) {
         events += session.dismiss(reason: reason)
         if !session.isShown { timer.cancel() }
     }
@@ -159,7 +159,7 @@ final class PrototypeExpiryTests: XCTestCase {
         XCTAssertTrue(harness.session.isShown)
         harness.clock.elapse()
         XCTAssertFalse(harness.session.isShown)
-        XCTAssertEqual(harness.events.map(\.kind), ["dismissed"])
+        XCTAssertEqual(harness.events.map(\.wireKind), ["dismissed"])
         XCTAssertEqual(harness.events.map(reason), ["ttl"])
         XCTAssertEqual(harness.events.map(\.sequence), [1])
         XCTAssertNil(harness.events.first?.name)
@@ -209,7 +209,7 @@ final class PrototypeExpiryTests: XCTestCase {
     }
 
     func testDismissReasonWireStringsMatchAndroid() {
-        XCTAssertEqual(PrototypeDismissReason.disconnect.rawValue, "disconnect")
-        XCTAssertEqual(PrototypeDismissReason.ttl.rawValue, "ttl")
+        XCTAssertEqual(PrototypeSessionDismissReason.disconnect.rawValue, "disconnect")
+        XCTAssertEqual(PrototypeSessionDismissReason.ttl.rawValue, "ttl")
     }
 }

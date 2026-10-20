@@ -253,6 +253,9 @@ data class StorageChangeEvent(
 
 /** Serializer for StorageProtocol types. */
 object StorageProtocolSerializer {
+  private val logger =
+    java.util.logging.Logger.getLogger(StorageProtocolSerializer::class.java.name)
+
   private val json = Json {
     ignoreUnknownKeys = true
     isLenient = true
@@ -268,7 +271,10 @@ object StorageProtocolSerializer {
   fun requestFromJson(jsonString: String): StorageRequest? {
     return try {
       json.decodeFromString(serializer<StorageRequest>(), jsonString)
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      // Generated serializers and JSON decoding report invalid input as IllegalArgumentException
+      // (including SerializationException). The nullable API deliberately rejects it as missing.
+      logger.log(java.util.logging.Level.FINE, "Invalid protocol JSON", e)
       null
     }
   }
@@ -282,7 +288,10 @@ object StorageProtocolSerializer {
   fun responseFromJson(jsonString: String): StorageResponse? {
     return try {
       json.decodeFromString(serializer<StorageResponse>(), jsonString)
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      // Generated serializers and JSON decoding report invalid input as IllegalArgumentException
+      // (including SerializationException). The nullable API deliberately rejects it as missing.
+      logger.log(java.util.logging.Level.FINE, "Invalid protocol JSON", e)
       null
     }
   }

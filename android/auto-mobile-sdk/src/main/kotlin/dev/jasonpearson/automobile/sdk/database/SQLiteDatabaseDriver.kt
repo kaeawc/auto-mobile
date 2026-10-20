@@ -2,7 +2,10 @@ package dev.jasonpearson.automobile.sdk.database
 
 import android.content.Context
 import android.database.Cursor
+import android.database.CursorIndexOutOfBoundsException
+import android.database.StaleDataException
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteReadOnlyDatabaseException
 import android.system.ErrnoException
 import android.system.Os
@@ -285,20 +288,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         '[' -> ']'
         else -> null
       }
-    if (quoteEnd != null) {
-      index++
-      while (index < text.length) {
-        if (text[index] == quoteEnd) {
-          if (quoteEnd != ']' && text.getOrNull(index + 1) == quoteEnd) {
-            index += 2
-            continue
-          }
-          return index + 1
-        }
-        index++
-      }
-      return null
-    }
+    if (quoteEnd != null) return readQuotedValueEnd(text, index, quoteEnd)
 
     if (
       text.getOrNull(index)?.isDigit() == true ||
@@ -310,6 +300,22 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     val valueStart = index
     while (text.getOrNull(index)?.let(::isWordChar) == true) index++
     return index.takeIf { it > valueStart }
+  }
+
+  private fun readQuotedValueEnd(text: String, startIndex: Int, quoteEnd: Char): Int? {
+    var index = startIndex
+    index++
+    while (index < text.length) {
+      if (text[index] == quoteEnd) {
+        if (quoteEnd != ']' && text.getOrNull(index + 1) == quoteEnd) {
+          index += 2
+          continue
+        }
+        return index + 1
+      }
+      index++
+    }
+    return null
   }
 
   private fun readNumericLiteralEnd(text: String, startIndex: Int): Int? {
@@ -560,50 +566,52 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       index = skipSqlTrivia(query, index) ?: return
       if (index >= query.length) return
       val char = query[index]
-      val end =
-        when (char) {
-          '\'',
-          '"',
-          '`',
-          '[' -> readPragmaValueEnd(query, index) ?: query.length
-          '$',
-          '@',
-          ':',
-          '#' -> {
-            var tokenEnd = index + 1
-            while (tokenEnd < query.length) {
-              when {
-                isWordChar(query[tokenEnd]) -> tokenEnd++
-                query.startsWith("::", tokenEnd) -> tokenEnd += 2
-                query[tokenEnd] == '(' && tokenEnd > index + 1 -> {
-                  // SQLite's Tcl-style parameter suffix ends at the first ), not a nested group.
-                  tokenEnd++
-                  while (
-                    tokenEnd < query.length &&
-                      !query[tokenEnd].isWhitespace() &&
-                      query[tokenEnd] != ')'
-                  ) tokenEnd++
-                  if (query.getOrNull(tokenEnd) == ')') tokenEnd++
-                  break
-                }
-                else -> break
-              }
-            }
-            tokenEnd
-          }
-          else -> {
-            var tokenEnd = index + 1
-            if (isWordChar(char)) {
-              while (query.getOrNull(tokenEnd)?.let(::isWordChar) == true) tokenEnd++
-            }
-            tokenEnd
-          }
-        }
+      val end = readSqlTokenEnd(query, index, char)
       if (char == '(') depth++
       if (char == ')' && depth > 0) depth--
       if (!visit(query.substring(index, end), index, depth)) return
       index = end
     }
+  }
+
+  private fun readSqlTokenEnd(query: String, index: Int, char: Char): Int =
+    when (char) {
+      '\'',
+      '"',
+      '`',
+      '[' -> readPragmaValueEnd(query, index) ?: query.length
+      '$',
+      '@',
+      ':',
+      '#' -> readParameterEnd(query, index)
+      else -> {
+        var tokenEnd = index + 1
+        if (isWordChar(char)) {
+          while (query.getOrNull(tokenEnd)?.let(::isWordChar) == true) tokenEnd++
+        }
+        tokenEnd
+      }
+    }
+
+  private fun readParameterEnd(query: String, index: Int): Int {
+    var tokenEnd = index + 1
+    while (tokenEnd < query.length) {
+      when {
+        isWordChar(query[tokenEnd]) -> tokenEnd++
+        query.startsWith("::", tokenEnd) -> tokenEnd += 2
+        query[tokenEnd] == '(' && tokenEnd > index + 1 -> {
+          // SQLite's Tcl-style parameter suffix ends at the first ), not a nested group.
+          tokenEnd++
+          while (
+            tokenEnd < query.length && !query[tokenEnd].isWhitespace() && query[tokenEnd] != ')'
+          ) tokenEnd++
+          if (query.getOrNull(tokenEnd) == ')') tokenEnd++
+          break
+        }
+        else -> break
+      }
+    }
+    return tokenEnd
   }
 
   private enum class StatementBoundary {
@@ -625,54 +633,66 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     var state = StatementBoundary.START
     scanSqlTokens(query, 0) { token, _, depth ->
       if (depth > 0 && state != StatementBoundary.COMPLETE) return@scanSqlTokens true
-      state =
-        // Compare states directly to avoid a public synthetic enum-switch mapping class.
-        when {
-          state == StatementBoundary.START ->
-            when (token.uppercase()) {
-              ";" -> StatementBoundary.START
-              "EXPLAIN" -> StatementBoundary.EXPLAIN
-              "CREATE" -> StatementBoundary.CREATE
-              else -> StatementBoundary.NORMAL
-            }
-          state == StatementBoundary.EXPLAIN ->
-            when (token.uppercase()) {
-              "CREATE" -> StatementBoundary.CREATE
-              "QUERY",
-              "PLAN" -> StatementBoundary.EXPLAIN
-              ";" -> StatementBoundary.COMPLETE
-              else -> StatementBoundary.NORMAL
-            }
-          state == StatementBoundary.CREATE ->
-            when (token.uppercase()) {
-              "TEMP",
-              "TEMPORARY" -> StatementBoundary.CREATE
-              "TRIGGER" -> StatementBoundary.TRIGGER
-              ";" -> StatementBoundary.COMPLETE
-              else -> StatementBoundary.NORMAL
-            }
-          state == StatementBoundary.NORMAL ->
-            if (token == ";") StatementBoundary.COMPLETE else StatementBoundary.NORMAL
-          state == StatementBoundary.TRIGGER ->
-            if (token == ";") StatementBoundary.TRIGGER_SEPARATOR else StatementBoundary.TRIGGER
-          state == StatementBoundary.TRIGGER_SEPARATOR ->
-            when {
-              token == ";" -> StatementBoundary.TRIGGER_SEPARATOR
-              token.equals("END", ignoreCase = true) -> StatementBoundary.TRIGGER_END
-              else -> StatementBoundary.TRIGGER
-            }
-          state == StatementBoundary.TRIGGER_END ->
-            if (token == ";") StatementBoundary.COMPLETE else StatementBoundary.TRIGGER
-          else -> {
-            if (token != ";") {
-              throw DatabaseError.SqlError("Multiple SQL statements are not supported")
-            }
-            StatementBoundary.COMPLETE
-          }
-        }
+      state = nextStatementBoundary(state, token)
       true
     }
   }
+
+  private fun nextStatementBoundary(state: StatementBoundary, token: String): StatementBoundary =
+    // Direct comparisons avoid a public synthetic enum-switch mapping class.
+    when {
+      state == StatementBoundary.START -> startStatementBoundary(token)
+      state == StatementBoundary.EXPLAIN ->
+        when (token.uppercase()) {
+          "CREATE" -> StatementBoundary.CREATE
+          "QUERY",
+          "PLAN" -> StatementBoundary.EXPLAIN
+          ";" -> StatementBoundary.COMPLETE
+          else -> StatementBoundary.NORMAL
+        }
+      state == StatementBoundary.CREATE ->
+        when (token.uppercase()) {
+          "TEMP",
+          "TEMPORARY" -> StatementBoundary.CREATE
+          "TRIGGER" -> StatementBoundary.TRIGGER
+          ";" -> StatementBoundary.COMPLETE
+          else -> StatementBoundary.NORMAL
+        }
+      else -> nextStatementBodyBoundary(state, token)
+    }
+
+  private fun startStatementBoundary(token: String): StatementBoundary =
+    when (token.uppercase()) {
+      ";" -> StatementBoundary.START
+      "EXPLAIN" -> StatementBoundary.EXPLAIN
+      "CREATE" -> StatementBoundary.CREATE
+      else -> StatementBoundary.NORMAL
+    }
+
+  private fun nextStatementBodyBoundary(
+    state: StatementBoundary,
+    token: String,
+  ): StatementBoundary =
+    when {
+      state == StatementBoundary.NORMAL ->
+        if (token == ";") StatementBoundary.COMPLETE else StatementBoundary.NORMAL
+      state == StatementBoundary.TRIGGER ->
+        if (token == ";") StatementBoundary.TRIGGER_SEPARATOR else StatementBoundary.TRIGGER
+      state == StatementBoundary.TRIGGER_SEPARATOR ->
+        when {
+          token == ";" -> StatementBoundary.TRIGGER_SEPARATOR
+          token.equals("END", ignoreCase = true) -> StatementBoundary.TRIGGER_END
+          else -> StatementBoundary.TRIGGER
+        }
+      state == StatementBoundary.TRIGGER_END ->
+        if (token == ";") StatementBoundary.COMPLETE else StatementBoundary.TRIGGER
+      else -> {
+        if (token != ";") {
+          throw DatabaseError.SqlError("Multiple SQL statements are not supported")
+        }
+        StatementBoundary.COMPLETE
+      }
+    }
 
   private fun executeQuery(
     databasePath: String,
@@ -699,10 +719,18 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
         }
       }
     } catch (e: SQLiteReadOnlyDatabaseException) {
-      if (mapReadOnlyFailureToPolicyError) throw DatabaseError.MutationNotAllowed()
-      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
-    } catch (e: Exception) {
-      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
+      if (mapReadOnlyFailureToPolicyError) throw DatabaseError.MutationNotAllowed().initCause(e)
+      throw databaseError(e)
+    } catch (e: SQLiteException) {
+      throw databaseError(e)
+    } catch (e: IllegalStateException) {
+      throw databaseError(e)
+    } catch (e: IllegalArgumentException) {
+      throw databaseError(e)
+    } catch (e: StaleDataException) {
+      throw databaseError(e)
+    } catch (e: CursorIndexOutOfBoundsException) {
+      throw databaseError(e)
     }
 
     return SQLExecutionResult.Query(columns = columns, rows = rows)
@@ -727,8 +755,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       // separate SELECT changes() call on a potentially different connection.
       val rowsAffected = db.compileStatement(query).executeUpdateDelete()
       return SQLExecutionResult.Mutation(rowsAffected = rowsAffected)
-    } catch (e: Exception) {
-      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
+    } catch (e: SQLiteException) {
+      throw databaseError(e)
+    } catch (e: IllegalStateException) {
+      throw databaseError(e)
+    } catch (e: IllegalArgumentException) {
+      throw databaseError(e)
     }
   }
 
@@ -742,22 +774,8 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     // Stat before opening: a replacement during open must not give an old handle a newer identity.
     // Only the main file identifies the database; WAL/journal changes do not invalidate the cache.
     val identity = fileIdentity(path)
-    val cached = openDatabases[path]
-    if (cached != null && cached.database.isOpen) {
-      val db = cached.database
-      val needsWritableConnection = !readOnly && db.isReadOnly
-      val needsExactReadOnlyConnection = readOnly && requireExactReadOnly && !db.isReadOnly
-      if (
-        identity == null ||
-          identity != cached.identity ||
-          needsWritableConnection ||
-          needsExactReadOnlyConnection
-      ) {
-        closeDatabase(db)
-        openDatabases.remove(path)
-      } else {
-        return db
-      }
+    cachedDatabase(path, identity, readOnly, requireExactReadOnly)?.let {
+      return it
     }
 
     // Open the database
@@ -775,10 +793,43 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       }
       openDatabases[path] = CachedDatabase(db, identity)
       return db
-    } catch (e: Exception) {
-      throw DatabaseError.SqlError("Failed to open database: ${e.message}")
+    } catch (e: SQLiteException) {
+      throw databaseError(e, "Failed to open database: ")
+    } catch (e: IllegalStateException) {
+      throw databaseError(e, "Failed to open database: ")
+    } catch (e: IllegalArgumentException) {
+      throw databaseError(e, "Failed to open database: ")
     }
   }
+
+  private fun cachedDatabase(
+    path: String,
+    identity: FileIdentity?,
+    readOnly: Boolean,
+    requireExactReadOnly: Boolean,
+  ): SQLiteDatabase? {
+    val cached = openDatabases[path]
+    if (cached != null && cached.database.isOpen) {
+      val db = cached.database
+      val needsWritableConnection = !readOnly && db.isReadOnly
+      val needsExactReadOnlyConnection = readOnly && requireExactReadOnly && !db.isReadOnly
+      val identityChanged = identity == null || identity != cached.identity
+      if (identityChanged || needsWritableConnection || needsExactReadOnlyConnection) {
+        closeDatabase(db)
+        openDatabases.remove(path)
+      } else {
+        return db
+      }
+    }
+
+    return null
+  }
+
+  // Keep the existing message-only protocol error while sharing it across typed catches.
+  private fun databaseError(error: Exception, prefix: String? = null): DatabaseError.SqlError =
+    DatabaseError.SqlError(
+      if (prefix == null) error.message ?: "Unknown SQL error" else "$prefix${error.message}",
+    )
 
   private fun fileIdentity(path: String): FileIdentity? =
     try {
@@ -793,7 +844,10 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   private fun closeDatabase(db: SQLiteDatabase) {
     try {
       if (db.isOpen) db.close()
-    } catch (error: Exception) {
+    } catch (error: SQLiteException) {
+      // Cleanup failure must not prevent eviction or closing the remaining handles.
+      Log.w("SQLiteDatabaseDriver", "Failed to close database", error)
+    } catch (error: IllegalStateException) {
       // Cleanup failure must not prevent eviction or closing the remaining handles.
       Log.w("SQLiteDatabaseDriver", "Failed to close database", error)
     }
@@ -810,10 +864,16 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     // the WAL write connection. compileStatement().execute() bypasses that check.
     try {
       db.compileStatement("PRAGMA busy_timeout=5000").execute()
-    } catch (_: RuntimeException) {
+    } catch (_: SQLiteException) {
       db.rawQuery("PRAGMA busy_timeout=5000", null).use { cursor ->
         while (cursor.moveToNext()) {
           // Exhaust the cursor so SQLite applies the pragma on Robolectric.
+        }
+      }
+    } catch (_: IllegalStateException) {
+      db.rawQuery("PRAGMA busy_timeout=5000", null).use { cursor ->
+        while (cursor.moveToNext()) {
+          // Preserve the query fallback for a connection closed during statement execution.
         }
       }
     }

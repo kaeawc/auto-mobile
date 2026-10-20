@@ -11,7 +11,7 @@ import {
   DEFAULT_PROVISION_DEVICE_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
 } from "../../src/utils/deviceTimeouts";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed
 // rationale: a fixed seed keeps CI deterministic while fast-check still prints

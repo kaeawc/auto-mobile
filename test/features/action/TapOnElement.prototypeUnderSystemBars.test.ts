@@ -1,5 +1,6 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test, beforeEach } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -9,6 +10,11 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { androidControlObservation } from "../../helpers/androidDisabledControlCapture";
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
 
 // The captured control is tapped at (517, 1479). Raising the status bar inset above that
 // point stands in for a control drawn under the bar (#10086).
@@ -69,7 +75,7 @@ function createCommand(scenario: Scenario) {
   };
   hierarchy.insets = scenario.insets;
   const shown = scenario.prototypeShown ?? scenario.prototypeOwnsControl;
-  const capturedRoot = hierarchy.hierarchy;
+  const capturedRoot = hierarchy.hierarchy.node;
   hierarchy.windows = shown
     ? [
         {
@@ -88,7 +94,7 @@ function createCommand(scenario: Scenario) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const service = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
+  clientSpy.mockReturnValue(service);
   const detector = new FakeAccessibilityDetector();
   detector.setDefaultResult(false);
   const command = new TapOnElement(
@@ -100,9 +106,7 @@ function createCommand(scenario: Scenario) {
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
-  spyOn(command, "observedInteraction").mockImplementation(async (block) =>
-    block(recordObservationRead(observation)),
-  );
+  command.observedInteraction = runBlockWith(() => recordObservationRead(observation));
   return { command, service };
 }
 
@@ -193,6 +197,7 @@ describe("Android tapOn under a system bar while an AutoMobile prototype is show
     }
     const barEnd = bounds.bottom - 5;
     mock.restore();
+    clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 
     const { command, service } = createCommand({
       prototypeOwnsControl: true,
@@ -218,6 +223,7 @@ describe("Android tapOn under a system bar while an AutoMobile prototype is show
       throw new Error("Expected the captured control bounds");
     }
     mock.restore();
+    clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
     // A bottom bar tall enough to cover the whole control.
     const barHeight = 2400 - bounds.top + 1;
 
@@ -231,6 +237,7 @@ describe("Android tapOn under a system bar while an AutoMobile prototype is show
     expect(tapped.warnings?.join(" ")).toContain("gesture navigation bar");
     expect(gesture.service.getTapHistory()).toEqual([{ x: 517, y: 1479, duration: 10 }]);
     mock.restore();
+    clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
 
     const buttons = createCommand({
       prototypeOwnsControl: true,

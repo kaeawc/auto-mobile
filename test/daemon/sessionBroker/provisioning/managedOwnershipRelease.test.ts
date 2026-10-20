@@ -1,9 +1,16 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { SessionManager, TerminalSessionError } from "../../../../src/daemon/sessionManager";
 import {
-  handleDaemonRequest,
-  type DaemonStateAccess,
-} from "../../../../src/daemon/daemonRequestHandlers";
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
+import { timedHold } from "../../../helpers/timedReleaseHold";
+import { SessionManager, TerminalSessionError } from "../../../../src/daemon/sessionManager";
+import { deliverDaemonHeartbeat } from "../../../helpers/daemonHeartbeatHandler";
 import {
   ManagedExecutionReowner,
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
@@ -20,7 +27,7 @@ import { REGISTRY_RETRY_MAX_DELAY_MS } from "../../../../src/daemon/sessionBroke
 import { fixedBackoff } from "../../../../src/utils/Backoff";
 import { SUSPECT_GRACE_MS } from "../../../../src/daemon/livenessOwnerLease";
 import { logger } from "../../../../src/utils/logger";
-import { sessionOwnershipLostPayload } from "../../../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../../../src/daemon/deviceSessionResult";
 import { FakeDbWriteBarrier } from "../../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -154,7 +161,6 @@ async function harness() {
     },
   });
   manager.setReleaseDeviceHold((id) => reowner.releaseDeviceHold(id));
-  const force = spyOn(manager, "forceStuckRelease");
   const releasedDevices: string[] = [];
   const drain = new BrokerExecutionRelease({
     registry: async () => faulty,
@@ -191,7 +197,6 @@ async function harness() {
     await reowner.whenIdle();
     await drain.whenIdle();
     manager.stopCleanupTimer();
-    force.mockRestore();
     timer.reset();
     await registry.releaseExecution(key, SESSION);
   });
@@ -339,9 +344,9 @@ describe("managed ownership release", () => {
     await h.reowner.reown([SESSION], { rehydrated: true });
     h.behavior.busy = false;
     const startedMs = h.timer.now();
-    const hold = h.reowner.releaseDeviceHold(SESSION);
+    const hold = timedHold(h.reowner.releaseDeviceHold(SESSION));
     const release = h.manager.releaseSession(SESSION);
-    expect(await hold?.settled).toBe("teardown");
+    expect(await hold.settled).toBe("teardown");
     expect(h.confirmed).toEqual([SESSION]); // The re-owner, rather than the drain, supplies proof.
     await release;
     await h.reowner.whenIdle();
@@ -359,7 +364,7 @@ describe("managed ownership release", () => {
     h.behavior.busy = true;
     h.behavior.busyMark = true;
     await h.reowner.reown([SESSION], { rehydrated: true });
-    const hold = h.reowner.releaseDeviceHold(SESSION);
+    const hold = timedHold(h.reowner.releaseDeviceHold(SESSION));
     const release = h.manager.releaseSession(SESSION);
     await drainMicrotasks(100); // The expedited attempt fails; the next attempt uses regular cadence.
     h.timer.advanceTime(REGISTRY_RETRY_MAX_DELAY_MS - 1);
@@ -369,7 +374,7 @@ describe("managed ownership release", () => {
     expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);
     h.behavior.busy = false;
     h.timer.advanceTime(1);
-    expect(await hold?.settled).toBe("teardown");
+    expect(await hold.settled).toBe("teardown");
     expect(h.confirmed).toEqual([SESSION]);
     await release;
     expect(h.writes).toEqual(["restore"]);
@@ -386,11 +391,11 @@ describe("managed ownership release", () => {
     expect(h.writes).toEqual(["restore"]);
   });
 
-  test("the hold ends at the cap; the re-own lands afterwards without device writes", async () => {
+  test("the hold ends at the cap and a releasing retained session stops re-owning", async () => {
     const h = await harness();
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const bookkeeping = Promise.withResolvers<void>();
-    // Keep the releasing session present: background re-owning stops once its object is gone.
+    // Keep the releasing object present to distinguish retention from live ownership.
     const markReleased = h.persistence.markReleased.bind(h.persistence);
     const persist = spyOn(h.persistence, "markReleased").mockImplementation(async (...args) => {
       await bookkeeping.promise;
@@ -401,7 +406,7 @@ describe("managed ownership release", () => {
       h.behavior.busy = true;
       h.behavior.busyMark = true;
       await h.reowner.reown([SESSION], { rehydrated: true });
-      const hold = h.reowner.releaseDeviceHold(SESSION);
+      const hold = timedHold(h.reowner.releaseDeviceHold(SESSION));
       release = h.manager.releaseSession(SESSION);
       await drainMicrotasks(100); // The hold's single expedited attempt fails while busy.
       await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1, () =>
@@ -417,7 +422,7 @@ describe("managed ownership release", () => {
         ),
       ).toHaveLength(0);
       h.timer.advanceTime(1);
-      expect(await hold?.settled).toBe("skip-device-writes");
+      expect(await hold.settled).toBe("skip-device-writes");
       await drainMicrotasks(100);
       expect(h.manager.getReleasingSession(SESSION)).not.toBeNull();
       expect(h.reowner.isReleaseHeld(SESSION)).toBe(false);
@@ -437,14 +442,14 @@ describe("managed ownership release", () => {
       expect(h.confirmed).toEqual([]);
       h.timer.advanceTime(1);
       await h.reowner.whenIdle();
-      expect(h.confirmed).toEqual([SESSION]);
+      expect(h.confirmed).toEqual([]);
       expect(h.lost).toEqual([]);
       expect(h.writes).toEqual([]);
       h.behavior.busyMark = false;
       bookkeeping.resolve();
       await release;
       await settleWithFakeTime(h.timer, h.drain.whenIdle(), {
-        description: "settlement after post-cap ownership confirmation",
+        description: "settlement after the non-live re-own stops",
         stepMs: 100,
         maxSteps: 100,
       });
@@ -608,17 +613,7 @@ describe("managed ownership release", () => {
         await h.reowner.reown([SESSION], { rehydrated: true });
         const session = h.manager.getSession(SESSION)!;
         h.manager.setRotation(session, { accelerometerRotation: 1, userRotation: 0 });
-        expect(
-          await handleDaemonRequest(
-            {
-              id: "owner-heartbeat",
-              type: "daemon_request",
-              method: "daemon/heartbeat",
-              params: { sessionId: SESSION },
-            },
-            { isInitialized: () => true, getSessionManager: () => h.manager } as DaemonStateAccess,
-          ),
-        ).toMatchObject({ success: true });
+        await deliverDaemonHeartbeat(h.manager, SESSION);
         h.timer.setCurrentTime(h.timer.now() + session.heartbeatTimeoutMs + SUSPECT_GRACE_MS + 1);
         expect(h.manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
         if (trigger === "retry-tick") {
@@ -729,4 +724,12 @@ describe("managed ownership release", () => {
     await drainUntil(() => h.confirmed.length === 2, { description: "second ownership episode" });
     expect(h.reowner.automationRefusal(SESSION)).toBeUndefined();
   });
+});
+
+let force: ReturnType<typeof spyOn<typeof SessionManager.prototype, "forceStuckRelease">>;
+beforeEach(() => {
+  force = spyOn(SessionManager.prototype, "forceStuckRelease");
+});
+afterEach(() => {
+  force.mockRestore();
 });

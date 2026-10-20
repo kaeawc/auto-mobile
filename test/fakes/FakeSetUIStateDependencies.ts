@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { TapOnElementResult } from "../../src/models/TapOnElementResult";
 import { SendTextResult } from "../../src/models/SendTextResult";
@@ -5,7 +6,10 @@ import { ClearTextResult } from "../../src/models/ClearTextResult";
 import { SwipeOnResult } from "../../src/models/SwipeOnResult";
 import { FieldType } from "../../src/models/SetUIStateResult";
 import type { ActionCall } from "../../src/features/action/ActionCall";
-import { FieldTypeDetector } from "../../src/features/action/FieldTypeDetector";
+import {
+  FieldTypeDetector,
+  type FieldTypeDetection,
+} from "../../src/features/action/FieldTypeDetector";
 import type {
   ObserveScreen,
   ObserveScreenExecuteOptions,
@@ -272,12 +276,12 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
   }
 
   private createDefaultResult(): ObserveResult {
-    return {
+    return buildObserveResult({
       observationId: "fake-observation",
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    };
+    });
   }
 
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
@@ -335,17 +339,7 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
 /**
  * Fake FieldTypeDetector for testing
  */
-type FieldTypeDetectorContract = Pick<
-  FieldTypeDetector,
-  | "detect"
-  | "isChecked"
-  | "getTextValue"
-  | "isIOSElement"
-  | "isPasswordField"
-  | "shouldSkipVerification"
->;
-
-export class FakeFieldTypeDetector implements FieldTypeDetectorContract {
+export class FakeFieldTypeDetector implements FieldTypeDetection {
   private typeOverrides: Map<string, FieldType> = new Map();
   private checkedOverrides: Map<string, boolean> = new Map();
   private textOverrides: Map<string, string> = new Map();

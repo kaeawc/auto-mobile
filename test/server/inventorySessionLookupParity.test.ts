@@ -1,4 +1,6 @@
 import { makePool } from "../helpers/makePool";
+import { listDevicesOutputSchema } from "../../src/server/deviceTools";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -17,6 +19,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Inventory contract: every surface reports the same holder for a device. The listDevices tool
 // names the session from the pool's own assignment (`pooled.sessionId`); the booted resource names
@@ -71,13 +76,11 @@ describe("session attribution on the tool and the resource", () => {
 
     const resource = await getBootedDevicesForPlatforms(["android"], timer);
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = listDevicesOutputSchema.parse(toolStructured(response));
 
     const fromResource = resource.devices.find((d) => d.runtime.deviceId === android.deviceId)!;
-    const fromTool = payload.devices.find(
-      (d: { runtime: { deviceId: string } }) => d.runtime.deviceId === android.deviceId,
-    );
+    const fromTool = payload.devices.find((d) => d.runtime.deviceId === android.deviceId)!;
     expect(fromTool.runtime.poolStatus).toBe(fromResource.runtime.poolStatus);
-    expect(fromResource.runtime.session).toEqual(fromTool.runtime.session);
+    expect(fromResource.runtime.session).toEqual(fromTool.runtime.session ?? null);
   });
 });

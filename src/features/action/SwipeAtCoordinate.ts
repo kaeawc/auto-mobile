@@ -16,6 +16,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import { ExecuteGesture } from "./ExecuteGesture";
+import { withVelocity } from "./swipeon/swipeDurationReport";
 import { validateDurationMs } from "./swipeon/swipeTiming";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { resolveTapAtCoordinates } from "./TapAtCoordinate";
@@ -26,6 +27,11 @@ import {
   supportsCtrlProxyGestureDisplay,
 } from "./touchscreenInput";
 import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  StylusOutcomeIndeterminateError,
+  dispatchStylusSwipe,
+  stylusRefusal,
+} from "./stylusPointer";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import {
   selectedDisplayPin,
@@ -198,9 +204,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
         display,
         this.observeScreen,
         this.adb,
-        this.lastRenderedObservation,
-        signal,
-        this.displayTransitionReader,
+        {
+          lastRenderedObservation: this.lastRenderedObservation,
+          signal,
+          transitions: this.displayTransitionReader,
+        },
       );
     } catch (error) {
       if (
@@ -306,8 +314,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
         to.x,
         to.y,
         { duration, displayFence: { assertCurrent: target.assertCurrent } },
-        perf,
-        signal,
+        { perf, signal },
       );
     }
     if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
@@ -315,23 +322,21 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
       let reason: string | undefined;
       try {
-        const result = await this.androidClient.requestSwipe(
-          from.x,
-          from.y,
-          to.x,
-          to.y,
+        const result = await this.androidClient.requestSwipe({
+          x1: from.x,
+          y1: from.y,
+          x2: to.x,
+          y2: to.y,
           duration,
-          undefined,
           perf,
-          undefined,
-          () => {
+          onDispatch: () => {
             dispatched = true;
             onDispatch();
           },
           signal,
           displayId,
-          target.assertCurrent,
-        );
+          beforeSend: target.assertCurrent,
+        });
         throwIfAborted(signal);
         if (result.success) {
           return { success: true, ...base, duration };
@@ -370,6 +375,47 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
   }
 
+  /**
+   * Stylus swipe through `adb shell input stylus`. It reports its own failure and never retries as
+   * a finger: once the command was dispatched, an error leaves the outcome indeterminate.
+   */
+  private async dispatchStylus(
+    resolved: { from: NativePoint; to: NativePoint },
+    duration: number,
+    fence: { assertCurrent: () => void } | undefined,
+    signal?: AbortSignal,
+  ): Promise<SwipeResult> {
+    const { from, to } = resolved;
+    const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+    try {
+      await dispatchStylusSwipe(
+        this.adb,
+        { from, to, duration },
+        { signal, assertCurrent: fence?.assertCurrent },
+      );
+      return { success: true, ...base, duration };
+    } catch (error) {
+      // An abort before the command was sent is a plain cancellation, as is a stale display.
+      if (
+        error instanceof StaleDisplayError ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      logger.warn(`${TOOL_NAME} stylus dispatch failed: ${errorMessage(error)}`, error);
+      // Once the command was sent, an unconfirmed result may have been applied.
+      return error instanceof StylusOutcomeIndeterminateError
+        ? {
+            success: false,
+            ...base,
+            duration,
+            error: `${errorMessage(error)} (the swipe was dispatched and may have been applied; do not retry automatically)`,
+            outcomeIndeterminate: true,
+          }
+        : { success: false, ...base, duration: 0, error: errorMessage(error) };
+    }
+  }
+
   async execute(
     options: SwipeAtOptions,
     call: ActionCall & { recordingContext?: SwipeAtRecordingContext } = {},
@@ -393,6 +439,15 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       const durationError = validateDurationMs(options);
       if (durationError) {
         return failure(durationError);
+      }
+      const stylusError = stylusRefusal({
+        pointer: options.pointer,
+        platform: this.device.platform,
+        gesture: "swipe",
+        display: options.display,
+      });
+      if (stylusError) {
+        return failure(stylusError);
       }
       if (options.display !== undefined) {
         return await this.executeOnDisplay(options, options.display, {
@@ -423,19 +478,20 @@ export class SwipeAtCoordinate extends BaseVisualChange {
           const duration =
             options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
           const result = await perf.track("executeSwipe", () =>
-            this.executeGesture.swipe(
-              resolved.from.x,
-              resolved.from.y,
-              resolved.to.x,
-              resolved.to.y,
-              {
-                duration,
-                // A display change since the pre-dispatch read refuses just before the finger goes down.
-                displayFence: fence,
-              },
-              perf,
-              signal,
-            ),
+            options.pointer
+              ? this.dispatchStylus(resolved, duration, fence, signal)
+              : this.executeGesture.swipe(
+                  resolved.from.x,
+                  resolved.from.y,
+                  resolved.to.x,
+                  resolved.to.y,
+                  {
+                    duration,
+                    // A display change since the pre-dispatch read refuses just before the finger goes down.
+                    displayFence: fence,
+                  },
+                  { perf, signal },
+                ),
           );
           if (this.device.platform === "ios" && result.success) {
             iosDispatchTimestamp = this.timer.now();
@@ -474,18 +530,4 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       perf.end();
     }
   }
-}
-
-/** Adds the straight-line velocity of a successful swipe so the fling can be reproduced. */
-function withVelocity(
-  result: SwipeResult,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  duration: number,
-): SwipeResult {
-  if (duration <= 0) {
-    return result;
-  }
-  const distance = Math.hypot(to.x - from.x, to.y - from.y);
-  return { ...result, velocityPxPerSecond: Math.round((distance / duration) * 1000) };
 }

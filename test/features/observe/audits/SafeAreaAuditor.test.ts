@@ -4,10 +4,26 @@ import {
   capLayoutWarnings,
   MAX_LAYOUT_WARNINGS,
 } from "../../../../src/features/observe/audits/SafeAreaAuditor";
+import { BASELINE_ACCESSIBILITY_ACTIONS } from "../../../../src/features/observe/audits/accessibilityActions";
 import type { LayoutWarning, ObserveResult } from "../../../../src/models";
+import {
+  capturedFlatNodeForTest,
+  createFlatHierarchyForTest,
+  createObserveResultForTest,
+  type FlatHierarchyNode,
+} from "../flatHierarchyBuilders";
+import { readFileSync } from "node:fs";
+import { observeResultFromFixture } from "../../../helpers/observeFixture";
+import { isTruthy } from "../../../../src/models/Element";
+import { parseBounds } from "../../../../src/utils/bounds";
+
+/** Real captures hang the screen's nodes under a single root node. */
+function setRootNodes(result: ObserveResult, nodes: FlatHierarchyNode[]): void {
+  result.viewHierarchy = createFlatHierarchyForTest({ hierarchy: { node: { node: nodes } } });
+}
 
 function observation(): ObserveResult {
-  return {
+  return createObserveResultForTest({
     updatedAt: 1,
     screenSize: { width: 100, height: 200 },
     systemInsets: { top: 20, right: 0, bottom: 20, left: 0 },
@@ -24,30 +40,172 @@ function observation(): ObserveResult {
     },
     viewHierarchy: {
       hierarchy: {
-        node: [
-          {
-            text: "Title",
-            "view-id": "title",
-            bounds: { left: 10, top: 8, right: 60, bottom: 28 },
-          },
-          {
-            text: "Continue",
-            clickable: "true",
-            "view-id": "continue",
-            bounds: { left: 10, top: 170, right: 90, bottom: 196 },
-          },
-          {
-            text: "System time",
-            "resource-id": "com.android.systemui:id/clock",
-            bounds: { left: 0, top: 0, right: 20, bottom: 20 },
-          },
-        ] as any,
+        node: {
+          node: [
+            {
+              text: "Title",
+              "view-id": "title",
+              bounds: { left: 10, top: 8, right: 60, bottom: 28 },
+            },
+            {
+              text: "Continue",
+              clickable: "true",
+              "view-id": "continue",
+              bounds: { left: 10, top: 170, right: 90, bottom: 196 },
+            },
+            {
+              text: "System time",
+              "resource-id": "com.android.systemui:id/clock",
+              bounds: { left: 0, top: 0, right: 20, bottom: 20 },
+            },
+          ],
+        },
       },
     },
-  };
+  });
 }
 
 describe("SafeAreaAuditor", () => {
+  describe("Android baseline accessibility actions", () => {
+    function gestureObservation(attributes: FlatHierarchyNode): ObserveResult {
+      const result = observation();
+      result.insets!.systemBars!.visible = { top: 0, right: 0, bottom: 0, left: 0 };
+      result.insets!.systemGestures = { top: 0, right: 0, bottom: 20, left: 0 };
+      setRootNodes(result, [
+        {
+          text: "Bottom label",
+          "view-id": "bottom-label",
+          bounds: { left: 10, top: 180, right: 90, bottom: 200 },
+          ...attributes,
+        },
+      ]);
+      return result;
+    }
+
+    test.each([...BASELINE_ACCESSIBILITY_ACTIONS])(
+      "does not treat baseline action %s as interaction",
+      (action) => {
+        expect(new SafeAreaAuditor().inspect(gestureObservation({ actions: [action] }))).toEqual(
+          [],
+        );
+      },
+    );
+
+    test("keeps baseline-only text warnings as text under visible bars", () => {
+      const result = gestureObservation({ actions: [...BASELINE_ACCESSIBILITY_ACTIONS] });
+      expect(new SafeAreaAuditor().inspect(result)).toEqual([]);
+      result.insets!.systemBars!.visible.bottom = 20;
+      expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+        { type: "important-content-under-inset", categories: ["text"] },
+      ]);
+    });
+
+    test("does not warn on a baseline-only container under visible bars", () => {
+      const result = gestureObservation({ text: "", actions: [...BASELINE_ACCESSIBILITY_ACTIONS] });
+      result.insets!.systemBars!.visible.bottom = 20;
+      expect(new SafeAreaAuditor().inspect(result)).toEqual([]);
+    });
+
+    test.each([
+      "click",
+      "long_click",
+      "set_text",
+      "scroll_forward",
+      "scroll_backward",
+      "expand",
+      "collapse",
+      "dismiss",
+      "copy",
+      "paste",
+      "cut",
+      "set_selection",
+      "focus",
+      "custom_vendor_action",
+    ])("keeps real action %s interactive, alone or with baseline actions", (action) => {
+      for (const actions of [[action], [...BASELINE_ACCESSIBILITY_ACTIONS, action]]) {
+        expect(new SafeAreaAuditor().inspect(gestureObservation({ actions }))).toMatchObject([
+          { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+        ]);
+      }
+    });
+
+    test.each(["clickable", "long-clickable", "checkable"])(
+      "keeps %s interactive with baseline actions",
+      (attribute) => {
+        for (const value of [true, "true"]) {
+          const result = gestureObservation({
+            [attribute]: value,
+            actions: [...BASELINE_ACCESSIBILITY_ACTIONS],
+          });
+          expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+            { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+          ]);
+        }
+      },
+    );
+
+    test("keeps SDK custom actions interactive without platform actions", () => {
+      const result = gestureObservation({
+        extras: { "sdk.accessibilityCustomActions": "Archive" },
+      });
+      expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
+        { type: "interaction-in-system-gesture-region", categories: ["interaction"] },
+      ]);
+    });
+
+    const captures = [
+      "android-overlay-window/app-layer-overlay-over-playground.raw.json",
+      "android-overlay-window/floating-overlay-over-button-elevated.raw.json",
+      "android-enabled/playground-disabled-control-api36.json",
+      "android-launcher/launcher-home-emulator-5600.json",
+    ].map((file) => {
+      const result = observeResultFromFixture(
+        JSON.parse(readFileSync(`${import.meta.dir}/../../../fixtures/${file}`, "utf8")),
+        file,
+      );
+      const root = capturedFlatNodeForTest(result.viewHierarchy!.hierarchy.node!);
+      result.viewHierarchy!.hierarchy.node = root;
+      return { file, result, root };
+    });
+
+    test.each(captures)("only flags real interactions in captured $file", ({ result, root }) => {
+      const nodes: FlatHierarchyNode[] = [];
+      function index(node: FlatHierarchyNode): void {
+        nodes.push(node);
+        node.node?.forEach(index);
+      }
+      index(root);
+      const warnings = new SafeAreaAuditor().inspect(result);
+      const interactions = warnings.filter((warning) => warning.categories.includes("interaction"));
+      expect(interactions.length).toBeGreaterThan(0);
+      for (const warning of [...interactions, ...result.layoutWarnings!.warnings]) {
+        if (!warning.categories.includes("interaction")) {
+          continue;
+        }
+        const bounds = parseBounds(warning.element.bounds);
+        const node = nodes.find(
+          (candidate) =>
+            (warning.element.viewId !== undefined
+              ? candidate["view-id"] === warning.element.viewId ||
+                candidate["resource-id"] === warning.element.viewId
+              : candidate["resource-id"] === warning.element.resourceId) &&
+            candidate.bounds?.left === bounds?.left &&
+            candidate.bounds?.top === bounds?.top &&
+            candidate.bounds?.right === bounds?.right &&
+            candidate.bounds?.bottom === bounds?.bottom,
+        );
+        expect(node).toBeDefined();
+        const hasFlag = [node?.clickable, node?.["long-clickable"], node?.checkable].some(
+          (value) => (typeof value === "boolean" || typeof value === "string") && isTruthy(value),
+        );
+        const hasAction =
+          Array.isArray(node?.actions) &&
+          node.actions.some((action) => !BASELINE_ACCESSIBILITY_ACTIONS.has(action));
+        expect(hasFlag || hasAction).toBe(true);
+      }
+    });
+  });
+
   test("reports text and interactive content under visible bars, excluding system UI", () => {
     const warnings = new SafeAreaAuditor().inspect(observation());
 
@@ -63,7 +221,7 @@ describe("SafeAreaAuditor", () => {
   test("excludes foreign resource IDs when nodes omit package metadata", () => {
     const result = observation();
     result.insets!.systemGestures = { top: 0, right: 0, bottom: 20, left: 0 };
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         text: "Compose",
         "view-id": "composer",
@@ -91,7 +249,7 @@ describe("SafeAreaAuditor", () => {
         clickable: "true",
         bounds: { left: 10, top: 8, right: 90, bottom: 28 },
       },
-    ] as any;
+    ]);
 
     const warnings = new SafeAreaAuditor().inspect(result);
 
@@ -105,7 +263,7 @@ describe("SafeAreaAuditor", () => {
   test("downgrades large edge-to-edge containers when their content is inset", () => {
     const result = observation();
     result.insets!.systemBars!.visible = { top: 80, right: 0, bottom: 80, left: 0 };
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         "view-id": "close-sheet",
         "content-desc": "Close sheet",
@@ -116,7 +274,7 @@ describe("SafeAreaAuditor", () => {
           { text: "Save", bounds: { left: 10, top: 110, right: 90, bottom: 120 } },
         ],
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       {
@@ -129,13 +287,13 @@ describe("SafeAreaAuditor", () => {
 
   test("keeps fully occluded leaf content at warning severity", () => {
     const result = observation();
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         text: "Last item",
         "view-id": "last-item",
         bounds: { left: 10, top: 180, right: 90, bottom: 200 },
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       {
@@ -148,13 +306,13 @@ describe("SafeAreaAuditor", () => {
 
   test("downgrades leaf content with limited inset overlap", () => {
     const result = observation();
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         text: "Partially inset",
         "view-id": "partial-item",
         bounds: { left: 10, top: 170, right: 90, bottom: 187 },
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       {
@@ -173,13 +331,13 @@ describe("SafeAreaAuditor", () => {
       units: "points",
       safeArea: { top: 10, right: 0, bottom: 0, left: 10 },
     };
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         text: "Corner leaf",
         "view-id": "corner",
         bounds: { left: 0, top: 0, right: 40, bottom: 40 },
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       {
@@ -265,7 +423,7 @@ describe("SafeAreaAuditor", () => {
     const result = observation();
     result.screenSize = { width: 1440, height: 3120 };
     result.insets!.systemBars!.visible = { top: 0, right: 0, bottom: 84, left: 0 };
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         clickable: "true",
         bounds: { left: 0, top: 2987, right: 1440, bottom: 3120 },
@@ -276,7 +434,7 @@ describe("SafeAreaAuditor", () => {
           },
         ],
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toEqual([
       expect.objectContaining({
@@ -291,7 +449,7 @@ describe("SafeAreaAuditor", () => {
 
   test("collapses an equal-bounds container into its flagged leaf", () => {
     const result = observation();
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         clickable: "true",
         bounds: { left: 1, top: 180, right: 99, bottom: 199 },
@@ -302,7 +460,7 @@ describe("SafeAreaAuditor", () => {
           },
         ],
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toEqual([
       expect.objectContaining({
@@ -314,7 +472,7 @@ describe("SafeAreaAuditor", () => {
 
   test("keeps an ancestor warning when its leaf does not cover every unsafe side", () => {
     const result = observation();
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         clickable: "true",
         bounds: { left: 1, top: 10, right: 99, bottom: 195 },
@@ -325,7 +483,7 @@ describe("SafeAreaAuditor", () => {
           },
         ],
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       {
@@ -362,27 +520,27 @@ describe("SafeAreaAuditor", () => {
     const result = observation();
     result.insets!.systemBars!.visible.left = 16;
     result.insets!.systemGestures!.left = 16;
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         text: "Previous page",
         clickable: "true",
         "view-id": "previous-page",
         bounds: { left: -100, top: 50, right: 0, bottom: 100 },
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toEqual([]);
   });
 
   test("only reports content overlap on sides with an inset", () => {
     const result = observation();
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         text: "Title",
         "view-id": "title",
         bounds: { left: -5, top: 8, right: 60, bottom: 28 },
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       { sides: ["top"], insetTypes: ["systemBars"] },
@@ -417,7 +575,7 @@ describe("SafeAreaAuditor", () => {
       units: "points",
       safeArea: { top: 30, right: 0, bottom: 30, left: 0 },
     };
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         $: {
           text: "Title",
@@ -425,7 +583,7 @@ describe("SafeAreaAuditor", () => {
           bounds: { left: 10, top: 8, right: 60, bottom: 28 },
         },
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       { element: { viewId: "ios-title" }, insetTypes: ["safeArea"], sides: ["top"] },
@@ -440,7 +598,7 @@ describe("SafeAreaAuditor", () => {
       units: "points",
       safeArea: { top: 30, right: 0, bottom: 30, left: 0 },
     };
-    result.viewHierarchy!.hierarchy.node = [
+    setRootNodes(result, [
       {
         $: {
           "view-id": "sdk-only-target",
@@ -448,7 +606,7 @@ describe("SafeAreaAuditor", () => {
         },
         extras: { "sdk.hasTapTarget": "true" },
       },
-    ] as any;
+    ]);
 
     expect(new SafeAreaAuditor().inspect(result)).toMatchObject([
       {

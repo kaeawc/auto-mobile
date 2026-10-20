@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { bindDevice } from "../../src/daemon/deviceBinding";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -30,6 +31,9 @@ import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
+import { ControlDiscoveryCache } from "../../src/daemon/socketServer/controlRoutes";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import type { McpForwardContext } from "../../src/daemon/socketServerParts/socketServerContracts";
 
 const devices: BootedDevice[] = [
   { name: "Pixel A", deviceId: "device-A", platform: "android" },
@@ -97,7 +101,7 @@ describe("executePlan cleans every acquired device before release", () => {
   const restores: Array<() => void> = [];
   const lifecycle = new DefaultPlanLifecycleManager();
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     events = [];
     cleanup = new FakeAppCleanupService(events);
     log = new FakeLogger();
@@ -149,7 +153,32 @@ describe("executePlan cleans every acquired device before release", () => {
       () => release.mockRestore(),
       () => free.mockRestore(),
     );
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each([...table])(
+        name,
+        async (row: T) => {
+          await arrangeHarness();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
 
   afterEach(() => {
     for (const restore of restores.splice(0).reverse()) {
@@ -200,21 +229,24 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(sessionManager.getSession("base")).toBeNull();
   };
 
-  test("nested executePlan retains the outer session and assigned device without cleanup", async () => {
-    await acquire([devices[0]], false);
-    pool.getDevice("device-A")!.sessionId = "base";
-    const session = sessionManager.getSession("base");
+  arranged(
+    "nested executePlan retains the outer session and assigned device without cleanup",
+    async () => {
+      await acquire([devices[0]], false);
+      bindDevice(pool.getDevice("device-A")!, "base");
+      const session = sessionManager.getSession("base");
 
-    await lifecycle.afterExecution(input({ nestedInPlan: true }));
+      await lifecycle.afterExecution(input({ nestedInPlan: true }));
 
-    expect(sessionManager.getSession("base")).toBe(session);
-    expect(pool.getDevice("device-A")!.sessionId).toBe("base");
-    expect(cleanup.calls).toEqual([]);
-    expect(events).toEqual([]);
-    expect(timer.getSleepHistory()).toEqual([]);
-  });
+      expect(sessionManager.getSession("base")).toBe(session);
+      expect(pool.getDevice("device-A")!.sessionId).toBe("base");
+      expect(cleanup.calls).toEqual([]);
+      expect(events).toEqual([]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
 
-  test("outermost executePlan still cleans and releases without a nested flag", async () => {
+  arranged("outermost executePlan still cleans and releases without a nested flag", async () => {
     await acquire([devices[0]], false);
 
     await lifecycle.afterExecution(input());
@@ -224,14 +256,53 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  arranged(
+    "deleting released session overrides refreshes a warm sessionUuid-routed tool list",
+    async () => {
+      await acquire([devices[0]], false);
+      const disabled = new Set(["base"]);
+      const cache = new ControlDiscoveryCache(async () => {});
+      const context: McpForwardContext = {
+        request: { id: "list", type: "mcp_request", method: "tools/list", params: {} },
+        route: { clientKey: "base", executionKey: "base", sessionUuid: "base" },
+        socketSessionId: "socket",
+        totalTimeoutMs: 1000,
+        deadline: new ProgressExtendableDeadline(timer.now(), 1000),
+      };
+      let loads = 0;
+      const list = () =>
+        cache.read(context, async () => {
+          loads++;
+          return { tools: disabled.has("base") ? [] : [{ name: "restoredTool" }] };
+        });
+      expect(await list()).toEqual({ tools: [] });
+      expect(await list()).toEqual({ tools: [] });
+      expect(loads).toBe(1);
+      await lifecycle.afterExecution(
+        input({
+          args: {},
+          sessionToolSelectionService: {
+            deleteSession: async (sessionUuid) => {
+              disabled.delete(sessionUuid);
+            },
+          },
+        }),
+      );
+      expect(disabled.size).toBe(0);
+      expect(await list()).toEqual({ tools: [{ name: "restoredTool" }] });
+      expect(await list()).toEqual({ tools: [{ name: "restoredTool" }] });
+      expect(loads).toBe(2);
+    },
+  );
+
   describe("holdSessionOnFailure (#10834)", () => {
     const failedResult: ExecutePlanResult = { success: false, executedSteps: 1, totalSteps: 2 };
     const hold = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
       input({ args: { holdSessionOnFailure: true }, ...overrides });
 
-    test("a failed plan with recovery pending keeps its session and device", async () => {
+    arranged("a failed plan with recovery pending keeps its session and device", async () => {
       await acquire([devices[0]], false);
-      pool.getDevice("device-A")!.sessionId = "base";
+      bindDevice(pool.getDevice("device-A")!, "base");
       const session = sessionManager.getSession("base");
 
       await lifecycle.afterExecution(hold({ succeeded: false }));
@@ -241,7 +312,7 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(events).toEqual([]);
     });
 
-    test("a successful plan is released even when it asked to hold on failure", async () => {
+    arranged("a successful plan is released even when it asked to hold on failure", async () => {
       await acquire([devices[0]], false);
 
       await lifecycle.afterExecution(hold({ succeeded: true }));
@@ -250,7 +321,7 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(events).toEqual(["session-release:base", "release:device-A"]);
     });
 
-    test("a failed plan without the flag is released as before", async () => {
+    arranged("a failed plan without the flag is released as before", async () => {
       await acquire([devices[0]], false);
 
       await lifecycle.afterExecution(input({ args: {}, succeeded: false }));
@@ -259,7 +330,7 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(events).toEqual(["session-release:base", "release:device-A"]);
     });
 
-    test("a failed plan with derived label sessions is always released", async () => {
+    arranged("a failed plan with derived label sessions is always released", async () => {
       await acquire(devices.slice(0, 2));
       // The handler reports the decision before the lifecycle acts on it.
       expect(
@@ -274,32 +345,40 @@ describe("executePlan cleans every acquired device before release", () => {
       }
     });
 
-    test("sessionHeld is false when the handler holds a derived label session as sessionUuid (#11111)", async () => {
-      await acquire(devices.slice(0, 2));
+    arranged(
+      "sessionHeld is false when the handler holds a derived label session as sessionUuid (#11111)",
+      async () => {
+        await acquire(devices.slice(0, 2));
 
-      // The registry resolves `device: B` to the derived session before the handler runs.
-      expect(
-        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base:B" })
-          .sessionHeld,
-      ).toBe(false);
-    });
+        // The registry resolves `device: B` to the derived session before the handler runs.
+        expect(
+          withReportedSessionHold(failedResult, {
+            holdSessionOnFailure: true,
+            sessionUuid: "base:B",
+          }).sessionHeld,
+        ).toBe(false);
+      },
+    );
 
-    test("a failed single-label plan keeps its base session like an unlabeled plan (#11091)", async () => {
-      await acquire([devices[0]]);
-      expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base" });
-      pool.getDevice("device-A")!.sessionId = "base";
-      const session = sessionManager.getSession("base");
+    arranged(
+      "a failed single-label plan keeps its base session like an unlabeled plan (#11091)",
+      async () => {
+        await acquire([devices[0]]);
+        expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base" });
+        bindDevice(pool.getDevice("device-A")!, "base");
+        const session = sessionManager.getSession("base");
 
-      await lifecycle.afterExecution(hold({ succeeded: false }));
+        await lifecycle.afterExecution(hold({ succeeded: false }));
 
-      expect(sessionManager.getSession("base")).toBe(session);
-      expect(pool.getDevice("device-A")!.sessionId).toBe("base");
-      expect(events).toEqual([]);
-      expect(
-        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base" })
-          .sessionHeld,
-      ).toBe(true);
-    });
+        expect(sessionManager.getSession("base")).toBe(session);
+        expect(pool.getDevice("device-A")!.sessionId).toBe("base");
+        expect(events).toEqual([]);
+        expect(
+          withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base" })
+            .sessionHeld,
+        ).toBe(true);
+      },
+    );
 
     describe("app cleanup waits for the held session's release (#11139)", () => {
       const holdWithCleanup = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
@@ -318,7 +397,7 @@ describe("executePlan cleans every acquired device before release", () => {
         }
       };
 
-      test("a held failed plan keeps its app untouched for recovery", async () => {
+      arranged("a held failed plan keeps its app untouched for recovery", async () => {
         await acquire([devices[0]], false);
 
         await lifecycle.afterExecution(holdWithCleanup());
@@ -328,19 +407,22 @@ describe("executePlan cleans every acquired device before release", () => {
         expect(events).toEqual([]);
       });
 
-      test("the resumed plan's lifecycle cleans once, before it releases the session", async () => {
-        await acquire([devices[0]], false);
-        await lifecycle.afterExecution(holdWithCleanup());
+      arranged(
+        "the resumed plan's lifecycle cleans once, before it releases the session",
+        async () => {
+          await acquire([devices[0]], false);
+          await lifecycle.afterExecution(holdWithCleanup());
 
-        await lifecycle.afterExecution(
-          input({ args: { cleanupAppId: "com.example.chat", cleanupClearAppData: true } }),
-        );
-        await flush();
+          await lifecycle.afterExecution(
+            input({ args: { cleanupAppId: "com.example.chat", cleanupClearAppData: true } }),
+          );
+          await flush();
 
-        expectCleanupBeforeRelease([devices[0]]);
-      });
+          expectCleanupBeforeRelease([devices[0]]);
+        },
+      );
 
-      test("a resumed plan without cleanupAppId still runs the deferred cleanup", async () => {
+      arranged("a resumed plan without cleanupAppId still runs the deferred cleanup", async () => {
         await acquire([devices[0]], false);
         await lifecycle.afterExecution(holdWithCleanup());
 
@@ -350,11 +432,11 @@ describe("executePlan cleans every acquired device before release", () => {
         expectCleanupBeforeRelease([devices[0]]);
       });
 
-      test("releasing the held session after a failed recovery runs the cleanup", async () => {
+      arranged("releasing the held session after a failed recovery runs the cleanup", async () => {
         await acquire([devices[0]], false);
         await lifecycle.afterExecution(holdWithCleanup());
 
-        await sessionManager.releaseSession("base", "client-release");
+        await sessionManager.releaseSession("base", "explicit-release");
         await flush();
 
         expect(cleanup.calls).toEqual([
@@ -367,31 +449,37 @@ describe("executePlan cleans every acquired device before release", () => {
         ]);
         expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
       });
-      test("identity replacement drops deferred app cleanup without commands or quarantine", async () => {
-        await acquire([devices[0]], false);
-        await lifecycle.afterExecution(holdWithCleanup());
-        await sessionManager.releaseSession("base", "client-release", {
-          deviceIdentityReplaced: true,
-        });
-        await flush();
-        expect(cleanup.calls).toEqual([]);
-        expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
-      });
-      test("skips a device the held session left and another session now owns (#11164)", async () => {
-        await acquire([devices[0]], false);
-        await lifecycle.afterExecution(holdWithCleanup());
-        await sessionManager.rebindSession("base", "device-B", "android");
-        await sessionManager.createSession("other", "device-A", "android");
+      arranged(
+        "identity replacement drops deferred app cleanup without commands or quarantine",
+        async () => {
+          await acquire([devices[0]], false);
+          await lifecycle.afterExecution(holdWithCleanup());
+          await sessionManager.releaseSession("base", "explicit-release", {
+            deviceIdentityReplaced: true,
+          });
+          await flush();
+          expect(cleanup.calls).toEqual([]);
+          expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
+        },
+      );
+      arranged(
+        "skips a device the held session left and another session now owns (#11164)",
+        async () => {
+          await acquire([devices[0]], false);
+          await lifecycle.afterExecution(holdWithCleanup());
+          await sessionManager.rebindSession("base", "device-B", "android");
+          await sessionManager.createSession("other", "device-A", "android");
 
-        await sessionManager.releaseSession("base", "client-release");
-        await flush();
+          await sessionManager.releaseSession("base", "explicit-release");
+          await flush();
 
-        expect(cleanup.calls).toEqual([]);
-        expect(sessionManager.getSessionForDevice("device-A")).toBe("other");
-      });
+          expect(cleanup.calls).toEqual([]);
+          expect(sessionManager.getSessionForDevice("device-A")).toBe("other");
+        },
+      );
     });
 
-    test("sessionHeld is reported only on a failed run that asked to hold", () => {
+    arranged("sessionHeld is reported only on a failed run that asked to hold", () => {
       const succeeded = { ...failedResult, success: true };
       expect(
         withReportedSessionHold(succeeded, { holdSessionOnFailure: true, sessionUuid: "base" }),
@@ -403,27 +491,30 @@ describe("executePlan cleans every acquired device before release", () => {
   });
 
   describe("auto-release frees every session independently (#11091)", () => {
-    test("a failed derived release does not keep the other sessions on their devices", async () => {
-      await acquire(devices.slice(0, 3));
-      releaseFaults.set("base:B", "before-removal");
+    arranged(
+      "a failed derived release does not keep the other sessions on their devices",
+      async () => {
+        await acquire(devices.slice(0, 3));
+        releaseFaults.set("base:B", "before-removal");
 
-      await lifecycle.afterExecution(input({ args: {} }));
+        await lifecycle.afterExecution(input({ args: {} }));
 
-      expect(sessionManager.getSession("base:B")).not.toBeNull();
-      for (const id of ["base", "base:C"]) {
-        expect(sessionManager.getSession(id)).toBeNull();
-      }
-      expect(events).toContain("release:device-A");
-      expect(events).toContain("release:device-C");
-      expect(events).not.toContain("release:device-B");
-      expect(
-        log
-          .at("warn")
-          .some((entry) => entry.message.includes("Failed to release label session base:B")),
-      ).toBe(true);
-    });
+        expect(sessionManager.getSession("base:B")).not.toBeNull();
+        for (const id of ["base", "base:C"]) {
+          expect(sessionManager.getSession(id)).toBeNull();
+        }
+        expect(events).toContain("release:device-A");
+        expect(events).toContain("release:device-C");
+        expect(events).not.toContain("release:device-B");
+        expect(
+          log
+            .at("warn")
+            .some((entry) => entry.message.includes("Failed to release label session base:B")),
+        ).toBe(true);
+      },
+    );
 
-    test("a base release rejecting after removal still frees its pool slot", async () => {
+    arranged("a base release rejecting after removal still frees its pool slot", async () => {
       await acquire(devices.slice(0, 2));
       releaseFaults.set("base", "after-removal");
 
@@ -436,7 +527,7 @@ describe("executePlan cleans every acquired device before release", () => {
     });
   });
 
-  test("nested executePlan leaves every label session for the outer lifecycle", async () => {
+  arranged("nested executePlan leaves every label session for the outer lifecycle", async () => {
     await acquire(devices.slice(0, 3));
     const releaseLabels = spyOn(deviceLabelMapping, "releaseDeviceLabelSessions");
     restores.push(() => releaseLabels.mockRestore());
@@ -453,7 +544,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
-  test.each([2, 3])("cleans all %s devices once before any release", async (count) => {
+  arrangedEach([2, 3])("cleans all %s devices once before any release", async (count) => {
     const targets = devices.slice(0, count);
     await acquire(targets);
     await lifecycle.afterExecution(input());
@@ -463,7 +554,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(log.at("warn")).toEqual([]);
   });
 
-  test.each(["device-A", "device-B"])(
+  arrangedEach(["device-A", "device-B"])(
     "a rejected cleanup on %s warns without preventing other cleanups or releases",
     async (failingDeviceId) => {
       await acquire(devices.slice(0, 3));
@@ -505,20 +596,23 @@ describe("executePlan cleans every acquired device before release", () => {
   };
   const marker = (id: string) => pool.getDeviceHealthMarker(id)?.reason;
 
-  test("a failed (non-throwing) cleanup is named in the summary and the device is marked app-cleanup", async () => {
-    await acquire(devices.slice(0, 3));
-    cleanup.softFailuresRemaining.set("device-B", 99);
-    await lifecycle.afterExecution(input());
-    const summary = log.at("warn").find((entry) => entry.message.includes("was incomplete"));
-    expect(summary?.message).toContain("failed on device-B (clearAppData: pm clear exited 1)");
-    expect(summary?.message).not.toContain("device-A");
-    expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(3);
-    expect(marker("device-B")).toBe("app-cleanup");
-    expect(marker("device-A")).toBeUndefined();
-    expect(marker("device-C")).toBeUndefined();
-  });
+  arranged(
+    "a failed (non-throwing) cleanup is named in the summary and the device is marked app-cleanup",
+    async () => {
+      await acquire(devices.slice(0, 3));
+      cleanup.softFailuresRemaining.set("device-B", 99);
+      await lifecycle.afterExecution(input());
+      const summary = log.at("warn").find((entry) => entry.message.includes("was incomplete"));
+      expect(summary?.message).toContain("failed on device-B (clearAppData: pm clear exited 1)");
+      expect(summary?.message).not.toContain("device-A");
+      expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(3);
+      expect(marker("device-B")).toBe("app-cleanup");
+      expect(marker("device-A")).toBeUndefined();
+      expect(marker("device-C")).toBeUndefined();
+    },
+  );
 
-  test("a rejected cleanup also marks the device", async () => {
+  arranged("a rejected cleanup also marks the device", async () => {
     await acquire(devices.slice(0, 2));
     cleanup.failingDeviceId = "device-A";
     await lifecycle.afterExecution(input());
@@ -526,7 +620,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(marker("device-B")).toBeUndefined();
   });
 
-  test("failed cleanup passes the plan app id and cleanup step as its retry key", async () => {
+  arranged("failed cleanup passes the plan app id and cleanup step as its retry key", async () => {
     await acquire(devices.slice(0, 1));
     cleanup.softFailuresRemaining.set("device-A", 3);
     const mark = spyOn(sessionManager, "markDeviceNeedsAppCleanup");
@@ -555,7 +649,7 @@ describe("executePlan cleans every acquired device before release", () => {
     }
   });
 
-  test("a clean cleanup marks nothing", async () => {
+  arranged("a clean cleanup marks nothing", async () => {
     await acquire(devices.slice(0, 2));
     await lifecycle.afterExecution(input());
     for (const target of devices.slice(0, 2)) {
@@ -563,46 +657,52 @@ describe("executePlan cleans every acquired device before release", () => {
     }
   });
 
-  test("the marked device's cleanup is retried under a live signal and the marker clears", async () => {
-    await acquire(devices.slice(0, 2));
-    cleanup.softFailuresRemaining.set("device-B", 1);
-    cleanup.throwWhenAmbientAborted = true;
-    const controller = new AbortController();
-    controller.abort(new Error("request deadline"));
-    await runWithAbortSignal(controller.signal, () => lifecycle.afterExecution(input()));
-    expect(marker("device-B")).toBe("app-cleanup");
-    expect(cleanup.calls.map((call) => call.device.deviceId)).toEqual(["device-A", "device-B"]);
+  arranged(
+    "the marked device's cleanup is retried under a live signal and the marker clears",
+    async () => {
+      await acquire(devices.slice(0, 2));
+      cleanup.softFailuresRemaining.set("device-B", 1);
+      cleanup.throwWhenAmbientAborted = true;
+      const controller = new AbortController();
+      controller.abort(new Error("request deadline"));
+      await runWithAbortSignal(controller.signal, () => lifecycle.afterExecution(input()));
+      expect(marker("device-B")).toBe("app-cleanup");
+      expect(cleanup.calls.map((call) => call.device.deviceId)).toEqual(["device-A", "device-B"]);
 
-    // The recovery is detached but inherits the aborted request signal unless it shields itself.
-    poolTimer.advanceTime(1000);
-    await flush();
-    expect(cleanup.calls.map((call) => call.device.deviceId)).toEqual([
-      "device-A",
-      "device-B",
-      "device-B",
-    ]);
-    expect(cleanup.calls[2].config).toEqual({ appId: "com.example.chat", clearAppData: true });
-    expect(cleanup.abortedAtStart.get("device-B")).toBe(false);
-    expect(marker("device-B")).toBeUndefined();
-  });
-
-  test("a device whose cleanup keeps failing stays marked after the bounded retries", async () => {
-    await acquire(devices.slice(0, 1));
-    cleanup.softFailuresRemaining.set("device-A", 99);
-    await lifecycle.afterExecution(input());
-    for (const delayMs of [1000, 2000, 4000]) {
-      poolTimer.advanceTime(delayMs);
+      // The recovery is detached but inherits the aborted request signal unless it shields itself.
+      poolTimer.advanceTime(1000);
       await flush();
-    }
-    // The original attempt plus the three recovery attempts, then no more.
-    expect(cleanup.calls).toHaveLength(4);
-    poolTimer.advanceTime(60_000);
-    await flush();
-    expect(cleanup.calls).toHaveLength(4);
-    expect(marker("device-A")).toBe("app-cleanup");
-  });
+      expect(cleanup.calls.map((call) => call.device.deviceId)).toEqual([
+        "device-A",
+        "device-B",
+        "device-B",
+      ]);
+      expect(cleanup.calls[2].config).toEqual({ appId: "com.example.chat", clearAppData: true });
+      expect(cleanup.abortedAtStart.get("device-B")).toBe(false);
+      expect(marker("device-B")).toBeUndefined();
+    },
+  );
 
-  test("devices still running at the cap are marked and named as unfinished", async () => {
+  arranged(
+    "a device whose cleanup keeps failing stays marked after the bounded retries",
+    async () => {
+      await acquire(devices.slice(0, 1));
+      cleanup.softFailuresRemaining.set("device-A", 99);
+      await lifecycle.afterExecution(input());
+      for (const delayMs of [1000, 2000, 4000]) {
+        poolTimer.advanceTime(delayMs);
+        await flush();
+      }
+      // The original attempt plus the three recovery attempts, then no more.
+      expect(cleanup.calls).toHaveLength(4);
+      poolTimer.advanceTime(60_000);
+      await flush();
+      expect(cleanup.calls).toHaveLength(4);
+      expect(marker("device-A")).toBe("app-cleanup");
+    },
+  );
+
+  arranged("devices still running at the cap are marked and named as unfinished", async () => {
     await acquire(devices.slice(0, 2));
     cleanup.hangForever = true;
     const timer = new FakeTimer();
@@ -617,7 +717,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(marker("device-B")).toBe("app-cleanup");
   });
 
-  test.each(["device-A", "device-B"])("skips a retired pooled device %s", async (id) => {
+  arrangedEach(["device-A", "device-B"])("skips a retired pooled device %s", async (id) => {
     await acquire(devices.slice(0, 3));
     const getDevice = pool.getDevice.bind(pool);
     const missing = spyOn(pool, "getDevice").mockImplementation((candidate) =>
@@ -635,7 +735,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(log.at("debug").some((entry) => entry.message.includes(id))).toBe(true);
   });
 
-  test("skips a label session that was already retired", async () => {
+  arranged("skips a label session that was already retired", async () => {
     await acquire(devices.slice(0, 3));
     await sessionManager.releaseSession("base:B");
     events.length = 0;
@@ -644,7 +744,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(log.at("debug").some((entry) => entry.message.includes("base:B"))).toBe(true);
   });
 
-  test("skips a session fenced by the existing device-loss admission gate", async () => {
+  arranged("skips a session fenced by the existing device-loss admission gate", async () => {
     await acquire(devices.slice(0, 3));
     const admit = pool.assertSessionReadyForAutomation.bind(pool);
     const lost = spyOn(pool, "assertSessionReadyForAutomation").mockImplementation((id) => {
@@ -660,7 +760,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(log.at("debug").some((entry) => entry.message.includes("base:B"))).toBe(true);
   });
 
-  test.each(["device-A", "device-B"])(
+  arrangedEach(["device-A", "device-B"])(
     "skips lost device %s before cancellation removes its session or pool entry",
     async (id) => {
       await acquire(devices.slice(0, 3));
@@ -679,6 +779,7 @@ describe("executePlan cleans every acquired device before release", () => {
     ["a request deadline or client cancel", () => new Error("request cancelled")],
     ["a sibling device loss", () => new DeviceLostError("device-B", "device lost during plan")],
   ])("cleans every owned device under a live signal after %s (#10022)", async (_label, reason) => {
+    await arrangeHarness();
     await acquire(devices.slice(0, 3));
     cleanup.throwWhenAmbientAborted = true;
     const controller = new AbortController();
@@ -694,7 +795,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(3);
   });
 
-  test("a device that never answers cannot hang release past the cleanup cap", async () => {
+  arranged("a device that never answers cannot hang release past the cleanup cap", async () => {
     await acquire(devices.slice(0, 2));
     cleanup.hangUntilAmbientAborted = true;
     const timer = new FakeTimer();
@@ -720,7 +821,7 @@ describe("executePlan cleans every acquired device before release", () => {
     ).toBe(true);
   });
 
-  test("skips a pooled device with quarantined runtime identity", async () => {
+  arranged("skips a pooled device with quarantined runtime identity", async () => {
     await acquire(devices.slice(0, 2));
     pool.getDevice("device-B")!.identityUnresolved = true;
     await lifecycle.afterExecution(input());
@@ -729,7 +830,7 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(log.at("debug").some((entry) => entry.message.includes("base:B"))).toBe(true);
   });
 
-  test("deduplicates devices even when different label sessions share an id", async () => {
+  arranged("deduplicates devices even when different label sessions share an id", async () => {
     await acquire([devices[0], devices[0]]);
     sessionManager.setDeviceLabels("base", { A: "base", alias: "base", B: "base:B" });
     await lifecycle.afterExecution(input());
@@ -737,14 +838,17 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(cleanup.calls[0].device).toEqual(devices[0]);
   });
 
-  test.each([true, false])("single-device cleanup keeps its args (labels: %s)", async (labels) => {
-    await acquire([devices[0]], labels);
-    await lifecycle.afterExecution(input());
-    expectCleanupBeforeRelease([devices[0]]);
-    expect(events.filter((event) => event.startsWith("release:"))).toEqual(["release:device-A"]);
-  });
+  arrangedEach([true, false])(
+    "single-device cleanup keeps its args (labels: %s)",
+    async (labels) => {
+      await acquire([devices[0]], labels);
+      await lifecycle.afterExecution(input());
+      expectCleanupBeforeRelease([devices[0]]);
+      expect(events.filter((event) => event.startsWith("release:"))).toEqual(["release:device-A"]);
+    },
+  );
 
-  test.each(["no-app", "other-tool"])("does no cleanup for %s", async (scenario) => {
+  arrangedEach(["no-app", "other-tool"])("does no cleanup for %s", async (scenario) => {
     await acquire(devices.slice(0, 2));
     await lifecycle.afterExecution(input(scenario === "no-app" ? { args: {} } : { name: "tapOn" }));
     expect(cleanup.calls).toEqual([]);
@@ -753,7 +857,7 @@ describe("executePlan cleans every acquired device before release", () => {
     );
   });
 
-  test("retains cleanup for a standalone device without a daemon session", async () => {
+  arranged("retains cleanup for a standalone device without a daemon session", async () => {
     DaemonState.getInstance().reset();
     await lifecycle.afterExecution(input({ baseSessionUuid: undefined, sessionUuid: undefined }));
     expect(cleanup.calls).toEqual([
@@ -761,7 +865,7 @@ describe("executePlan cleans every acquired device before release", () => {
     ]);
   });
 
-  test.each([true, false])(
+  arrangedEach([true, false])(
     "mixed-platform factories receive each device and drain derived cleanup (clear: %s)",
     async (clearAppData) => {
       const targets = [devices[0], devices[1], devices[3]];
@@ -820,12 +924,12 @@ describe("executePlan cleans every acquired device before release", () => {
           new ClearAppData(device, undefined, {
             simctl,
             isSimulatorFn: () => true,
-            cacheInvalidator: { invalidate: () => {} },
+            cacheInvalidator: { invalidate: () => {}, retireAppProcess: () => {} },
           }),
         logger: log,
       });
 
-    test("an uninstalled bundle is cleaned and does not mark the simulator", async () => {
+    arranged("an uninstalled bundle is cleaned and does not mark the simulator", async () => {
       await acquire([devices[3]]);
       const simctl = new FakeSimctl();
       simctl.setInstalledApps([{ bundleId: "com.example.other" }]);
@@ -836,18 +940,21 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(log.at("warn").some((entry) => entry.message.includes("was incomplete"))).toBe(false);
     });
 
-    test("a transient container failure on an installed bundle still marks the simulator", async () => {
-      await acquire([devices[3]]);
-      const simctl = new FakeSimctl();
-      simctl.setInstalledApps([{ bundleId: "com.example.chat" }]);
-      simctl.setContainerError("com.example.chat", new Error("simctl get_app_container failed"));
-      await lifecycle.afterExecution(
-        input({ device: devices[3], cleanupService: iosCleanup(simctl) }),
-      );
-      expect(marker("device-ios")).toBe("app-cleanup");
-    });
+    arranged(
+      "a transient container failure on an installed bundle still marks the simulator",
+      async () => {
+        await acquire([devices[3]]);
+        const simctl = new FakeSimctl();
+        simctl.setInstalledApps([{ bundleId: "com.example.chat" }]);
+        simctl.setContainerError("com.example.chat", new Error("simctl get_app_container failed"));
+        await lifecycle.afterExecution(
+          input({ device: devices[3], cleanupService: iosCleanup(simctl) }),
+        );
+        expect(marker("device-ios")).toBe("app-cleanup");
+      },
+    );
 
-    test("an unreadable listing is not mistaken for an uninstalled bundle", async () => {
+    arranged("an unreadable listing is not mistaken for an uninstalled bundle", async () => {
       await acquire([devices[3]]);
       const simctl = new FakeSimctl();
       simctl.setListAppsError(new Error("simctl listapps timed out"));

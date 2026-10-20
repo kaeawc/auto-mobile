@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.platform
 
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,9 +18,15 @@ private val LOG = LoggerFactory.getLogger("SourceFileOpener")
  * The filesystem walk runs on [Dispatchers.IO] so click handlers never block the Compose UI thread.
  * A simple cache avoids repeated walks for the same file.
  */
+data class SourceOpenOptions(
+  val androidIde: String = "auto",
+  val iosIde: String = "auto",
+  val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+)
+
 object SourceFileOpener {
 
-  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val scope = CoroutineScope(SupervisorJob())
 
   /** Well-known project root markers to search from. */
   private val PROJECT_ROOTS =
@@ -30,22 +38,22 @@ object SourceFileOpener {
       .distinct()
 
   /** Cache of (fileName, className) → resolved absolute path. */
-  private val fileCache = ConcurrentHashMap<String, String?>()
+  private val fileCache = ConcurrentHashMap<String, String>()
 
   fun open(
     fileName: String,
     lineNumber: Int,
     className: String,
-    androidIde: String = "auto",
-    iosIde: String = "auto",
+    options: SourceOpenOptions = SourceOpenOptions(),
   ) {
-    scope.launch {
+    scope.launch(options.dispatcher) {
       try {
         val cacheKey = "$className/$fileName"
         val path =
-          fileCache.getOrPut(cacheKey) {
-            findFile(fileName, className)?.absolutePath
-          }
+          fileCache[cacheKey]
+            ?: findFile(fileName, className)?.absolutePath?.let { resolved ->
+              fileCache.putIfAbsent(cacheKey, resolved) ?: resolved
+            }
 
         if (path == null) {
           LOG.warn("Could not find source file: $fileName (class: $className)")
@@ -54,13 +62,15 @@ object SourceFileOpener {
 
         val ide =
           if (isSwiftOrObjC(fileName)) {
-            resolveIde(iosIde, isIos = true)
+            resolveIde(options.iosIde, isIos = true)
           } else {
-            resolveIde(androidIde, isIos = false)
+            resolveIde(options.androidIde, isIos = false)
           }
 
         openInIde(ide, path, lineNumber)
-      } catch (e: Exception) {
+      } catch (e: IOException) {
+        LOG.error("Failed to open source file: $fileName:$lineNumber", e)
+      } catch (e: SecurityException) {
         LOG.error("Failed to open source file: $fileName:$lineNumber", e)
       }
     }
@@ -116,8 +126,10 @@ object SourceFileOpener {
         ProcessBuilder(cmd).redirectErrorStream(true).start()
         LOG.info("Opening in ${ide.name}: ${cmd.joinToString(" ")}")
         return
-      } catch (_: Exception) {
-        // Try next command
+      } catch (error: IOException) {
+        LOG.warn("Could not start ${cmd.first()}; trying next command", error)
+      } catch (error: SecurityException) {
+        LOG.warn("Could not start ${cmd.first()}; trying next command", error)
       }
     }
     LOG.warn("Could not open file in ${ide.name} — no working command found")

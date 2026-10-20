@@ -1,9 +1,3 @@
-import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
-import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
-import { unsupportedPlatformError } from "../../models/ActionableError";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
-import { BaseVisualChange, type ObservedActionResult } from "./BaseVisualChange";
 import {
   type AppendTextFailureSource,
   BootedDevice,
@@ -11,99 +5,46 @@ import {
   KeyboardResult,
   SendTextResult,
 } from "../../models";
-import { logger } from "../../utils/logger";
-import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
+import { unsupportedPlatformError } from "../../models/ActionableError";
+import { getRequestContext } from "../../utils/AbortContext";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
-import { IOSCtrlProxyClient } from "../observe/ios";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
-import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
-import { resolveAutoInputMode } from "./resolveAutoInputMode";
-import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
 import { serverConfig } from "../../utils/ServerConfig";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
   buildAsciiKeyEventPlan,
   type KeyEventPlan,
 } from "../../utils/android-cmdline-tools/asciiKeyEvents";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
+import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import { Keyboard } from "./Keyboard";
-import { TapOnElement } from "./TapOnElement";
-import { getRequestContext } from "../../utils/AbortContext";
+import {
+  defaultTargetFocuserFactory,
+  describeFocusTarget,
+  isFocusResultConfirmed,
+  type TextInputTargetFocuser,
+  type TextInputTargetFocuserFactory,
+  type TextInputTargetSelector,
+} from "./TextInputTargetFocus";
+import { assertInputNotAborted } from "./assertInputNotAborted";
+import { executeIosTextInput, type IosTextInputDeps } from "./iosTextInput";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+import { resolveAutoInputMode } from "./resolveAutoInputMode";
+export { type TextInputTargetFocuser, type TextInputTargetSelector } from "./TextInputTargetFocus";
 
 // The UI needs a brief settle after a key event.
 export const KEY_EVENT_SETTLE_MS = 100;
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "append";
-
-/** Selector variants that identify a field to focus before typing (issue #5872). */
-export interface TextInputTargetSelector {
-  elementId?: string;
-  testTag?: string;
-  text?: string;
-  textAny?: string[];
-}
-
-/**
- * Focuses the field a `selector` names before {@link InputText} types into it,
- * collapsing the mandatory focus-then-type pair into one call (issue #5872 AC3).
- * Interface + fake so the focus step is unit-testable without a real tap.
- */
-export interface TextInputTargetFocuser {
-  focus(
-    selector: TextInputTargetSelector,
-    signal?: AbortSignal,
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    focusVerified?: boolean;
-    matchedId?: string;
-    matchedText?: string;
-  }>;
-}
-
-type TextInputTargetFocuserFactory = (device: BootedDevice) => TextInputTargetFocuser;
-
-function isFocusResultConfirmed(
-  result: Awaited<ReturnType<TextInputTargetFocuser["focus"]>>,
-): boolean {
-  // The focuser verifies the selected field's own keyboard focus or its nearest
-  // editable ancestor/descendant before any text is sent.
-  return result.success && result.focusVerified === true;
-}
-
-function describeFocusTarget(
-  result: Awaited<ReturnType<TextInputTargetFocuser["focus"]>>,
-  selector: TextInputTargetSelector,
-): string {
-  const target =
-    result.matchedText ??
-    selector.text ??
-    selector.textAny?.[0] ??
-    selector.elementId ??
-    selector.testTag;
-  return target ? JSON.stringify(target) : "for the selector";
-}
-
-const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => ({
-  focus: async (selector, signal) => {
-    const result = await new TapOnElement(device).execute(
-      { ...selector, action: "focus" },
-      undefined,
-      signal,
-    );
-    return {
-      success: result.success,
-      error: result.error,
-      focusVerified: result.focusVerified === true,
-      matchedId: result.selectedElement?.resourceId,
-      matchedText: result.selectedElement?.text,
-    };
-  },
-});
 
 /**
  * Runs once, immediately before the append's FIRST key event, to confirm the
@@ -124,23 +65,39 @@ interface KeyboardCloser {
 type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory) => KeyboardCloser;
 
 const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory) => {
-  const keyboard = new Keyboard(device, adbFactory);
+  const keyboard = new Keyboard(device, { adbFactory });
   return {
     close: (signal) => keyboard.execute("close", signal),
   };
 };
-
-function assertInputNotAborted(signal?: AbortSignal, result?: ObservedActionResult): void {
-  if (result?.retryable !== false) {
-    signal?.throwIfAborted();
-  }
-}
 
 /**
  * Fields the best-effort keyboard-dismissal epilogue contributes to an
  * already-successful input result (issue #6868).
  */
 type KeyboardDismissalOutcome = Pick<SendTextResult, "keyboardDismissed" | "warnings">;
+
+export interface InputTextTestHooks {
+  executeAndroidTextInput: (
+    text: string,
+    imeAction?: ImeAction,
+    dismissKeyboard?: boolean,
+    mode?: InputTextMode,
+    signal?: AbortSignal,
+  ) => Promise<SendTextResult & { method?: InputTextMode }>;
+  executeKeyEventPlan: (
+    plan: KeyEventPlan,
+    timeoutMs?: number,
+    noRetry?: boolean,
+    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  executeiOSTextInput: (
+    text: string,
+    imeAction?: ImeAction,
+    signal?: AbortSignal,
+  ) => ReturnType<typeof executeIosTextInput>;
+}
 
 export class InputText extends BaseVisualChange {
   private androidApiLevel: number | undefined;
@@ -152,14 +109,29 @@ export class InputText extends BaseVisualChange {
     private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory,
     timer: Timer = defaultTimer,
     targetFocuserFactory: TextInputTargetFocuserFactory = defaultTargetFocuserFactory,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adbFactoryOrExecutor, timer);
+    super(device, adbFactoryOrExecutor, timer, undefined, collaborators);
     this.device = device;
     this.targetFocuser = targetFocuserFactory(device);
   }
 
+  /** Typed view of the internals unit tests drive directly; not a production API. */
+  get testHooks(): InputTextTestHooks {
+    return {
+      executeAndroidTextInput: (...args) => this.executeAndroidTextInput(...args),
+      executeKeyEventPlan: (...args) => this.executeKeyEventPlan(...args),
+      executeiOSTextInput: (text, imeAction, signal) =>
+        executeIosTextInput(this.iosTextDeps(), text, imeAction, signal),
+    };
+  }
+
+  private iosTextDeps(): IosTextInputDeps {
+    return { device: this.device, observeScreen: this.observeScreen, timer: this.timer };
+  }
+
   async execute(
-    text: string,
+    text: string | null | undefined,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode?: InputTextMode,
@@ -242,7 +214,7 @@ export class InputText extends BaseVisualChange {
               // dismissKeyboard is Android-only — it works around an emulator
               // bug where the soft keyboard stays visible after setText.
               return await perf.track("iOSTextInput", () =>
-                this.executeiOSTextInput(text, imeAction, signal),
+                executeIosTextInput(this.iosTextDeps(), text, imeAction, signal),
               );
             default:
               perf.end();
@@ -266,7 +238,7 @@ export class InputText extends BaseVisualChange {
         usesObservationForResolution: false,
         changeExpected: true,
         tolerancePercent: 0.0,
-        timeoutMs: 5000,
+        timeoutMs: SETTLE_BUDGET_MS.lifecycle,
         perf,
         signal,
         skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
@@ -277,7 +249,7 @@ export class InputText extends BaseVisualChange {
   }
 
   /**
-   * Execute Android-specific text input using accessibility service
+   * Execute Android-specific text input using accessibility service (@internal unit-test seam)
    * @param text - Text to input
    * @param imeAction - Optional IME action
    * @returns Result with method information
@@ -1044,102 +1016,6 @@ export class InputText extends BaseVisualChange {
       });
       assertInputNotAborted(signal);
     }
-  }
-
-  /**
-   * Execute iOS-specific text input
-   * @param text - Text to input
-   * @param imeAction - Optional IME action
-   * @returns Result with method information
-   */
-  private async executeiOSTextInput(
-    text: string,
-    imeAction?: ImeAction,
-    signal?: AbortSignal,
-  ): Promise<SendTextResult & { method?: "a11y"; retryable?: false }> {
-    assertInputNotAborted(signal);
-    const startMs = Date.now();
-    logger.debug(
-      `[InputText] iOS begin textLength=${text.length} imeAction=${imeAction ?? "none"}`,
-    );
-
-    const client = IOSCtrlProxyClient.getInstance(this.device);
-    const before = await readIosTypedTextField(this.observeScreen, this.timer, signal);
-    assertInputNotAborted(signal);
-    const deadlineMs = getTextRequestDeadlineMs();
-    const result = await client.requestSetText(text, {
-      ...(deadlineMs === undefined ? {} : { deadlineMs }),
-      timeoutMs: resolveTextCtrlProxyTimeoutMs(
-        text,
-        deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
-      ),
-      abortSignal: signal,
-    });
-    if (!result.success) {
-      assertInputNotAborted(signal, result);
-      logger.error(
-        `[InputText] CtrlProxy iOS setText failed: ${result.error} totalMs=${Date.now() - startMs}`,
-      );
-      return {
-        success: false,
-        text,
-        error: result.error,
-        ...(result.retryable === false ? { retryable: false as const } : {}),
-        method: "a11y",
-      };
-    }
-
-    logger.debug(`[InputText] iOS setText ok totalMs=${Date.now() - startMs}`);
-
-    const verification = await verifyIosTypedText(
-      text,
-      before,
-      this.observeScreen,
-      this.timer,
-      signal,
-    );
-    if (!verification.success) {
-      return { success: false, text, error: verification.error, method: "a11y" };
-    }
-
-    const imeError = await this.executeIosImeAfterType(client, imeAction, signal);
-    if (imeError !== undefined) {
-      return { success: false, text, method: "a11y", error: imeError };
-    }
-
-    return {
-      success: true,
-      text,
-      imeAction,
-      method: "a11y",
-      ...(verification.warning ? { warnings: [verification.warning] } : {}),
-    };
-  }
-
-  private async executeIosImeAfterType(
-    client: Pick<IOSCtrlProxyClient, "requestImeAction">,
-    imeAction?: ImeAction,
-    signal?: AbortSignal,
-  ): Promise<string | undefined> {
-    if (!imeAction) {
-      return undefined;
-    }
-    let imeError: string | undefined;
-    try {
-      const imeResult = await client.requestImeAction(imeAction);
-      assertInputNotAborted(signal);
-      if (!imeResult.success) {
-        imeError = imeResult.error || "unknown error";
-      }
-    } catch (error) {
-      assertInputNotAborted(signal);
-      imeError = errorMessage(error) || "unknown error";
-    }
-    if (imeError === undefined) {
-      return undefined;
-    }
-    logger.warn(`[InputText] CtrlProxy iOS IME action '${imeAction}' failed: ${imeError}`);
-    return imeActionFailedAfterTextEntered(imeAction, imeError);
   }
 
   private async executeImeAction(imeAction: string, signal?: AbortSignal): Promise<void> {

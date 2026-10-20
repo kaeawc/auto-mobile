@@ -1,11 +1,12 @@
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { beforeEach, describe, expect, test } from "bun:test";
-import { NetworkState } from "../../src/server/NetworkState";
-import { buildNetworkMockRules } from "../../src/server/networkMockRules";
+import { NetworkState } from "../../src/utils/NetworkState";
+import { buildNetworkMockRules } from "../../src/utils/networkMockRules";
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
   type NetworkDeviceStatePusher,
-} from "../../src/server/networkStateSessionCleanup";
+} from "../../src/daemon/networkStateSessionCleanup";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -57,6 +58,42 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     manager = new FakeSessionCleanupManager();
     pusher = new FakePusher(state);
     registerNetworkStateSessionCleanup(manager, { state: () => state, pusher });
+  });
+
+  test("release cleanup cancels an unanswered SDK push within the ten-second cap", async () => {
+    const timer = new FakeTimer();
+    const boundedManager = new FakeSessionCleanupManager();
+    let signal: AbortSignal | undefined;
+    let deadline: number | undefined;
+    const boundedPusher: NetworkDeviceStatePusher = {
+      push: async (_deviceId, options) => {
+        signal = options?.abortSignal;
+        deadline = options?.deadlineMs;
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        });
+      },
+    };
+    registerNetworkStateSessionCleanup(boundedManager, {
+      state: () => state,
+      pusher: boundedPusher,
+      timer,
+    });
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
+    boundedManager.release("session-1", DEVICE_A);
+    let settled = false;
+    const cleanup = boundedManager.pendingCleanups[0]!.cleanup.then(() => {
+      settled = true;
+    });
+    expect(deadline).toBe(timer.now() + 10_000);
+    timer.advanceTime(9999);
+    expect(signal?.aborted).toBe(false);
+    expect(settled).toBe(false);
+    timer.advanceTime(1);
+    await drainUntil(() => settled, { description: "network cleanup cap" });
+    await cleanup;
+    expect(signal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("releasing the owning session empties the device store and pushes the empty set", async () => {

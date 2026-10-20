@@ -27,9 +27,17 @@ import {
   test,
 } from "bun:test";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ActionableError } from "../../src/models";
-import type { DaemonStatus, PidFileData, DaemonSocketPaths } from "../../src/daemon/types";
+import type { Session } from "../../src/daemon/sessionManager";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { createFakeSession } from "./helpers/inputSocketHarness";
+import type {
+  DaemonOptions,
+  DaemonStatus,
+  PidFileData,
+  DaemonSocketPaths,
+} from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent, parseLockContent } from "../../src/utils/fileLock";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -74,6 +82,23 @@ const complete: PidFileData = {
   options: { debug: true, port: 19000, host: "127.0.0.1" },
 };
 
+/** Spy on a private/protected method, which `spyOn`'s public-key typing excludes. */
+function spyOnPrivate<Args extends unknown[] = unknown[], Result = Promise<void>>(
+  target: object,
+  method: string,
+) {
+  return spyOn(target as Record<string, (...args: Args) => Result>, method);
+}
+
+/** The replacement owner a status recovery names; the scenario must have produced one. */
+function replacementOwnerOf(status: DaemonStatus): DaemonStatus {
+  const owner = status.recovery?.replacementOwner;
+  if (!owner) {
+    throw new Error("expected the status recovery to name a replacement owner");
+  }
+  return owner;
+}
+
 function harness(
   result: { accepted: boolean; reason?: string } = { accepted: true },
   lockPath = "/isolated/lock",
@@ -115,7 +140,7 @@ function harness(
       isProcessRunning: (pid) => pid === process.pid || (owner.running && pid === owner.pid),
     },
     processSignaler: {
-      kill: () => {
+      signal: () => {
         throw new Error("must not signal");
       },
     },
@@ -223,7 +248,7 @@ describe("provider-owned identity recovery", () => {
       processFinder: { findDaemonProcesses: () => [], isProcessRunning: (pid) => pid === 123 },
       platform: "win32",
     });
-    const probe = spyOn((manager as any).identityRecoveryIO, "probe").mockRejectedValue(
+    const probe = spyOn(manager["identityRecoveryIO"], "probe").mockRejectedValue(
       new Error("connect ECONNREFUSED"),
     );
     expect(await manager.status()).toEqual({ running: false });
@@ -236,10 +261,10 @@ describe("provider-owned identity recovery", () => {
     expect(probe).not.toHaveBeenCalled();
   });
 
-  for (const outcome of ["repaired", "deferred", "failed", "unauthenticated"]) {
+  for (const outcome of ["repaired", "deferred", "failed", "unauthenticated"] as const) {
     test(`fix 1: status ${outcome} records only status and republish RPCs`, async () => {
       const h = harness({ accepted: outcome !== "deferred" });
-      const io = (h.manager as any).identityRecoveryIO;
+      const io = h.manager["identityRecoveryIO"];
       const original = io.probe;
       io.probe = async () => {
         await h.client.callDaemonMethod("ide/status", {});
@@ -279,33 +304,32 @@ describe("provider-owned identity recovery", () => {
       timer,
     );
     const successor = { ...complete, pid: 124, startedAt: 200, processGenerationToken: "next" };
-    const stop = spyOn(h.manager as any, "stopRunningDaemon").mockImplementation(async () => {
+    const stop = spyOnPrivate(h.manager, "stopRunningDaemon").mockImplementation(async () => {
       stopStarted.resolve();
       await timer.sleep(300);
       h.setOwner({ running: false });
     });
-    const launch = spyOn((h.manager as any).launcher, "launchAndWait").mockImplementation(
-      async () => {
-        h.setOwner({ ...successor, running: true });
-        // Listening is insufficient until the successor publishes its complete record.
-        launchStarted.resolve();
-        await publishSuccessor.promise;
-        h.setRecord(successor);
-      },
-    );
+    const launch = spyOn(h.manager["launcher"], "launchAndWait").mockImplementation(async () => {
+      h.setOwner({ ...successor, running: true });
+      // Listening is insufficient until the successor publishes its complete record.
+      launchStarted.resolve();
+      await publishSuccessor.promise;
+      h.setRecord(successor);
+    });
     const peer = harness({ accepted: false }, join(dir, "lock"), timer);
     // Separate manager state, sharing only the filesystem lock and fake daemon endpoint.
-    const recoveryIO = (h.manager as unknown as { identityRecoveryIO: IdentityRecoveryIO })
-      .identityRecoveryIO;
-    (peer.manager as unknown as { identityRecoveryIO: IdentityRecoveryIO }).identityRecoveryIO = {
-      ...recoveryIO,
-      probe: async () => {
-        followerProbed.resolve();
-        return recoveryIO.probe();
-      },
-    };
-    spyOn(peer.manager as any, "isProcessRunning").mockImplementation((pid) =>
-      (h.manager as any).isProcessRunning(pid),
+    const recoveryIO = h.manager["identityRecoveryIO"];
+    Object.assign(peer.manager, {
+      identityRecoveryIO: {
+        ...recoveryIO,
+        probe: async () => {
+          followerProbed.resolve();
+          return recoveryIO.probe();
+        },
+      } satisfies IdentityRecoveryIO,
+    });
+    spyOnPrivate<[number], boolean>(peer.manager, "isProcessRunning").mockImplementation((pid) =>
+      h.manager["isProcessRunning"](pid),
     );
     const reachable = spyOn(peer.manager, "waitForReady").mockResolvedValue(true);
     let joined: DaemonStatus | undefined;
@@ -348,10 +372,10 @@ describe("provider-owned identity recovery", () => {
     const timer = new FakeTimer();
     const h = harness({ accepted: false }, join(dir, "lock"), timer);
     const peer = harness({ accepted: false }, join(dir, "lock"), timer);
-    const io = (h.manager as any).identityRecoveryIO;
-    (peer.manager as any).identityRecoveryIO = io;
-    spyOn(peer.manager as any, "isProcessRunning").mockImplementation((pid) =>
-      (h.manager as any).isProcessRunning(pid),
+    const io = h.manager["identityRecoveryIO"];
+    Object.assign(peer.manager, { identityRecoveryIO: io });
+    spyOnPrivate<[number], boolean>(peer.manager, "isProcessRunning").mockImplementation((pid) =>
+      h.manager["isProcessRunning"](pid),
     );
     const probe = io.probe;
     let unblock!: () => void;
@@ -388,7 +412,7 @@ describe("provider-owned identity recovery", () => {
     try {
       const start = h.manager.start();
       await authenticating;
-      expect((h.manager as any).readStartupLockHolder().recovering).toBe(true);
+      expect(h.manager["readStartupLockHolder"]().recovering).toBe(true);
       const follower = peer.manager.start().then((result) => {
         joined = true;
         return result;
@@ -425,9 +449,9 @@ describe("provider-owned identity recovery", () => {
         writeFileSync(target, content, { mode: 0o600 });
         rmSync(path);
         symlinkSync(target, path);
-        expect(() => (h.manager as any).markStartupLockRecovering()).not.toThrow();
+        expect(() => h.manager["markStartupLockRecovering"]()).not.toThrow();
         expect(readFileSync(target, "utf8")).toBe(content);
-        const recovered = await (h.manager as any).recoverSocketIdentity();
+        const recovered = await h.manager["recoverSocketIdentity"]();
         expect(recovered.running).toBe(true);
         expect(h.record).toEqual(complete);
         expect(readFileSync(target, "utf8")).toBe(content);
@@ -448,9 +472,9 @@ describe("provider-owned identity recovery", () => {
         expect(h.manager.acquireLock()).toBe(true);
         const content = readFileSync(path, "utf8");
         chmodSync(path, 0o666);
-        expect(() => (h.manager as any).markStartupLockRecovering()).not.toThrow();
+        expect(() => h.manager["markStartupLockRecovering"]()).not.toThrow();
         expect(readFileSync(path, "utf8")).toBe(content);
-        const recovered = await (h.manager as any).recoverSocketIdentity();
+        const recovered = await h.manager["recoverSocketIdentity"]();
         expect(recovered.running).toBe(true);
         expect(h.record).toEqual(complete);
         expect(readFileSync(path, "utf8")).toBe(content);
@@ -475,10 +499,10 @@ describe("provider-owned identity recovery", () => {
         generation,
       );
       writeFileSync(path, oldBody);
-      const before = (h.manager as any).readStartupLockHolder();
+      const before = h.manager["readStartupLockHolder"]();
       expect(before.recovering).toBe(false);
-      (h.manager as any).markStartupLockRecovering();
-      expect((h.manager as any).readStartupLockHolder()).toEqual({ ...before, recovering: true });
+      h.manager["markStartupLockRecovering"]();
+      expect(h.manager["readStartupLockHolder"]()).toEqual({ ...before, recovering: true });
       const body = readFileSync(path, "utf8");
       expect(body).toBe(
         formatLockContent(
@@ -504,11 +528,11 @@ describe("provider-owned identity recovery", () => {
     const h = harness({ accepted: false }, join(dir, "lock"));
     const next = harness({ accepted: false }, join(dir, "lock"), h.timer);
     h.timer.enableAutoAdvance();
-    (next.manager as any).identityRecoveryIO = (h.manager as any).identityRecoveryIO;
+    Object.assign(next.manager, { identityRecoveryIO: h.manager["identityRecoveryIO"] });
     const ready = spyOn(h.manager, "waitForReady").mockImplementation(async () => {
       h.manager.releaseLock();
       expect(next.manager.acquireLock()).toBe(true);
-      (next.manager as any).markStartupLockRecovering();
+      next.manager["markStartupLockRecovering"]();
       h.timer.setTimeout(() => h.setRecord(complete), 300);
       return true;
     });
@@ -531,11 +555,11 @@ describe("provider-owned identity recovery", () => {
     const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
     try {
       expect(h.manager.acquireLock()).toBe(true);
-      (h.manager as any).markStartupLockRecovering();
+      h.manager["markStartupLockRecovering"]();
       const content = readFileSync(path, "utf8");
       writeFileSync(path, content.slice(0, content.indexOf("{") + 1));
       h.timer.setTimeout(() => writeFileSync(path, content), 1);
-      const holder = await (h.manager as any).readSettledStartupLockHolder(30000);
+      const holder = await h.manager["readSettledStartupLockHolder"](30000);
       expect(holder.recovering).toBe(true);
       expect(holder.metadataPending).toBeUndefined();
       expect(h.timer.now()).toBe(1);
@@ -555,9 +579,9 @@ describe("provider-owned identity recovery", () => {
       expect(await h.manager.start()).toBe("joined");
       expect(existsSync(join(dir, "lock"))).toBe(false);
       expect(h.manager.acquireLock()).toBe(true);
-      expect((h.manager as any).readStartupLockHolder().recovering).toBeUndefined();
+      expect(h.manager["readStartupLockHolder"]().recovering).toBeUndefined();
       const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
-      const probe = spyOn((h.manager as any).identityRecoveryIO, "probe");
+      const probe = spyOn(h.manager["identityRecoveryIO"], "probe");
       expect(await h.manager.start()).toBe("joined");
       expect(ready).toHaveBeenCalled();
       expect(probe).not.toHaveBeenCalled();
@@ -569,7 +593,7 @@ describe("provider-owned identity recovery", () => {
   test("ordinary lock followers never inspect socket identity and retain the full budget", async () => {
     const dir = scratchDir("identity-ordinary-follower-");
     const h = harness({ accepted: false }, join(dir, "lock"));
-    const io = (h.manager as any).identityRecoveryIO;
+    const io = h.manager["identityRecoveryIO"];
     const socketExists = spyOn(io, "socketExists");
     const probe = spyOn(io, "probe");
     const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
@@ -589,7 +613,7 @@ describe("provider-owned identity recovery", () => {
     const h = harness({ accepted: false }, join(dir, "lock"));
     h.timer.enableAutoAdvance();
     const ready = spyOn(h.manager, "waitForReady").mockImplementation(async () => {
-      (h.manager as any).markStartupLockRecovering();
+      h.manager["markStartupLockRecovering"]();
       h.timer.setTimeout(() => h.setRecord(complete), 300);
       return true;
     });
@@ -612,12 +636,12 @@ describe("provider-owned identity recovery", () => {
       const reachable = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
       try {
         expect(h.manager.acquireLock()).toBe(true);
-        (h.manager as any).markStartupLockRecovering();
+        h.manager["markStartupLockRecovering"]();
         if (outcome === "repair") {
           h.timer.setTimeout(() => h.setRecord(complete), 300);
         }
         if (outcome === "stalled probe") {
-          const io = (h.manager as any).identityRecoveryIO;
+          const io = h.manager["identityRecoveryIO"];
           const probe = io.probe;
           let calls = 0;
           spyOn(io, "probe").mockImplementation(() =>
@@ -651,7 +675,7 @@ describe("provider-owned identity recovery", () => {
       recovery: { state: "failed" },
     });
     h.setRecord(null);
-    await expect((h.manager as any).startUnlocked({})).rejects.toThrow("Republish accepted");
+    await expect(h.manager["startUnlocked"]({})).rejects.toThrow("Republish accepted");
     expect(restart).not.toHaveBeenCalled();
     expect(h.client.callDaemonMethodCalls.every((c) => c.method === REPUBLISH)).toBe(true);
   });
@@ -664,18 +688,18 @@ describe("provider-owned identity recovery", () => {
         running: false,
         recovery: { state: "unauthenticated" },
       });
-      await expect((h.manager as any).startUnlocked({})).rejects.toThrow();
+      await expect(h.manager["startUnlocked"]({})).rejects.toThrow();
       expect(h.client.callDaemonMethodCalls).toHaveLength(0);
     });
   }
 
   test("fix 2: completeness follows the authenticated provider socket map", async () => {
     const h = harness();
-    const providerSockets = { control: socketPath, future: "/isolated/future.sock" };
+    const providerSockets = { ...sockets, future: "/isolated/future.sock" };
     h.setOwner({ ...complete, running: true, reportedSockets: providerSockets });
     h.results.set(REPUBLISH, { accepted: true });
     spyOn(h.client, "callDaemonMethod").mockImplementation(async () => {
-      h.setRecord({ ...complete, sockets: providerSockets as any });
+      h.setRecord({ ...complete, sockets: providerSockets });
       return { accepted: true };
     });
     expect((await h.manager.status()).recovery?.state).toBe("repaired");
@@ -693,9 +717,7 @@ describe("provider-owned identity recovery", () => {
         }
         return "restarted";
       });
-      const result = await (h.manager as any).replaceRecoveryOwner(
-        evidence.recovery?.replacementOwner,
-      );
+      const result = await h.manager["replaceRecoveryOwner"](replacementOwnerOf(evidence));
       expect(result).toMatchObject({
         running: succeeds,
         recovery: { state: succeeds ? "replaced" : "failed" },
@@ -715,14 +737,13 @@ describe("provider-owned identity recovery", () => {
       return "joined";
     });
     expect(
-      (await (h.manager as any).replaceRecoveryOwner(evidence.recovery?.replacementOwner)).recovery
-        ?.state,
+      (await h.manager["replaceRecoveryOwner"](replacementOwnerOf(evidence))).recovery?.state,
     ).toBe("joined");
   });
 
   test("fix 4: explicit stop authenticates missing metadata without republishing", async () => {
     const h = harness();
-    const stop = spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    const stop = spyOnPrivate(h.manager, "stopRunningDaemon").mockResolvedValue(undefined);
     await h.manager.stop();
     expect(stop).toHaveBeenCalledWith(expect.objectContaining({ pid: 123 }), expect.any(Number));
     expect(h.client.callDaemonMethodCalls).toHaveLength(0);
@@ -768,13 +789,16 @@ describe("provider-owned identity recovery", () => {
 
   test("fix 1: explicit start performs maintenance-admitted replacement preserving options and database", async () => {
     const h = harness({ accepted: false, reason: "republish_unavailable" });
-    const startUnlocked = (h.manager as any).startUnlocked.bind(h.manager);
+    const startUnlocked = h.manager["startUnlocked"].bind(h.manager);
     const restart = spyOn(h.manager, "restart");
     // Only the process stop/start boundaries are fake; exercise the real restart admission.
-    const stop = spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
-    const start = spyOn(h.manager as any, "startUnlocked").mockImplementation(async (options) => {
+    const stop = spyOnPrivate(h.manager, "stopRunningDaemon").mockResolvedValue(undefined);
+    const start = spyOnPrivate<[DaemonOptions], Promise<string>>(
+      h.manager,
+      "startUnlocked",
+    ).mockImplementation(async (options) => {
       expect(options).toEqual({ ...complete.options, strictPort: true });
-      expect((h.manager as any).daemonLaunchEnvironment(options).AUTOMOBILE_DB_PATH).toBe(
+      expect(h.manager["daemonLaunchEnvironment"](options).AUTOMOBILE_DB_PATH).toBe(
         complete.dbPath,
       );
       const replacement = {
@@ -810,13 +834,10 @@ describe("provider-owned identity recovery", () => {
     test(`${reason} defer fallback at maintenance admission without stopping`, async () => {
       const h = harness({ accepted: false, reason: "republish_unavailable" });
       h.results.set(PREPARE, { accepted: false, reason });
-      const stop = spyOn(h.manager as any, "stopRunningDaemon");
+      const stop = spyOnPrivate(h.manager, "stopRunningDaemon");
       expect(
-        (
-          await (h.manager as any).replaceRecoveryOwner(
-            (await h.manager.status()).recovery?.replacementOwner,
-          )
-        ).recovery,
+        (await h.manager["replaceRecoveryOwner"](replacementOwnerOf(await h.manager.status())))
+          .recovery,
       ).toMatchObject({
         state: "deferred",
         reason: expect.stringContaining(reason),
@@ -899,17 +920,18 @@ describe("provider-owned identity recovery", () => {
 });
 
 function provider(
-  sessions: unknown[] = [],
+  sessions: Session[] = [],
   token = "provider-generation",
   claimed: Record<string, unknown> = { processGenerationToken: token },
 ) {
   let writes = 0;
   const server = createTestUnixSocketServer(
     socketPath,
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => ({
+        hasSession: () => false,
+        getDeviceLabels: () => undefined,
         getAllSessions: () => sessions,
         getSession: () => null,
         releaseSession: async () => null,
@@ -919,6 +941,7 @@ function provider(
         getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
         releaseDevice: async () => {},
       }),
+      getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     },
     new FakeTimer(),
     null,
@@ -939,7 +962,12 @@ function provider(
     ...getCurrentBuildIdentity(),
   };
   const request = (method: string, requestParams: Record<string, unknown> = {}) =>
-    (server as any).handleLocalSocketRequest({ method, params: requestParams });
+    server["handleLocalSocketRequest"]({
+      id: "request",
+      type: "daemon_request",
+      method,
+      params: requestParams,
+    });
   const call = (overrides = {}) => request(REPUBLISH, { ...params, ...overrides });
   return {
     call,
@@ -953,9 +981,11 @@ function provider(
 describe("republish admin RPC admission", () => {
   test("provider coalesces concurrent cross-process requests into one publication", async () => {
     const p = provider();
-    expect(await Promise.all([p.call(), p.call(), p.call()])).toEqual(
-      Array(3).fill({ accepted: true }),
-    );
+    expect(await Promise.all([p.call(), p.call(), p.call()])).toEqual([
+      { accepted: true },
+      { accepted: true },
+      { accepted: true },
+    ]);
     expect(p.writes).toBe(1);
   });
   test("provider rejects a stale process generation even during a concurrent repair", async () => {
@@ -1001,7 +1031,7 @@ describe("republish admin RPC admission", () => {
     expect(p.writes).toBe(0);
   });
   test("fix 4: provider republishes with active sessions without maintenance admission", async () => {
-    const p = provider([{ sessionId: "active" }]);
+    const p = provider([createFakeSession("active", "emulator-5554", "android")]);
     expect(await p.call()).toEqual({ accepted: true });
     expect(p.writes).toBe(1);
   });
@@ -1043,11 +1073,11 @@ describe("incumbent-owned atomic publisher", () => {
     });
     await Promise.resolve();
     expect(acknowledged).toBe(false);
-    expect(record).toBeNull();
+    expect(io.readRecord()).toBeNull();
     finish();
     await first;
     expect(acknowledged).toBe(true);
-    expect(record).toEqual(complete);
+    expect(io.readRecord()).toEqual(complete);
     expect(await republishOwnedIdentity(true, complete, io, sockets)).toBe(true);
     expect(writes).toBe(1);
   });

@@ -44,9 +44,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../src/utils/deviceTimeouts";
 import { isCliToolFailure } from "../src/cli/index";
 import { coerceCliValue, getDeclaredParamTypes } from "../src/cli/cliValueCoercion";
-import { getDeviceSessionIdFromResult } from "../src/server/deviceSessionResult";
-import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
-import { withV1ClientErrors } from "../src/server/mcpError";
+import { getDeviceSessionIdFromResult } from "../src/daemon/deviceSessionResult";
+import { readToolEnvelopePayload } from "../src/daemon/toolEnvelopePayload";
+import { withV1ClientErrors } from "../src/daemon/mcpError";
 
 export interface DriveStep {
   tool: string;
@@ -396,7 +396,11 @@ async function createSdkClient(serverPath: string, timeoutMs: number): Promise<D
     command: process.execPath,
     args: [serverPath],
     stderr: "inherit",
-    env: { ...process.env },
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    ),
   });
   await client.connect(transport);
   return {

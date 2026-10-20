@@ -127,7 +127,9 @@ describe("SessionManager", () => {
       try {
         repository.deferNextUpsert();
         const creating = runWithAbortSignal(controller.signal, () =>
-          manager.createSession("expired-acquisition", "emulator-5554", "android"),
+          manager.createSession("expired-acquisition", "emulator-5554", "android", {
+            signal: controller.signal,
+          }),
         );
         await repository.waitForUpsert();
         controller.abort(new Error("provision deadline exhausted"));

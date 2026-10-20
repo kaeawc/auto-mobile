@@ -14,6 +14,7 @@ import { resolveAutoMobileBaseDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { Window as WindowInterface } from "./interfaces/Window";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 
 // AdbExecutor extended with optional AdbClient-specific methods. Both the
 // deadline (timeoutMs) and the cancellation signal are forwarded so the
@@ -48,7 +49,7 @@ export const DEFAULT_GET_ACTIVE_TIMEOUT_MS = 5000;
  * Set by the unit-test preload to the data directory it assigned the process, so the window
  * disk cache can tell that isolation default from a test that sets a data directory itself.
  */
-export const UNIT_TEST_ISOLATED_DATA_DIR_ENV = "AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR";
+export const UNIT_TEST_ISOLATED_DATA_DIR_ENV = ENV.UNIT_TEST_ISOLATED_DATA_DIR.name;
 
 export class Window implements WindowInterface {
   private adb: ExtendedAdbExecutor;
@@ -82,7 +83,7 @@ export class Window implements WindowInterface {
     const explicitDataDir =
       !!dataDirOverride && dataDirOverride !== env[UNIT_TEST_ISOLATED_DATA_DIR_ENV]?.trim();
     this.cacheDir =
-      env.NODE_ENV === "test" && !explicitDataDir
+      readEnvRaw(AMBIENT_ENV.NODE_ENV, env) === "test" && !explicitDataDir
         ? null
         : path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.WINDOW);
     this.adb = adbFactory.create(device);

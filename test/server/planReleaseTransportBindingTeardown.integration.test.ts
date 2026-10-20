@@ -1,8 +1,7 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
-import type { ToolCapability } from "../../src/features/toolSelection/SessionToolSelectionService";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   registerObservationResources,
   type ObservationResourceDependencies,
@@ -40,8 +39,8 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
   // Narrow the released session so the whole "clipboard" capability is disabled
   // for it; every other session (and the unbound state) keeps it enabled.
   const profile = {
-    isEnabled: async (sessionUuid: string, capability: ToolCapability): Promise<boolean> =>
-      !(sessionUuid === RELEASED_SESSION && capability === "clipboard"),
+    isEnabled: async (sessionUuid: string | undefined, toolName: string): Promise<boolean> =>
+      !(sessionUuid === RELEASED_SESSION && toolName === "clipboard"),
   };
 
   test("a session release clears the transport binding so a later tools/list no longer enforces the released profile", async () => {
@@ -86,7 +85,11 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
       uri: `automobile:device-session/${RELEASED_SESSION}/screenshot`,
     });
 
-    expect(JSON.parse(response.contents[0].text!)).toMatchObject({
+    const content = response.contents[0];
+    if (!content || !("text" in content)) {
+      throw new Error("Expected a text resource content");
+    }
+    expect(JSON.parse(content.text)).toMatchObject({
       code: "SESSION_NOT_ACTIVE",
       retryable: false,
     });

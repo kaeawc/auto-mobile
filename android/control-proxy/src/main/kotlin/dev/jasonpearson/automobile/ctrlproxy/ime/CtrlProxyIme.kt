@@ -291,18 +291,9 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       )
     }
 
-  fun commitText(
-    text: String,
-    priorImeId: String?,
-    isCancelled: () -> Boolean = { false },
-    delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
-    timeoutMs: Long? = null,
-    requestDeadlineMs: Long = Long.MAX_VALUE,
-    trace: Boolean = false,
-    onResult: (ImeCommitResult) -> Unit,
-  ) {
+  fun commitText(request: ImeCommitRequest, onResult: (ImeCommitResult) -> Unit) {
     mainHandler.post {
-      if (isCancelled()) {
+      if (request.isCancelled()) {
         onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
         return@post
       }
@@ -325,11 +316,11 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       val secureInput = ImeCommitDriver.isPasswordInput(currentInputEditorInfo?.inputType)
       recordTrace(
         "commitStart",
-        "delivery" to delivery.name,
-        "textLength" to if (secureInput) null else text.length,
+        "delivery" to request.delivery.name,
+        "textLength" to if (secureInput) null else request.text.length,
         "secure" to if (secureInput) true else null,
       )
-      val restoreId = priorImeId?.takeUnless { it == ownImeId() }
+      val restoreId = request.priorImeId?.takeUnless { it == ownImeId() }
       rememberRestore(driver, restoreId)
       var finished = false
       fun finish(result: ImeCommitResult) {
@@ -342,7 +333,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           "committedUnits" to result.committedUnits,
           "insertedLength" to result.insertedText?.length,
         )
-        val tracedResult = if (trace) result.copy(trace = traceRecorder.snapshot()) else result
+        val tracedResult =
+          if (request.trace) result.copy(trace = traceRecorder.snapshot()) else result
         if (activeDriver === driver) {
           activeDriver = null
           cancelActiveCommit = null
@@ -354,32 +346,33 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         finish(ImeCommitResult(success = false, error = reason))
       }
       awaitInputConnection(
-        text = text,
-        priorImeId = restoreId,
-        driver = driver,
-        deadlineMs = connectionDeadlineMs(SystemClock.uptimeMillis(), requestDeadlineMs),
-        generation = generation,
-        isCancelled = isCancelled,
-        delivery = delivery,
-        commitBudgetMs = commitTimeoutMs(timeoutMs, ImeGraphemes.split(text).size),
-        requestDeadlineMs = requestDeadlineMs,
+        request.copy(priorImeId = restoreId),
+        ImeConnectionWait(
+          driver = driver,
+          deadlineMs = connectionDeadlineMs(SystemClock.uptimeMillis(), request.requestDeadlineMs),
+          generation = generation,
+          commitBudgetMs =
+            commitTimeoutMs(request.timeoutMs, ImeGraphemes.split(request.text).size),
+        ),
         onResult = ::finish,
       )
     }
   }
 
   private fun awaitInputConnection(
-    text: String,
-    priorImeId: String?,
-    driver: ImeCommitDriver,
-    deadlineMs: Long,
-    generation: Long,
-    isCancelled: () -> Boolean,
-    delivery: ImeTextDelivery,
-    commitBudgetMs: Long,
-    requestDeadlineMs: Long,
+    request: ImeCommitRequest,
+    wait: ImeConnectionWait,
     onResult: (ImeCommitResult) -> Unit,
   ) {
+    val priorImeId = request.priorImeId
+    val isCancelled = request.isCancelled
+    val delivery = request.delivery
+    val requestDeadlineMs = request.requestDeadlineMs
+    val driver = wait.driver
+    val deadlineMs = wait.deadlineMs
+    val generation = wait.generation
+    val commitBudgetMs = wait.commitBudgetMs
+
     if (generation != commitGeneration) return
     if (isCancelled()) {
       onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
@@ -393,32 +386,15 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     val connection = currentInputConnection
     if (isInputStarted && connection != null) {
       if (delivery == ImeTextDelivery.CLEAR_FIELD) {
-        val cleared =
-          clearImeField(
-            finishComposing = connection::finishComposingText,
-            readBefore = { connection.getTextBeforeCursor(it, 0) },
-            readAfter = { connection.getTextAfterCursor(it, 0) },
-            deleteSurrounding = connection::deleteSurroundingText,
-          )
-        val result =
-          if (cleared.success && !editorSyncSucceeded(InputConnectionAdapter(connection, this)))
-            cleared.copy(
-              success = false,
-              error = "Input connection lost while syncing clear",
-              partialApplication = true,
-            )
-          else cleared
+        val result = ConnectedField(connection).clear()
         driver.restoreIfNeeded(priorImeId)
         onResult(result)
         if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
         return
       }
       driver.commit(
-        text,
-        priorImeId,
-        SystemClock.uptimeMillis() + commitBudgetMs,
-        isCancelled,
-        delivery,
+        request,
+        deadlineMs = SystemClock.uptimeMillis() + commitBudgetMs,
         hardDeadlineMs = driverDeadlineMs(SystemClock.uptimeMillis(), requestDeadlineMs),
       ) { result ->
         onResult(result)
@@ -436,21 +412,34 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     }
     mainHandler.postDelayed(
       {
-        awaitInputConnection(
-          text,
-          priorImeId,
-          driver,
-          deadlineMs,
-          generation,
-          isCancelled,
-          delivery,
-          commitBudgetMs,
-          requestDeadlineMs,
-          onResult,
-        )
+        awaitInputConnection(request, wait, onResult)
       },
       minOf(INPUT_CONNECTION_POLL_MS, deadlineMs - SystemClock.uptimeMillis()).coerceAtLeast(0),
     )
+  }
+
+  private inner class ConnectedField(
+    private val connection: android.view.inputmethod.InputConnection,
+  ) {
+    fun clear(): ImeCommitResult {
+      val cleared =
+        clearImeField(
+          finishComposing = connection::finishComposingText,
+          readBefore = { connection.getTextBeforeCursor(it, 0) },
+          readAfter = { connection.getTextAfterCursor(it, 0) },
+          deleteSurrounding = connection::deleteSurroundingText,
+        )
+      return if (
+        cleared.success &&
+          !editorSyncSucceeded(InputConnectionAdapter(connection, this@CtrlProxyIme))
+      )
+        cleared.copy(
+          success = false,
+          error = "Input connection lost while syncing clear",
+          partialApplication = true,
+        )
+      else cleared
+    }
   }
 
   private fun createSink(): ImeCommitSink =

@@ -113,7 +113,7 @@ class ViewHierarchyScaleMetadataTest {
    * through it — the debounced direct extraction ([extractHierarchyDirect]) and the ADB
    * EXTRACT_HIERARCHY broadcast ([extractHierarchy]). If the helper's scale-1 contract is altered,
    * or either route stops calling it, no serialization test above would notice. Scans the committed
-   * source (the BroadcastGuardAdoptionTest mechanism) rather than executing the
+   * source (the BroadcastGuardAdoptionTestSourceTest mechanism) rather than executing the
    * AccessibilityService, which cannot be constructed in a unit test.
    */
   @Test
@@ -121,7 +121,7 @@ class ViewHierarchyScaleMetadataTest {
     val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
     val marker = "private fun withScaleMetadata"
     val start = source.indexOf(marker)
-    assertTrue("withScaleMetadata not found in CtrlProxy.kt", start >= 0)
+    assertTrue("withScaleMetadata not found in HierarchyController.kt", start >= 0)
     // The helper is a single-expression `copy(...)`; carve out its argument list.
     val parenOpen = source.indexOf('(', source.indexOf("hierarchy?.copy", start))
     val body = source.substring(parenOpen, KotlinSourceScan.matchParen(source, parenOpen))
@@ -144,11 +144,17 @@ class ViewHierarchyScaleMetadataTest {
   fun `every hierarchy route enriches scale metadata through the shared helper`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
 
-    for (route in listOf("private fun extractHierarchyDirect", "private fun extractHierarchy(")) {
+    for (route in listOf("private fun extractHierarchyDirect", "internal fun extractHierarchy(")) {
       val start = source.indexOf(route)
-      assertTrue("$route not found in CtrlProxy.kt", start >= 0)
+      assertTrue("$route not found in HierarchyController.kt", start >= 0)
       val bodyOpen = source.indexOf('{', start)
-      val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val entry = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+      val suffix = if (route.contains("Direct")) "Direct" else "Fallback"
+      assertTrue(entry.contains("HierarchyCapture("))
+      assertTrue(entry.contains(".extract$suffix("))
+      val extractStart = source.indexOf("fun extract$suffix(")
+      val extractOpen = source.indexOf('{', extractStart)
+      val body = source.substring(extractOpen, KotlinSourceScan.matchBrace(source, extractOpen))
       assertTrue(
         "$route must enrich scale metadata via withScaleMetadata so the daemon retains it off this route (#4548)",
         "withScaleMetadata(" in body,
@@ -159,11 +165,27 @@ class ViewHierarchyScaleMetadataTest {
   @Test
   fun `adb hierarchy fallback brackets and stamps rotation`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
-    val marker = "private fun extractHierarchy("
+    val marker = "internal fun extractHierarchy("
     val start = source.indexOf(marker)
-    assertTrue("ADB hierarchy route not found in CtrlProxy.kt", start >= 0)
+    assertTrue("ADB hierarchy route not found in HierarchyController.kt", start >= 0)
     val bodyOpen = source.indexOf('{', start)
-    val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+    val entry = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+    assertTrue(
+      entry.contains("HierarchyCapture(null).extractFallback(textFilter, disableAllFiltering)"),
+    )
+    val captureStart = source.indexOf("private inner class HierarchyCapture(")
+    val captureOpen = source.indexOf('{', captureStart)
+    val capture = source.substring(captureOpen, KotlinSourceScan.matchBrace(source, captureOpen))
+    val extractStart = capture.indexOf("fun extractFallback(")
+    val extractOpen = capture.indexOf('{', extractStart)
+    val extraction =
+      capture.substring(extractOpen, KotlinSourceScan.matchBrace(capture, extractOpen))
+    assertTrue(extraction.contains("enrichFallback(hierarchy)"))
+    val enrichStart = capture.indexOf("private fun enrichFallback(")
+    val enrichOpen = capture.indexOf('{', enrichStart)
+    val body =
+      capture.substring(0, capture.indexOf("fun walkDirect(")) +
+        capture.substring(enrichOpen, KotlinSourceScan.matchBrace(capture, enrichOpen))
 
     assertTrue(
       "ADB fallback must capture the display-change generation before hierarchy inputs",
@@ -184,7 +206,7 @@ class ViewHierarchyScaleMetadataTest {
   }
 
   private fun locateCtrlProxySource(): File {
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/HierarchyController.kt"
     // The Gradle working directory may be the module root, `android`, or the repo root.
     val direct =
       listOf(File(rel), File("control-proxy/$rel"), File("android/control-proxy/$rel"))
@@ -204,7 +226,7 @@ class ViewHierarchyScaleMetadataTest {
       }
       dir = dir.parentFile
     }
-    fail("Could not locate CtrlProxy.kt from user.dir=$userDir")
+    fail("Could not locate HierarchyController.kt from user.dir=$userDir")
     error("unreachable")
   }
 }

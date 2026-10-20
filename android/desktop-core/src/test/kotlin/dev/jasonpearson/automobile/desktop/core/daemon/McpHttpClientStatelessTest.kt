@@ -118,8 +118,11 @@ class McpHttpClientStatelessTest {
 
     fun client() =
       McpHttpClient(
-        endpoint = "http://localhost/mcp",
-        requestSender = HttpRequestSender { request -> handle(request) },
+        dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClientOptions(
+          endpoint = "http://localhost/mcp",
+          tokenProvider = DaemonHttpTokenProvider { null },
+          requestSender = HttpRequestSender { request -> handle(request) },
+        ),
       )
 
     private fun handle(request: HttpRequest): HttpResponse<String> {

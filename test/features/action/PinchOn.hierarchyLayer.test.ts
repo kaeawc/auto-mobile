@@ -1,10 +1,12 @@
-import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { afterEach, describe, expect, mock, spyOn, test, beforeEach } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { BootedDevice, PinchOnOptions } from "../../../src/models";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -13,6 +15,16 @@ import {
   capturedTwoWindowHierarchy,
   observationOf,
 } from "../../helpers/prototypeWindowCapture";
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+
+let managerInstanceSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyManager, "getInstance">>;
+beforeEach(() => {
+  managerInstanceSpy = spyOn(AndroidCtrlProxyManager, "getInstance");
+});
 
 const device: BootedDevice = {
   name: "Android test device",
@@ -30,10 +42,8 @@ function createPinch(hierarchy: ViewHierarchyResult) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const service = new FakeCtrlProxy(timer);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
-  spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-    isAvailable: async () => true,
-  } as unknown as AndroidCtrlProxyManager);
+  clientSpy.mockReturnValue(service);
+  managerInstanceSpy.mockReturnValue(FakeCtrlProxyManager.withAvailability(true));
   const observation = { ...observationOf(hierarchy), screenSize: { width: 1080, height: 2400 } };
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation);
@@ -42,7 +52,7 @@ function createPinch(hierarchy: ViewHierarchyResult) {
     capture: new FakeHierarchyCapture(() => hierarchy),
   });
   pinchOn.observeScreen = observeScreen;
-  pinchOn.observedInteraction = (action) => action(observation);
+  pinchOn.observedInteraction = runBlockWith(observation);
   return { pinchOn, service };
 }
 
@@ -57,12 +67,10 @@ afterEach(() => {
 });
 
 describe("pinchOn layer (#9305)", () => {
-  // CI's per-test time excludes only beforeAll: one throwaway pinch pays the resolver's one-time
-  // module/JIT cost over the captured hierarchy here, not in the first timed test.
-  beforeAll(async () => {
+  // A throwaway pinch pays the resolver's module/JIT cost before each measured test.
+  beforeEach(async () => {
     const { pinchOn } = createPinch(capturedFloatingCoverHierarchy());
     await pinchOn.execute(pinch("coverBox", "prototype"));
-    mock.restore();
   });
 
   test('"prototype" resolves the container among prototype nodes and pinches inside the prototype', async () => {

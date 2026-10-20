@@ -1,17 +1,22 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeVisionAnalyzer } from "../../fakes/FakeVisionAnalyzer";
 import type { VisionFallbackConfig } from "../../../src/vision/VisionTypes";
+
+afterEach(() => mock.restore());
 
 const enabledVisionConfig: VisionFallbackConfig = {
   enabled: true,
@@ -38,17 +43,18 @@ describe("PinchOn vision fallback", () => {
   let managerSpy: ReturnType<typeof spyOn> | null = null;
 
   const createHierarchy = (): ViewHierarchyResult => ({
-    hierarchy: { node: [] },
+    hierarchy: { node: createFlatNodeForTest({ node: [] }) },
     packageName: "com.test.app",
     updatedAt: Date.now(),
   });
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy(),
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: createHierarchy(),
+    });
 
   beforeEach(() => {
     fakeObserveScreen = new FakeObserveScreen();
@@ -60,12 +66,10 @@ describe("PinchOn vision fallback", () => {
     fakeCtrlProxy = new FakeCtrlProxy();
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 
-    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true,
-    } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as any,
+    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+      FakeCtrlProxyManager.withAvailability(true),
     );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
   });
 
   afterEach(() => {
@@ -81,11 +85,11 @@ describe("PinchOn vision fallback", () => {
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).timer = fakeTimer;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
     return pinchOn;
   };
 
@@ -160,11 +164,11 @@ describe("PinchOn vision fallback", () => {
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).timer = fakeTimer;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
 
     const result = await pinchOn.execute({
       direction: "in",

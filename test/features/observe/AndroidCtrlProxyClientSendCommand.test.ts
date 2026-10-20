@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
   ctrlProxyRequests,
@@ -32,17 +31,17 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "client-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "client-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
     },
   );
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     "request_activate_accessibility_link",
     "discover_keystore",
@@ -123,15 +122,15 @@ const methods: Method[] = [
   {
     name: "requestActivateAccessibilityLink",
     invoke: (h, signal, onDispatch) =>
-      h.client.requestActivateAccessibilityLink(
-        " link ",
-        2,
+      h.client.requestActivateAccessibilityLink({
+        text: " link ",
+        occurrence: 2,
         selector,
-        50,
+        timeoutMs: 50,
         perf,
         signal,
         onDispatch,
-      ),
+      }),
     frame: (requestId) =>
       ctrlProxyRequests.requestActivateAccessibilityLink({
         requestId,

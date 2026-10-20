@@ -15,6 +15,15 @@ import {
 import type { BlockerHandlerDeps } from "../../../src/features/navigation/ExploreBlockerDetection";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeElementParser } from "../../fakes/FakeElementParser";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
+
+function parserFlatteningTo(elements: Element[]): FakeElementParser {
+  const parser = new FakeElementParser();
+  parser.nextFlattenedElements = elements.map((element, index) => ({ element, index, depth: 0 }));
+  return parser;
+}
 
 describe("ExploreBlockerDetection", () => {
   function createMockElement(overrides: Partial<Element> = {}): Element {
@@ -419,7 +428,7 @@ describe("ExploreBlockerDetection", () => {
     // The selector is chosen against the real hierarchy (tapOn's own finder
     // decides uniqueness), so give the handlers one built from the elements.
     function hierarchyOf(elements: Element[]): ViewHierarchyResult {
-      return {
+      return createHierarchyForTest({
         hierarchy: {
           node: elements.map((element) => ({
             $: {
@@ -434,7 +443,7 @@ describe("ExploreBlockerDetection", () => {
           })),
         },
         packageName: "com.test",
-      } as unknown as ViewHierarchyResult;
+      });
     }
 
     test("handlePermissionDialog taps an Allow button with text and resource-id by id only", async () => {
@@ -871,17 +880,13 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
       ];
-      const parser = {
-        flattenViewHierarchy: () =>
-          elements.map((element, index) => ({ element, index, depth: 0 })),
-      } as unknown as ElementParser;
+      const parser = parserFlatteningTo(elements);
 
       const handled = await detectAndHandleBlockers(
-        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         deps,
       );
@@ -901,17 +906,13 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
       ];
-      const parser = {
-        flattenViewHierarchy: () =>
-          elements.map((element, index) => ({ element, index, depth: 0 })),
-      } as unknown as ElementParser;
+      const parser = parserFlatteningTo(elements);
 
       const handled = await detectAndHandleBlockers(
-        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         { tapActionFactory: tap.factory, timer },
       );
@@ -934,17 +935,13 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Skipping", "resource-id": "com.test:id/skipping" }),
         createMockElement({ text: "Skip", "resource-id": "com.test:id/skip_button" }),
       ];
-      const parser = {
-        flattenViewHierarchy: () =>
-          elements.map((element, index) => ({ element, index, depth: 0 })),
-      } as unknown as ElementParser;
+      const parser = parserFlatteningTo(elements);
 
       const handled = await detectAndHandleBlockers(
-        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         deps,
       );
@@ -966,17 +963,13 @@ describe("ExploreBlockerDetection", () => {
             "resource-id": "com.test:id/dismiss_button",
           }),
         ];
-        const parser = {
-          flattenViewHierarchy: () =>
-            elements.map((element, index) => ({ element, index, depth: 0 })),
-        } as unknown as ElementParser;
+        const parser = parserFlatteningTo(elements);
 
         const handled = await detectAndHandleBlockers(
-          { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+          createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
           androidDevice,
           null,
           parser,
-          async () => {},
           undefined,
           deps,
         );
@@ -993,17 +986,13 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Disclosed", "resource-id": "com.test:id/disclosed" }),
         createMockElement({ text: "Skipping", "resource-id": "com.test:id/skipping" }),
       ];
-      const parser = {
-        flattenViewHierarchy: () =>
-          elements.map((element, index) => ({ element, index, depth: 0 })),
-      } as unknown as ElementParser;
+      const parser = parserFlatteningTo(elements);
 
       const handled = await detectAndHandleBlockers(
-        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        createObserveResultForTest({ viewHierarchy: hierarchyOf(elements) }),
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         deps,
       );
@@ -1024,17 +1013,13 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Notes now", "resource-id": "com.test:id/notes_now" }),
       ];
-      const notesParser = {
-        flattenViewHierarchy: () =>
-          notesElements.map((element, index) => ({ element, index, depth: 0 })),
-      } as unknown as ElementParser;
+      const notesParser = parserFlatteningTo(notesElements);
 
       const notesHandled = await detectAndHandleBlockers(
-        { viewHierarchy: hierarchyOf(notesElements) } as unknown as ObserveResult,
+        createObserveResultForTest({ viewHierarchy: hierarchyOf(notesElements) }),
         androidDevice,
         null,
         notesParser,
-        async () => {},
         undefined,
         notesDeps,
       );
@@ -1047,17 +1032,13 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
       ];
-      const genuineParser = {
-        flattenViewHierarchy: () =>
-          genuineElements.map((element, index) => ({ element, index, depth: 0 })),
-      } as unknown as ElementParser;
+      const genuineParser = parserFlatteningTo(genuineElements);
 
       const genuineHandled = await detectAndHandleBlockers(
-        { viewHierarchy: hierarchyOf(genuineElements) } as unknown as ObserveResult,
+        createObserveResultForTest({ viewHierarchy: hierarchyOf(genuineElements) }),
         androidDevice,
         null,
         genuineParser,
-        async () => {},
         undefined,
         genuineDeps,
       );
@@ -1077,12 +1058,12 @@ describe("ExploreBlockerDetection", () => {
       extractionCount: () => number;
     } {
       let calls = 0;
-      const parser = {
-        flattenViewHierarchy: () => {
-          calls += 1;
-          return elements.map((element, index) => ({ element, index, depth: 0 }));
-        },
-      } as unknown as ElementParser;
+      const parser = parserFlatteningTo(elements);
+      const flatten = parser.flattenViewHierarchy.bind(parser);
+      parser.flattenViewHierarchy = (...args) => {
+        calls += 1;
+        return flatten(...args);
+      };
       return { parser, extractionCount: () => calls };
     }
 
@@ -1090,12 +1071,16 @@ describe("ExploreBlockerDetection", () => {
       hierarchy: { error?: string },
       packageName = "com.test",
     ): ObserveResult {
-      return {
-        viewHierarchy: { hierarchy, packageName },
-      } as unknown as ObserveResult;
+      return createObserveResultForTest({
+        viewHierarchy: createHierarchyForTest({ hierarchy, packageName }),
+      });
     }
 
-    const device = {} as unknown as BootedDevice;
+    const device: BootedDevice = {
+      deviceId: "test-device",
+      name: "Test Device",
+      platform: "android",
+    };
 
     const permissionAndLoginElements: Element[] = [
       { text: "Allow access", clickable: true } as Element,
@@ -1108,7 +1093,6 @@ describe("ExploreBlockerDetection", () => {
 
     test("handles a permission-and-login screen as a permission dialog, not a login dead-end", async () => {
       // Permission handling still takes precedence over normal login selection.
-      let deadEndCalls = 0;
       const { parser } = makeParser(permissionAndLoginElements);
       const tap = new FakeDialogTapAction();
       const timer = new FakeTimer();
@@ -1119,61 +1103,36 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => {
-          deadEndCalls += 1;
-        },
         undefined,
         { timer, tapActionFactory: tap.factory },
       );
 
-      expect(deadEndCalls).toBe(0);
       expect(tap.calls).toEqual([{ text: "Allow access", action: "tap" }]);
       expect(result).toBe(true);
     });
 
     test("leaves login screens to normal selection before dead-end handling", async () => {
-      let deadEndCalls = 0;
       const { parser } = makeParser(loginElements);
 
-      const result = await detectAndHandleBlockers(
-        observationWith({}),
-        device,
-        null,
-        parser,
-        async () => {
-          deadEndCalls += 1;
-        },
-      );
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, parser);
 
-      expect(deadEndCalls).toBe(0);
       expect(result).toBe(false);
     });
 
     test("returns false and never handles blockers on a regular screen", async () => {
-      let deadEndCalls = 0;
       const { parser } = makeParser([
         { text: "Home", clickable: true } as Element,
         { text: "Settings", clickable: true } as Element,
       ]);
 
-      const result = await detectAndHandleBlockers(
-        observationWith({}),
-        device,
-        null,
-        parser,
-        async () => {
-          deadEndCalls += 1;
-        },
-      );
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, parser);
 
       expect(result).toBe(false);
-      expect(deadEndCalls).toBe(0);
     });
 
     test("bails out without extracting elements when the hierarchy carries an error", async () => {
       // Dropping the hierarchy-error guard would extract the login elements.
       // With the guard, extraction never runs.
-      let deadEndCalls = 0;
       const { parser, extractionCount } = makeParser(loginElements);
 
       const result = await detectAndHandleBlockers(
@@ -1181,32 +1140,23 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => {
-          deadEndCalls += 1;
-        },
       );
 
       expect(result).toBe(false);
-      expect(deadEndCalls).toBe(0);
       expect(extractionCount()).toBe(0);
     });
 
     test("returns false when the observation has no view hierarchy", async () => {
-      let deadEndCalls = 0;
       const { parser, extractionCount } = makeParser(loginElements);
 
       const result = await detectAndHandleBlockers(
-        { viewHierarchy: undefined } as unknown as ObserveResult,
+        createObserveResultForTest({ viewHierarchy: undefined }),
         device,
         null,
         parser,
-        async () => {
-          deadEndCalls += 1;
-        },
       );
 
       expect(result).toBe(false);
-      expect(deadEndCalls).toBe(0);
       expect(extractionCount()).toBe(0);
     });
   });

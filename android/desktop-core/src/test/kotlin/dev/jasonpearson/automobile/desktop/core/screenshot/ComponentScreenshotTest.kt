@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.components.ErrorCard
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
+import dev.jasonpearson.automobile.desktop.core.components.SearchBarOptions
 import dev.jasonpearson.automobile.desktop.core.shell.StatusBarBadge
 import org.junit.Test
 
@@ -71,7 +72,12 @@ class ComponentScreenshotTest {
   @Test
   fun searchBarEmpty() =
     screenshotTest("search_bar_empty") {
-      ThemedSurface(dark = true) { SearchBar(query = "", onQueryChange = {}) }
+      ThemedSurface(dark = true) {
+        SearchBar(
+          query = "",
+          onQueryChange = {},
+        )
+      }
     }
 
   @Test
@@ -81,9 +87,12 @@ class ComponentScreenshotTest {
         SearchBar(
           query = "MainActivity",
           onQueryChange = {},
-          showRegexToggle = true,
-          isRegexEnabled = true,
-          onRegexToggle = {},
+          options =
+            SearchBarOptions(
+              showRegexToggle = true,
+              isRegexEnabled = true,
+              onRegexToggle = {},
+            ),
         )
       }
     }

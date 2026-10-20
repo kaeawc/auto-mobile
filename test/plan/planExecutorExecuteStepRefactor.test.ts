@@ -1,16 +1,16 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 
 interface CapturedCall {
   params: Record<string, unknown>;
@@ -18,11 +18,11 @@ interface CapturedCall {
 }
 
 describe("PlanExecutor executeStep refactor", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let okCalls: CapturedCall[];
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     okCalls = [];
 
     const deviceSchema = z.object({
@@ -109,7 +109,7 @@ describe("PlanExecutor executeStep refactor", () => {
       },
     );
     let settled = false;
-    const pending = new DefaultPlanExecutor(timer)
+    const pending = createDefaultPlanExecutor(timer)
       .executePlan(
         {
           name: "parked barrier abort",
@@ -271,12 +271,12 @@ describe("PlanExecutor executeStep refactor", () => {
     const originalAny = AbortSignal.any;
     const anyCalls: AbortSignal[][] = [];
     const anyReturnSignals: AbortSignal[] = [];
-    (AbortSignal as any).any = (signals: AbortSignal[]) => {
+    const anySpy = spyOn(AbortSignal, "any").mockImplementation((signals: AbortSignal[]) => {
       anyCalls.push([...signals]);
       const combined = originalAny(signals);
       anyReturnSignals.push(combined);
       return combined;
-    };
+    });
 
     let siblingSignal: AbortSignal | undefined;
     ToolRegistry.register(
@@ -341,7 +341,7 @@ describe("PlanExecutor executeStep refactor", () => {
       expect(siblingFailure?.error).toContain(OPERATION_CANCELLED_MESSAGE);
       expect(siblingFailure?.failureObservation).toBeUndefined();
     } finally {
-      (AbortSignal as any).any = originalAny;
+      anySpy.mockRestore();
     }
   });
 });

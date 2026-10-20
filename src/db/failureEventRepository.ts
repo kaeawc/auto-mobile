@@ -84,9 +84,22 @@ export class FailureEventRepository {
     insertsSinceCleanup: CLEANUP_CHECK_INTERVAL,
   };
 
-  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
+  /** `retention` lets tests observe the amortized sweeps at small caps. */
+  constructor(
+    db?: Kysely<Database>,
+    timer: Timer = defaultTimer,
+    private readonly retention: { crashMaxRows?: number; anrMaxRows?: number } = {},
+  ) {
     this.timer = timer;
     this.db = db ?? null;
+  }
+
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      pruneCrashesToRowCap: (maxRows?: number) => this.pruneCrashesToRowCap(maxRows),
+      pruneAnrsToRowCap: (maxRows?: number) => this.pruneAnrsToRowCap(maxRows),
+    };
   }
 
   private getDb(): Kysely<Database> {
@@ -493,12 +506,9 @@ export class FailureEventRepository {
 
     await db.deleteFrom("anrs").where("timestamp", "<", cutoffTimestamp).execute();
 
-    // No `status = 'failure'` filter (#6464): the real write path
-    // (`ToolCallRepository.recordToolCall`) never sets `status`, so it falls
-    // through to the column's schema-level `DEFAULT 'success'`
-    // (`2026_01_27_000_crash_anr_monitoring.ts`) — never `'failure'` — so that
-    // filter previously matched zero rows regardless of age. Age-based
-    // deletion now mirrors the unconditional crash/ANR deletes above.
+    // Age-based deletion remains unconditional (#6464), mirroring crashes/ANRs.
+    // The write path now records status (#13608); both successes and failures
+    // intentionally expire by age rather than retaining successes indefinitely.
     await db.deleteFrom("tool_calls").where("timestamp", "<", cutoffDate).execute();
 
     logger.info(`[FAILURE_REPO] Deleted failures older than ${olderThanDays} days`);
@@ -508,11 +518,15 @@ export class FailureEventRepository {
   // inserts (#6464), mirroring the other RowCapTable repositories so retention
   // does not add a scan to the hot insert path.
   private async cleanupCrashRetention(): Promise<void> {
-    await runAmortizedRetention(this.crashRetentionState, () => this.pruneCrashesToRowCap());
+    await runAmortizedRetention(this.crashRetentionState, () =>
+      this.pruneCrashesToRowCap(this.retention.crashMaxRows),
+    );
   }
 
   private async cleanupAnrRetention(): Promise<void> {
-    await runAmortizedRetention(this.anrRetentionState, () => this.pruneAnrsToRowCap());
+    await runAmortizedRetention(this.anrRetentionState, () =>
+      this.pruneAnrsToRowCap(this.retention.anrMaxRows),
+    );
   }
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap

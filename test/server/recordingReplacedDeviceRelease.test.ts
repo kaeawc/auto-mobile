@@ -1,15 +1,17 @@
+import { z } from "zod/v4";
+import { toolJson } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { promises as fsPromises } from "node:fs";
-import * as segmentedTools from "../../src/server/videoRecordingTools";
-import * as gestures from "../../src/server/deviceGestureRecordingManager";
-import * as manager from "../../src/server/videoRecordingManager";
+import { segmentedRecordingCleanup } from "../../src/daemon/segmentedRecordingCleanup";
+import * as gestures from "../../src/daemon/deviceGestureRecordingManager";
+import * as manager from "../../src/daemon/videoRecordingManager";
 import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import { VideoRecorderService } from "../../src/features/video";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -21,7 +23,7 @@ import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
-import { resetStoppedDeviceGestureRecordings } from "../../src/server/deviceGestureRecordingManager";
+import { resetStoppedDeviceGestureRecordings } from "../../src/daemon/deviceGestureRecordingManager";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { logger } from "../../src/utils/logger";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";
@@ -150,10 +152,10 @@ describe("recording release after serial identity replacement", () => {
       recordingId: active.recordingId,
       sessionUuid: "A",
     });
-    const parsed = JSON.parse(response.content[0].text);
+    const parsed = toolJson(response);
     expect(parsed.alreadyStopped).toBe(true);
     expect(parsed.recordings).toHaveLength(1);
-    expect(parsed.recordings[0]).toMatchObject({
+    expect(z.array(z.unknown()).parse(parsed.recordings)[0]).toMatchObject({
       recordingId: active.recordingId,
       metadata: {
         endedAt: interrupted?.endedAt,
@@ -317,7 +319,7 @@ describe("recording release after serial identity replacement", () => {
   test("a wedged segmented abandon cannot starve single-file or gesture host cleanup", async () => {
     const active = await startA();
     const segment = spyOn(
-      segmentedTools,
+      segmentedRecordingCleanup,
       "finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice",
     ).mockImplementation(() => new Promise<void>(() => {}));
     const owned = spyOn(gestures, "ownedDeviceGestureRecordingId").mockReturnValue("gesture-A");

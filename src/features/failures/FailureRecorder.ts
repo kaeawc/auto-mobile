@@ -7,7 +7,7 @@ import type {
   FailureType,
   StackTraceElement,
   AggregatedToolCallInfo,
-} from "../../server/failuresResources";
+} from "../../models/failureAnalytics";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import crypto from "node:crypto";
@@ -148,7 +148,7 @@ interface FailureNotificationOptions {
  * It handles signature generation, severity calculation, and stores failures in the database.
  */
 export class FailureRecorder implements FailureRecorderService {
-  private repository: FailureAnalyticsRepository;
+  private repository: Pick<FailureAnalyticsRepository, "recordFailure">;
   private timer: Timer;
   private telemetryRecorder: {
     recordFailureTelemetry: TelemetryRecorder["recordFailureTelemetry"];
@@ -156,7 +156,7 @@ export class FailureRecorder implements FailureRecorderService {
   private static instance: FailureRecorder | null = null;
 
   constructor(
-    repository?: FailureAnalyticsRepository,
+    repository?: Pick<FailureAnalyticsRepository, "recordFailure">,
     timer: Timer = defaultTimer,
     telemetryRecorder?: { recordFailureTelemetry: TelemetryRecorder["recordFailureTelemetry"] },
   ) {
@@ -185,7 +185,9 @@ export class FailureRecorder implements FailureRecorderService {
   /**
    * Create a new instance for testing with injected dependencies.
    */
-  static createForTesting(repository?: FailureAnalyticsRepository): FailureRecorder {
+  static createForTesting(
+    repository?: Pick<FailureAnalyticsRepository, "recordFailure">,
+  ): FailureRecorder {
     return new FailureRecorder(repository);
   }
 

@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
-import { readMcpSessionKey } from "../server/mcpSessionKey";
-import type { ExecutionCancellationReason } from "../server/executionTracker";
+import { readMcpSessionKey } from "./mcpSessionKey";
+import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
@@ -12,7 +12,7 @@ import { INTERNAL_MCP_SESSION_PARAM } from "./constants";
  *
  * Every POST gets its own MCP server and transport, closed when its response closes.
  * There is no transport map, no idle reaper and no transport session header: the caller's
- * session key ({@link readMcpSessionKey}, else the in-band `__mcpSessionId`) is the
+ * session key ({@link readMcpSessionKey}; only without a header, the in-band `__mcpSessionId`) is the
  * only thing that links one request to the next. GET and DELETE answer 405 because
  * there is no session stream to open or terminate.
  *
@@ -67,6 +67,18 @@ export interface StatelessMcpRequestScope {
   readonly requestScopeId: string;
   /** The caller's session key: the header, else the in-band `__mcpSessionId` argument. */
   readonly requestMcpSessionId: string | undefined;
+  /**
+   * True only for the daemon's own in-process forward (stdio proxy / socket-forwarded tool
+   * calls, #13315): its in-band `__mcpSessionId` names the originating client and outranks
+   * `requestMcpSessionId` (the connection key). The HTTP endpoint never sets it, so a direct
+   * client's in-band id can never override its session-key header.
+   */
+  readonly trustedForwarder?: boolean;
+  /**
+   * Who owns the request's MCP tasks (#4668), when not its session key: a control-socket forward
+   * from the stdio proxy names the proxy. The HTTP endpoint never sets it.
+   */
+  readonly taskOwnerKey?: string;
 }
 
 export interface StatelessMcpHttpEndpointDeps<
@@ -86,7 +98,7 @@ export interface StatelessMcpHttpEndpointDeps<
   ): Promise<number>;
   /**
    * Forget the bindings a keyless request recorded under its one-off scope id
-   * (`daemonSessionToolBindingStore().forget`): nothing will present that id again.
+   * (`forgetDaemonSessionBindingScope`): nothing will present that id again.
    */
   forgetScopeBindings(requestScopeId: string): void;
   /** Why a request that closes now is cancelled: the handoff error during shutdown. */
@@ -157,7 +169,8 @@ export class StatelessMcpHttpEndpoint<
 > {
   private readonly inFlight = new Map<string, InFlightRequest>();
   /** session key + JSON-RPC id → request scope, for `notifications/cancelled`. */
-  private readonly byCancelKey = new Map<string, string>();
+  // Scope ids per cancel key, oldest first: keyless requests may share a JSON-RPC id.
+  private readonly byCancelKey = new Map<string, string[]>();
   private accepting = true;
 
   constructor(private readonly deps: StatelessMcpHttpEndpointDeps<Req, Res, T>) {}
@@ -294,7 +307,7 @@ export class StatelessMcpHttpEndpoint<
     };
     this.inFlight.set(requestScopeId, request);
     for (const key of cancelKeys) {
-      this.byCancelKey.set(key, requestScopeId);
+      this.byCancelKey.set(key, [...(this.byCancelKey.get(key) ?? []), requestScopeId]);
     }
     return request;
   }
@@ -341,8 +354,13 @@ export class StatelessMcpHttpEndpoint<
       this.inFlight.delete(request.requestScopeId);
     }
     for (const key of request.cancelKeys) {
-      if (this.byCancelKey.get(key) === request.requestScopeId) {
+      const remaining = (this.byCancelKey.get(key) ?? []).filter(
+        (scopeId) => scopeId !== request.requestScopeId,
+      );
+      if (remaining.length === 0) {
         this.byCancelKey.delete(key);
+      } else {
+        this.byCancelKey.set(key, remaining);
       }
     }
   }
@@ -389,11 +407,18 @@ export class StatelessMcpHttpEndpoint<
     requestId: JsonRpcId,
   ): string | undefined {
     if (headerSessionKey !== undefined) {
-      return this.byCancelKey.get(cancelKey(headerSessionKey, requestId));
+      return this.byCancelKey.get(cancelKey(headerSessionKey, requestId))?.at(-1);
     }
     const suffix = cancelKeySuffix(requestId);
-    const matches = Array.from(this.byCancelKey.entries()).filter(([key]) => key.endsWith(suffix));
-    return matches.length === 1 ? matches[0][1] : undefined;
+    const matches = Array.from(this.byCancelKey.entries())
+      .filter(([key]) => key.endsWith(suffix))
+      .flatMap(([, scopeIds]) => scopeIds);
+    if (matches.length > 1) {
+      logger.warn(
+        `Ignoring header-less notifications/cancelled for ambiguous request id ${String(requestId)}: ${matches.length} in-flight requests share it`,
+      );
+    }
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   private async dispatch(

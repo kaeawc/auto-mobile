@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { ToolCallRepository } from "../../src/db/toolCallRepository";
@@ -164,21 +164,27 @@ describe("ToolCallRepository", () => {
 // production write path (`toolRegistry.ts`) — actually bounds the table.
 describe("ToolCallRepository row-cap retention (#6464)", () => {
   test("sweeps on the first write of each lifetime and then after 256 more writes", async () => {
+    const cap = 2;
+    const countRows = async () => (await db.selectFrom("tool_calls").selectAll().execute()).length;
+    const write = (toolName: string) =>
+      db
+        .insertInto("tool_calls")
+        .values({ tool_name: toolName, timestamp: "2026-01-01T00:00:00Z" })
+        .execute();
     for (let lifetime = 0; lifetime < 2; lifetime++) {
-      const fresh = new ToolCallRepository(db);
-      const prune = spyOn(fresh as any, "pruneToRowCap");
-      try {
-        await fresh.recordToolCall({ toolName: "first", timestamp: "2026-01-01T00:00:00Z" });
-        expect(prune).toHaveBeenCalledTimes(1);
-        for (let index = 0; index < 255; index++) {
-          await fresh.recordToolCall({ toolName: "next", timestamp: "2026-01-01T00:00:00Z" });
-        }
-        expect(prune).toHaveBeenCalledTimes(1);
-        await fresh.recordToolCall({ toolName: "last", timestamp: "2026-01-01T00:00:00Z" });
-        expect(prune).toHaveBeenCalledTimes(2);
-      } finally {
-        prune.mockRestore();
+      await db.deleteFrom("tool_calls").execute();
+      for (let index = 0; index < 10; index++) {
+        await write("seed");
       }
+      const fresh = new ToolCallRepository(db, cap);
+      await fresh.recordToolCall({ toolName: "first", timestamp: "2026-01-01T00:00:00Z" });
+      expect(await countRows()).toBe(cap);
+      for (let index = 0; index < 255; index++) {
+        await fresh.recordToolCall({ toolName: "next", timestamp: "2026-01-01T00:00:00Z" });
+      }
+      expect(await countRows()).toBe(cap + 255);
+      await fresh.recordToolCall({ toolName: "last", timestamp: "2026-01-01T00:00:00Z" });
+      expect(await countRows()).toBe(cap);
     }
   });
 
@@ -202,7 +208,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
       });
     }
 
-    await (repo as any).pruneToRowCap(5);
+    await repo.testHooks.pruneToRowCap(5);
 
     const rows = await db
       .selectFrom("tool_calls")
@@ -226,7 +232,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
       });
     }
 
-    await (repo as any).pruneToRowCap(10);
+    await repo.testHooks.pruneToRowCap(10);
 
     const rows = await db.selectFrom("tool_calls").selectAll().execute();
     expect(rows).toHaveLength(3);
@@ -247,7 +253,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
     const beforePrune = await db.selectFrom("tool_calls").selectAll().execute();
     expect(beforePrune.every((row) => row.status === "success")).toBe(true);
 
-    await (repo as any).pruneToRowCap(2);
+    await repo.testHooks.pruneToRowCap(2);
 
     const rows = await db
       .selectFrom("tool_calls")

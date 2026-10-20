@@ -10,11 +10,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Function to check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
 # Get project root (parent directory of scripts)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -23,7 +18,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 echo -e "${YELLOW}Checking for required commands...${NC}"
 
 # Check if hadolint is installed
-if ! command_exists hadolint; then
+if ! command -v hadolint >/dev/null 2>&1; then
     echo -e "${RED}hadolint is not installed${NC}"
     if [[ "${INSTALL_HADOLINT_WHEN_MISSING}" == "true" ]]; then
         echo -e "${YELLOW}Installing hadolint...${NC}"
@@ -43,7 +38,7 @@ if ! command_exists hadolint; then
 fi
 
 # Verify hadolint is available
-if ! command_exists hadolint; then
+if ! command -v hadolint >/dev/null 2>&1; then
     echo -e "${RED}hadolint is still not available after installation attempt${NC}"
     exit 1
 fi

@@ -13,6 +13,7 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
 import type { Element, ViewHierarchyResult } from "../../../../src/models";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 
 describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
   const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
@@ -33,16 +34,18 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     bounds: { left: 0, top: 0, right: 1000, bottom: 2000 },
     "resource-id": LIST_ID,
     scrollable: true,
-  } as unknown as Element;
+  };
 
   const target: Element = {
     bounds: { left: 10, top: 500, right: 990, bottom: 600 },
     "resource-id": "test:id/target",
     text: "Target Item",
-  } as unknown as Element;
+  };
 
   const createObserveResult = (hierarchyId: string): ObserveResult => ({
-    timestamp: 0,
+    updatedAt: 0,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: { hierarchy: { node: { $: { _id: hierarchyId } } } },
@@ -55,16 +58,15 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     fakeCtrlProxy.getActionHistory().some((call) => call.action === "scroll_forward");
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
       resolver: scrollResolver,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
-    (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
     return swipeOn;
   };
 
@@ -218,22 +220,23 @@ describe("SwipeOn boomerang", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const createObserveResult = (): ObserveResult => ({
-    timestamp: Date.now(),
+    observationId: "swipe-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    updatedAt: Date.now(),
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: null,
+    viewHierarchy: undefined,
   });
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
       timer: fakeTimer,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };
 
@@ -320,14 +323,14 @@ describe("SwipeOn lookFor validation", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };
 

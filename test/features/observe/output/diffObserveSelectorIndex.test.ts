@@ -1,4 +1,6 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { createFlatNodeForTest } from "../flatHierarchyBuilders";
+import { buildObserveResult } from "../../../helpers/observeFixture";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
@@ -41,7 +43,7 @@ function changedPair(baseline: ObserveResult, occurrence = 0) {
   const next = structuredClone(baseline);
   const changed = duplicates(next)[occurrence];
   // Only a state attribute changes; identity, bounds and hierarchy stay captured.
-  changed.selected = true;
+  createFlatNodeForTest(changed).selected = true;
   const diff = diffObserveResult(baseline, next);
   const entry = diff.changed.find(({ changes }) => changes.selected);
   expect(entry).toBeDefined();
@@ -105,7 +107,7 @@ function mirroredAndroidPair(labelOnly: boolean, count = 1) {
   const next = structuredClone(baseline);
   for (const entry of new SearchableHierarchy().project(next.viewHierarchy!)) {
     if (entry.properties.text === "Mirrored control") {
-      entry.source.selected = true;
+      createFlatNodeForTest(entry.source).selected = true;
     }
   }
   return { baseline, next };
@@ -193,7 +195,7 @@ describe("merged Android roots and window copies (#9804)", () => {
         const [parent, child] = root.node!;
         parent.clickable = true;
         child.clickable = false;
-        delete child.actions;
+        delete createFlatNodeForTest(child).actions;
         root.node = [parent];
         parent.node = [child];
       }
@@ -220,7 +222,12 @@ describe("diff selector replay indexes (#9693)", () => {
     const a = parseBounds(large.bounds)!;
     const b = parseBounds(small.bounds)!;
     // Keep the captured nodes; give the child its parent's area at its own origin.
-    small.bounds = [b.left, b.top, b.left + a.right - a.left, b.top + a.bottom - a.top];
+    small.bounds = {
+      left: b.left,
+      top: b.top,
+      right: b.left + a.right - a.left,
+      bottom: b.top + a.bottom - a.top,
+    };
     expectReplay(baseline, 0);
   });
 
@@ -248,7 +255,7 @@ describe("diff selector replay indexes (#9693)", () => {
       });
       return nodes;
     })[0];
-    changed.selected = true;
+    createFlatNodeForTest(changed).selected = true;
     const selector = diffObserveResult(baseline, next).changed.find(
       ({ changes }) => changes.selected,
     )!.selector!;
@@ -258,7 +265,7 @@ describe("diff selector replay indexes (#9693)", () => {
     )!;
     expect(selector.index).toBe(1);
     expect(selector.index).toBe(row.index);
-    expect(
+    expect<unknown>(
       new ResolverElementSelector().selectByText(next.viewHierarchy!, selector.label!, {
         index: selector.index,
         partialMatch: false,
@@ -289,7 +296,12 @@ describe("diff selector replay indexes (#9693)", () => {
     // larger area must lose to window rank, not win by hierarchy position.
     const upper = structuredClone(lower);
     const bounds = parseBounds(upper.bounds)!;
-    upper.bounds = [bounds.left, bounds.top, bounds.right, bounds.bottom + 100];
+    upper.bounds = {
+      left: bounds.left,
+      top: bounds.top,
+      right: bounds.right,
+      bottom: bounds.bottom + 100,
+    };
     const windowRoot = parser.extractWindowRootGroups(hierarchy, "topmost-first")[0][0];
     const children = windowRoot.node;
     windowRoot.node = [...(Array.isArray(children) ? children : children ? [children] : []), upper];
@@ -301,7 +313,7 @@ describe("diff selector replay indexes (#9693)", () => {
     expect(rows).toHaveLength(2);
     expect(selector.index).toBe(1);
     expect(rows.find((row) => row.bounds[3] === bounds.bottom)!.index).toBe(selector.index);
-    expect(
+    expect<unknown>(
       new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
         index: selector.index,
       }).element?.bounds,
@@ -316,7 +328,12 @@ describe("diff selector replay indexes (#9693)", () => {
     // rather than merely the unique-selector rule after dropping the child.
     const sibling = structuredClone(inert);
     const bounds = parseBounds(sibling.bounds)!;
-    sibling.bounds = [bounds.left + 50, bounds.top, bounds.right + 50, bounds.bottom];
+    sibling.bounds = {
+      left: bounds.left + 50,
+      top: bounds.top,
+      right: bounds.right + 50,
+      bottom: bounds.bottom,
+    };
     const children = parent.node;
     parent.node = [...(Array.isArray(children) ? children : children ? [children] : []), sibling];
     inert.clickable = false;
@@ -333,7 +350,7 @@ describe("diff selector replay indexes (#9693)", () => {
       { index: 1 },
     );
     expect(promoted.totalMatches).toBe(2);
-    expect(promoted.element?.bounds).toEqual(parseBounds(parent.bounds));
+    expect<unknown>(promoted.element?.bounds).toEqual(parseBounds(parent.bounds));
     expect(selector.index).toBe(1);
     expect(selector).not.toHaveProperty("ambiguous");
     const childSelector = changedPair(baseline, 1).selector;
@@ -362,7 +379,7 @@ describe("diff selector replay indexes (#9693)", () => {
       const { next, changed, selector } = changedPair(baseline, occurrence);
       expect(selector.index).toBe(expectedIndex);
       expect(selector).not.toHaveProperty("ambiguous");
-      expect(
+      expect<unknown>(
         new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
           index: selector.index,
         }).element?.bounds,
@@ -375,7 +392,12 @@ describe("diff selector replay indexes (#9693)", () => {
     const small = duplicates(baseline)[1];
     const bounds = parseBounds(small.bounds)!;
     // Shift the captured child below the viewport, preserving its size.
-    small.bounds = [bounds.left, 1000, bounds.right, 1000 + bounds.bottom - bounds.top];
+    small.bounds = {
+      left: bounds.left,
+      top: 1000,
+      right: bounds.right,
+      bottom: 1000 + bounds.bottom - bounds.top,
+    };
     expect(changedPair(baseline, 1).selector.index).toBeUndefined();
   });
 
@@ -388,7 +410,7 @@ describe("diff selector replay indexes (#9693)", () => {
     const { next, changed, selector } = changedPair(baseline, 1);
     expect(selector.index).toBe(0);
     expect(selector).not.toHaveProperty("ambiguous");
-    expect(
+    expect<unknown>(
       new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
         index: selector.index,
       }).element?.bounds,
@@ -421,7 +443,7 @@ describe("review regressions", () => {
   test("several changed duplicates project the skeleton exactly once", () => {
     const next = structuredClone(capture);
     duplicates(next).forEach((node) => {
-      node.selected = true;
+      createFlatNodeForTest(node).selected = true;
     });
     const spy = spyOn(skeletonProjection, "projectSkeleton");
     try {
@@ -451,7 +473,7 @@ describe("review regressions", () => {
     const [parent, child] = duplicates(baseline);
     const sibling = structuredClone(child);
     const b = parseBounds(sibling.bounds)!;
-    sibling.bounds = [b.left + 50, b.top, b.right + 50, b.bottom];
+    sibling.bounds = { left: b.left + 50, top: b.top, right: b.right + 50, bottom: b.bottom };
     const children = parent.node;
     parent.node = [...(Array.isArray(children) ? children : children ? [children] : []), sibling];
     // Strip other ancestors' tap evidence, retaining the captured toggle parent.
@@ -459,12 +481,12 @@ describe("review regressions", () => {
     let ancestor = entries.find((entry) => entry.source === parent)!.parentIndex;
     while (ancestor !== undefined) {
       entries[ancestor].source.clickable = false;
-      entries[ancestor].source.checkable = false;
-      delete entries[ancestor].source.actions;
+      createFlatNodeForTest(entries[ancestor].source).checkable = false;
+      delete createFlatNodeForTest(entries[ancestor].source).actions;
       ancestor = entries[ancestor].parentIndex;
     }
     parent.clickable = false;
-    parent.checkable = true;
+    createFlatNodeForTest(parent).checkable = true;
     child.clickable = false;
     const selector = changedPair(baseline).selector;
     expect(selector.index).toBe(1);
@@ -501,7 +523,7 @@ describe("review regressions", () => {
     const [parent, child] = duplicates(baseline);
     const sibling = structuredClone(child);
     const b = parseBounds(sibling.bounds)!;
-    sibling.bounds = [b.left + 50, b.top, b.right + 50, b.bottom];
+    sibling.bounds = { left: b.left + 50, top: b.top, right: b.right + 50, bottom: b.bottom };
     delete parent["resource-id"];
     delete parent["view-id"];
     delete sibling["resource-id"];
@@ -516,7 +538,7 @@ describe("review regressions", () => {
     for (const root of parser.extractRootNodes(next.viewHierarchy!)) {
       parser.traverseNode(root, (node) => {
         if (node.text === "Shared label" && node.className === "UIButton") {
-          node.selected = true;
+          createFlatNodeForTest(node).selected = true;
         }
       });
     }
@@ -551,10 +573,12 @@ describe("review regressions", () => {
         "utf8",
       ),
     );
-    const baseline: ObserveResult = {
+    const baseline: ObserveResult = buildObserveResult({
+      updatedAt: 0,
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
       screenSize: { width: 1080, height: 2400 },
-    };
+    });
     const nodes: ViewHierarchyNode[] = [];
     for (const root of parser.extractRootNodes(hierarchy)) {
       parser.traverseNode(root, (node) => {
@@ -566,13 +590,13 @@ describe("review regressions", () => {
     for (const node of nodes.slice(0, 3)) {
       node["resource-id"] = "com.automobile.playground:id/keyboard_duplicate";
     }
-    nodes[2].bounds = [100, 1800, 110, 1810];
+    nodes[2].bounds = { left: 100, top: 1800, right: 110, bottom: 1810 };
     const next = structuredClone(baseline);
     for (const root of parser.extractRootNodes(next.viewHierarchy!)) {
       let changed = false;
       parser.traverseNode(root, (node) => {
         if (!changed && node["resource-id"] === "com.automobile.playground:id/keyboard_duplicate") {
-          node.selected = true;
+          createFlatNodeForTest(node).selected = true;
           changed = true;
         }
       });
@@ -595,10 +619,12 @@ describe("review regressions", () => {
         "utf8",
       ),
     );
-    const baseline: ObserveResult = {
+    const baseline: ObserveResult = buildObserveResult({
+      updatedAt: 0,
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
       screenSize: { width: 1080, height: 2400 },
-    };
+    });
     const nodes: ViewHierarchyNode[] = [];
     for (const root of parser.extractRootNodes(hierarchy)) {
       parser.traverseNode(root, (node) => {
@@ -620,7 +646,7 @@ describe("review regressions", () => {
         }
       });
     }
-    nextNodes[0].selected = true;
+    createFlatNodeForTest(nextNodes[0]).selected = true;
     const selector = diffObserveResult(baseline, next).changed.find(
       ({ changes }) => changes.selected,
     )!.selector!;
@@ -633,4 +659,8 @@ describe("review regressions", () => {
     expect(selector.index).toBeUndefined();
     expect(selector).not.toHaveProperty("ambiguous");
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

@@ -160,15 +160,20 @@ export function markNodeVisited(state: GraphTraversalState, screenName: string):
 /**
  * Mark edge as traversed with validation result
  */
+export interface EdgeTraversalOutcome {
+  actualTo: string | null;
+  success: boolean;
+  error?: string;
+  matchConfidence?: number;
+}
+
 export function markEdgeTraversed(
   state: GraphTraversalState,
   edge: NavigationEdge,
-  actualTo: string | null,
-  success: boolean,
+  outcome: EdgeTraversalOutcome,
   timer: Timer,
-  error?: string,
-  matchConfidence?: number,
 ): void {
+  const { actualTo, success, error, matchConfidence } = outcome;
   const edgeKey = getEdgeKey(edge);
   state.traversedEdges.add(edgeKey);
 
@@ -391,6 +396,13 @@ function resolveCoordinateTap(
   args: Record<string, unknown>,
 ): EdgeTargetResolution {
   const { x, y } = args;
+  if (args.pointer !== undefined) {
+    // An element tap is a finger touch; replaying a stylus edge that way would silently change it.
+    return notValidatable(
+      edge,
+      'recorded "tapAt" used a stylus pointer, which an element tap cannot replay',
+    );
+  }
   if (typeof x !== "number" || typeof y !== "number") {
     return notValidatable(edge, 'recorded "tapAt" interaction has no numeric x/y coordinate');
   }
@@ -491,11 +503,13 @@ export async function validateNavigation(
   markEdgeTraversed(
     state,
     expectedEdge,
-    actualScreen,
-    success,
+    {
+      actualTo: actualScreen,
+      success,
+      error: success ? undefined : `Expected ${expectedEdge.to}, got ${actualScreen}`,
+      matchConfidence: elementConfidence,
+    },
     timer,
-    success ? undefined : `Expected ${expectedEdge.to}, got ${actualScreen}`,
-    elementConfidence,
   );
 
   if (!success) {

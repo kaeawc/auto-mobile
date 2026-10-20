@@ -1,3 +1,9 @@
+import { attachSnapshotReference } from "../../src/server/observeResponse";
+import { observation as coordinateObservation } from "../helpers/tapAtCoordinate";
+import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
+import { z } from "zod/v4";
+import { observeResultSchema } from "../../src/server/toolOutputSchemas";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { resolveIosObserveRotation } from "../../src/features/observe/iosObserveRotation";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -11,7 +17,7 @@ import {
   type DeviceObservationAccess,
 } from "../../src/server/deviceObservationAccess";
 import { observeSchema, registerObserveTools } from "../../src/server/observeTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -23,7 +29,7 @@ import {
 import toolDefinitions from "../../schemas/tool-definitions.json";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
-import { ObserverPendingRequestTimeoutError } from "../../src/features/observe/DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../../src/features/observe/ObserverPendingRequestTimeoutError";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
@@ -33,7 +39,7 @@ import { NavigationGraphManager } from "../../src/features/navigation/Navigation
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import type { Plan } from "../../src/models/Plan";
 import {
   getToolSelectionContext,
@@ -42,24 +48,38 @@ import {
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
-import { getStructuredField } from "../../src/utils/toolUtils";
-import { snapshotReferences } from "../../src/features/observe/SnapshotReferenceStore";
+} from "../../src/utils/directSessionDeviceRegistry";
+import { SnapshotReferenceStore } from "../../src/features/observe/SnapshotReferenceStore";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { DeviceReadOptions } from "../../src/features/observe/interfaces/ObserveScreen";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+const observeResponseSchema = z.looseObject({
+  isError: z.boolean().optional(),
+  content: z.array(z.looseObject({ type: z.string() })),
+  structuredContent: observeResultSchema,
+});
+
+function observePayload(response: unknown) {
+  return observeResultSchema.parse(readToolEnvelopePayload(response)?.payload);
+}
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
-const originalManager = Reflect.get(ToolRegistry, "deviceSessionManager");
 const callDeviceRead = (args: Record<string, unknown>) =>
   runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
     ToolRegistry.getTool("observe")!.handler(args),
   );
 
+let snapshotReferenceStore: SnapshotReferenceStore;
 let restoreInventory: () => void;
-let originalRepository: Parameters<typeof ToolRegistry.setToolCallRepositoryForTesting>[0];
+let originalCollaborators: ToolRegistryCollaborators;
 beforeEach(() => {
-  originalRepository = ToolRegistry["toolCallRepository"];
+  snapshotReferenceStore = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+  originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
   restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
     displayInventory: new FakeDisplayInventoryProvider(),
@@ -68,8 +88,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreInventory();
-  ToolRegistry.setToolCallRepositoryForTesting(originalRepository);
-  Reflect.set(ToolRegistry, "deviceSessionManager", originalManager);
+  ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
   DaemonState.getInstance().reset();
   ToolRegistry.clearTools();
   resetObserveCacheStore();
@@ -84,6 +103,7 @@ describe("session-free observe device read", () => {
     const now = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
     const received: Array<DeviceReadOptions | undefined> = [];
     registerObserveTools({
+      snapshotReferences: snapshotReferenceStore,
       timer,
       createScreen: (_device, display) => {
         expect(display).toBe("all");
@@ -123,6 +143,7 @@ describe("session-free observe device read", () => {
   ] as const)("all rejects %j with an actionable error before capture", async (options, option) => {
     let captures = 0;
     registerObserveTools({
+      snapshotReferences: snapshotReferenceStore,
       deviceReadAccess: { listBooted: async () => [device], isAuthorized: () => true },
       createScreen: () => {
         captures++;
@@ -157,6 +178,7 @@ describe("session-free observe device read", () => {
     async (options, message) => {
       const calls: string[] = [];
       registerObserveTools({
+        snapshotReferences: snapshotReferenceStore,
         deviceReadAccess: { listBooted: async () => [device], isAuthorized: () => true },
         createScreen: () => {
           calls.push("createScreen");
@@ -197,7 +219,7 @@ describe("session-free observe device read", () => {
   });
 
   test("retired screenshot tool is absent from live and generated definitions", () => {
-    registerObserveTools();
+    registerObserveTools({ snapshotReferences: snapshotReferenceStore });
     const retiredName = ["capture", "Device", "Screenshot"].join("");
     expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).not.toContain(retiredName);
     expect(toolDefinitions.map((tool) => tool.name)).not.toContain(retiredName);
@@ -205,7 +227,7 @@ describe("session-free observe device read", () => {
 
   test("returns observation and screenshot path without session acquisition or ownership changes", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const calls: string[] = [];
     const ownershipCalls: string[] = [];
@@ -243,6 +265,7 @@ describe("session-free observe device read", () => {
         screenshotCaptureSource: "device",
       };
       registerObserveTools({
+        snapshotReferences: snapshotReferenceStore,
         deviceReadAccess: access,
         createScreen: () => ({
           executeDeviceRead: async (_signal, screenshot) => {
@@ -258,7 +281,7 @@ describe("session-free observe device read", () => {
         }),
       });
       const result = await callDeviceRead({ deviceId: device.deviceId });
-      expect(result.structuredContent).toMatchObject({
+      expect(observePayload(result)).toMatchObject({
         deviceId: device.deviceId,
         screenshotPath,
         screenshotSource: "fresh",
@@ -280,6 +303,7 @@ describe("session-free observe device read", () => {
       const screenshotBytes = Buffer.from("89504e470d0a1a0a", "hex");
       await fs.writeFile(screenshotPath, screenshotBytes);
       registerObserveTools({
+        snapshotReferences: snapshotReferenceStore,
         deviceReadAccess: { listBooted: async () => [device], isAuthorized: () => true },
         createScreen: () => ({
           executeDeviceRead: async (_signal, screenshot) => {
@@ -297,11 +321,11 @@ describe("session-free observe device read", () => {
         deviceId: device.deviceId,
         includeScreenshotImage: true,
       });
-      expect(getStructuredField(response, "screenshotImage")).toMatchObject({
+      expect(observePayload(response).screenshotImage).toMatchObject({
         included: true,
         mimeType: "image/png",
       });
-      expect(response.content).toContainEqual({
+      expect(observeResponseSchema.parse(response).content).toContainEqual({
         type: "image",
         data: screenshotBytes.toString("base64"),
         mimeType: "image/png",
@@ -317,6 +341,7 @@ describe("session-free observe device read", () => {
     Reflect.set(daemon, "devicePool", { getDevice: () => ({ sessionId: "owner" }) });
     Reflect.set(daemon, "deviceSessionRegistry", {});
     registerObserveTools({
+      snapshotReferences: snapshotReferenceStore,
       deviceReadAccess: {
         listBooted: async () => [device],
         isAuthorized: defaultDeviceObservationAccess.isAuthorized,
@@ -334,11 +359,12 @@ describe("session-free observe device read", () => {
       Reflect.set(daemon, "sessionManager", { getDeviceLabels: () => undefined });
       Reflect.set(daemon, "devicePool", { getDevice: () => owner });
       Reflect.set(daemon, "deviceSessionRegistry", {});
-      const capture = spyOn(snapshotReferences, "capture");
+      const capture = spyOn(snapshotReferenceStore, "capture");
       try {
         const observation =
           platform === "ios" ? loadIosFractionalObserve() : loadAndroidHomeObserve().observe;
         registerObserveTools({
+          snapshotReferences: snapshotReferenceStore,
           deviceReadAccess: {
             listBooted: async () => [target],
             isAuthorized: defaultDeviceObservationAccess.isAuthorized,
@@ -365,13 +391,13 @@ describe("session-free observe device read", () => {
               project: "full",
             }),
         );
-        expect(getStructuredField(response, "viewHierarchy")).toBeDefined();
-        expect(getStructuredField(response, "screenSize")).toBeDefined();
-        expect(getStructuredField(response, "screenshotPath")).toBe("/fake/owned.png");
+        expect(observePayload(response).viewHierarchy).toBeDefined();
+        expect(observePayload(response).screenSize).toBeDefined();
+        expect(observePayload(response).screenshotPath).toBe("/fake/owned.png");
         expect(owner).toEqual({ sessionId: "owner", poolStatus: "assigned" });
         expect(capture).not.toHaveBeenCalled();
-        expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
-        expect(getStructuredField(response, "snapshotReferenceUnavailable")).toBeUndefined();
+        expect(observePayload(response).snapshotReference).toBeUndefined();
+        expect(observePayload(response).snapshotReferenceUnavailable).toBeUndefined();
       } finally {
         capture.mockRestore();
       }
@@ -379,7 +405,7 @@ describe("session-free observe device read", () => {
   );
 
   test("published observe alone exposes deviceId", () => {
-    registerObserveTools();
+    registerObserveTools({ snapshotReferences: snapshotReferenceStore });
     const live = ToolRegistry.getToolDefinitions();
     const observe = live.find((entry) => entry.name === "observe")!;
     expect(observe.inputSchema.properties).toHaveProperty("deviceId");
@@ -401,11 +427,11 @@ describe("session-free observe device read", () => {
     const sessionUuid = "aggregate-owner";
     const manager = new FakeDeviceSessionManager();
     manager.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     registerDirectSessionDevice(sessionUuid, device);
-    const capture = spyOn(snapshotReferences, "capture");
+    const capture = spyOn(snapshotReferenceStore, "capture");
     const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue();
-    const recorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+    const recorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const record = spyOn(recorder, "record").mockImplementation(() => {});
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       auditRunner: {
@@ -415,6 +441,7 @@ describe("session-free observe device read", () => {
     const observation = { ...loadAndroidHomeObserve().observe, backStack: undefined };
     try {
       registerObserveTools({
+        snapshotReferences: snapshotReferenceStore,
         createScreen: (_device, display) => {
           expect(display).toBe("all");
           return {
@@ -435,7 +462,7 @@ describe("session-free observe device read", () => {
         includeScreenshotImage: false,
         screenshot: "none",
       });
-      expect(getStructuredField(result, "snapshotReference")).toBeUndefined();
+      expect(observePayload(result).snapshotReference).toBeUndefined();
       expect(capture).not.toHaveBeenCalled();
       expect(notify).not.toHaveBeenCalled();
     } finally {
@@ -450,12 +477,12 @@ describe("session-free observe device read", () => {
     const sessionUuid = "observe-session";
     const manager = new FakeDeviceSessionManager();
     manager.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     registerDirectSessionDevice(sessionUuid, device);
     const reads: string[] = [];
     const events: string[] = [];
-    const navigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+    const navigationRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const record = spyOn(navigationRecorder, "record").mockImplementation(
       (_name, _args, _device, routedSessionUuid) => {
         expect(routedSessionUuid).toBe(sessionUuid);
@@ -472,6 +499,7 @@ describe("session-free observe device read", () => {
     });
     try {
       registerObserveTools({
+        snapshotReferences: snapshotReferenceStore,
         deviceReadAccess: {
           listBooted: async () => {
             reads.push("resolve");
@@ -514,10 +542,10 @@ describe("session-free observe device read", () => {
         skipBackStack: true,
         screenshot: "none",
       });
-      expect(getStructuredField(response, "matched")).toBe(true);
-      expect(getStructuredField(response, "polls")).toBe(1);
-      expect(getStructuredField(response, "rawViewHierarchy")).toBeDefined();
-      expect(response.isError).not.toBe(true);
+      expect(observePayload(response).matched).toBe(true);
+      expect(observePayload(response).polls).toBe(1);
+      expect(observePayload(response).rawViewHierarchy).toBeDefined();
+      expect(observeResponseSchema.parse(response).isError).not.toBe(true);
       expect(events).toEqual(["navigation", "audit", "session-observe", "raw"]);
       expect(reads).toEqual([]);
       expect(manager.getLastEnsureDeviceReadyDeviceId()).toBe(device.deviceId);
@@ -539,12 +567,13 @@ describe("session-free observe device read", () => {
       const sessionUuid = "ios-observe-session";
       const manager = new FakeDeviceSessionManager();
       manager.setConnectedDevices([iosDevice]);
-      Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
       ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
       registerDirectSessionDevice(sessionUuid, iosDevice);
       // The existing iOS fixture predates runner frame metadata; supply the typed fields
       // emitted by current CtrlProxy without inventing a second hierarchy fixture.
-      const navigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+      const navigationRecorder =
+        ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
       const record = spyOn(navigationRecorder, "record").mockImplementation(() => {});
       const restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
         displayInventory: new FakeDisplayInventoryProvider(),
@@ -577,6 +606,7 @@ describe("session-free observe device read", () => {
           },
         };
         registerObserveTools({
+          snapshotReferences: snapshotReferenceStore,
           createScreen: () => ({
             execute: async () => observation,
             executeDeviceRead: async () => {
@@ -591,20 +621,18 @@ describe("session-free observe device read", () => {
           sessionUuid,
         });
         if (hasRotation) {
-          expect(getStructuredField(response, "rotation")).toBe(0);
+          expect(observePayload(response).rotation).toBe(0);
           expect(observation.viewHierarchy?.rotation).toBe(
             rotationSource === "runner" ? 0 : undefined,
           );
-          expect(getStructuredField(response, "snapshotReference")).toMatchObject({
+          expect(observePayload(response).snapshotReference).toMatchObject({
             snapshotId: expect.any(String),
             expiresAt: expect.any(Number),
           });
-          expect(getStructuredField(response, "snapshotReferenceUnavailable")).toBeUndefined();
+          expect(observePayload(response).snapshotReferenceUnavailable).toBeUndefined();
         } else {
-          expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
-          expect(getStructuredField(response, "snapshotReferenceUnavailable")).toEqual([
-            "rotation",
-          ]);
+          expect(observePayload(response).snapshotReference).toBeUndefined();
+          expect(observePayload(response).snapshotReferenceUnavailable).toEqual(["rotation"]);
         }
       } finally {
         restorePipeline();
@@ -617,7 +645,7 @@ describe("session-free observe device read", () => {
     const sessionUuid = "observe-session";
     const suppliedDeviceId = "emulator-5556";
     registerDirectSessionDevice(sessionUuid, device);
-    registerObserveTools();
+    registerObserveTools({ snapshotReferences: snapshotReferenceStore });
     let rejection: unknown;
     try {
       await callDeviceRead({ deviceId: suppliedDeviceId, sessionUuid });
@@ -633,10 +661,11 @@ describe("session-free observe device read", () => {
   test("a plan observe step with injected deviceId keeps normal readiness and screenshot mode", async () => {
     const manager = new FakeDeviceSessionManager();
     manager.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const modes: Array<string | undefined> = [];
     registerObserveTools({
+      snapshotReferences: snapshotReferenceStore,
       createScreen: () => ({
         execute: async (options) => {
           modes.push(options?.screenshot);
@@ -650,7 +679,12 @@ describe("session-free observe device read", () => {
       }),
     });
     const plan: Plan = { name: "observe routing", steps: [{ tool: "observe", params: {} }] };
-    const result = await new DefaultPlanExecutor().executePlan(plan, 0, "android", device.deviceId);
+    const result = await createDefaultPlanExecutor().executePlan(
+      plan,
+      0,
+      "android",
+      device.deviceId,
+    );
     expect(result.success).toBe(true);
     expect(manager.getEnsureDeviceReadyCalls()).toBeGreaterThan(0);
     expect(modes).toEqual([undefined]);
@@ -658,7 +692,7 @@ describe("session-free observe device read", () => {
 
   test("real screen device read returns hierarchy without shared-state writes or session calls", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const timer = new FakeTimer();
     const cache = new FakeObserveCacheStore(timer);
@@ -673,7 +707,7 @@ describe("session-free observe device read", () => {
       },
     };
     await cache.put(device.deviceId, ownerObservation);
-    const ownerSnapshot = snapshotReferences.capture(device.deviceId, ownerObservation);
+    const ownerSnapshot = snapshotReferenceStore.capture(device.deviceId, ownerObservation);
     expect(ownerSnapshot.status).toBe("captured");
     if (ownerSnapshot.status !== "captured") {
       throw new Error("Owner reference unavailable");
@@ -697,6 +731,7 @@ describe("session-free observe device read", () => {
     });
     try {
       registerObserveTools({
+        snapshotReferences: snapshotReferenceStore,
         deviceReadAccess: { listBooted: async () => [device], isAuthorized: () => true },
         createScreen: (target) =>
           new RealObserveScreen(
@@ -739,23 +774,26 @@ describe("session-free observe device read", () => {
         skipBackStack: false,
         raw: false,
       });
-      expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
-      expect(response.structuredContent).toMatchObject({ screenshotPath: "/fake/read.png" });
-      expect(getStructuredField(response, "viewHierarchy")?.hierarchy?.node).toBeDefined();
-      expect(getStructuredField(response, "screenSize")).toMatchObject({
+      const payload = observePayload(response);
+      expect(payload.snapshotReference).toBeUndefined();
+      expect(payload).toMatchObject({
+        screenshotPath: "/fake/read.png",
+      });
+      expect(payload.viewHierarchy?.hierarchy?.node).toBeDefined();
+      expect(payload.screenSize).toMatchObject({
         width: 1080,
         height: 2400,
       });
-      expect(getStructuredField(response, "activeWindow")).toBeDefined();
-      expect(getStructuredField(response, "display")).toBeDefined();
-      expect(getStructuredField(response, "deviceLock")).toEqual({
+      expect(payload.activeWindow).toBeDefined();
+      expect(payload.display).toBeDefined();
+      expect(payload.deviceLock).toEqual({
         locked: false,
         keyguardShowing: false,
       });
       expect(cache.getPutCallCount()).toBe(priorWrites);
       expect(cache.getRecentInMemoryForDevice(device.deviceId)).toEqual(ownerObservation);
       expect(
-        snapshotReferences.staleReason(
+        snapshotReferenceStore.staleReason(
           ownerSnapshot.reference.snapshotId,
           device.deviceId,
           ownerObservation,
@@ -831,6 +869,7 @@ describe("session-free observe device read", () => {
   test("device read passes WebP encoding options into capture and reports its MIME type", async () => {
     const capturedOptions: unknown[] = [];
     registerObserveTools({
+      snapshotReferences: snapshotReferenceStore,
       deviceReadAccess: { listBooted: async () => [device], isAuthorized: () => true },
       createScreen: (target) =>
         new RealObserveScreen(target, new FakeAdbClientFactory(new FakeAdbExecutor()), {
@@ -864,7 +903,7 @@ describe("session-free observe device read", () => {
       screenshotOptions: { format: "webp", quality: 80 },
     });
     expect(capturedOptions).toEqual([{ format: "webp", quality: 80, displayId: undefined }]);
-    expect(response.structuredContent).toMatchObject({
+    expect(observePayload(response)).toMatchObject({
       screenshotPath: "/fake/read.webp",
       screenshotFormat: "webp",
       screenshotMimeType: "image/webp",
@@ -886,11 +925,13 @@ describe("session-free observe device read", () => {
       },
     };
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     const cached = {
       ...loadAndroidHomeObserve().observe,
       display: { key: "cover", role: "cover", posture: "closed", generation: 0 },
@@ -946,10 +987,11 @@ describe("session-free observe device read", () => {
 
   test("denies a device read before capture and does not acquire a session", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     let captures = 0;
     registerObserveTools({
+      snapshotReferences: snapshotReferenceStore,
       deviceReadAccess: {
         listBooted: async () => [device],
         isAuthorized: () => false,
@@ -977,11 +1019,12 @@ describe("session-free observe device read", () => {
 
   test("withholds an observation if ownership changes during capture", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
-    const after = spyOn(Reflect.get(ToolRegistry, "afterToolCall"), "handle");
+    const after = spyOn(ToolRegistry.getCollaboratorsForTesting().afterToolCall, "handle");
     let authorized = true;
     registerObserveTools({
+      snapshotReferences: snapshotReferenceStore,
       deviceReadAccess: {
         listBooted: async () => [device],
         isAuthorized: () => authorized,
@@ -1048,4 +1091,18 @@ describe("session-free observe device read", () => {
       },
     });
   });
+});
+
+test("incomplete captures replace a prior handle with the missing completeHierarchy precondition", () => {
+  const result = coordinateObservation(100, 200);
+  attachSnapshotReference(device.deviceId, result, snapshotReferenceStore);
+  expect(result.snapshotReference?.snapshotId).toBeTruthy();
+  result.viewHierarchy!.truncationReasons = ["max_nodes"];
+  attachSnapshotReference(device.deviceId, result, snapshotReferenceStore);
+  expect(result.snapshotReference).toBeUndefined();
+  expect(result.snapshotReferenceUnavailable).toEqual(["completeHierarchy"]);
+  result.viewHierarchy!.truncationReasons = [];
+  attachSnapshotReference(device.deviceId, result, snapshotReferenceStore);
+  expect(result.snapshotReference?.snapshotId).toBeTruthy();
+  expect(result.snapshotReferenceUnavailable).toBeUndefined();
 });

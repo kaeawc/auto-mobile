@@ -21,8 +21,11 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-          telemetryPushClient = null,
-          dataSourceMode = DataSourceMode.Real,
+          options =
+            TelemetryDashboardOptions(
+              telemetryPushClient = null,
+              dataSourceMode = DataSourceMode.Real,
+            ),
         )
       }
     }
@@ -34,8 +37,11 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-          telemetryPushClient = null,
-          dataSourceMode = DataSourceMode.Real,
+          options =
+            TelemetryDashboardOptions(
+              telemetryPushClient = null,
+              dataSourceMode = DataSourceMode.Real,
+            ),
         )
       }
     }
@@ -47,9 +53,12 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-          telemetryPushClient = null,
-          dataSourceMode = DataSourceMode.Real,
-          activeDeviceId = "emulator-5554",
+          options =
+            TelemetryDashboardOptions(
+              telemetryPushClient = null,
+              dataSourceMode = DataSourceMode.Real,
+              activeDeviceId = "emulator-5554",
+            ),
         )
       }
     }
@@ -61,8 +70,11 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-          telemetryPushClient = null,
-          dataSourceMode = DataSourceMode.Real,
+          options =
+            TelemetryDashboardOptions(
+              telemetryPushClient = null,
+              dataSourceMode = DataSourceMode.Real,
+            ),
         )
       }
     }
@@ -75,9 +87,12 @@ class TelemetryDashboardUiTest {
     setContent {
       MaterialTheme {
         TelemetryDashboard(
-          telemetryPushClient = fake,
-          dataSourceMode = DataSourceMode.Real,
-          activeDeviceId = "dev-1",
+          options =
+            TelemetryDashboardOptions(
+              telemetryPushClient = fake,
+              dataSourceMode = DataSourceMode.Real,
+              activeDeviceId = "dev-1",
+            ),
         )
       }
     }

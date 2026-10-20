@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { PLAN_SKELETON } from "./toolRegistryTypes";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { MultiTouchGesture } from "../features/action/MultiTouchGesture";
 import {
@@ -17,14 +18,15 @@ import {
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import type { BootedDevice } from "../models";
 import type { MultiTouchOptions } from "../models/MultiTouchOptions";
+import { multiTouchResultSchema } from "./gestureToolOutputSchemas";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
-import { hierarchyLayerSchema } from "./elementSelectorSchemas";
+import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 
 export type MultiTouchArgs = MultiTouchOptions & {
   platform?: "android" | "ios";
@@ -177,6 +179,11 @@ export function registerMultiTouchTools() {
     "Simultaneous 2-5 finger tap, long press, or swipe at a screen point.",
     multiTouchSchema,
     multiTouchHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: multiTouchResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 }

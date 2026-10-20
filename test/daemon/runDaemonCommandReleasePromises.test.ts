@@ -1,11 +1,25 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
-import type { DaemonManager } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models/ActionableError";
+import {
+  buildSession,
+  ScriptedDevicePool,
+  ScriptedSessionManager,
+  unexpected as unexpectedHook,
+} from "./helpers/cliDaemonState";
+
+class CodedActionableError extends ActionableError {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
 
 function managerForCliRelease(callDaemonMethod: DaemonClientLike["callDaemonMethod"]) {
   const unexpected = () => {
@@ -37,9 +51,7 @@ function managerForCliRelease(callDaemonMethod: DaemonClientLike["callDaemonMeth
 describe("CLI heartbeat ownership results", () => {
   test("superseded heartbeat uses the ActionableError non-zero exit path with re-claim guidance", async () => {
     const Manager = managerForCliRelease(async () => {
-      throw Object.assign(new ActionableError("Displaced owner"), {
-        code: "liveness_owner_superseded",
-      });
+      throw new CodedActionableError("Displaced owner", "liveness_owner_superseded");
     });
     const exited = new Error("fake exit");
     const log = spyOn(console, "log").mockImplementation(() => {});
@@ -183,7 +195,10 @@ describe("CLI release-session daemon results", () => {
   });
 });
 
-async function expectCliReleaseFailure(Manager: new () => DaemonManager, message: string) {
+async function expectCliReleaseFailure(
+  Manager: ReturnType<typeof managerForCliRelease>,
+  message: string,
+) {
   const exited = new Error("fake exit");
   const log = spyOn(console, "log").mockImplementation(() => {});
   const report = spyOn(console, "error").mockImplementation(() => {});
@@ -208,20 +223,23 @@ function managerForRelease(
   releaseSession: () => Promise<string | null>,
   releaseDevice: () => Promise<void>,
 ) {
-  class FakeManager {
-    getDaemonState(): DaemonStateLike {
-      return {
-        isInitialized: () => true,
-        getSessionManager: () => ({
-          getSession: () => ({ assignedDevice: "fake-device" }),
-          releaseSession,
-        }),
-        getDevicePool: () => ({ releaseDevice }),
-      } as unknown as DaemonStateLike;
+  // This command only uses the daemon state; no manager startup or daemon operations.
+  const sessions = new ScriptedSessionManager({
+    getSession: () => buildSession({ assignedDevice: "fake-device" }),
+    releaseSession,
+  });
+  const pool = new ScriptedDevicePool(sessions, { releaseDevice });
+  const state: DaemonStateLike = {
+    isInitialized: () => true,
+    getSessionManager: () => sessions,
+    getDevicePool: () => pool,
+    getDeviceSessionRegistry: unexpectedHook,
+  };
+  return class FakeManager extends SafeDaemonManager {
+    override getDaemonState() {
+      return state;
     }
-  }
-  // This command only uses getDaemonState; no manager startup or daemon operations.
-  return FakeManager as unknown as new () => DaemonManager;
+  };
 }
 
 describe("CLI release-session promise ownership", () => {

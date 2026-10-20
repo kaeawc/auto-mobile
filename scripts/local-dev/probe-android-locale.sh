@@ -44,10 +44,11 @@ find_sdk_tool() {
     command -v "${command_name}"
     return 0
   fi
-  return 1
+  # Not finding the tool is a normal outcome: callers test for empty output.
+  return 0
 }
 
-ADB_BIN="$(find_sdk_tool "platform-tools/adb" "adb" || true)"
+ADB_BIN="$(find_sdk_tool "platform-tools/adb" "adb")"
 
 [[ -n "${ADB_BIN}" ]] || fail "adb not found. Set ANDROID_SDK_ROOT or ANDROID_HOME."
 
@@ -55,10 +56,25 @@ adb_cmd() {
   "${ADB_BIN}" -s "${ADB_SERIAL}" "$@"
 }
 
+# adb_cmd for probes whose failure is expected and must not abort the script.
+adb_cmd_best_effort() {
+  "${ADB_BIN}" -s "${ADB_SERIAL}" "$@" || true
+}
+
+# Run a command the same way an `if` condition would (errexit is ignored
+# inside it) and record its exit status in RUN_STATUS. Calling through "$@"
+# keeps that explicit instead of a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
 cleanup() {
   if [[ "${KILL_ON_EXIT}" == "true" && "${STARTED_EMULATOR}" == "true" && -n "${ADB_SERIAL}" ]]; then
     warn "KILL_ON_EXIT=true, stopping ${ADB_SERIAL}"
-    adb_cmd emu kill >/dev/null 2>&1 || true
+    adb_cmd_best_effort emu kill >/dev/null 2>&1
   elif [[ -n "${EMULATOR_PID}" ]]; then
     warn "Leaving emulator process running (pid ${EMULATOR_PID}). Set KILL_ON_EXIT=true to stop it."
   fi
@@ -76,41 +92,43 @@ running_serial_for_avd() {
       return 0
     fi
   done < <("${ADB_BIN}" devices | awk 'NR > 1 && $2 == "device" && $1 ~ /^emulator-/ {print $1}')
-  return 1
+  # No running emulator for this AVD is a normal outcome: callers test for empty output.
+  return 0
 }
 
 wait_for_boot() {
+  local failure_message="$1"
   local deadline=$((SECONDS + BOOT_TIMEOUT_SECONDS))
 
   adb_cmd wait-for-device
   while (( SECONDS < deadline )); do
     local boot_completed sys_boot_completed
-    boot_completed="$(adb_cmd shell getprop dev.bootcomplete 2>/dev/null | tr -d '\r' || true)"
-    sys_boot_completed="$(adb_cmd shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+    boot_completed="$(adb_cmd_best_effort shell getprop dev.bootcomplete 2>/dev/null | tr -d '\r')"
+    sys_boot_completed="$(adb_cmd_best_effort shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
     if [[ "${boot_completed}" == "1" && "${sys_boot_completed}" == "1" ]]; then
       return 0
     fi
     sleep 2
   done
 
-  return 1
+  fail "${failure_message}"
 }
 
 read_locale_state() {
   printf 'id: '
-  adb_cmd shell id || true
+  adb_cmd_best_effort shell id
   printf 'ro.debuggable: '
-  adb_cmd shell getprop ro.debuggable || true
+  adb_cmd_best_effort shell getprop ro.debuggable
   printf 'ro.secure: '
-  adb_cmd shell getprop ro.secure || true
+  adb_cmd_best_effort shell getprop ro.secure
   printf 'ro.build.tags: '
-  adb_cmd shell getprop ro.build.tags || true
+  adb_cmd_best_effort shell getprop ro.build.tags
   printf 'sdk: '
-  adb_cmd shell getprop ro.build.version.sdk || true
+  adb_cmd_best_effort shell getprop ro.build.version.sdk
   printf 'persist.sys.locale: '
-  adb_cmd shell getprop persist.sys.locale || true
+  adb_cmd_best_effort shell getprop persist.sys.locale
   printf 'settings system_locales: '
-  adb_cmd shell settings get system system_locales || true
+  adb_cmd_best_effort shell settings get system system_locales
   printf 'am get-config locale line: '
   adb_cmd shell am get-config 2>/dev/null | tr -d '\r' | awk 'NR == 1 {print}'
 }
@@ -134,7 +152,7 @@ try_system_locale_setprop() {
   adb_cmd shell stop
   sleep 2
   adb_cmd shell start
-  wait_for_boot || fail "device did not finish booting after framework restart"
+  wait_for_boot "device did not finish booting after framework restart"
   read_locale_state
   return 0
 }
@@ -162,7 +180,7 @@ try_app_locale() {
   fi
 
   log "Trying per-app locale for ${APP_ID}"
-  adb_cmd shell cmd locale get-app-locales "${APP_ID}" || true
+  adb_cmd_best_effort shell cmd locale get-app-locales "${APP_ID}"
   adb_cmd shell cmd locale set-app-locales "${APP_ID}" --locales "${LOCALE}"
   adb_cmd shell cmd locale get-app-locales "${APP_ID}"
 
@@ -176,12 +194,12 @@ printf 'AVD_NAME=%s\nLOCALE=%s\nAPP_ID=%s\nEMULATOR_PORT=%s\nEMULATOR_ARGS=%s\n'
   "${AVD_NAME}" "${LOCALE}" "${APP_ID}" "${EMULATOR_PORT}" "${EMULATOR_ARGS}"
 
 if [[ -z "${ADB_SERIAL}" ]]; then
-  ADB_SERIAL="$(running_serial_for_avd || true)"
+  ADB_SERIAL="$(running_serial_for_avd)"
 fi
 
 if [[ -z "${ADB_SERIAL}" ]]; then
   log "Starting AVD ${AVD_NAME}"
-  EMULATOR_BIN="$(find_sdk_tool "emulator/emulator" "emulator" || true)"
+  EMULATOR_BIN="$(find_sdk_tool "emulator/emulator" "emulator")"
   [[ -n "${EMULATOR_BIN}" ]] || fail "emulator not found. Set ANDROID_SDK_ROOT or ANDROID_HOME, or pass ADB_SERIAL for an already running emulator."
 
   emulator_args_array=("-no-window" "-no-audio" "-no-snapshot")
@@ -200,18 +218,20 @@ if [[ -z "${ADB_SERIAL}" ]]; then
 fi
 
 log "Waiting for ${ADB_SERIAL} to boot"
-wait_for_boot || fail "device ${ADB_SERIAL} did not boot within ${BOOT_TIMEOUT_SECONDS}s"
+wait_for_boot "device ${ADB_SERIAL} did not boot within ${BOOT_TIMEOUT_SECONDS}s"
 
 log "Initial locale/root state"
 read_locale_state
 
 system_without_root="failed"
-if try_system_locale_setprop "before adb root"; then
+run_capture_status try_system_locale_setprop "before adb root"
+if (( RUN_STATUS == 0 )); then
   system_without_root="succeeded"
 fi
 
 root_result="failed"
-if try_adb_root; then
+run_capture_status try_adb_root
+if (( RUN_STATUS == 0 )); then
   root_result="succeeded"
 fi
 
@@ -222,7 +242,8 @@ root_identity_status=$?
 set -e
 if (( root_identity_status == 0 )) && [[ "${root_identity}" == *'uid=0(root)'* ]]; then
   system_after_root="failed"
-  if try_system_locale_setprop "after adb root"; then
+  run_capture_status try_system_locale_setprop "after adb root"
+  if (( RUN_STATUS == 0 )); then
     system_after_root="succeeded"
   fi
 else
@@ -230,7 +251,8 @@ else
 fi
 
 app_locale="failed"
-if try_app_locale; then
+run_capture_status try_app_locale
+if (( RUN_STATUS == 0 )); then
   app_locale="succeeded"
 fi
 

@@ -158,6 +158,11 @@ export class TestExecutionRepository {
     this.db = db ?? null;
   }
 
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return { pruneToRowCap: (maxRows?: number) => this.pruneToRowCap(maxRows) };
+  }
+
   private getDb(): Kysely<Database> {
     if (this.db) {
       return this.db;

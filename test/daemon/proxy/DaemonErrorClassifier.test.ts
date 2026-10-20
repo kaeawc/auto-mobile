@@ -1,11 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
 import { DaemonErrorClassifier } from "../../../src/daemon/proxy/DaemonErrorClassifier";
-import {
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-} from "../../../src/daemon/client";
-import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonUnavailableError } from "../../../src/daemon/client";
+import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/DaemonVersionMismatchError";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../../src/daemon/types";
 
 function classifier(

@@ -1,14 +1,9 @@
 import type { PlanStepToolResult, PlanToolResultsTruncation } from "../../models/ExecutePlanResult";
+import { PlanToolResultsBudget, serializedLength } from "./PlanToolResultsBudget";
+export { PlanToolResultsBudget, MAX_PLAN_TOOL_RESULTS_CHARS } from "./PlanToolResultsBudget";
 
 /** Largest serialized result kept for one step before it is narrowed to its core fields. */
 export const MAX_STEP_TOOL_RESULT_CHARS = 8 * 1024;
-
-/**
- * Hard serialized budget for the whole `toolResults` array of one plan, across every device track
- * (entries count in full: `stepIndex`, `tool`, `device` and `result`). Once an entry does not fit,
- * it and every later one is left out and counted in `toolResultsTruncated.omittedSteps`.
- */
-export const MAX_PLAN_TOOL_RESULTS_CHARS = 64 * 1024;
 
 /**
  * Payload fields that are bulky and already have their own channel: the embedded observation and
@@ -43,10 +38,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function serializedLength(value: unknown): number {
-  return JSON.stringify(value).length;
-}
-
 function withoutBulkyFields(payload: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(payload).filter(([key]) => !isDroppedField(key)));
 }
@@ -79,36 +70,6 @@ export function boundStepToolResult(
     result: serializedLength(core) <= maxChars ? core : successOnly(trimmed),
     truncated: true,
   };
-}
-
-/**
- * One `toolResults` budget shared by every device track's collector of a plan, so a multi-device
- * plan cannot return one budget per track. Sticky: after the first entry that does not fit, no
- * later entry is admitted, so the retained entries are a prefix of what completed.
- */
-export class PlanToolResultsBudget {
-  private spentChars = 0;
-  private omitted = 0;
-  private exhausted = false;
-
-  constructor(private readonly maxChars: number = MAX_PLAN_TOOL_RESULTS_CHARS) {}
-
-  /** Reserves room for one serialized entry (plus its array separator), or records it omitted. */
-  admit(entry: PlanStepToolResult): boolean {
-    const chars = serializedLength(entry) + 1;
-    if (this.exhausted || this.spentChars + chars > this.maxChars) {
-      this.exhausted = true;
-      this.omitted++;
-      return false;
-    }
-    this.spentChars += chars;
-    return true;
-  }
-
-  /** The `toolResultsTruncated` response field, present only once an entry was omitted. */
-  asField(): { toolResultsTruncated?: PlanToolResultsTruncation } {
-    return this.omitted > 0 ? { toolResultsTruncated: { omittedSteps: this.omitted } } : {};
-  }
 }
 
 /** Collects bounded per-step tool results for one device track (or a single-device plan). */

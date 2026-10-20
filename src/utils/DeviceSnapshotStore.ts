@@ -581,3 +581,6 @@ export class DeviceSnapshotStore {
     }
   }
 }
+
+/** The public surface of {@link DeviceSnapshotStore}; test fakes implement exactly this. */
+export type DeviceSnapshotStorePort = Pick<DeviceSnapshotStore, keyof DeviceSnapshotStore>;

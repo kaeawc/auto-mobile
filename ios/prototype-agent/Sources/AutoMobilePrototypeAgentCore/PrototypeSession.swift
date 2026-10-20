@@ -1,7 +1,14 @@
 import Foundation
 
-/// Why a prototype went away; the `reason` in the terminal `dismissed` event's payload.
-enum PrototypeDismissReason: String {
+/// Why an embedded prototype went away.
+/// This enum may gain cases; include a default branch when switching over it.
+public enum PrototypeDismissReason: String, Sendable {
+    /// The host dismiss control or a spec `dismiss` action.
+    case user
+}
+
+/// Internal lifecycle reasons retain the injected agent's wire protocol.
+enum PrototypeSessionDismissReason: String, Sendable {
     /// The host dismiss control or a spec `dismiss` action.
     case user
     /// A `dismiss_prototype` request.
@@ -13,12 +20,16 @@ enum PrototypeDismissReason: String {
     case ttl
 }
 
-/// One `prototype_event` push, before the wall-clock timestamp is attached.
-struct PrototypeEvent: Equatable {
-    let id: String
-    let sequence: Int
-    let kind: String
-    let name: String?
+/// A prototype event with a semantic category and JSON snapshots for app-owned Codable payloads.
+/// The session creates it before the model attaches the wire timestamp.
+public struct PrototypeEvent: Equatable, Sendable {
+    /// The prototype that emitted this event.
+    public let id: String
+    /// Monotonic event sequence for this prototype.
+    public let sequence: Int
+    let wireKind: String
+    /// The authored event name, state key, or data path.
+    public let name: String?
     let payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
@@ -26,6 +37,9 @@ struct PrototypeEvent: Equatable {
     var resolvedContext: PrototypeResolvedEmitContext?
     var keys: [String]?
     var validity: [String: Bool]?
+    var embeddedWire: Data? = nil
+    var wireTimestamp = 0
+    var isStateChange = false
 
     var context: [String: JSONValue]? { resolvedContext?.context }
     var contextTruncated: Bool? { resolvedContext?.contextTruncated }
@@ -37,7 +51,7 @@ struct PrototypeEvent: Equatable {
             "timestamp": timestamp,
             "id": id,
             "sequence": sequence,
-            "kind": kind,
+            "kind": wireKind,
             "name": name as Any? ?? NSNull(),
             "payload": payload.foundationObject,
             "state": JSONValue.object(state).foundationObject,
@@ -321,6 +335,22 @@ struct PrototypeSession {
         return PrototypeStateValidator.rejection(root: spec.root, state: state, nonStateBytes: nonStateBytes) == nil
     }
 
+    private mutating func applyPlannedWrite(_ write: PlannedWrite?, touched: inout [String]) {
+        guard let write else { return }
+        // The plan was validated against the data before this list ran; an earlier data
+        // action may have added a control (a repeat row) that refuses this value now.
+        var next = state
+        next[write.key] = write.value
+        guard accepts(next) else { return }
+        state[write.key] = write.value
+        if !touched.contains(write.key) { touched.append(write.key) }
+    }
+
+    private mutating func runEmit(_ action: PrototypeAction) -> [PrototypeEvent] {
+        let context = action.context?.resolve(EmitContextInputs(state: state, pages: pages, dataModel: data))
+        return emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
+    }
+
     /// Runs `actions` in order, applying the writes planned for them.
     private mutating func execute(_ actions: [PrototypeAction], _ writes: [Int: PlannedWrite]) -> [PrototypeEvent] {
         let baseline = state
@@ -330,8 +360,7 @@ struct PrototypeSession {
             guard isShown else { break }
             switch action.type {
             case "emit":
-                let context = action.context?.resolve(EmitContextInputs(state: state, pages: pages, dataModel: data))
-                events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
+                events += runEmit(action)
             case "push", "pop", "popToRoot", "replace":
                 events += runStack(action)
             case "setPage":
@@ -343,15 +372,7 @@ struct PrototypeSession {
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
-                if let write = writes[index] {
-                    // The plan was validated against the data before this list ran; an earlier data
-                    // action may have added a control (a repeat row) that refuses this value now.
-                    var next = state
-                    next[write.key] = write.value
-                    guard accepts(next) else { continue }
-                    state[write.key] = write.value
-                    if !touched.contains(write.key) { touched.append(write.key) }
-                }
+                applyPlannedWrite(writes[index], touched: &touched)
             }
         }
         guard isShown else { return events }
@@ -365,30 +386,32 @@ struct PrototypeSession {
     /// `PrototypeDataWriteCode`, or a tree the changed data cannot rebuild within the show's limits)
     /// changes and emits nothing, and the rest of the action list still runs.
     private mutating func runDataWrite(_ action: PrototypeAction) -> [PrototypeEvent] {
-        guard let spec, let op = PrototypeDataWrite.Op(actionType: action.type), let path = action.path else {
+        guard let spec, let operation = PrototypeDataWrite.Operation(actionType: action.type),
+              let path = action.path
+        else {
             return []
         }
         let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
         var value: JSONValue?
-        if op != .remove {
+        if operation != .remove {
             guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
                 return []
             }
             value = resolved
         }
-        return (try? commitDataWrite(op, path: path, value: value).get()) ?? []
+        return (try? commitDataWrite(operation, path: path, value: value).get()) ?? []
     }
 
     /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
     /// bumped revision and the `change` event. A refused write changes nothing.
     private mutating func commitDataWrite(
-        _ op: PrototypeDataWrite.Op, path: String, value: JSONValue?
+        _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?
     )
         -> Result<[PrototypeEvent], PrototypeDataWriteFailure>
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
         let data: [String: JSONValue]
-        switch PrototypeDataWrite.apply(spec.data, op: op, path: path, value: value) {
+        switch PrototypeDataWrite.apply(spec.data, op: operation, path: path, value: value) {
         case let .success(written): data = written
         case let .failure(failure): return .failure(failure)
         }
@@ -397,12 +420,16 @@ struct PrototypeSession {
                 code: .limitExceeded, message: "\(path): the changed data breaks a limit the show enforces"
             ))
         }
+        // The size baseline moves with the data the write changed, as it does for a patch, so a later
+        // state write or patch is measured against the written spec rather than the shown one.
+        let structureDelta = PrototypePatch.structureBytes(rebuilt) - PrototypePatch.structureBytes(spec)
+        nonStateBytes = max(0, nonStateBytes + structureDelta)
         self.spec = rebuilt
         structureRevision += 1
         rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
         let revision = dataRevision + 1
         revisions[rebuilt.id] = revision
-        var payload: [String: JSONValue] = ["op": .string(op.rawValue), "revision": .number(Double(revision))]
+        var payload: [String: JSONValue] = ["op": .string(operation.rawValue), "revision": .number(Double(revision))]
         // The value is left out when the event would not fit the emit payload limit, so the host,
         // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).
         if let value, PrototypeEmitContext.fits(.object(payload.merging(["value": value]) { $1 })) {
@@ -482,8 +509,8 @@ struct PrototypeSession {
         let next: JSONValue? = switch action.type {
         case "setState": action.value
         case "toggle": state[key]?.boolValue.map { .bool(!$0) }
-        case "increment": stepped(state[key], by: action.by ?? 1)
-        case "decrement": stepped(state[key], by: -(action.by ?? 1))
+        case "increment": stepped(state[key], by: action.incrementAmount ?? 1)
+        case "decrement": stepped(state[key], by: -(action.incrementAmount ?? 1))
         default: nil
         }
         return next.map { (key, $0) }
@@ -507,7 +534,11 @@ struct PrototypeSession {
                 "values": .object(Dictionary(uniqueKeysWithValues: keys.map { ($0, state[$0] ?? .null) })),
             ])
         }
-        return emit(kind: "emit", name: "change", payload: payload)
+        return emit(kind: "emit", name: "change", payload: payload).map {
+            var event = $0
+            event.isStateChange = true
+            return event
+        }
     }
 
     /// Several keys written together, reported by one `change` event (see `emitStateChange`). They are
@@ -629,7 +660,7 @@ struct PrototypeSession {
     }
 
     /// The terminal event: every dismissal emits exactly one `dismissed`, carrying its reason.
-    mutating func dismiss(reason: PrototypeDismissReason) -> [PrototypeEvent] {
+    mutating func dismiss(reason: PrototypeSessionDismissReason) -> [PrototypeEvent] {
         guard isShown else { return [] }
         let events = emit(kind: "dismissed", name: nil, payload: .object(["reason": .string(reason.rawValue)]))
         requests.cancelAll()
@@ -648,7 +679,7 @@ struct PrototypeSession {
         return [PrototypeEvent(
             id: id,
             sequence: sequence,
-            kind: kind,
+            wireKind: kind,
             name: name,
             payload: payload,
             state: state,

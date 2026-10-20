@@ -4,6 +4,7 @@ import {
   compare,
   countImportViolations,
   countTokenViolations,
+  exitCodeFor,
   scan,
   type Counts,
 } from "../../scripts/check-mcp-sdk-boundary";
@@ -25,6 +26,15 @@ describe("check-mcp-sdk-boundary", () => {
     expect(compare(counts, {}).excess).toEqual([
       "test/server/x.test.ts: sdk-import x1 (allowed 0)",
     ]);
+  });
+
+  test("flags a reintroduced v1-view test client import", () => {
+    expect(
+      importCounts('import { Client } from "../helpers/v1ViewMcpClient";')["f.ts"]?.[
+        "v1-view-client"
+      ],
+    ).toBe(1);
+    expect(importCounts('import { Client } from "@modelcontextprotocol/client";')).toEqual({});
   });
 
   test("flags every v1 SDK import form", () => {
@@ -104,5 +114,36 @@ describe("check-mcp-sdk-boundary", () => {
     ]);
     expect(stale).toEqual(["src/gone.ts: sessionIdGenerator x0 (allowlist says 1)"]);
     expect(compare(allowed, allowed)).toEqual({ excess: [], stale: [] });
+  });
+
+  test("a stale allowlist entry fails check mode (was warn-only, exit 0)", () => {
+    const comparison = compare({}, { "src/gone.ts": { sessionIdGenerator: 1 } });
+    expect(comparison.excess).toEqual([]);
+    expect(exitCodeFor(comparison)).toBe(1);
+    expect(exitCodeFor(compare({}, {}))).toBe(0);
+  });
+
+  test("counts sessionContext.sessionId through optional chains, brackets and destructuring", () => {
+    const counts: Counts = {};
+    countTokenViolations(
+      "src/x.ts",
+      [
+        "const a = options.sessionContext?.sessionId;",
+        'const b = ctx.sessionContext["sessionId"];',
+        "const { sessionId } = options.sessionContext;",
+        "const { sessionId: id } = sessionContext;",
+        "const c = sessionContext.sessionId;",
+        "const d = other.sessionId; // sessionContext.sessionId in a comment",
+        "type T = { sessionContext?: { sessionId?: string } };",
+      ].join("\n"),
+      counts,
+    );
+    expect(counts["src/x.ts"]).toEqual({ "sessionContext.sessionId": 5 });
+  });
+
+  test("flags v1 view client helpers beyond the exact v1ViewMcpClient name", () => {
+    expect(importCounts('import { c } from "../helpers/v1ViewClient";')["f.ts"]).toEqual({
+      "v1-view-client": 1,
+    });
   });
 });

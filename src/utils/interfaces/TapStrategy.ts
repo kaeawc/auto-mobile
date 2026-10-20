@@ -64,6 +64,33 @@ export interface TapStrategy {
   /** Re-tap when the view hierarchy hash is unchanged after a tap. */
   readonly retryTapIfNoChange: boolean;
 
+  /** Warn when the matched element reports itself as disabled (Android only). */
+  readonly warnsOnDisabledElement: boolean;
+
+  /** Wait out the activity-transition window before concluding a tap changed nothing. */
+  readonly settlesPostTapChange: boolean;
+
+  /** Re-check the display generation after a fresh hierarchy capture. */
+  readonly verifiesRefreshedDisplay: boolean;
+
+  /** Promote a matched node to its nearest clickable ancestor as the tap target. */
+  readonly promotesClickableAncestor: boolean;
+
+  /** Whether a failed post-tap focus check is re-polled until focus settles (iOS only). */
+  readonly settlesFocusChangeAfterTap: boolean;
+
+  /** Whether a keyboard occlusion during a focus tap is rethrown for IME recovery (Android only). */
+  readonly rethrowsKeyboardOcclusion: boolean;
+
+  /**
+   * Restamp the rotation of an observation whose hierarchy was just re-captured. Platforms
+   * that do not derive observation rotation from the hierarchy leave it untouched.
+   */
+  applyRefreshedObservationRotation(
+    observation: ObserveResult,
+    hierarchyRotation: number | undefined,
+  ): void;
+
   /** Default long-press duration in milliseconds. */
   readonly longPressDurationMs: number;
 }

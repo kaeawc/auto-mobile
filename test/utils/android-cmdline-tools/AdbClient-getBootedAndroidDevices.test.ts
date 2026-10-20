@@ -1,7 +1,5 @@
 import { withAndroidTransportId, copyAndroidTransportId } from "../../../src/utils/androidSerial";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { EventEmitter } from "events";
-import { PassThrough } from "stream";
 import {
   AdbClient,
   AdbCommandTimeoutError,
@@ -11,6 +9,7 @@ import {
 import type { ExecResult } from "../../../src/models";
 import { isAdbMissingDeviceError } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeDiscoveryObservationSequence } from "../../fakes/FakeDiscoveryObservationSequence";
 
 function createExecResult(stdout: string, stderr: string = ""): ExecResult {
@@ -21,6 +20,19 @@ function createExecResult(stdout: string, stderr: string = ""): ExecResult {
     trim: () => stdout.trim(),
     includes: (searchString: string) => stdout.includes(searchString),
   };
+}
+
+class RecordingChild extends FakeChildProcess {
+  readonly killCalls: string[] = [];
+  constructor() {
+    super();
+    // No pid: native-helper tracking would otherwise probe a real host process.
+    this.pid = undefined;
+  }
+  override kill(signal?: NodeJS.Signals | number): boolean {
+    this.killCalls.push(typeof signal === "string" ? signal : "SIGTERM");
+    return true;
+  }
 }
 
 describe("AdbClient.getBootedAndroidDevices", () => {
@@ -115,7 +127,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const timer = new FakeTimer();
     timer.advanceTime(42);
     const observations = new FakeDiscoveryObservationSequence();
-    const adb = new AdbClient(null, execAsync, null, undefined, timer, undefined, observations);
+    const adb = new AdbClient(null, execAsync, { timer, observationSequence: observations });
 
     const devices = await adb.getBootedAndroidDevices();
 
@@ -150,11 +162,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       null,
       async () =>
         createExecResult(["List of devices attached", "emulator-5554\tdevice", ""].join("\n")),
-      null,
-      undefined,
-      timer,
-      undefined,
-      observations,
+      { timer, observationSequence: observations },
     );
 
     const initial = await adb.getBootedAndroidDevices();
@@ -277,24 +285,17 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   });
 
   test("spawns argv without retry and terminates only its child on abort", async () => {
-    const child = Object.assign(new EventEmitter(), {
-      stdin: null,
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      killCalls: [] as string[],
-      kill(signal?: string) {
-        this.killCalls.push(signal ?? "SIGTERM");
-        return true;
-      },
-    });
+    const child = new RecordingChild();
     let received: { file: string; args: string[] } | undefined;
     const adb = new AdbClient(
       { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
       async (): Promise<ExecResult> => createExecResult(""),
-      ((file: string, args: string[]) => {
-        received = { file, args };
-        return child;
-      }) as never,
+      {
+        spawnFn: (file, args) => {
+          received = { file, args };
+          return child;
+        },
+      },
     );
     const controller = new AbortController();
 
@@ -322,24 +323,17 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   });
 
   test("does not terminate a child after startup-scoped cancellation", async () => {
-    const child = Object.assign(new EventEmitter(), {
-      stdin: null,
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      killCalls: [] as string[],
-      kill(signal?: string) {
-        this.killCalls.push(signal ?? "SIGTERM");
-        return true;
-      },
-    });
+    const child = new RecordingChild();
     let receivedSignal: AbortSignal | undefined;
     const adb = new AdbClient(
       { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
       async (): Promise<ExecResult> => createExecResult(""),
-      ((_file: string, _args: string[], options?: { signal?: AbortSignal }) => {
-        receivedSignal = options?.signal;
-        return child;
-      }) as never,
+      {
+        spawnFn: (_file, _args, options) => {
+          receivedSignal = options?.signal;
+          return child;
+        },
+      },
     );
     const controller = new AbortController();
 
@@ -362,15 +356,13 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   test("does not spawn when cancellation arrives during executable resolution", async () => {
     let resolveBase: ((value: { adbPath: string; baseArgs: string[] }) => void) | undefined;
     let spawnCalls = 0;
-    const adb = new AdbClient(null, async (): Promise<ExecResult> => createExecResult(""), (() => {
-      spawnCalls++;
-      throw new Error("must not spawn");
-    }) as never);
-    (
-      adb as unknown as {
-        getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-      }
-    ).getBaseCommandParts = () =>
+    const adb = new AdbClient(null, async (): Promise<ExecResult> => createExecResult(""), {
+      spawnFn: () => {
+        spawnCalls++;
+        throw new Error("must not spawn");
+      },
+    });
+    adb.getBaseCommandParts = () =>
       new Promise((resolve) => {
         resolveBase = resolve;
       });
@@ -386,21 +378,14 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   test("does not spawn when executable resolution exhausts the timeout budget", async () => {
     const timer = new FakeTimer();
     let spawnCalls = 0;
-    const adb = new AdbClient(
-      null,
-      async (): Promise<ExecResult> => createExecResult(""),
-      (() => {
+    const adb = new AdbClient(null, async (): Promise<ExecResult> => createExecResult(""), {
+      spawnFn: () => {
         spawnCalls++;
         throw new Error("must not spawn");
-      }) as never,
-      undefined,
+      },
       timer,
-    );
-    (
-      adb as unknown as {
-        getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-      }
-    ).getBaseCommandParts = async () => {
+    });
+    adb.getBaseCommandParts = async () => {
       timer.advanceTime(100);
       return { adbPath: "adb", baseArgs: [] };
     };

@@ -15,7 +15,7 @@ import fs from "node:fs";
 import os from "os";
 import path from "path";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
+import { AMBIENT_ENV, ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
@@ -96,7 +96,7 @@ export function resolveAutoMobileLogsDir(
  * @param env - Environment to inspect (injectable for tests)
  */
 export function assertUnitTestLogsDirIsolated(env: NodeJS.ProcessEnv = process.env): void {
-  if (env.NODE_ENV !== "test") {
+  if (readEnvRaw(AMBIENT_ENV.NODE_ENV, env) !== "test") {
     return;
   }
   // Same `??` precedence as resolveAutoMobileLogsDir/resolveAutoMobileBaseDir: an

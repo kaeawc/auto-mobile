@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
-import { permissiveDeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import { permissiveDeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -66,7 +66,7 @@ function hasNal(socket: FakeSocket, type: number, marker: number): boolean {
 function createHarness(resolveDevice: () => Promise<BootedDevice> = async () => device) {
   const timer = new FakeTimer();
   const sources: CaptureSource[] = [];
-  const hints: Array<{ quality?: string; fps: number; bitrateBps?: number }> = [];
+  const hints: Array<{ quality?: string; fps: number | undefined; bitrateBps?: number }> = [];
   const emitters: Array<(chunk: Buffer) => void> = [];
   const server = new TestVideoServer(
     {

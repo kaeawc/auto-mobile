@@ -25,6 +25,10 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { readToolResponse, toolIsError, toolStructured } from "../helpers/toolResponse";
+
+isolateToolRegistry();
 
 // No test in this file may run the installed network-filter-controller.
 const networkFilterBridge = new FakeNetworkFilterBridge();
@@ -241,9 +245,9 @@ describe("device state tools", () => {
       const handler = tool.deviceAwareHandler!;
       tool.deviceAwareHandler = async (...args) => {
         const response = await handler(...args);
-        expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
-        expect(response.content).toEqual(
-          createJSONToolResponse(response.structuredContent).content,
+        expect(tool.outputSchema!.parse(toolStructured(response))).toBeDefined();
+        expect(readToolResponse(response).content).toEqual(
+          createJSONToolResponse(toolStructured(response)).content,
         );
         return response;
       };
@@ -595,9 +599,9 @@ describe("device state tools", () => {
           biometrics: { supported: true, error: "capture failed" },
           error: "capture failed",
         };
-        expect(response.structuredContent).toEqual(payload);
-        expect(response.content).toEqual(createJSONToolResponse(payload).content);
-        expect(response.isError).toBeUndefined();
+        expect(toolStructured(response)).toEqual(payload);
+        expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
+        expect(toolIsError(response)).toBe(false);
         expect(mutation).toHaveBeenCalledTimes(combined ? 1 : 0);
       } finally {
         capture.mockRestore();
@@ -825,8 +829,16 @@ describe("device state tools", () => {
       createBootedDevice("sim-a", "ios", "iPhone 15"),
       createBootedDevice("sim-b", "ios", "iPhone 16"),
     ]);
-    await devicePool.bindOrReuseDeviceSession("session-a", "sim-a", "ios");
-    await devicePool.bindOrReuseDeviceSession("session-b", "sim-b", "ios");
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: "session-a",
+      deviceId: "sim-a",
+      platform: "ios",
+    });
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: "session-b",
+      deviceId: "sim-b",
+      platform: "ios",
+    });
     DaemonState.getInstance().initialize(sessionManager, devicePool);
 
     const setActiveDevice = ToolRegistry.getTool("setActiveDevice");

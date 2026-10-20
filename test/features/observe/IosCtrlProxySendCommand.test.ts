@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { CtrlProxyStorage } from "../../../src/features/observe/ios/CtrlProxyStorage";
 import { CtrlProxyDatabase } from "../../../src/features/observe/ios/CtrlProxyDatabase";
 import { iosWireDeadlineParams } from "../../../src/features/observe/ios/CtrlProxyDispatch";
@@ -34,7 +33,7 @@ async function harness() {
   const context: DelegateContext = {
     timer,
     requestManager: manager,
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => socket,
     ensureConnected: async () => {
       connects++;
       return true;

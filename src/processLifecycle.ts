@@ -81,7 +81,7 @@ type ProcessShutdownTimeoutHandler = () =>
   | undefined;
 
 export type FatalProcessEvent =
-  | { type: "uncaughtException"; error: Error }
+  | { type: "uncaughtException"; error: unknown }
   | { type: "unhandledRejection"; reason: unknown; promise: Promise<unknown> };
 
 export type FatalProcessHandler = (event: FatalProcessEvent) => Promise<void> | void;

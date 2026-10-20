@@ -2,41 +2,37 @@ import { cancellationHandlers, cancellationTests } from "../helpers/interactionC
 import { describe, expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { DOUBLE_TAP_GAP_MS } from "../../src/features/action/tapAtGesture";
-import {
-  resetTapAtElementFactory,
-  resetTapOnElementFactory,
-  resetTapAnyElementFactory,
-  resetDragAndDropFactory,
-  setTapAtElementFactory,
-  setTapOnElementFactory,
-  setTapAnyElementFactory,
-  setDragAndDropFactory,
-} from "../../src/server/interactionTools";
+import { type InteractionToolDependencies } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createTapAt } from "../helpers/tapAtCoordinate";
-import type { ActionCall } from "../../src/features/action/ActionCall";
+import { resolveActionCallWithPerf, type ActionCall } from "../../src/features/action/ActionCall";
+import type { ProgressCallback } from "../../src/features/action/BaseVisualChange";
 
+const interactionDeps: InteractionToolDependencies = {};
 const devices = [
   { name: "Android test device", platform: "android", deviceId: "emulator-5554" },
   { name: "iOS test device", platform: "ios", deviceId: "ios-test-device" },
 ] as BootedDevice[];
 
-const registeredHandler = cancellationHandlers(["tapAt", "tapOn", "tapAny", "dragAndDrop"]);
+const registeredHandler = cancellationHandlers(
+  ["tapAt", "tapOn", "tapAny", "dragAndDrop"],
+  interactionDeps,
+);
 
 describe("registered interaction handler cancellation", () => {
   const test = cancellationTests(() => {
-    resetTapAtElementFactory();
-    resetTapOnElementFactory();
-    resetTapAnyElementFactory();
-    resetDragAndDropFactory();
+    delete interactionDeps.tapAtElementFactory;
+    delete interactionDeps.tapOnElementFactory;
+    delete interactionDeps.tapAnyElementFactory;
+    delete interactionDeps.dragAndDropFactory;
     ToolRegistry.clearTools();
   });
 
   // iOS delivers a double tap as one runner request, so only Android has a gap to cancel inside.
   test.each([devices[0]!])("tapAt cancels during the double-tap gap on %s", async (device) => {
     const { tapAt, timer, androidDispatches, iosDispatches } = createTapAt(device);
-    setTapAtElementFactory(() => tapAt);
+    interactionDeps.tapAtElementFactory = () => tapAt;
     const gapTimer = new FakeTimer();
     const controller = new AbortController();
     let gapStarted!: () => void;
@@ -76,7 +72,7 @@ describe("registered interaction handler cancellation", () => {
   test("iOS tapAt doubleTap is one runner double tap with no gap sleep", async () => {
     const device = devices[1]!;
     const { tapAt, timer, iosDispatches } = createTapAt(device);
-    setTapAtElementFactory(() => tapAt);
+    interactionDeps.tapAtElementFactory = () => tapAt;
     const sleep = spyOn(timer, "sleep");
     try {
       const response = await registeredHandler("tapAt")(device, {
@@ -94,7 +90,7 @@ describe("registered interaction handler cancellation", () => {
 
   test.each(devices)("pre-aborted tapAt dispatches nothing on %s", async (device) => {
     const { tapAt, androidDispatches, iosDispatches } = createTapAt(device);
-    setTapAtElementFactory(() => tapAt);
+    interactionDeps.tapAtElementFactory = () => tapAt;
     const controller = new AbortController();
     controller.abort();
     const response = await registeredHandler("tapAt")(
@@ -110,12 +106,12 @@ describe("registered interaction handler cancellation", () => {
 
   test("tapAt forwards the exact signal to execute", async () => {
     let received: AbortSignal | undefined;
-    setTapAtElementFactory(() => ({
+    interactionDeps.tapAtElementFactory = () => ({
       execute: async (options, call) => {
-        received = (call as ActionCall | undefined)?.signal;
-        return { success: true, x: options.x, y: options.y, action: "doubleTap" };
+        received = resolveActionCallWithPerf(call).signal;
+        return { success: true, x: options.x ?? 0, y: options.y ?? 0, action: "doubleTap" };
       },
-    }));
+    });
     const controller = new AbortController();
     await registeredHandler("tapAt")(
       devices[0]!,
@@ -129,18 +125,21 @@ describe("registered interaction handler cancellation", () => {
   test.each(["tapOn", "tapAny", "dragAndDrop"])("%s forwards the exact signal", async (name) => {
     let received: AbortSignal | undefined;
     const sentinel = new Error("fake command stopped");
-    const execute = async (_options: unknown, call?: ActionCall): Promise<never> => {
-      received = call?.signal;
+    const execute = async (
+      _options: unknown,
+      call?: ProgressCallback | ActionCall,
+    ): Promise<never> => {
+      received = resolveActionCallWithPerf(call).signal;
       throw sentinel;
     };
     if (name === "tapOn") {
-      setTapOnElementFactory(() => ({ execute }));
+      interactionDeps.tapOnElementFactory = () => ({ execute });
     }
     if (name === "tapAny") {
-      setTapAnyElementFactory(() => ({ execute }));
+      interactionDeps.tapAnyElementFactory = () => ({ execute });
     }
     if (name === "dragAndDrop") {
-      setDragAndDropFactory(() => ({ execute }));
+      interactionDeps.dragAndDropFactory = () => ({ execute });
     }
     const controller = new AbortController();
     await expect(

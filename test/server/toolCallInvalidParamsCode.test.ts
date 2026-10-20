@@ -1,6 +1,6 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client, ProtocolError } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { ErrorCode, McpError } from "../../src/server/mcpError";
+import { ErrorCode } from "../../src/daemon/mcpError";
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { daemonResponseError } from "../../src/daemon/client";
@@ -49,6 +49,7 @@ describe("invalid tool params use the SDK invalid-params code", () => {
     onCallTool: () => {
       throw daemonResponseError({
         id: "invalid-params-response",
+        type: "mcp_response",
         success: false,
         code: ErrorCode.InvalidParams,
         error: daemonMessage,
@@ -107,10 +108,10 @@ describe("invalid tool params use the SDK invalid-params code", () => {
       const error = await fixtures[index].client
         .callTool({ name, arguments: args })
         .catch((failure: unknown) => failure);
-      expect(error).toBeInstanceOf(McpError);
+      expect(error).toBeInstanceOf(ProtocolError);
       expect(error).toMatchObject({
         code: ErrorCode.InvalidParams,
-        message: `MCP error -32602: ${message}`,
+        message,
       });
     });
 
@@ -126,8 +127,8 @@ describe("invalid tool params use the SDK invalid-params code", () => {
       const error = await fixtures[index].client
         .callTool({ name, arguments: args })
         .catch((failure: unknown) => failure);
-      expect(error).toBeInstanceOf(McpError);
-      expect(error).toMatchObject({ code: -32602, message: `MCP error -32602: ${message}` });
+      expect(error).toBeInstanceOf(ProtocolError);
+      expect(error).toMatchObject({ code: -32602, message });
     });
 
     test(`${mode}: genuine handler failure keeps its isError shape`, async () => {
@@ -143,7 +144,7 @@ describe("invalid tool params use the SDK invalid-params code", () => {
         .catch((failure: unknown) => failure);
       expect(error).toMatchObject({
         code: -32603,
-        message: `MCP error -32603: Unknown tool: ${UNKNOWN_TOOL}`,
+        message: `Unknown tool: ${UNKNOWN_TOOL}`,
       });
     });
   }
@@ -159,7 +160,7 @@ describe("invalid tool params use the SDK invalid-params code", () => {
         .catch((failure: unknown) => failure);
       expect(error).toMatchObject({
         code: -32603,
-        message: `MCP error -32603: Invalid parameters for tool ${INTERNAL_TOOL}: Error: schema failed internally`,
+        message: `Invalid parameters for tool ${INTERNAL_TOOL}: Error: schema failed internally`,
       });
     } finally {
       parse.mockRestore();
@@ -179,6 +180,7 @@ describe("validation message hygiene", () => {
     const error = new z.ZodError([
       {
         code: "custom",
+        input: undefined,
         path: ["layer"],
         message: "layer requires a selector naming the field to focus",
       },
@@ -190,7 +192,7 @@ describe("validation message hygiene", () => {
 
   test("a similar word does not suppress the path", () => {
     const error = new z.ZodError([
-      { code: "custom", path: ["layer"], message: "layers are invalid" },
+      { code: "custom", input: undefined, path: ["layer"], message: "layers are invalid" },
     ]);
     expect(formatToolParamError("sendKeys", error)).toBe("layer layers are invalid");
   });

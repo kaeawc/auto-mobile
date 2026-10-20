@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -9,7 +10,7 @@ const SESSION = "heartbeat-accepted-log";
 describe("accepted heartbeat debug log", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
-  let debug: ReturnType<typeof spyOn>;
+  let debug: Mock<typeof logger.debug>;
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -28,7 +29,7 @@ describe("accepted heartbeat debug log", () => {
     const previousHeartbeat = manager.getSession(SESSION)!.lastHeartbeat;
     const expectedAge = Math.max(0, timer.now() - previousHeartbeat);
 
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
 
     expect(debug).toHaveBeenCalledTimes(1);
     expect(String(debug.mock.calls[0]?.[0])).toContain(
@@ -37,11 +38,11 @@ describe("accepted heartbeat debug log", () => {
   });
 
   test("logs 3000ms for the second heartbeat", async () => {
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     debug.mockClear();
     await timer.advanceTimeAsync(3_000);
 
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
 
     expect(debug).toHaveBeenCalledTimes(1);
     expect(String(debug.mock.calls[0]?.[0])).toContain(
@@ -49,8 +50,9 @@ describe("accepted heartbeat debug log", () => {
     );
   });
 
-  test("does not log acceptance for an unknown session", () => {
-    manager.recordHeartbeat("unknown-heartbeat-session");
+  test("does not log acceptance for an unknown session", async () => {
+    // The daemon answers a heartbeat for an unknown session as not-found, which rejects here.
+    await expect(deliverDaemonHeartbeat(manager, "unknown-heartbeat-session")).rejects.toThrow();
 
     expect(
       debug.mock.calls.some(([message]) => String(message).includes("Heartbeat accepted")),

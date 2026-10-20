@@ -10,7 +10,7 @@
 # installer sources it and keeps only its tool-specific config + install logic.
 #
 # Sourcing convention mirrors scripts/local-dev/lib/common.sh:
-#   # shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+#   # shellcheck source=scripts/lib/tool-install.sh
 #   source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 #
 # Exports:
@@ -20,7 +20,7 @@
 #   detect_arch                - echoes x86_64|arm64|armv7|386|unknown (normalized)
 #   install_via_brew_or_manual - generic macOS brew-or-manual install helper
 
-# shellcheck source=scripts/lib/shell-core.sh disable=SC1091
+# shellcheck source=scripts/lib/shell-core.sh
 source "$(dirname "${BASH_SOURCE[0]}")/shell-core.sh"
 
 # Colors for output. Guarded so re-sourcing (or a caller that already set them)

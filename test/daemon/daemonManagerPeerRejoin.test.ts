@@ -2,7 +2,6 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChildProcess } from "node:child_process";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
@@ -74,7 +73,8 @@ function harness() {
     close: async () => {},
     callTool: async () => ({}),
     readResource: async () => ({}),
-    callDaemonMethod: async () => ({}),
+    callDaemonMethod: async (method) =>
+      method === "ide/status" ? readPidFileDataSync(pidPath) : {},
   };
   const manager = new SafeDaemonManager({
     clientFactory: () => client,
@@ -83,7 +83,7 @@ function harness() {
     pidFilePath: pidPath,
     socketPath,
     processFinder: table,
-    processSpawner: { spawn: (...args) => spawner.spawn(...args) as unknown as ChildProcess },
+    processSpawner: spawner,
     launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
     idGenerator: { next: () => "peer-rejoin-owner" },
     peerSocketReachability: reachability,

@@ -26,6 +26,7 @@
  */
 
 import { ActionableError } from "../models/ActionableError";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export const LATEST_RELEASE_VERSION = "latest";
 
@@ -84,6 +85,18 @@ export interface ReleaseChecksumEntry {
  * Each entry represents a validated release build.
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
+  {
+    version: "0.0.87",
+    apkSha256: "65e6c420b48b9af28377df9b68073b6151567a90059cefb33e677a5310cb6544",
+    ipaSha256: "0d5bc367976e67475400fd85a84b85c2e51bd4efa31060bfb43fbba47c4fab7c",
+    runnerSha256: "1063cab4de18f363b8a7d1177d7df89687bcb19b85f0b93b504f509a12d6053e",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "943adc314a3a573108619cba3326b2a07ae42c9d631b15bb284e480115e639ab",
+    screenCaptureHelperSha256: "02034a9b3973240097b853c4281b0debbd979195ab256c825f2d1a207a86e64b",
+    prototypeAgentSha256: "9f329aea7173a371c180364849d5823fd12f96c0b5716953b68e255de1fb5b41",
+    prototypeViewerSha256: "60ac1b236434ac112aa293efcce258123db2a6f341bc6f809438f0b375b97fd9",
+    networkFilterSha256: "b177bccc11732773f7df2bfc0c398924739a92eca2fef2a5e822a3098561511f",
+  },
   {
     version: "0.0.86",
     apkSha256: "49ce5a2cc5cbc6f1cf5d05652793707d17ac795383f054296f9fe2777309300d",
@@ -627,11 +640,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "bb26c4556ed673eb84b8455a74f12f2ef007d89612a7210e8b0bf35c68b2d226",
-  ipaSha256: "497621604fa57cb8dfb3d178c9741af7346a4bd1d24e174f9a92a50d297adaf6",
+  apkSha256: "c109b1b5606bf5a6765aa568b28813502f597da441aedabc4471c88046a63cbd",
+  ipaSha256: "b6dfd41f2b0cb57288143ffe9ef9a54dc9775fd01f2686a090f05fa9829fd984",
   runnerSha256Target: "xctest",
-  videoJarSha256: "943adc314a3a573108619cba3326b2a07ae42c9d631b15bb284e480115e639ab",
-  runnerSha256: "f4e49306efee12483efdf36d019f21b77d5e505e942c8c7a25e38021dcdbb841",
+  videoJarSha256: "3bdfb96984674aa9ad97c89e14e76b17346387106eadc86a85c908c520eeb593",
+  runnerSha256: "a25cce30e3e250182f9e64d6cd9efa547f4b524038ce66b7c3795e937fcd1e06",
 };
 
 /**
@@ -758,10 +771,10 @@ export function resolveAssetVersion(
 export const DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile";
 
 /** Environment variable that pins daemon + APK + IPA to one coherent version. */
-export const AUTOMOBILE_VERSION_ENV = "AUTOMOBILE_VERSION";
+export const AUTOMOBILE_VERSION_ENV = ENV.VERSION.name;
 
 /** Environment variable that mirrors the APK/IPA download host for offline CI. */
-export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
+export const AUTOMOBILE_ASSET_BASE_URL_ENV = ENV.ASSET_BASE_URL.name;
 
 /**
  * Opt-out that permits a plaintext `http://` asset base/bundle URL (issue #4761).
@@ -771,7 +784,7 @@ export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
  * checksum still blocks substitution). Set to `1`/`true` ONLY for a trusted
  * loopback/dev mirror (e.g. `http://127.0.0.1:8080` or `http://localhost`).
  */
-export const AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV = "AUTOMOBILE_ALLOW_INSECURE_ASSET_URL";
+export const AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV = ENV.ALLOW_INSECURE_ASSET_URL.name;
 
 /** Default GitHub Releases base for versioned asset downloads. */
 export const DEFAULT_ASSET_BASE_URL = "https://github.com/kaeawc/auto-mobile/releases/download";
@@ -780,7 +793,7 @@ type EnvLike = Record<string, string | undefined>;
 
 /** True when the plaintext-http opt-out ({@link AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}) is set. */
 function isInsecureAssetUrlAllowed(env: EnvLike): boolean {
-  const value = env[AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV];
+  const value = readEnvRaw(ENV.ALLOW_INSECURE_ASSET_URL, env);
   return value === "1" || value?.toLowerCase() === "true";
 }
 
@@ -825,7 +838,7 @@ export function assertHttpsAssetUrl(url: string, label: string, env: EnvLike = p
  * yet a 404 URL (an incoherent triple).
  */
 export function resolvePinnedVersion(env: EnvLike = process.env): string {
-  const trimmed = env[AUTOMOBILE_VERSION_ENV]?.trim();
+  const trimmed = readEnvTrimmed(ENV.VERSION, env);
   if (!trimmed || trimmed.length === 0) {
     return LATEST_RELEASE_VERSION;
   }
@@ -863,7 +876,7 @@ export function isPinnedVersionKnown(
  * (trimmed, trailing slashes stripped) when set, otherwise the GitHub default.
  */
 export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
-  const trimmed = env[AUTOMOBILE_ASSET_BASE_URL_ENV]?.trim();
+  const trimmed = readEnvTrimmed(ENV.ASSET_BASE_URL, env);
   if (trimmed && trimmed.length > 0) {
     let parsed: URL;
     try {

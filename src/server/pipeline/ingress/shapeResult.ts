@@ -1,6 +1,6 @@
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import { daemonShuttingDownMcpOutcome } from "../../../daemon/daemonShutdownOutcome";
-import { SessionReleasedDuringCreationError } from "../../../daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCreationError } from "../../../models/deviceAcquisitionRefusals";
 import {
   DaemonSessionCreationRejectedError,
   TerminalSessionError,
@@ -14,14 +14,14 @@ import {
   enrichDeviceLossOutcome,
   remainingDeviceLossIncidentWaitMs,
   type DeviceLossOutcome,
-} from "../../deviceLossOutcome";
+} from "../../../utils/deviceLossOutcome";
 import {
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
-} from "../../deviceSessionResult";
-import { executionTracker } from "../../executionTracker";
+} from "../../../daemon/deviceSessionResult";
+import { executionTracker } from "../../../daemon/executionTracker";
 import { forwardingLeaseConflictCause } from "../../forwardingLeaseConflictOutcome";
-import { shapeToolCallError } from "../../shapeToolCallError";
+import { shapeToolCallError } from "../../../daemon/shapeToolCallError";
 import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,
@@ -33,14 +33,12 @@ async function resolveDeviceLossOutcome(
   deviceLoss: DeviceLossOutcome,
   timeoutMs?: number,
 ): Promise<DeviceLossOutcome> {
-  const daemonState = DaemonState.getInstance();
-  if (!deviceLoss.incidentId || !daemonState.isInitialized()) {
+  const devicePool = deviceLoss.incidentId ? defaultDaemonContext.devicePool() : undefined;
+  if (!deviceLoss.incidentId || !devicePool) {
     return deviceLoss;
   }
   try {
-    const incident = await daemonState
-      .getDevicePool()
-      .waitForEmulatorLossIncident(deviceLoss.incidentId, timeoutMs);
+    const incident = await devicePool.waitForEmulatorLossIncident(deviceLoss.incidentId, timeoutMs);
     return enrichDeviceLossOutcome(deviceLoss, incident);
   } catch (incidentError) {
     logger.warn(

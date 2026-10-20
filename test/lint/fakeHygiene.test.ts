@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
@@ -295,7 +296,7 @@ function forbiddenLinesIn(source: string): string[] {
         }
         bindName(functionScope, parameter.name, null);
       }
-      if (node.body) {
+      if ("body" in node && node.body) {
         visit(node.body, functionScope);
       }
       return;
@@ -370,7 +371,7 @@ describe("fake hygiene source scan (#4186)", () => {
 
   for (const fileName of fakeFiles) {
     test(`${fileName} introduces no new real-clock / real-randomness use`, () => {
-      const source = readFileSync(path.join(FAKES_DIR, fileName), "utf8");
+      const source = readGuardFile(path.join(FAKES_DIR, fileName));
       const found = forbiddenLinesIn(source);
       const allowed = ALLOWLIST[fileName] ?? [];
 

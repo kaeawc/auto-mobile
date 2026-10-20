@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import type { IosNetworkErrorSimulationConfig } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
-  IOSCtrlProxyClient,
   type IosMockRuleSyncOutcome,
   type IosMockRuleSyncResult,
 } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
-import { NetworkState } from "../../src/server/NetworkState";
-import type { NetworkMockSyncReport } from "../../src/server/networkMockRules";
+import { NetworkState } from "../../src/utils/NetworkState";
+import type { NetworkMockSyncReport } from "../../src/utils/networkMockRules";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   isIosNetworkErrorSimulationAvailable,
@@ -23,6 +24,10 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 function ipaBytes(): Buffer {
   // A real CtrlProxy .ipa is a zip over 10KB; the override guard validates
@@ -37,7 +42,7 @@ function parseToolJson(response: any): any {
 describe("network tool schema", () => {
   let iosMessages: string[];
   let androidMessages: string[];
-  let iosErrorSimulations: unknown[];
+  let iosErrorSimulations: IosNetworkErrorSimulationConfig[];
   let iosMockRuleSyncCalls: number;
   let iosMockRuleSyncResult: IosMockRuleSyncOutcome | IosMockRuleSyncResult | Error;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
@@ -80,12 +85,12 @@ describe("network tool schema", () => {
     androidSendResult = true;
     androidMockReport = { status: "reported", rejected: [] };
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    iosGetInstanceSpy = spyOnIosClientInstance({
       sendMessage: (message: string) => {
         iosMessages.push(message);
         return true;
       },
-      setNetworkErrorSimulation: async (config: unknown) => {
+      setNetworkErrorSimulation: async (config: IosNetworkErrorSimulationConfig) => {
         iosErrorSimulations.push(config);
         return { success: true, totalTimeMs: 0 };
       },
@@ -98,7 +103,7 @@ describe("network tool schema", () => {
           ? { outcome: iosMockRuleSyncResult }
           : iosMockRuleSyncResult;
       },
-    } as IOSCtrlProxyClient);
+    });
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       sendMessage: (message: string) => {
         androidMessages.push(message);
@@ -130,12 +135,7 @@ describe("network tool schema", () => {
     iosGetInstanceSpy.mockRestore();
     androidGetInstanceSpy.mockRestore();
     warnSpy.mockRestore();
-    if (localRunnerIpa) {
-      await fs
-        .rm(path.dirname(localRunnerIpa), { recursive: true, force: true })
-        .catch(() => undefined);
-      localRunnerIpa = undefined;
-    }
+    localRunnerIpa = undefined;
     restoreEnv("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH", originalIosBundlePath);
     restoreEnv("AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH", originalIosIpaPath);
     restoreEnv("AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD", originalSkipDownload);
@@ -149,13 +149,14 @@ describe("network tool schema", () => {
     process.env[key] = value;
   }
 
+  const scratch = useScratchRoot("nettools-local-runner-");
   let localRunnerIpa: string | undefined;
 
   // Point the override at a REAL .ipa file. hasIosCtrlProxyRunnerOverride now
   // validates that the override resolves to a file (#4221), so a bare
   // non-existent path no longer counts as an available local runner.
   async function allowLocalIosRunner(): Promise<void> {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "nettools-local-runner-"));
+    const dir = scratch.next();
     localRunnerIpa = path.join(dir, "CtrlProxyUITests-Runner.ipa");
     await fs.writeFile(localRunnerIpa, ipaBytes());
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = localRunnerIpa;
@@ -260,13 +261,13 @@ describe("network tool schema", () => {
     const state = NetworkState.getInstance();
     const nowSpy = spyOn(state.timer, "now").mockImplementation(() => nowMs);
     iosGetInstanceSpy.mockRestore();
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
-      setNetworkErrorSimulation: async (config: unknown) => {
+    iosGetInstanceSpy = spyOnIosClientInstance({
+      setNetworkErrorSimulation: async (config: IosNetworkErrorSimulationConfig) => {
         iosErrorSimulations.push(config);
         nowMs += 5_000;
         return { success: true, totalTimeMs: 0 };
       },
-    } as IOSCtrlProxyClient);
+    });
     const tool = ToolRegistry.getTool("network");
 
     try {
@@ -277,10 +278,10 @@ describe("network tool schema", () => {
         },
       });
 
-      const sent = iosErrorSimulations[0] as { expiresAtEpochMs: number };
-      expect(sent.expiresAtEpochMs).toBe(31_000);
-      expect((sent as { remainingMs: number }).remainingMs).toBe(30_000);
-      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(sent.expiresAtEpochMs);
+      const sent = iosErrorSimulations[0];
+      expect(sent?.expiresAtEpochMs).toBe(31_000);
+      expect(sent?.remainingMs).toBe(30_000);
+      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(31_000);
       expect(state.getSnapshot(iosDevice.deviceId).simulatingErrors?.remainingSeconds).toBe(25);
     } finally {
       nowSpy.mockRestore();
@@ -332,13 +333,13 @@ describe("network tool schema", () => {
       limit: undefined,
     });
     iosGetInstanceSpy.mockRestore();
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    iosGetInstanceSpy = spyOnIosClientInstance({
       setNetworkErrorSimulation: async () => ({
         success: false,
         totalTimeMs: 0,
         error: "in-app server is unreachable",
       }),
-    } as IOSCtrlProxyClient);
+    });
 
     await expect(
       tool!.deviceAwareHandler!(iosDevice, {
@@ -356,13 +357,13 @@ describe("network tool schema", () => {
   test("network simulateErrors on iOS fails closed when CtrlProxy rejects the command", async () => {
     await allowLocalIosRunner();
     iosGetInstanceSpy.mockRestore();
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    iosGetInstanceSpy = spyOnIosClientInstance({
       setNetworkErrorSimulation: async () => ({
         success: false,
         totalTimeMs: 0,
         error: "iOS CtrlProxy runner does not support set_network_error_simulation",
       }),
-    } as IOSCtrlProxyClient);
+    });
     const tool = ToolRegistry.getTool("network");
 
     await expect(

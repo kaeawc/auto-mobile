@@ -1,11 +1,11 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
-import { executionTracker } from "../../src/server/executionTracker";
+} from "../../src/utils/directSessionDeviceRegistry";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -136,60 +136,97 @@ describe("createMcpServer session key (#4678)", () => {
     const warm = new McpTestFixture();
     await warm.setup();
     await warm.teardown();
-  });
-
-  beforeEach(() => {
-    ToolRegistry.clearTools();
+    // Register the probe tools once, on top of the tools the warm server registered, and list
+    // them: every registry change drops the per-tool schema cache, so rebuilding all ~75 schemas
+    // (~15 ms) must be paid here, not inside the first test. The tests do not clear the registry.
+    registerProbeTools();
     clearDirectSessionDevices();
     registerDirectSessionDevice("session-a", {
       deviceId: "emulator-5554",
       name: "Pixel_9_API_36",
       platform: "android",
     });
+    const listed = new McpTestFixture();
+    await listed.setup();
+    await listed.client.listTools();
+    await listed.teardown();
+  });
+
+  const registerProbeTools = () => {
     ToolRegistry.register("bindingProbe", "bindingProbe", schema, async () => ({ success: true }));
     ToolRegistry.register("hiddenOnSessionA", "hiddenOnSessionA", schema, async () => ({
       success: true,
     }));
-  });
+  };
 
   afterEach(async () => {
     for (const fixture of fixtures.splice(0)) {
       await fixture.teardown();
     }
-    ToolRegistry.clearTools();
+    ToolRegistry.unregister("blocking");
+  });
+
+  afterAll(() => {
+    ToolRegistry.unregister("bindingProbe");
+    ToolRegistry.unregister("hiddenOnSessionA");
     clearDirectSessionDevices();
   });
 
-  test("a binding made under a key filters another server's argument-less tools/list for that key", async () => {
-    const store = new SessionToolBindingStore();
-    const binder = await serve({ requestMcpSessionId: "key-1", sessionToolBindingStore: store });
-    await binder.client.callTool({ name: "bindingProbe", arguments: { sessionUuid: "session-a" } });
+  // Each scenario below builds its servers in its own beforeAll and lists once there: creating a
+  // server re-registers every tool and drops the per-tool schema cache, so the ~75-schema rebuild
+  // (~15 ms locally, several times that on a loaded runner) belongs outside the timed test body.
+  describe("a binding made under a key", () => {
+    let binder: McpTestFixture;
+    let sameKey: McpTestFixture;
+    let otherKey: McpTestFixture;
+    beforeAll(async () => {
+      const store = new SessionToolBindingStore();
+      binder = await serve({ requestMcpSessionId: "key-1", sessionToolBindingStore: store });
+      sameKey = await serve({ requestMcpSessionId: "key-1", sessionToolBindingStore: store });
+      otherKey = await serve({ requestMcpSessionId: "key-2", sessionToolBindingStore: store });
+      await binder.client.callTool({
+        name: "bindingProbe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      // The binding drops the schema cache; list once so the test body hits the rebuilt one.
+      await listedNames(sameKey);
+      await listedNames(otherKey);
+    });
 
-    const sameKey = await serve({ requestMcpSessionId: "key-1", sessionToolBindingStore: store });
-    const otherKey = await serve({ requestMcpSessionId: "key-2", sessionToolBindingStore: store });
-
-    expect(await listedNames(sameKey)).not.toContain("hiddenOnSessionA");
-    expect(await listedNames(otherKey)).toContain("hiddenOnSessionA");
+    test("filters another server's argument-less tools/list for that key", async () => {
+      expect(await listedNames(sameKey)).not.toContain("hiddenOnSessionA");
+      expect(await listedNames(otherKey)).toContain("hiddenOnSessionA");
+    });
   });
 
-  test("a release clears the shared binding once, for every server on the store", async () => {
+  describe("a release", () => {
     const fake = fakeReleaseStore();
-    const binder = await serve({
-      requestMcpSessionId: "key-1",
-      sessionToolBindingStore: fake.store,
-    });
-    await binder.client.callTool({ name: "bindingProbe", arguments: { sessionUuid: "session-a" } });
-    const sameKey = await serve({
-      requestMcpSessionId: "key-1",
-      sessionToolBindingStore: fake.store,
+    let binder: McpTestFixture;
+    let sameKey: McpTestFixture;
+    beforeAll(async () => {
+      binder = await serve({
+        requestMcpSessionId: "key-1",
+        sessionToolBindingStore: fake.store,
+      });
+      sameKey = await serve({
+        requestMcpSessionId: "key-1",
+        sessionToolBindingStore: fake.store,
+      });
+      await binder.client.callTool({
+        name: "bindingProbe",
+        arguments: { sessionUuid: "session-a" },
+      });
+      await listedNames(sameKey);
     });
 
-    fake.release("session-a");
-    fake.release("session-a");
+    test("clears the shared binding once, for every server on the store", async () => {
+      fake.release("session-a");
+      fake.release("session-a");
 
-    expect(fake.subscriptions()).toBe(1);
-    expect(fake.changes()).toBe(1);
-    expect(await listedNames(sameKey)).toContain("hiddenOnSessionA");
+      expect(fake.subscriptions()).toBe(1);
+      expect(fake.changes()).toBe(1);
+      expect(await listedNames(sameKey)).toContain("hiddenOnSessionA");
+    });
   });
 
   test("cancelling by the request's session key aborts that key's running call", async () => {

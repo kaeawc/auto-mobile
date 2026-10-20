@@ -2,8 +2,8 @@ import { logger, type Logger } from "./logger";
 
 /**
  * The two representations an MCP tool envelope may carry for the same payload:
- * `structuredContent` and the serialized text content part. They must never
- * disagree on the wire, so every post-handler rewrite reads through
+ * `structuredContent` and the serialized text content part. They share a payload
+ * (with extras optionally retained in structured content), so rewrites read through
  * {@link readToolEnvelopePayload} and writes through
  * `writeToolEnvelopePayload`.
  */

@@ -1,13 +1,4 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -24,7 +15,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -75,19 +66,13 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
     });
 
   const bind = (sessionUuid: string, device: BootedDevice, connection: string) =>
-    pool.bindOrReuseDeviceSession(
-      sessionUuid,
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      connection,
-    );
+    pool.bindOrReuseDeviceSession({
+      sessionId: sessionUuid,
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: connection,
+    });
 
   const record = async (device: BootedDevice, ownerSessionUuid?: string) => {
     const active = await startVideoRecording({ device, ownerSessionUuid });
@@ -132,7 +117,7 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
     restore();
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -168,7 +153,19 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
     await fixture.setup();
 
     await installFakeRecorder();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(async () => {
     resetVideoRecordingManagerDependencies();
@@ -193,7 +190,7 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });
 
-  test("another connection is refused and the holder's capture keeps running", async () => {
+  arranged("another connection is refused and the holder's capture keeps running", async () => {
     const recordingId = await record(held, HOLDER);
     const stopsBefore = backend.stopCalls.length;
 
@@ -205,7 +202,7 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
     expect(await activeIds()).toEqual([recordingId]);
   });
 
-  test("the connection that acquired the holding session stops its recording", async () => {
+  arranged("the connection that acquired the holding session stops its recording", async () => {
     const recordingId = await record(held, HOLDER);
 
     const result = await stopById(OWNER, recordingId);
@@ -215,16 +212,19 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
     expect(await activeIds()).toEqual([]);
   });
 
-  test("an owned recording on a device no session holds stays stoppable by anyone", async () => {
-    const recordingId = await record(unheld, "sess-gone");
+  arranged(
+    "an owned recording on a device no session holds stays stoppable by anyone",
+    async () => {
+      const recordingId = await record(unheld, "sess-gone");
 
-    const result = await stopById(OTHER, recordingId);
+      const result = await stopById(OTHER, recordingId);
 
-    expect(result.isError).not.toBe(true);
-    expect(await activeIds()).toEqual([]);
-  });
+      expect(result.isError).not.toBe(true);
+      expect(await activeIds()).toEqual([]);
+    },
+  );
 
-  test("an ownerless recording on a held device stays stoppable by anyone", async () => {
+  arranged("an ownerless recording on a held device stays stoppable by anyone", async () => {
     const recordingId = await record(held);
 
     const result = await stopById(OTHER, recordingId);

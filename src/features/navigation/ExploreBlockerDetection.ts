@@ -498,11 +498,6 @@ async function dismissDialog(
 }
 
 /**
- * Handler for dead end situations
- */
-type DeadEndHandler = (progress?: ProgressCallback) => Promise<void>;
-
-/**
  * Detect and handle blocker screens (login, permissions, dialogs)
  */
 export async function detectAndHandleBlockers(
@@ -510,7 +505,6 @@ export async function detectAndHandleBlockers(
   device: BootedDevice,
   adb: AdbExecutor | null,
   elementParser: ElementParser,
-  _handleDeadEnd: DeadEndHandler,
   progress?: ProgressCallback,
   deps: BlockerHandlerDeps = {},
 ): Promise<boolean> {

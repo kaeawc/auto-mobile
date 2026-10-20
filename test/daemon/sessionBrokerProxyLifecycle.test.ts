@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/constants";
 import type { SessionConfig } from "../../src/devices/sessionConfig";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

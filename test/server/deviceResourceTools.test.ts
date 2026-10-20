@@ -1,3 +1,4 @@
+import { toolIsError, toolJson } from "../helpers/toolResponse";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { DefaultDeviceResourceObserver } from "../../src/utils/deviceResourceObserver";
 import { DefaultDeviceResourceController } from "../../src/utils/deviceResourceController";
@@ -6,12 +7,13 @@ import { iosDeviceResourceCatalog } from "../../src/utils/iosDeviceResourceCatal
 import { androidDeviceResourceCatalog } from "../../src/utils/androidDeviceResourceCatalog";
 import { logger } from "../../src/utils/logger";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { z } from "zod/v4";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   deviceResourceConfigurationSchema,
   reconcileDeviceResourcesSchema,
   setDeviceResourcesSchema,
-} from "../../src/server/deviceResourceSchemas";
+} from "../../src/utils/deviceResourceSchemas";
 import { FakeDeviceResourceReconciler } from "../fakes/FakeDeviceResourceReconciler";
 import { DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {
@@ -26,9 +28,14 @@ import {
   INTERNAL_TOOL_PARAM_NAMES,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
 } from "../../src/daemon/constants";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 
 isolateToolRegistry();
+
+const observedResources = z.object({
+  observed: z.object({ resources: z.record(z.string(), z.object({ state: z.string() })) }),
+});
+const driftKinds = z.object({ remainingDrift: z.array(z.object({ kind: z.string() })) });
 
 describe("setDeviceResources", () => {
   let controller: FakeDeviceResourceController;
@@ -99,9 +106,9 @@ describe("setDeviceResources", () => {
         target,
         { resources: controller.result.requested, timeoutMs: 10_000 },
       );
-      const payload = JSON.parse(response.content[0].text);
+      const payload = toolJson(response);
       expect(payload).toEqual({ device: target, ...controller.result, observed: observer.result });
-      expect(Object.keys(payload.observed.resources)).toEqual(
+      expect(Object.keys(observedResources.parse(payload).observed.resources)).toEqual(
         expect.arrayContaining(Object.keys(catalog)),
       );
       expect(observer.requests[0]).toEqual({
@@ -109,7 +116,7 @@ describe("setDeviceResources", () => {
         deadlineMs: timer.now() + (controller.requests[0]!.deadlineMs - timer.now()) / 2,
         signal: controller.requests[0]!.signal,
       });
-      expect(response.isError).toBeUndefined();
+      expect(toolIsError(response)).toBe(false);
     },
   );
 
@@ -123,8 +130,8 @@ describe("setDeviceResources", () => {
         device,
         { resources: { wallpaperRendering: requested } },
       );
-      expect(response.isError).toBe(true);
-      expect(JSON.parse(response.content[0].text)).toEqual({
+      expect(toolIsError(response)).toBe(true);
+      expect(toolJson(response)).toEqual({
         device,
         ...controller.result,
         requested: { wallpaperRendering: requested },
@@ -144,8 +151,8 @@ describe("setDeviceResources", () => {
         device,
         { resources: controller.result.requested },
       );
-      expect(response.isError).toBeUndefined();
-      expect(JSON.parse(response.content[0].text)).toEqual({
+      expect(toolIsError(response)).toBe(false);
+      expect(toolJson(response)).toEqual({
         device,
         ...controller.result,
         observed: observer.result,
@@ -159,8 +166,8 @@ describe("setDeviceResources", () => {
     const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
       resources: requested,
     });
-    expect(response.isError).toBeUndefined();
-    expect(JSON.parse(response.content[0].text).observationContradictions).toBeUndefined();
+    expect(toolIsError(response)).toBe(false);
+    expect(toolJson(response).observationContradictions).toBeUndefined();
   });
 
   test("logs observation failure and keeps successful mutation evidence", async () => {
@@ -173,8 +180,8 @@ describe("setDeviceResources", () => {
         device,
         { resources: controller.result.requested },
       );
-      expect(JSON.parse(response.content[0].text)).toEqual({ device, ...controller.result });
-      expect(response.isError).toBeUndefined();
+      expect(toolJson(response)).toEqual({ device, ...controller.result });
+      expect(toolIsError(response)).toBe(false);
       expect(warning).toHaveBeenCalled();
     } finally {
       warning.mockRestore();
@@ -220,10 +227,11 @@ describe("setDeviceResources", () => {
     const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
       resources: { wallpaperRendering: "disabled" },
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
     expect(payload.success).toBe(true);
-    expect(payload.observed.resources.wallpaperRendering.state).toBe("disabled");
-    expect(Object.keys(payload.observed.resources)).toEqual(
+    const { resources } = observedResources.parse(payload).observed;
+    expect(resources.wallpaperRendering?.state).toBe("disabled");
+    expect(Object.keys(resources)).toEqual(
       expect.arrayContaining(Object.keys(iosDeviceResourceCatalog)),
     );
   });
@@ -279,7 +287,7 @@ describe("setDeviceResources", () => {
       deadlineMs: 10_000,
     });
     expect(controller.requests[0]!.signal).toBeDefined();
-    expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(toolJson(response).success).toBe(true);
   });
 
   test("forwards restoration through the same device lifecycle path", async () => {
@@ -346,8 +354,8 @@ describe("setDeviceResources", () => {
     const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
       resources: { wallpaperRendering: "disabled" },
     });
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(response.content[0].text)).toMatchObject({
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response)).toMatchObject({
       success: false,
       resources: { wallpaperRendering: { state: "unsupported" } },
     });
@@ -439,8 +447,8 @@ describe("reconcileDeviceResources", () => {
       releaseOwnedExtras: false,
       deadlineMs: timer.now() + DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
     });
-    expect(JSON.parse(response.content[0].text)).toEqual({ device, ...reconciler.result });
-    expect(response.isError).toBeUndefined();
+    expect(toolJson(response)).toEqual({ device, ...reconciler.result });
+    expect(toolIsError(response)).toBe(false);
   });
 
   test("forwards repair options and reports unproven results as tool errors", async () => {
@@ -467,8 +475,8 @@ describe("reconcileDeviceResources", () => {
       releaseOwnedExtras: true,
       deadlineMs: timer.now() + 5_000,
     });
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(response.content[0].text).remainingDrift[0].kind).toBe("commandFailure");
+    expect(toolIsError(response)).toBe(true);
+    expect(driftKinds.parse(toolJson(response)).remainingDrift[0]?.kind).toBe("commandFailure");
   });
 
   test("shares the per-device lease with setDeviceResources", async () => {

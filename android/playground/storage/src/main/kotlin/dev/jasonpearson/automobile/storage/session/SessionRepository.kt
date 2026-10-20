@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.storage.session
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import java.util.UUID
 
 class SessionRepository(private val context: Context) {
@@ -13,7 +15,8 @@ class SessionRepository(private val context: Context) {
     val appVersion =
       try {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
-      } catch (e: Exception) {
+      } catch (e: PackageManager.NameNotFoundException) {
+        Log.w("SessionRepository", "Unable to read app version", e)
         null
       }
 

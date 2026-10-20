@@ -8,11 +8,16 @@ import type {
 import {
   assertAppGestureNotUnderPrototype,
   hasOwnPrototype,
+  hasOwnRunnerPrototype,
   ownPrototypeCoversPoint,
+  runnerPrototypeCoversPoint,
+  scopeRunnerHierarchyToLayer,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
 } from "../../../../src/features/observe/hierarchyLayer";
+import { runnerLayerTree } from "../../../../src/features/observe/layerTree";
+import type { HierarchyLayer } from "../../../../src/models/HierarchyLayer";
 import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import {
@@ -56,11 +61,6 @@ function onlyWindow(index: number): ViewHierarchyResult {
   return convert(raw);
 }
 
-/** The runner's unconverted tree, which keeps the UIWindow wrappers. */
-function unconverted(): ViewHierarchyResult {
-  return captured as unknown as ViewHierarchyResult;
-}
-
 /** Derived chromeless FULLSCREEN shape; a real capture of its root marker is still owed. */
 function withWindowMarker(keepDismiss = false, markRoot = true): XCTestHierarchy {
   const raw = structuredClone(captured);
@@ -91,21 +91,63 @@ function ids(hierarchy: ViewHierarchyResult): Set<string> {
   );
 }
 
-describe("iOS prototype agent window with layer (iphone D2)", () => {
-  for (const form of ["stamped layers", "single window", "UIWindow wrappers"] as const) {
-    const hierarchyForForm = (keepDismiss: boolean): ViewHierarchyResult => {
-      const raw = withWindowMarker(keepDismiss);
-      if (form === "single window") {
-        raw.hierarchy.node = (raw.hierarchy.node as CtrlProxyNode[]).slice(1);
-      }
-      return form === "UIWindow wrappers" ? (raw as unknown as ViewHierarchyResult) : convert(raw);
-    };
+/** What the layer assertions read from a capture, spelled the way that capture carries it. */
+interface LayerForm<C> {
+  hasPrototype(capture: C): boolean;
+  idsIn(capture: C, layer: HierarchyLayer): Set<string>;
+  rootAttributes(capture: C, layer: HierarchyLayer): Record<string, unknown>[];
+  covers(capture: C, point: { x: number; y: number }): boolean;
+}
 
+/** Attributes that identify a root independent of the ids conversion generates. */
+function stableAttributes(attributes: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(attributes).filter(([key]) => key !== "view-id" && key !== "node"),
+  );
+}
+
+const convertedForm: LayerForm<ViewHierarchyResult> = {
+  hasPrototype: hasOwnPrototype,
+  idsIn: (capture, layer) => ids(scopeHierarchyToLayer(capture, layer)),
+  rootAttributes: (capture, layer) =>
+    [scopeHierarchyToLayer(capture, layer).hierarchy.node ?? []]
+      .flat()
+      .map((node) => stableAttributes(nodeAttributes(node))),
+  covers: ownPrototypeCoversPoint,
+};
+
+/** Every node of the runner's tree, front to back. */
+function runnerNodes(node: CtrlProxyNode): CtrlProxyNode[] {
+  return [node, ...[node.node ?? []].flat().flatMap(runnerNodes)];
+}
+
+const runnerForm: LayerForm<XCTestHierarchy> = {
+  hasPrototype: hasOwnRunnerPrototype,
+  idsIn: (capture, layer) =>
+    new Set(
+      runnerNodes(scopeRunnerHierarchyToLayer(capture, layer).hierarchy).flatMap((node) =>
+        runnerLayerTree.resourceId(node) ? [String(runnerLayerTree.resourceId(node))] : [],
+      ),
+    ),
+  rootAttributes: (capture, layer) =>
+    [scopeRunnerHierarchyToLayer(capture, layer).hierarchy.node ?? []]
+      .flat()
+      .map((node) => stableAttributes({ ...node })),
+  covers: runnerPrototypeCoversPoint,
+};
+
+describe("iOS prototype agent window with layer (iphone D2)", () => {
+  /** The same assertions run against each capture spelling that carries the prototype window. */
+  function defineFormTests<C>(
+    form: string,
+    spelling: LayerForm<C>,
+    build: (keepDismiss: boolean) => C,
+  ): void {
     test(`fullscreen root marker alone owns the whole window (${form})`, () => {
-      const hierarchy = hierarchyForForm(false);
-      expect(hasOwnPrototype(hierarchy)).toBe(true);
-      const prototype = ids(scopeHierarchyToLayer(hierarchy, "prototype"));
-      const app = ids(scopeHierarchyToLayer(hierarchy, "app"));
+      const hierarchy = build(false);
+      expect(spelling.hasPrototype(hierarchy)).toBe(true);
+      const prototype = spelling.idsIn(hierarchy, "prototype");
+      const app = spelling.idsIn(hierarchy, "app");
       for (const id of ["automobile-prototype-window", ...PROTOTYPE_IDS.slice(1)]) {
         expect(prototype.has(id)).toBe(true);
         expect(app.has(id)).toBe(false);
@@ -121,36 +163,41 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
         { x: 200, y: 300 },
         { x: 401, y: 873 },
       ]) {
-        expect(ownPrototypeCoversPoint(hierarchy, point)).toBe(true);
+        expect(spelling.covers(hierarchy, point)).toBe(true);
       }
     });
 
     test(`revealing the dismiss pill keeps the fullscreen roots (${form})`, () => {
-      const hiddenPill = hierarchyForForm(false);
-      const revealedPill = hierarchyForForm(true);
-      expect(hasOwnPrototype(revealedPill)).toBe(true);
+      const hiddenPill = build(false);
+      const revealedPill = build(true);
+      expect(spelling.hasPrototype(revealedPill)).toBe(true);
       for (const layer of ["app", "prototype"] as const) {
-        const hiddenRoots = scopeHierarchyToLayer(hiddenPill, layer).hierarchy.node;
-        const revealedRoots = scopeHierarchyToLayer(revealedPill, layer).hierarchy.node;
         // Conversion generates fresh view ids; compare the roots' stable attributes and node ownership.
-        const rootAttributes = (nodes: typeof hiddenRoots) =>
-          (Array.isArray(nodes) ? nodes : nodes ? [nodes] : []).map((node) =>
-            Object.fromEntries(
-              Object.entries(nodeAttributes(node)).filter(
-                ([key]) => key !== "view-id" && key !== "node",
-              ),
-            ),
-          );
-        expect(rootAttributes(revealedRoots)).toEqual(rootAttributes(hiddenRoots));
-        const expected = ids(scopeHierarchyToLayer(hiddenPill, layer));
+        expect(spelling.rootAttributes(revealedPill, layer)).toEqual(
+          spelling.rootAttributes(hiddenPill, layer),
+        );
+        const expected = spelling.idsIn(hiddenPill, layer);
         if (layer === "prototype") {
           expected.add("automobile-prototype-dismiss");
         }
-        expect(ids(scopeHierarchyToLayer(revealedPill, layer))).toEqual(expected);
+        expect(spelling.idsIn(revealedPill, layer)).toEqual(expected);
       }
-      expect(ownPrototypeCoversPoint(revealedPill, { x: 200, y: 300 })).toBe(true);
+      expect(spelling.covers(revealedPill, { x: 200, y: 300 })).toBe(true);
     });
   }
+
+  const withoutAppWindow = (keepDismiss: boolean): XCTestHierarchy => {
+    const raw = withWindowMarker(keepDismiss);
+    raw.hierarchy.node = [raw.hierarchy.node ?? []].flat().slice(1);
+    return raw;
+  };
+  defineFormTests("stamped layers", convertedForm, (keepDismiss) =>
+    convert(withWindowMarker(keepDismiss)),
+  );
+  defineFormTests("single window", convertedForm, (keepDismiss) =>
+    convert(withoutAppWindow(keepDismiss)),
+  );
+  defineFormTests("UIWindow wrappers", runnerForm, (keepDismiss) => withWindowMarker(keepDismiss));
 
   test("the captured agent window with neither marker is not an own prototype", () => {
     const hierarchy = convert(withWindowMarker(false, false));
@@ -174,12 +221,11 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
   });
 
   test("the unconverted runner tree is split at the agent's UIWindow", () => {
-    const hierarchy = unconverted();
-    expect(hasOwnPrototype(hierarchy)).toBe(true);
-    expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("like-button")).toBe(true);
-    expect(ids(scopeHierarchyToLayer(hierarchy, "prototype")).has("Toolbar")).toBe(false);
-    expect(ids(scopeHierarchyToLayer(hierarchy, "app")).has("like-button")).toBe(false);
-    expect(ids(scopeHierarchyToLayer(hierarchy, "app")).has("Toolbar")).toBe(true);
+    expect(runnerForm.hasPrototype(captured)).toBe(true);
+    expect(runnerForm.idsIn(captured, "prototype").has("like-button")).toBe(true);
+    expect(runnerForm.idsIn(captured, "prototype").has("Toolbar")).toBe(false);
+    expect(runnerForm.idsIn(captured, "app").has("like-button")).toBe(false);
+    expect(runnerForm.idsIn(captured, "app").has("Toolbar")).toBe(true);
   });
 
   test("when only the agent's window contributes nodes, all of them are the prototype's", () => {
@@ -218,6 +264,7 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
   test("observe with layer prototype returns the agent's controls", () => {
     const viewHierarchy = convert();
     const result: ObserveResult = {
+      observationId: "prototype-layer",
       updatedAt: 1,
       display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       screenSize: { width: 402, height: 874 },

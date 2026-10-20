@@ -8,6 +8,7 @@ import type {
   EmulatorDeviceIdReservation,
   EmulatorPortReservations,
 } from "./EmulatorPortReservations";
+import { AMBIENT_ENV, ENV, readEnvRaw, readEnvTrimmed } from "../../config/env";
 
 export type LaunchFailureCategory =
   | "display_initialization_failed"
@@ -134,7 +135,7 @@ export function resolveHeadlessMode(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
 ): { headless: boolean; reason: string } {
-  const explicit = env.AUTOMOBILE_EMULATOR_HEADLESS;
+  const explicit = readEnvRaw(ENV.EMULATOR_HEADLESS, env);
   if (explicit === "true") {
     return { headless: true, reason: "AUTOMOBILE_EMULATOR_HEADLESS=true" };
   }
@@ -152,7 +153,7 @@ export function resolveHeadlessMode(
 
   if (platform === "linux") {
     const hasDisplay = Boolean(
-      (env.DISPLAY && env.DISPLAY.trim()) || (env.WAYLAND_DISPLAY && env.WAYLAND_DISPLAY.trim()),
+      readEnvTrimmed(AMBIENT_ENV.DISPLAY, env) || readEnvTrimmed(AMBIENT_ENV.WAYLAND_DISPLAY, env),
     );
     if (!hasDisplay) {
       return {

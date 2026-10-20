@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import os from "node:os";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
@@ -32,8 +32,9 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
   let tempDir: string;
   let outputFile: string;
 
+  const scratch = useScratchRoot("platform-video-early-");
   beforeEach(async () => {
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-early-"));
+    tempDir = scratch.next();
     outputFile = path.join(tempDir, "video.mp4");
     factory = new FakeAdbClientFactory();
     timer = new FakeTimer();
@@ -43,10 +44,6 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
         return "h264";
       },
     });
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
   });
 
   function config(overrides: Partial<VideoCaptureConfig> = {}): VideoCaptureConfig {
@@ -325,7 +322,7 @@ class AmbientAbortAdbClient extends FakeAdbClient {
   override async executeCommand(
     ...args: Parameters<FakeAdbClient["executeCommand"]>
   ): ReturnType<FakeAdbClient["executeCommand"]> {
-    (args[4] ?? getAbortSignal())?.throwIfAborted();
+    (args[1]?.signal ?? getAbortSignal())?.throwIfAborted();
     return super.executeCommand(...args);
   }
 

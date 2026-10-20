@@ -9,6 +9,7 @@ import {
 } from "../ChildProcessTracker";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
+import { ENV } from "../../config/env";
 
 export interface FfmpegProcess extends TrackedChildProcess {
   stdin: Writable | null;
@@ -82,7 +83,7 @@ export function resolveFfmpegBinary(options: ResolveFfmpegBinaryOptions = {}): s
     return options.explicitPath;
   }
   const env = options.env ?? process.env;
-  for (const key of options.environmentKeys ?? ["AUTOMOBILE_FFMPEG"]) {
+  for (const key of options.environmentKeys ?? [ENV.FFMPEG.name]) {
     const candidate = env[key];
     if (candidate) {
       return candidate;
@@ -99,8 +100,7 @@ export interface DefaultFfmpegClientOptions extends ResolveFfmpegBinaryOptions {
 
 const defaultExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
 const defaultSpawn: FfmpegSpawner = (binaryPath, args, options) =>
-  // eslint-disable-next-line auto-mobile/no-unknown-cast -- Node's ChildProcess supplies the restricted FFmpeg process contract exposed by this client.
-  defaultExecutor.spawn(binaryPath, args, options) as unknown as FfmpegProcess;
+  defaultExecutor.spawn(binaryPath, args, options);
 
 /**
  * The only production owner for FFmpeg resolution and execution. Consumers pass

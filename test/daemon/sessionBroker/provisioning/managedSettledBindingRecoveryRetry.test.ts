@@ -330,7 +330,10 @@ test("busy settled-binding recovery gates the rehydrated session until ready the
   await reowner.reown(["session-a"], { rehydrated: true });
   for (let i = 0; i < 3; i++) {
     expect(reowner.automationRefusal("session-a")).toBeInstanceOf(BindingOwnershipUnconfirmedError);
-    expect(reowner.automationRefusal("session-a")?.code).toBe("binding_ownership_unconfirmed");
+    expect(reowner.automationRefusal("session-a")).toHaveProperty(
+      "code",
+      "binding_ownership_unconfirmed",
+    );
     expect((await h.registry.getAssignment(h.key))?.state).toBe("settling");
     await h.step(1_000);
   }
@@ -393,7 +396,7 @@ test("other drain registry steps retain the default 250 ms to five second policy
   expect(h.warn.mock.calls[0]?.[0]).toContain("retrying in 250ms");
 });
 
-test("wired recovery and re-own pacers alternate blocking failures on the daemon timer", async () => {
+test("wired recovery and re-own pacers keep alternating beyond fifteen seconds", async () => {
   const h = await harness();
   h.behavior.failures = Infinity;
   h.behavior.blocked = 3_300;
@@ -435,6 +438,7 @@ test("wired recovery and re-own pacers alternate blocking failures on the daemon
   expect(h.calls.map((c) => c.at)).toEqual([0, 13_200]);
   await h.step(3_300);
   expect(reownStarts).toEqual([6_600, 19_800]);
+  expect(reowner.ownershipState("session-a")).toBe("unconfirmed");
   reowner.close();
   h.release.close();
   await recovery;

@@ -170,7 +170,7 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
       const now = Date.now();
       const depth = async (value: number | null) => {
         if (value !== null) {
-          await manager.recordBackStack({ depth: value, activities: [], tasks: [] });
+          await manager.recordBackStack({ depth: value });
         }
       };
       await manager.recordNavigationEvent(createEvent("Home", now));

@@ -16,9 +16,18 @@
 # chunks still run after a shared-group failure and after a failed chunk; the
 # first non-zero status is the exit status.
 set -euo pipefail
+# The direct parent is a watchdog/shard subshell which can survive test-ts.
+# Watch the exported lane owner instead; standalone callers watch their parent.
+original_parent_pid="${AUTOMOBILE_TEST_TS_PARENT_PID:-$PPID}"
+parent_is_alive() {
+  if ! kill -0 "$original_parent_pid" 2>/dev/null; then
+    echo 'test-ts: unit chunk caller is gone; stopping' >&2
+    exit 1
+  fi
+}
 root="$1" runner_os="$2" report_dir="$3" shard="$4"
 shift 4
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$root/scripts/lib/bun-unit-test.sh"
 configure_bun_unit_test "$root" "$runner_os"
 
@@ -33,6 +42,7 @@ isolated_files=("${files[@]:shared_count}")
 
 status=0
 if [[ "${#shared_files[@]}" -gt 0 ]]; then
+  parent_is_alive
   args=("${BUN_UNIT_SHARED_TEST_COMMAND[@]}")
   if [[ -n "$report_dir" ]]; then
     args+=(--reporter junit --reporter-outfile "$report_dir/shard-${shard}-shared.xml")
@@ -61,6 +71,7 @@ else
   split=1
 fi
 for ((offset = 0, chunk = 0; offset < isolated_total; offset += isolated_chunk, chunk += 1)); do
+  parent_is_alive
   slice=("${isolated_files[@]:offset:isolated_chunk}")
   args=("${BUN_UNIT_TEST_COMMAND[@]}")
   report_name="shard-${shard}.xml"

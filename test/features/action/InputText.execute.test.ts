@@ -1,3 +1,5 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
@@ -13,7 +15,6 @@ import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
@@ -29,6 +30,7 @@ import {
   runWithTextRequestContext,
 } from "../../../src/features/action/textTransportTimeout";
 import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("InputText.execute", () => {
   const androidDevice: BootedDevice = {
@@ -53,19 +55,25 @@ describe("InputText.execute", () => {
   let iosGetInstanceSpy: ReturnType<typeof spyOn> | null = null;
   let savedMarkers: readonly string[];
 
-  const createObserveResult = (): ObserveResult => ({
-    timestamp: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: { node: { $: {} } } },
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { $: {} } } },
+    });
 
-  const wireFakes = (inputText: InputText): void => {
-    (inputText as any).observeScreen = fakeObserveScreen;
-    (inputText as any).window = fakeWindow;
-    (inputText as any).awaitIdle = fakeAwaitIdle;
-    (inputText as any).timer = fakeTimer;
-  };
+  const createInputText = (
+    device: BootedDevice,
+    adb: ConstructorParameters<typeof InputText>[1],
+    keyboardCloserFactory?: ConstructorParameters<typeof InputText>[2],
+    targetFocuserFactory?: ConstructorParameters<typeof InputText>[4],
+  ): InputText =>
+    new InputText(device, adb, keyboardCloserFactory, fakeTimer, targetFocuserFactory, {
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+      awaitIdle: fakeAwaitIdle,
+    });
 
   beforeEach(() => {
     savedMarkers = serverConfig.getEventAllMarkers();
@@ -98,10 +106,9 @@ describe("InputText.execute", () => {
   });
 
   test("returns a no-text failure without invoking any transport when text is undefined", async () => {
-    const inputText = new InputText(androidDevice, fakeAdb as any);
-    wireFakes(inputText);
+    const inputText = createInputText(androidDevice, fakeAdb);
 
-    const result = await inputText.execute(undefined as any);
+    const result = await inputText.execute(undefined);
 
     expect(result).toMatchObject({
       success: false,
@@ -117,8 +124,7 @@ describe("InputText.execute", () => {
     serverConfig.setEventAllMarkers([]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const inputText = new InputText(androidDevice, fakeAdb as any);
-    wireFakes(inputText);
+    const inputText = createInputText(androidDevice, fakeAdb);
 
     const result = await inputText.execute("/a");
 
@@ -140,8 +146,7 @@ describe("InputText.execute", () => {
       expect(state.hasPending()).toBe(true);
       return reply.promise;
     });
-    const input = new InputText(androidDevice, fakeAdb);
-    wireFakes(input);
+    const input = createInputText(androidDevice, fakeAdb);
     const error = new Error("setText failed");
     const result = runWithAbortSignal(undefined, () => input.execute("hi"), { textState: state });
     const outcome = result.then(
@@ -192,28 +197,26 @@ describe("InputText.execute", () => {
           child,
           result: childResult.promise,
         });
-        const adb = new AdbClient(
-          androidDevice,
-          null,
-          null,
-          new DefaultRetryExecutor(fakeTimer),
-          fakeTimer,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          host,
-        );
+        // Real (non-test-mode) process path: isTestMode is fixed at construction from this env flag.
+        const priorTestMode = process.env.AUTOMOBILE_TEST_MODE;
+        process.env.AUTOMOBILE_TEST_MODE = "false";
+        const adb = new AdbClient(androidDevice, null, {
+          retryExecutor: new DefaultRetryExecutor(fakeTimer),
+          timer: fakeTimer,
+          hostProcessExecutor: host,
+        });
+        if (priorTestMode === undefined) {
+          delete process.env.AUTOMOBILE_TEST_MODE;
+        } else {
+          process.env.AUTOMOBILE_TEST_MODE = priorTestMode;
+        }
         // Exercise real cancellation/settlement without SDK lookup or a real process.
-        const internals = adb as unknown as {
-          isTestMode: boolean;
-          getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-        };
-        internals.isTestMode = false;
-        internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
-        spyOn(adb, "getDeviceTimestampMs").mockImplementation(async () => fakeTimer.now());
-        const input = new InputText(androidDevice, adb);
-        wireFakes(input);
+        spyOn(adb, "getBaseCommandParts").mockResolvedValue({ adbPath: "adb", baseArgs: [] });
+        spyOn(adb, "getDeviceTimestampMsWithSource").mockImplementation(async () => ({
+          timestampMs: fakeTimer.now(),
+          source: "device-ms",
+        }));
+        const input = createInputText(androidDevice, adb);
         const controller = new AbortController();
         const reason = new Error("text cancelled");
         const state = new TextRequestState();
@@ -310,8 +313,7 @@ describe("InputText.execute", () => {
         }
         return execute(args, options);
       });
-      const input = new InputText(androidDevice, fakeAdb);
-      wireFakes(input);
+      const input = createInputText(androidDevice, fakeAdb);
       const result = runWithAbortSignal(
         undefined,
         () => input.execute("hi", undefined, false, mode),
@@ -363,10 +365,9 @@ describe("InputText.execute", () => {
           return setText(value, options);
         },
       );
-      const input = new InputText(androidDevice, fakeAdb, () => ({
-        close: async () => ({ success: true, action: "close" }),
+      const input = createInputText(androidDevice, fakeAdb, () => ({
+        close: async () => ({ success: true, open: false, action: "close" as const }),
       }));
-      wireFakes(input);
       const result = runWithAbortSignal(
         undefined,
         () => input.execute(text, undefined, dismissKeyboard, mode),
@@ -421,8 +422,7 @@ describe("InputText.execute", () => {
       }
       return execute(command);
     });
-    const input = new InputText(androidDevice, fakeAdb);
-    wireFakes(input);
+    const input = createInputText(androidDevice, fakeAdb);
     const result = runWithAbortSignal(undefined, () => input.execute("hi", imeAction), {
       textState: state,
     });
@@ -460,8 +460,7 @@ describe("InputText.execute", () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
         fakeA11yService,
       );
-      const input = new InputText(androidDevice, fakeAdb);
-      wireFakes(input);
+      const input = createInputText(androidDevice, fakeAdb);
       expect(
         await runWithAbortSignal(undefined, () => input.execute("hi", undefined, false, mode)),
       ).toMatchObject({ success: true, method: mode });
@@ -472,8 +471,7 @@ describe("InputText.execute", () => {
     serverConfig.setEventAllMarkers(["/"]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const inputText = new InputText(androidDevice, fakeAdb as any);
-    wireFakes(inputText);
+    const inputText = createInputText(androidDevice, fakeAdb);
 
     const result = await inputText.execute("/a");
 
@@ -485,12 +483,9 @@ describe("InputText.execute", () => {
   });
 
   test("routes iOS input through the CtrlProxy client and ignores Android modes", async () => {
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient,
-    );
+    iosGetInstanceSpy = spyOnIosClientInstance(fakeIosCtrlProxy);
 
-    const inputText = new InputText(iosDevice, fakeAdb as any);
-    wireFakes(inputText);
+    const inputText = createInputText(iosDevice, fakeAdb);
 
     const result = await inputText.execute("hello", undefined, false, "eventAll");
 
@@ -519,15 +514,14 @@ describe("InputText.execute", () => {
       tapStrategy: new FakeTapStrategy(),
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     });
-    const observation: ObserveResult = {
+    const observation: ObserveResult = buildObserveResult({
       observationId: "occluded-focus",
       updatedAt: 1,
       screenSize: { width: 400, height: 240 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
-    };
-    tap.observedInteraction = async (action) => ({
-      ...(await action(recordObservationRead(observation))),
+    });
+    tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
       observation,
     });
     const error =
@@ -562,9 +556,7 @@ describe("InputText.execute", () => {
       );
 
       const focusCalls: unknown[] = [];
-      const inputText = new InputText(androidDevice, fakeAdb as any);
-      wireFakes(inputText);
-      (inputText as any).targetFocuser = {
+      const inputText = createInputText(androidDevice, fakeAdb, undefined, () => ({
         focus: async (selector: unknown) => {
           focusCalls.push(selector);
           return {
@@ -574,7 +566,7 @@ describe("InputText.execute", () => {
             matchedText: "First name",
           };
         },
-      };
+      }));
 
       const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
         text: "First name",
@@ -591,11 +583,9 @@ describe("InputText.execute", () => {
     });
 
     test("returns the focus failure without typing when the selector cannot be focused", async () => {
-      const inputText = new InputText(androidDevice, fakeAdb as any);
-      wireFakes(inputText);
-      (inputText as any).targetFocuser = {
+      const inputText = createInputText(androidDevice, fakeAdb, undefined, () => ({
         focus: async () => ({ success: false, error: "no element matches text=Missing" }),
-      };
+      }));
 
       const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
         text: "Missing",
@@ -614,15 +604,13 @@ describe("InputText.execute", () => {
         fakeA11yService,
       );
 
-      const inputText = new InputText(androidDevice, fakeAdb as any);
-      wireFakes(inputText);
-      (inputText as any).targetFocuser = {
+      const inputText = createInputText(androidDevice, fakeAdb, undefined, () => ({
         focus: async () => ({
           success: true,
           focusVerified: false,
           matchedText: "Phone notification: ",
         }),
-      };
+      }));
 
       const result = await inputText.execute("555-0100", undefined, false, undefined, undefined, {
         text: "Phone",

@@ -5,14 +5,14 @@ import { type Kysely, sql } from "kysely";
 // the same exact device are serialized by the in-process lifecycle lease and
 // ownership refusals instead. Forward-only: the earlier migrations that created
 // and extended this table stay untouched.
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("provision_device_operations").ifExists().execute();
 }
 
 // Recreates the final pre-#11065 shape (2026_08_22_000 plus the expiry,
 // attempt-fence and lifecycle columns) so a rollback leaves the schema the
 // earlier `down` migrations expect.
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("provision_device_operations")
     .ifNotExists()

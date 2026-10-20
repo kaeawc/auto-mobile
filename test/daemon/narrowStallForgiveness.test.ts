@@ -30,6 +30,7 @@ const IDLE_MS = 60_000;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+  releaseDevice: async () => {},
 };
 
 interface Rig {

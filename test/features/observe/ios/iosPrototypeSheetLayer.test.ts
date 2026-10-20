@@ -1,8 +1,13 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
+import { convertIosHierarchy } from "../../../helpers/iosHierarchyConverter";
 import { describe, expect, test } from "bun:test";
 import { getHierarchyNodeSource } from "../../../../src/features/observe/output/elementProvenance";
 import { normalizeIosHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
-import type { HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
+import type {
+  CtrlProxyNode,
+  HierarchyDelegateContext,
+} from "../../../../src/features/observe/ios/types";
 import { IOS_WINDOW_LAYER_EXTRA } from "../../../../src/features/observe/ios/iosWindowLayer";
 import {
   hasOwnPrototype,
@@ -22,17 +27,28 @@ import {
   iosPrototypeSheetWire,
 } from "../../../fixtures/observe/iosPrototypeSheet";
 
+function withoutWindowStamps(node: CtrlProxyNode): CtrlProxyNode {
+  const extras = Object.fromEntries(
+    Object.entries(node.extras ?? {}).filter(([key]) => key !== IOS_WINDOW_LAYER_EXTRA),
+  );
+  const children = node.node === undefined ? [] : [node.node].flat().map(withoutWindowStamps);
+  return {
+    ...node,
+    ...(node.extras === undefined ? {} : { extras }),
+    ...(node.node === undefined ? {} : { node: Array.isArray(node.node) ? children : children[0] }),
+  };
+}
+
 const converter = new CtrlProxyHierarchy({} as HierarchyDelegateContext);
-const normalized = normalizeIosHierarchy(iosPrototypeSheetWire());
+const normalized = normalizeIosHierarchy(convertIosHierarchy(iosPrototypeSheetWire()));
 const convertedWire = converter.convertToViewHierarchyResult(iosPrototypeSheetWire());
 const convertedRaw = converter.convertToViewHierarchyResult(iosPrototypeSheetRaw());
 // Derive the pre-fix capture by removing the stamp from every node, without editing the fixture.
 const unstamped = normalizeIosHierarchy(
-  JSON.parse(
-    JSON.stringify(iosPrototypeSheetWire(), (key, value) =>
-      key === IOS_WINDOW_LAYER_EXTRA ? undefined : value,
-    ),
-  ),
+  convertIosHierarchy({
+    ...iosPrototypeSheetWire(),
+    hierarchy: withoutWindowStamps(iosPrototypeSheetWire().hierarchy),
+  }),
 );
 const project = (h: ViewHierarchyResult) => new SearchableHierarchy().project(h);
 const signature = (n: SearchableEntry) => [n.className, n.nativeId, n.label, n.bounds];
@@ -78,18 +94,24 @@ for (const { name, hierarchy, nodes } of captures) {
     });
 
     test("observe rebuilds elements using only the selected window", () => {
-      const result: ObserveResult = {
+      const result: ObserveResult = buildObserveResult({
         updatedAt: 1,
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
         screenSize: { width: 390, height: 844 },
         viewHierarchy: hierarchy,
         // Deliberately stale elements: layer scoping must replace them.
         elements: scopeObserveResultToLayer(
-          { updatedAt: 1, viewHierarchy: hierarchy },
+          buildObserveResult({
+            updatedAt: 1,
+            screenSize: { width: 390, height: 844 },
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            viewHierarchy: hierarchy,
+          }),
           "app",
           "ios",
         ).elements,
-      };
+      });
       for (const layer of ["prototype", "app"] as const) {
         const scoped = scopeObserveResultToLayer(result, layer, "ios");
         const projected = project(scoped.viewHierarchy!);
@@ -161,5 +183,8 @@ test("a capture from a runner that predates window stamps cannot be split", () =
       (n) => n.parentIndex === prototype.find((n) => n.className === "XCUIApplication")?.index,
     ),
   ).toHaveLength(8);
-  expect(project(scopeHierarchyToLayer(unstamped, "app"))).toHaveLength(0);
+  // Only the empty application root remains: every window child belongs to the prototype layer.
+  expect(project(scopeHierarchyToLayer(unstamped, "app")).map((n) => n.className)).toEqual([
+    "XCUIApplication",
+  ]);
 });

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import {
   KeyEventSupport,
@@ -35,7 +36,10 @@ function harness() {
     getAndroidApiLevel: (signal) => support.getAndroidApiLevel(signal),
     executeKeyEventPlan: (plan, signal) => support.executeKeyEventPlan(plan, signal),
     keyEventFailureMessage: (error) => support.keyEventFailureMessage(error),
-    readFocusedText: (frame) => frame.viewHierarchy?.hierarchy.node?.$.text,
+    readFocusedText: (frame) => {
+      const text = frame.viewHierarchy?.hierarchy.node?.$?.text;
+      return typeof text === "string" ? text : undefined;
+    },
     readFreshObservation: async (signal, display) => {
       calls.push({ signal, display });
       return observation("A");
@@ -133,11 +137,11 @@ describe("KeyEventSupport", () => {
       options.push(config);
       return execute(args, config);
     };
-    adb.setCommandResponse("echo $$; exec", { stdout: "123\n", stderr: "" });
+    adb.setCommandResponse("echo $$; exec", createExecResult("123\n", ""));
     adb.setCommandError("echo $$; exec", failure);
     adb.setCommandResponseSequence("/proc/123/cmdline", [
-      { stdout: "alive", stderr: "" },
-      { stdout: "", stderr: "" },
+      createExecResult("alive", ""),
+      createExecResult("", ""),
     ]);
     host.getAndroidApiLevel = async () => 30;
     await expect(
@@ -161,9 +165,9 @@ describe("KeyEventSupport", () => {
     };
     host.getAndroidApiLevel = async () => null;
     host.session.typingPasswordField = true;
-    adb.setCommandResponse("echo $$; exec", { stdout: "123\n", stderr: "" });
+    adb.setCommandResponse("echo $$; exec", createExecResult("123\n", ""));
     adb.setCommandError("echo $$; exec", failure);
-    adb.setCommandResponse("/proc/123/cmdline", { stdout: "alive", stderr: "" });
+    adb.setCommandResponse("/proc/123/cmdline", createExecResult("alive", ""));
     await expect(
       support.executeKeyEventPlan({ commands: ["shell input text 'a'"], textLength: 9 }),
     ).rejects.toBe(failure);
@@ -222,7 +226,7 @@ describe("KeyEventSupport", () => {
     expect(await support.clearForReplace("replace", signal, "2")).toMatchObject({
       unchangedWarning: "unchanged",
     });
-    host.observer.execute = async () => ({ timestamp: 1 });
+    host.observer.execute = async () => ({ ...observation(), viewHierarchy: undefined });
     expect(await support.requireFocusedAndroidInput(signal)).toMatchObject({ success: false });
     host.getTargetLayer = () => "prototype";
     expect(

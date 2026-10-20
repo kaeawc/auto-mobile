@@ -6,6 +6,51 @@ it. Callers do not select slots, pool identities, runner scopes, or capacity.
 The requirement vocabulary and default resolution are documented in
 [session-requirements.md](session-requirements.md).
 
+## Pinned session exports
+
+Broker mode advertises `session-broker-export/v1`. A client may pass the strict
+optional `export: { prepareId, requestDigest }` to `daemon/prepareSession`; both
+strings must contain 1–256 characters. Admission and pre-admission failures link
+this identity to the request receipt in the same transaction, before native work.
+Replays may link a previously unexported receipt; conflicting prepare identities
+or digests are rejected with `session_export_identity_mismatch`.
+
+`daemon/getSessionExport { prepareId, requestDigest, livenessOwnerToken }` returns
+`{ contractVersion: 1, prepareId, requestDigest, acknowledged, result }`, or
+`session_export_not_found`. The result derives from the current durable receipt:
+after owner-exit recovery it reports `failed` / `session_owner_exited`, retaining
+the original session UUID and profile. Authentication uses the original consumer
+token even when recovery changes the daemon owner. Reading an export grants no
+session control and never acquires a replacement device.
+
+`daemon/acknowledgeSessionExport` takes the same strict parameters and returns
+`{ prepareId, outcome: "acknowledged" }`, or `"unknown_export"` for an absent
+identity. Digest and owner checks precede acknowledgement; exact replays preserve
+the first acknowledgement time. An unacknowledged export pins its receipt past
+the normal 30-day terminal window, up to a configurable 180-day export age.
+Acknowledged or expired export rows prune with their eligible request receipts;
+pending resource cleanup and retained-receipt tombstone guards still apply.
+Clients omitting `export` retain the existing prepare contract.
+
+## Shutdown refusals and retry cadence
+
+Once restart handoff begins, new prepare and abandon calls return an RPC refusal:
+`success: false`, `code: "session_broker_stopping"`, `error: "Session broker is stopping"`,
+`retryable: true`, and `retryAfterMs: 5000`. Retry the same request identity against the
+successor daemon; the stopping refusal neither admits a request nor stores a terminal
+receipt. It stays outside preparation's `failureFor` mapping. Already-running
+preparations cancelled by shutdown retain the existing `session_preparation_failed`
+terminal receipt and cleanup behavior.
+
+Retryable `session_restart_handoff_pending` and configured-but-unavailable broker
+refusals use the same hint, shared with the service's five-second idle interval between
+recovery passes. This is a pacing hint, not a readiness deadline: recovery work can
+extend a pass. Stopping and handoff-pending refusals log at debug; non-retryable request
+owner and export identity mismatches remain warnings. A failed initial handoff snapshot
+warns and still joins preparations; close retries the snapshot after that join before
+finishing releases. A failed second snapshot still rejects close so the service keeps
+its host lock.
+
 ## Current qualification boundary
 
 The first native milestone deliberately uses zero pooling. Every relinquished
@@ -211,7 +256,15 @@ sessions, reset, uncertain state, and unfinished destruction count toward the
 total cap. Failed acquisition with unfinished native work retains session
 capacity too. A full pool must confirm eviction before reserving a replacement;
 there is no temporary burst. Pool selection prefers the most recently returned
-compatible device and evicts the least recently returned idle device.
+compatible device, even after a total-cap reduction, and evicts the least recently
+returned idle device when no compatible idle device is available. A pending
+eviction or transient destroy failure returns `eviction_pending` with
+`retryable: true` and `retryAfterMs: 1000`. Its destroying resource keeps capacity
+reserved for recovery. The failed request ID remains terminal; after cleanup
+frees capacity, retry with a new request ID. Permanent destroy errors remain
+non-retryable `session_preparation_failed` failures.
+Managed provisioning's `cleanup_pending` remains a separate failure: its retryability
+is suppressed while that request's resource cleanup is pending, with no retry delay injected.
 
 ## Consumer contract
 

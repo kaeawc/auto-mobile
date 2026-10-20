@@ -1,5 +1,6 @@
+import { socketServerInputHooks } from "../helpers/socketServerInputHooks";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
-import { UnixSocketServer, type AppendTextInput } from "../../src/daemon/socketServer";
+import { type AppendTextInput } from "../../src/daemon/socketServer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -12,14 +13,16 @@ test.each([false, true])(
   async (present) => {
     const timer = new FakeTimer();
     timer.advanceTime(400);
-    const server: UnixSocketServer = Object.create(UnixSocketServer.prototype);
-    Object.assign(server, { timer });
+    const server = socketServerInputHooks(timer);
     const client: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       timer.advanceTime(70);
       return client;
     });
-    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({ success: true });
+    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({
+      success: true,
+      totalTimeMs: 0,
+    });
     const calls: Parameters<AppendTextInput["appendText"]>[] = [];
     const input: AppendTextInput = {
       async appendText(...args) {
@@ -34,11 +37,11 @@ test.each([false, true])(
         return { success: true, charsSent: 2 };
       },
     };
-    server["getAppendTextInput"] = () => ({ input, fromCache: false });
+    server.getAppendTextInput = () => ({ input, fromCache: false });
     const signal = present ? new AbortController().signal : undefined;
     const frameContext = present ? "frame" : undefined;
     expect(
-      await server["executeInputTypeText"](
+      await server.executeInputTypeText(
         "android",
         device,
         "AB",
@@ -63,14 +66,16 @@ test.each(["append", "validation"] as const)(
   async (phase) => {
     const timer = new FakeTimer();
     timer.advanceTime(400);
-    const server: UnixSocketServer = Object.create(UnixSocketServer.prototype);
-    Object.assign(server, { timer });
+    const server = socketServerInputHooks(timer);
     const client: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       timer.advanceTime(phase === "append" ? 1000 : 70);
       return client;
     });
-    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({ success: true });
+    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({
+      success: true,
+      totalTimeMs: 0,
+    });
     const appendText = mock<AppendTextInput["appendText"]>(
       async (_text, timeoutMs, beforeKeyEvent) => {
         expect(timeoutMs).toBe(930);
@@ -79,9 +84,9 @@ test.each(["append", "validation"] as const)(
         return await beforeKeyEvent!();
       },
     );
-    server["getAppendTextInput"] = () => ({ input: { appendText }, fromCache: false });
+    server.getAppendTextInput = () => ({ input: { appendText }, fromCache: false });
     expect(
-      await server["executeInputTypeText"]("android", device, "AB", undefined, 1000, true, "frame"),
+      await server.executeInputTypeText("android", device, "AB", undefined, 1000, true, "frame"),
     ).toEqual({
       success: false,
       error: `input/typeText exceeded 1000ms budget before append ${phase === "append" ? "key events" : "frame context validation"}`,
@@ -95,8 +100,7 @@ test.each([false, true])(
   "append self-heal and submit share one dispatch mark (first sent=%s)",
   async (firstSent) => {
     const timer = new FakeTimer();
-    const server: UnixSocketServer = Object.create(UnixSocketServer.prototype);
-    Object.assign(server, { timer });
+    const server = socketServerInputHooks(timer);
     let marks = 0;
     let attempts = 0;
     const client: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
@@ -105,8 +109,8 @@ test.each([false, true])(
       args[4]?.();
       return { success: true, action: "done", totalTimeMs: 0 };
     });
-    server["evictDeviceInputCache"] = () => {};
-    server["getAppendTextInput"] = () => ({
+    server.evictDeviceInputCache = () => {};
+    server.getAppendTextInput = () => ({
       fromCache: true,
       input: {
         appendText: async (text, _timeout, _validate, _signal, onDispatch) => {
@@ -123,8 +127,9 @@ test.each([false, true])(
         },
       },
     });
-    expect(
-      await server["executeInputTypeText"](
+    // The declared result omits the IME action fields the append path also returns.
+    expect<object>(
+      await server.executeInputTypeText(
         "android",
         device,
         "AB",
@@ -144,8 +149,7 @@ test.each([false, true])(
 
 test("submit is the first dispatch when append sends no keyevents", async () => {
   const timer = new FakeTimer();
-  const server: UnixSocketServer = Object.create(UnixSocketServer.prototype);
-  Object.assign(server, { timer });
+  const server = socketServerInputHooks(timer);
   let marks = 0;
   const client: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
@@ -154,12 +158,13 @@ test("submit is the first dispatch when append sends no keyevents", async () => 
     args[4]?.();
     return { success: true, action: "done", totalTimeMs: 0 };
   });
-  server["getAppendTextInput"] = () => ({
+  server.getAppendTextInput = () => ({
     input: { appendText: async () => ({ success: true, charsSent: 0 }) },
     fromCache: false,
   });
-  expect(
-    await server["executeInputTypeText"](
+  // The declared result omits the IME action fields the append path also returns.
+  expect<object>(
+    await server.executeInputTypeText(
       "android",
       device,
       "",

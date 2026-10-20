@@ -7,18 +7,18 @@ import {
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import {
   getDeviceGestureRecordingStatus,
   isDeviceGestureRecordingOwnedBy,
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -72,7 +72,7 @@ class FakeSessionManager implements CleanupManager {
  * segmented and the device gesture recording (#11041). recordingSessionCleanup.test.ts pins that with a fake
  * whose `markVideoRecordingIncomplete` accepts any id.
  *
- * The real one (`markVideoRecordingIncomplete` in src/server/videoRecordingManager.ts) only knows
+ * The real one (`markVideoRecordingIncomplete` in src/daemon/videoRecordingManager.ts) only knows
  * video recordings: handed the device gesture recording's id it force-stops nothing and finds no row. The
  * device gesture recording is stopped only by the last stage of `stopOwnedRecordings`, which a wedged
  * earlier stage never reaches. So at the cap the device is freed with the released session's

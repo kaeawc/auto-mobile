@@ -1,4 +1,6 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { wireCapture } from "../../helpers/wireCapture";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { afterEach, mock, describe, expect, spyOn, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ObserveResult } from "../../../src/models";
 import type { SwipeOnOptions } from "../../../src/models";
@@ -11,7 +13,7 @@ describe("UIStateExtractor state characterization", () => {
   test("returns undefined for absent hierarchy and for a captured screen with no useful state", () => {
     const extractor = new UIStateExtractor();
     expect(extractor.extract(undefined)).toBeUndefined();
-    expect(extractor.extract(homeCapture.viewHierarchy as ViewHierarchyResult)).toBeUndefined();
+    expect(extractor.extract(wireCapture(homeCapture.viewHierarchy))).toBeUndefined();
   });
 
   test.each([
@@ -29,9 +31,9 @@ describe("UIStateExtractor state characterization", () => {
       );
       try {
         expect(
-          new UIStateExtractor(parser).extract(homeCapture.viewHierarchy as ViewHierarchyResult)
+          new UIStateExtractor(parser).extract(wireCapture(homeCapture.viewHierarchy))
             ?.selectedElements ?? [],
-        ).toEqual(expected);
+        ).toEqual([...expected]);
       } finally {
         traverse.mockRestore();
       }
@@ -126,12 +128,12 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
       ],
     };
 
-    const observation: ObserveResult = {
+    const observation: ObserveResult = buildObserveResult({
       updatedAt: 0,
       screenSize: { width: 0, height: 0 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy,
-    };
+    });
 
     const state = new UIStateExtractor().extractFromObservation(observation);
 
@@ -156,7 +158,7 @@ describe("UIStateExtractor.createScrollPosition", () => {
   });
 
   test("returns undefined when the swipe direction is missing", () => {
-    const noDirection = { lookFor: { text: "Save" } } as unknown as SwipeOnOptions;
+    const noDirection = opts({ lookFor: { text: "Save" }, direction: undefined });
     expect(UIStateExtractor.createScrollPosition(noDirection)).toBeUndefined();
   });
 
@@ -214,11 +216,7 @@ describe("UIStateExtractor.createScrollPosition", () => {
 // Synthetic hierarchy nodes exercise the child-text contract; these are not device captures.
 describe("UIStateExtractor child-text characterization", () => {
   function textFinder(parser: FakeElementParser) {
-    return new UIStateExtractor(parser) as unknown as {
-      findTextInChildren: (
-        node: Record<string, unknown> | Record<string, unknown>[],
-      ) => string | undefined;
-    };
+    return new UIStateExtractor(parser);
   }
 
   test("searches depth first, skips empty descendants and stops before later siblings", () => {
@@ -270,4 +268,8 @@ describe("UIStateExtractor child-text characterization", () => {
       { text: "Explicit label" },
     ]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

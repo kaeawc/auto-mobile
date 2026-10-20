@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, mock, beforeEach } from "bun:test";
 import {
   lazySessionReleasePool,
   releasePoolDevice,
@@ -122,9 +122,11 @@ describe("lazySessionReleasePool", () => {
 });
 
 describe("releaseSessionAndDevice", () => {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  afterEach(() => warn.mockClear());
-  afterAll(() => warn.mockRestore());
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  beforeEach(() => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => warn.mockRestore());
   test.each([
     ["explicit-release", true, "Failed to persist terminal release"],
     ["device-restart:Pixel_8", false, "Failed to persist non-terminal release"],
@@ -176,9 +178,9 @@ describe("releaseSessionAndDevice", () => {
         pool.failure = poolFailure;
       }
       await expect(
-        releaseSessionAndDevice(manager, pool, "device", "session", "reason"),
+        releaseSessionAndDevice(manager, pool, "device", "session", "superseded"),
       ).rejects.toBe(failure);
-      expect(manager.calls).toEqual([["session", "reason"]]);
+      expect(manager.calls).toEqual([["session", "superseded"]]);
       expect(manager.getSession()).toBeNull();
       expect(manager.hasSession()).toBe(scenario === "present");
       expect(pool.calls).toEqual(scenario === "present" ? [] : [["device", "session"]]);
@@ -195,14 +197,14 @@ describe("releaseSessionAndDevice", () => {
     const pool = new FakeReleasePool(manager);
     manager.failure = new Error("persistence failed");
     await expect(
-      releaseSessionAndDevice(manager, pool, "device", "session", "reason", {
+      releaseSessionAndDevice(manager, pool, "device", "session", "superseded", {
         deferFailureFallback: true,
       }),
     ).rejects.toBe(manager.failure);
     expect(manager.hasSession()).toBe(false);
     expect(pool.calls).toEqual([]);
     manager.failure = undefined;
-    await releaseSessionAndDevice(manager, pool, "device", "session", "reason", {
+    await releaseSessionAndDevice(manager, pool, "device", "session", "superseded", {
       deferFailureFallback: true,
     });
     expect(pool.calls).toEqual([["device", "session"]]);
@@ -219,7 +221,7 @@ describe("releaseSessionAndDevice", () => {
   test("a conditional release returning no device retains ownership", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
-    await releaseSessionAndDevice(manager, pool, "device", "session", "reason", {
+    await releaseSessionAndDevice(manager, pool, "device", "session", "superseded", {
       release: async () => null,
     });
     expect(manager.hasSession()).toBe(true);
@@ -230,8 +232,8 @@ describe("releaseSessionAndDevice", () => {
   test("a custom release uses its returned device even without a known failure fallback", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
-    await releaseSessionAndDevice(manager, pool, null, "session", "reason", {
-      release: () => manager.releaseSession("session", "reason"),
+    await releaseSessionAndDevice(manager, pool, null, "session", "superseded", {
+      release: () => manager.releaseSession("session", "superseded"),
     });
     expect(pool.calls).toEqual([["device", "session"]]);
   });
@@ -246,4 +248,8 @@ describe("releaseSessionAndDevice", () => {
     expect(manager.calls).toEqual([["session", undefined]]);
     expect(pool.calls).toEqual([["device", "session"]]);
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

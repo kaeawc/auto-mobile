@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { AppearanceMode } from "../../src/models";
-import type { AppearanceConfig } from "../../src/server/appearanceManager";
+import type { AppearanceConfig } from "../../src/models/Appearance";
 import {
   AppearanceSyncScheduler,
   defaultAppearanceSyncDependencies,

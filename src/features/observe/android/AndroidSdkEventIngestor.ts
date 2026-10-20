@@ -22,7 +22,7 @@ import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getFailureRecorder } from "../../failures/FailureRecorder";
 import type { FailureRecorderService } from "../../failures/interfaces/FailureRecorderService";
 import { logger } from "../../../utils/logger";
-import type { StackTraceElement } from "../../../server/failuresResources";
+import type { StackTraceElement } from "../../../models/failureAnalytics";
 import type { SdkAnrPayload, SdkCrashPayload } from "../crash/sdkCrashIngestion";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { StorageTelemetryInput } from "./AndroidCtrlProxyClient";

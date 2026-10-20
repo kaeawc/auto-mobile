@@ -1,5 +1,4 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
+import type { A11yTapCoordinatesResult } from "../../src/features/observe/android/types";
 import {
   afterAll,
   afterEach,
@@ -26,10 +25,15 @@ import {
 } from "../../src/daemon/toolCallActivity";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
 import {
   androidDevice,
   createFakeDaemonState,
@@ -44,12 +48,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * tracker are the real ones, wired to the session manager as `daemon.ts` wires them; only the
  * device client is a fake.
  */
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
 
 const SESSION = "suspect-input-session";
 const OWNER_TOKEN = "harness-a";
@@ -81,12 +79,12 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let server: UnixSocketServerHarness;
   let taps: number;
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
   /** When set, a tap parks on the device until it settles. */
-  let tapOnDevice: PromiseWithResolvers<{ success: boolean }> | undefined;
+  let tapOnDevice: PromiseWithResolvers<A11yTapCoordinatesResult> | undefined;
   let tapEntered: PromiseWithResolvers<void>;
   let unsubscribeActivity: () => void;
   let monitor: SessionHeartbeatMonitor | undefined;
@@ -145,6 +143,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       getDevicePool: () => ({
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+        releaseDevice: async () => {},
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };
@@ -192,7 +191,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -200,7 +199,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
   const sendGesture = (kind: "Start" | "Move" | "End") =>
     send(`gesture-${kind}`, `input/gesture${kind}`, { gestureId: "drag-1" });
 
-  beforeEach(async () => {
+  async function arrange(): Promise<void> {
     taps = 0;
     strokes = [];
     tapOnDevice = undefined;
@@ -223,40 +222,42 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     const stroke =
       (kind: string) => async (_id: string, _x: number, _y: number, last?: unknown) => {
         strokes.push(kind === "end" && last === true ? "cancel" : kind);
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       };
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       getScreenScaleMetadata: () => null,
       requestTapCoordinates: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
       ) => {
-        args[6]?.();
+        args[0].onDispatch?.();
         taps++;
         tapEntered.resolve();
-        return (await tapOnDevice?.promise) ?? { success: true };
+        return (await tapOnDevice?.promise) ?? { success: true, totalTimeMs: 0 };
       },
-      requestGestureStart: stroke("start"),
+      requestGestureStart: async () => {
+        strokes.push("start");
+        return { success: true, totalTimeMs: 0 };
+      },
       requestGestureMove: stroke("move"),
       requestGestureEnd: stroke("end"),
-    }));
+    });
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = createTestUnixSocketServer(
+    server = createHarnessServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
+        getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
+      },
       new FakeTimer(),
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    server.allowRequests();
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
-  });
+    server.connect(socket);
+  }
 
-  afterEach(async () => {
+  async function dismantle(): Promise<void> {
     await monitor?.stop();
     monitor = undefined;
     unsubscribeActivity();
@@ -265,7 +266,10 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     PlatformDeviceManagerFactory.reset();
     socket.destroy();
     sessionManager.stopCleanupTimer();
-  });
+  }
+
+  beforeEach(arrange);
+  afterEach(dismantle);
 
   test("a tap inside the suspect window is refused, retryable, and restores nothing", async () => {
     timer.advanceTime(LEASE_MS + 1);
@@ -344,7 +348,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
   });
 
   test("a tap still on the device keeps the session; a second tap after the lapse is refused", async () => {
-    tapOnDevice = Promise.withResolvers<{ success: boolean }>();
+    tapOnDevice = Promise.withResolvers<A11yTapCoordinatesResult>();
     socket.send({
       id: "tap",
       type: "mcp_request",
@@ -356,7 +360,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
 
     // A second pane: a connection answers its own frames in order.
     const second = new FakeSocket();
-    internals.handleConnection(second as unknown as Socket);
+    server.connect(second);
     second.send({
       id: "tap-2",
       type: "mcp_request",
@@ -366,9 +370,9 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     await settle();
     const refused = second.responses.find((frame) => frame.id === "tap-2");
     const heldDuringCall = sessionManager.getSession(SESSION);
-    tapOnDevice.resolve({ success: true });
+    tapOnDevice.resolve({ success: true, totalTimeMs: 0 });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     second.destroy();
 
     // Never released under an in-flight control call: the newcomer gets the retryable refusal.
@@ -428,13 +432,13 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       return answers;
     }
 
-    test.each(SESSION_KINDS)(
+    test.each([...SESSION_KINDS])(
       "admitting a tap on a %s session stamps nothing; its end is tool use",
       async (kind) => {
         await createSession(kind);
         timer.advanceTime(1_000);
         const before = clocks();
-        tapOnDevice = Promise.withResolvers<{ success: boolean }>();
+        tapOnDevice = Promise.withResolvers<A11yTapCoordinatesResult>();
         socket.send({
           id: "tap",
           type: "mcp_request",
@@ -447,9 +451,9 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
         // Admitted and on the device: nothing on the session moved.
         expect(clocks()).toEqual(before);
 
-        tapOnDevice.resolve({ success: true });
+        tapOnDevice.resolve({ success: true, totalTimeMs: 0 });
         await settle();
-        await Promise.all([...internals.activeRequestHandlers]);
+        await Promise.all([...server.state.activeRequestHandlers]);
         expect(socket.responses.find((frame) => frame.id === "tap")).toMatchObject({
           success: true,
         });

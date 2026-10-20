@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DaemonHandoffInterruptionError,
@@ -11,7 +11,7 @@ import {
 } from "../../src/daemon/socketServer/forwardSessionKey";
 import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
 import type { McpRequestSessionContext } from "../../src/daemon/statelessMcpServerFactory";
-import type { ExecutionCancellationReason } from "../../src/server/executionTracker";
+import type { ExecutionCancellationReason } from "../../src/daemon/executionTracker";
 import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
@@ -27,7 +27,9 @@ interface Built {
   closed: boolean;
 }
 
-function harness(options: { serverScope?: AsyncScope } = {}) {
+function harness(
+  options: { serverScope?: AsyncScope; refreshResources?: () => Promise<void> } = {},
+) {
   const built: Built[] = [];
   const cancelled: Array<{ scope: string; reason: ExecutionCancellationReason }> = [];
   const forgotten: string[] = [];
@@ -84,14 +86,38 @@ function harness(options: { serverScope?: AsyncScope } = {}) {
 }
 
 describe("InProcessMcpDispatcher (#11820)", () => {
+  // The SDK client and server build their handlers and validators on first use. That one-time
+  // cost belongs to the process, not to whichever test runs first (or alone, in the budget's
+  // isolated re-run), so drive one connect, call and close before the timed tests.
+  beforeAll(async () => {
+    const client = await harness().dispatcher.connect({ sessionKey: "warm-up" });
+    await client.callTool({ name: "echo", arguments: {} });
+    await client.close();
+  });
+
+  test("cached resource freshness runs in the server root without opening a loopback client", async () => {
+    let observed: string | undefined;
+    const h = ambient.run("daemon-root", () =>
+      harness({
+        refreshResources: async () => {
+          observed = ambient.getStore();
+        },
+      }),
+    );
+    await ambient.run("socket-caller", () => h.dispatcher.refreshResources!());
+    expect(observed).toBe("daemon-root");
+    expect(h.built).toHaveLength(0);
+    expect(h.dispatcher.inFlightCount).toBe(0);
+  });
+
   test("each forward gets its own server with the forward's context and session key", async () => {
     const h = harness();
     const first = await h.dispatcher.connect({ boundSessionUuid: "bound", sessionKey: "socket-1" });
     const second = await h.dispatcher.connect({ releasedSessionUuid: "released" });
 
     expect(h.built.map((record) => record.scope)).toEqual([
-      { requestScopeId: "scope-1", requestMcpSessionId: "socket-1" },
-      { requestScopeId: "scope-2", requestMcpSessionId: undefined },
+      { requestScopeId: "scope-1", requestMcpSessionId: "socket-1", trustedForwarder: true },
+      { requestScopeId: "scope-2", requestMcpSessionId: undefined, trustedForwarder: true },
     ]);
     expect(h.built[0].context).toEqual({ initialSessionToolBinding: "bound" });
     expect(h.built[1].context).toEqual({ initialReleasedSession: "released" });

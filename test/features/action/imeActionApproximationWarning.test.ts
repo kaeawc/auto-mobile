@@ -6,7 +6,9 @@ import {
 
 describe("withImeActionApproximationWarning", () => {
   test("adds a warning when the device approximated the action", () => {
-    expect(withImeActionApproximationWarning({ success: true, approximated: true })).toEqual({
+    expect<unknown>(
+      withImeActionApproximationWarning({ success: true, approximated: true }),
+    ).toEqual({
       success: true,
       approximated: true,
       warning: IME_ACTION_APPROXIMATED_WARNING,

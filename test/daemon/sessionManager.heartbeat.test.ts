@@ -1,4 +1,5 @@
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import { expireIfDue } from "../helpers/expireIfDue";
 import { describe, expect, test, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -9,6 +10,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { DeviceSession } from "../../src/db/types";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { DeviceSessionNotActiveError } from "../../src/db/deviceSessionRepository";
 import {
@@ -18,6 +20,17 @@ import {
   makeSessionManager,
   stubbedPersistence,
 } from "../helpers/sessionManagerSuite";
+
+async function storedRow(
+  persistence: Pick<FakeDeviceSessionPersistence, "getSession">,
+  sessionId: string,
+): Promise<DeviceSession> {
+  const row = await persistence.getSession(sessionId);
+  if (!row) {
+    throw new Error(`no persisted row for ${sessionId}`);
+  }
+  return { ...row };
+}
 
 describe("SessionManager", () => {
   let sessionManager: SessionManager;
@@ -39,9 +52,10 @@ describe("SessionManager", () => {
       // belongs to the heartbeat lease only: idleness releases exactly at the deadline.
       sessionManager.recordHeartbeat("session-1");
       fakeTimer.advanceTime(1000);
-      expect(sessionManager.getSession("session-1")).not.toBeNull();
+      expect(expireIfDue(sessionManager, "session-1")).not.toBeNull();
 
       fakeTimer.advanceTime(1);
+      expect(expireIfDue(sessionManager, "session-1")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
   });
@@ -67,7 +81,7 @@ describe("SessionManager", () => {
           hasReceivedHeartbeat: true,
           ownership: "owned",
         };
-        const stored = { ...(await persistence.getSession!(session.sessionId)) };
+        const stored = await storedRow(persistence, session.sessionId);
         write.mockImplementationOnce(async () => {
           throw new Error("one activity write failed");
         });
@@ -90,7 +104,7 @@ describe("SessionManager", () => {
       const manager = makeSessionManager({ timer: fakeTimer, persistence, fakeBarrier: true });
       try {
         const session = await createAwaitingOwnerSession(manager, "kept-owner");
-        const storedBefore = { ...(await persistence.getSession!(session.sessionId)) };
+        const storedBefore = await storedRow(persistence, session.sessionId);
         write.mockImplementationOnce(async () => {
           throw new Error("one activity write failed");
         });
@@ -139,7 +153,7 @@ describe("SessionManager", () => {
           ownership: session.ownership,
           awaitingOwnerSince: session.awaitingOwnerSince,
         };
-        const storedBefore = { ...(await persistence.getSession!(session.sessionId)) };
+        const storedBefore = await storedRow(persistence, session.sessionId);
         write.mockImplementationOnce(async () => {
           throw new Error("one activity write failed");
         });
@@ -394,7 +408,7 @@ describe("SessionManager", () => {
           activityGeneration: 2,
         };
         expect(session).toMatchObject(latest);
-        const stored = { ...(await persistence.getSession!(session.sessionId)) };
+        const stored = await storedRow(persistence, session.sessionId);
         failFirst.resolve();
         if (firstRefresh) {
           await expect(firstRefresh).rejects.toBeInstanceOf(SessionActivityPersistenceError);

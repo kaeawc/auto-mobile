@@ -1,3 +1,4 @@
+import { makeSessionManager, stopBuiltSessionManagers } from "../helpers/sessionManagerSuite";
 import {
   afterAll,
   afterEach,
@@ -24,7 +25,6 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "../db/testDbHelper";
-import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const SESSION = "row-writes";
@@ -115,8 +115,10 @@ describe("remaining session row writes (#11557)", () => {
     // Warm lifecycle modules and SQL statements once; cold initialization is not the race under test.
     const warmTimer = new FakeTimer();
     const warmStore = new DeferredRowRepository(db, warmTimer);
-    const warmManager = new SessionManager(warmTimer, warmStore, {
-      barrier: () => new FakeDbWriteBarrier(),
+    const warmManager = makeSessionManager({
+      timer: warmTimer,
+      persistence: warmStore,
+      fakeBarrier: true,
     });
     warmManager.stopCleanupTimer();
     try {
@@ -136,7 +138,7 @@ describe("remaining session row writes (#11557)", () => {
     timer.setCurrentTime(1_000);
     store = new DeferredRowRepository(db, timer);
     peer = new DeviceSessionRepository(db, timer);
-    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
+    manager = makeSessionManager({ timer: timer, persistence: store, fakeBarrier: true });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-1");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
@@ -146,6 +148,7 @@ describe("remaining session row writes (#11557)", () => {
   });
   afterEach(() => {
     manager.stopCleanupTimer();
+    stopBuiltSessionManagers();
   });
 
   const row = () => store.getSession(SESSION);
@@ -257,6 +260,9 @@ describe("remaining session row writes (#11557)", () => {
   test("a losing activity repair rejects its caller without ending the live session", async () => {
     const session = await create();
     const generation = (await row())!.stable_identity_generation;
+    if (generation === undefined) {
+      throw new Error("the persisted row has no stable identity generation");
+    }
     await sweep();
     await db
       .updateTable("device_sessions")
@@ -734,7 +740,10 @@ describe("remaining session row writes (#11557)", () => {
       }
       const assigner: SessionDeviceAssigner = {
         async assignDeviceToSession(id) {
-          const creating = manager.createSession(id, DEVICE, "android", { timeoutMs: 60_000 });
+          const creating = manager.createSession(id, DEVICE, "android", {
+            timeoutMs: 60_000,
+            signal: controller.signal,
+          });
           if (!landed) {
             controller.abort(failure);
           }
@@ -744,7 +753,9 @@ describe("remaining session row writes (#11557)", () => {
       const writesBefore = store.releases.length;
       await expect(
         runWithAbortSignal(controller.signal, () =>
-          manager.getOrCreateSession(SESSION, assigner, "android", undefined, true),
+          manager.getOrCreateSession(SESSION, assigner, "android", undefined, true, {
+            signal: controller.signal,
+          }),
         ),
       ).rejects.toBe(failure);
       expect(await row()).toMatchObject({
@@ -755,7 +766,7 @@ describe("remaining session row writes (#11557)", () => {
       expect(store.releases.slice(writesBefore)).toEqual(["session-creation-cancelled"]);
       expect(store.releaseGenerations.slice(writesBefore)).toEqual([undefined]);
       expect(manager.getTerminalReleaseSnapshot(SESSION)).toMatchObject({ terminal: true });
-      const later = new SessionManager(timer, peer, { barrier: () => new FakeDbWriteBarrier() });
+      const later = makeSessionManager({ timer: timer, persistence: peer, fakeBarrier: true });
       later.stopCleanupTimer();
       later.attachDaemonSessionId("daemon-later");
       later.attachLiveDaemonSessionIds(() => new Set(["daemon-later"]));
@@ -784,7 +795,7 @@ describe("remaining session row writes (#11557)", () => {
       timer.advanceTime(100);
       // A new daemon reads persisted stamps on its own session clock, including after a wall step.
       manager.stopCleanupTimer();
-      manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
+      manager = makeSessionManager({ timer: timer, persistence: store, fakeBarrier: true });
       manager.stopCleanupTimer();
       manager.attachDaemonSessionId("daemon-recovery");
       manager.attachLiveDaemonSessionIds(() => new Set(["daemon-recovery"]));

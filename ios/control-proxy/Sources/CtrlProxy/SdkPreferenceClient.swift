@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 struct PreferenceMutationResult: Sendable {
@@ -36,7 +37,7 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
     }
 
     convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
-        let url = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
+        let url = loopbackBaseURL(port: port)
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5
@@ -138,7 +139,7 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
     }
 
     private func post(_ payload: PreferenceRequest) async throws -> PreferenceResponse {
-        var request = URLRequest(url: baseURL.appendingPathComponent("preferences"))
+        var request = URLRequest(url: baseURL.appendingPathComponent(SdkRoute.preferences.path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)

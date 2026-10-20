@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { DeviceSessionNotActiveError } from "../../src/db/deviceSessionRepository";
 import type { LivenessHoldState, LivenessOwnerView } from "../../src/daemon/livenessClaimDecision";
 import {
@@ -7,12 +7,16 @@ import {
   widenIdleDeadlineFromLastActivity,
   type SessionLivenessPort,
 } from "../../src/daemon/sessionLivenessLease";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../src/models/managedExecutionLiveness";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+
+afterEach(() => {
+  mock.restore();
+});
 
 /** Enough turns to settle a barrier-tracked write behind the claim mutex. */
 const DRAIN_TURNS = 10;

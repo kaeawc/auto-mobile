@@ -1,12 +1,14 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
 import type {
   CallToolResult,
   ListToolsResult,
   McpServer,
   ServerCapabilities,
+  ServerContext,
 } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
-import { McpError } from "./mcpError";
+import { McpError } from "../daemon/mcpError";
 import { logger } from "../utils/logger";
 import {
   DaemonBoundSessionExpiredError,
@@ -17,7 +19,6 @@ import {
   DaemonRestartDeferredError,
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
-import { DaemonShuttingDownError } from "../daemon/client";
 import { daemonRestartDeferredPayload } from "../daemon/daemonRestartAdmission";
 import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
@@ -34,22 +35,41 @@ import {
 } from "../daemon/deviceControlTransportFailure";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
+  noActiveDeviceSessionPayload,
   readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
-  terminalSessionRefusalFields,
-} from "./deviceSessionResult";
+} from "../daemon/deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
 import { ToolRegistry } from "./toolRegistry";
-import { installToolCallDispatcher } from "./toolCallDispatch";
-import { shapeToolCallError } from "./shapeToolCallError";
-import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
+import {
+  installToolCallDispatcher,
+  type McpToolCallExtra,
+  type McpToolCallResult,
+  type ToolCall,
+} from "./toolCallDispatch";
+import { shapeToolCallError } from "../daemon/shapeToolCallError";
+import {
+  DAEMON_STALLED_CODE,
+  livenessHandoverPayload,
+  type LivenessHandover,
+} from "../daemon/proxyLivenessRecovery";
 import { SESSION_EXPERIMENTAL_CAPABILITY } from "../devices/sessionConfig";
 import type { SessionBrokerResult } from "../devices/sessionBrokerResult";
 import { idleReleaseField } from "../daemon/releaseReasons";
+import { z } from "zod/v4";
+import { advertiseTasksOnDeclaringInitialize } from "./tasks/installTasksProtocol";
+import {
+  type CreateTaskResult,
+  isCreateTaskResult,
+  missingTasksCapabilityError,
+  requestDeclaresTasks,
+} from "../daemon/tasks/mcpTasksExtension";
+import { toRelayedProtocolError, isRelayedJsonRpcError } from "../daemon/tasks/taskRelay";
+import { ENV } from "../config/env";
 
-const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
-const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
+const LIVE_ACCEPTANCE_ENV = ENV.ACCEPTANCE_LIVE.name;
+const ACCEPTANCE_DISCOVERY_ORDER_ENV = ENV.ACCEPTANCE_DISCOVERY_ORDER.name;
 
 function acceptanceDiscoveryConfiguration():
   | { order: "forward" | "reverse"; capability: string }
@@ -135,6 +155,10 @@ function localBrokerSessionEndedResult(
   error: unknown,
   session: SessionBrokerResult | undefined,
 ): CallToolResult | undefined {
+  if (error instanceof DaemonSessionStalledError && error.handover.code === DAEMON_STALLED_CODE) {
+    // StallProbe can resume this session; preserve the retryable handover instead of relaunching.
+    return undefined;
+  }
   return error instanceof DaemonBoundSessionExpiredError && session
     ? brokerSessionEndedToolResult(session, error)
     : undefined;
@@ -194,18 +218,6 @@ function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): Call
 function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
   const payload = boundSessionOwnershipLostPayload(error);
   return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
-}
-
-export function noActiveDeviceSessionPayload(error: { message: string; reason: string }) {
-  return {
-    error: {
-      code: "no_active_device_session",
-      message: error.message,
-      reason: error.reason,
-      ...idleReleaseField(error.reason),
-      ...terminalSessionRefusalFields(),
-    },
-  };
 }
 
 function noActiveDeviceSessionMessage(error: DaemonConnectionSessionReleasedError): string {
@@ -526,6 +538,89 @@ function installAcquisitionToolRefusal(
   }
 }
 
+/**
+ * Forward one `tools/call` to the daemon. The client's own per-request Tasks declaration (#4668)
+ * travels with it, and the daemon alone decides whether the call becomes a task; a task handle is
+ * returned unchanged.
+ */
+async function callProxyTool(
+  proxy: DaemonMcpProxy,
+  call: Pick<ToolCall<McpToolCallExtra>, "name" | "args" | "progressToken" | "extra">,
+  onProgress: ((tick: number, total?: number, message?: string) => void) | undefined,
+  options: ProxyMcpServerOptions,
+): Promise<McpToolCallResult | CreateTaskResult> {
+  const { name, args, progressToken, extra } = call;
+  const declaresTasks = requestDeclaresTasks({ envelope: extra.envelope, meta: extra._meta });
+  if (!declaresTasks) {
+    // An undeclared call is forwarded exactly as before the extension existed.
+    const result = await proxy.callTool(name, args, progressToken, onProgress, extra.signal);
+    return brokerEndedRelayedResult(result, options.session);
+  }
+  const result = await proxy.callTool(name, args, progressToken, onProgress, extra.signal, {
+    declaresTasks,
+  });
+  return isCreateTaskResult(result) ? result : brokerEndedRelayedResult(result, options.session);
+}
+
+const relayedTaskIdParams = z.looseObject({ taskId: z.string() });
+const relayedTaskUpdateParams = z.looseObject({
+  taskId: z.string(),
+  inputResponses: z.record(z.string(), z.unknown()).optional(),
+});
+
+/** The daemon's JSON-RPC answer to a relayed `tasks/*` request, re-raised unchanged (#4668). */
+function relayedTaskError(error: unknown): unknown {
+  const relayed: unknown =
+    error !== null && typeof error === "object" ? Reflect.get(error, "jsonRpcError") : undefined;
+  return isRelayedJsonRpcError(relayed) ? toRelayedProtocolError(relayed) : error;
+}
+
+/**
+ * Relays the MCP Tasks extension (#4668) to the daemon, which owns the tasks: the proxy advertises
+ * the extension only to a client whose `initialize` declared it, refuses an undeclared `tasks/*`
+ * request exactly as the daemon would (`-32021`), and otherwise forwards `tasks/get`,
+ * `tasks/update` (with the input responses the SDK lifts to `ctx.mcpReq.inputResponses`) and
+ * `tasks/cancel`, answering with the daemon's result or JSON-RPC error unchanged. A daemon
+ * connection failure is the proxy's own error: it never invents a task status.
+ */
+function installTasksRelay(server: McpServer, proxy: DaemonMcpProxy): void {
+  const inner = server.server;
+  advertiseTasksOnDeclaringInitialize(inner);
+  const relay = async (
+    method: "tasks/get" | "tasks/update" | "tasks/cancel",
+    params: Record<string, unknown>,
+    ctx: ServerContext,
+  ) => {
+    if (!requestDeclaresTasks({ envelope: ctx.mcpReq.envelope, meta: ctx.mcpReq._meta })) {
+      throw missingTasksCapabilityError();
+    }
+    try {
+      return await proxy.relayTaskMethod(method, params, true, ctx.mcpReq.signal);
+    } catch (error) {
+      ctx.mcpReq.signal.throwIfAborted();
+      throw relayedTaskError(error);
+    }
+  };
+  inner.setRequestHandler("tasks/get", { params: relayedTaskIdParams }, async (params, ctx) =>
+    relay("tasks/get", { taskId: params.taskId }, ctx),
+  );
+  inner.setRequestHandler(
+    "tasks/update",
+    { params: relayedTaskUpdateParams },
+    async (params, ctx) => {
+      const inputResponses = ctx.mcpReq.inputResponses ?? params.inputResponses;
+      return relay(
+        "tasks/update",
+        { taskId: params.taskId, ...(inputResponses !== undefined && { inputResponses }) },
+        ctx,
+      );
+    },
+  );
+  inner.setRequestHandler("tasks/cancel", { params: relayedTaskIdParams }, async (params, ctx) =>
+    relay("tasks/cancel", { taskId: params.taskId }, ctx),
+  );
+}
+
 function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy): void {
   // Register resources/list handler. Serves a cold (empty/cached) roster without
   // connecting when no connection exists yet, deferring the daemon connect to the
@@ -807,8 +902,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         : undefined;
 
       try {
-        const result = await proxy.callTool(name, args, progressToken, onProgress, extra.signal);
-        return brokerEndedRelayedResult(result, options.session);
+        return await callProxyTool(
+          proxy,
+          { name, args, progressToken, extra },
+          onProgress,
+          options,
+        );
       } catch (error) {
         // The SDK suppresses responses for aborted requests. Do not turn a
         // cancellation into a tool error result while that request unwinds.
@@ -823,6 +922,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   });
 
   registerProxyResourceHandlers(server, proxy);
+  installTasksRelay(server, proxy);
   installAcquisitionToolRefusal(server, options.session);
 
   return { server, proxy };

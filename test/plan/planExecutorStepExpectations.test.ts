@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import {
-  DefaultPlanExecutor,
-  UNEVALUATED_EXPECTATIONS_WARNING,
-} from "../../src/utils/plan/PlanExecutor";
+import { UNEVALUATED_EXPECTATIONS_WARNING } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -49,7 +47,7 @@ ${extra}`;
 `),
     );
 
-    const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(plan, 0);
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(plan, 0);
 
     expect(result.failedStep).toBeUndefined();
     expect(result.success).toBe(true);
@@ -70,7 +68,7 @@ ${extra}`;
     registerStrictTool(seen);
     const plan = new YamlPlanSerializer().importPlanFromYaml(yaml(""));
 
-    const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(plan, 0);
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(plan, 0);
 
     expect(result.success).toBe(true);
     expect(result.warnings).toBeUndefined();

@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import type { SwipeOnOptions } from "../../../../src/models";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { runSessionDisplayPin } from "../../../../src/server/sessionDisplayPin";
 import { harness } from "./displaySwipeHarness";
 
@@ -91,6 +91,31 @@ test("TalkBack on, default display: swipeOn uses the TalkBack executor instead o
   expect(h.ctrl.getTwoFingerSwipeHistory()).toHaveLength(1);
   expect(h.ctrl.getSwipeHistory()).toEqual([]);
   expect(h.commands()).toEqual([]);
+});
+
+test("TalkBack on, default display: an explicit durationMs reaches the TalkBack executor as durationExplicit (#13145)", async () => {
+  const h = harness();
+  talkBackOn(h);
+  h.adb.setCommandResult(
+    "shell cmd display get-displays",
+    'Display id 0: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+  );
+  await h.action.execute({ ...swipe, durationMs: 700 });
+  expect(h.talkback.mock.calls[0]?.[0].gestureOptions).toMatchObject({
+    duration: 700,
+    durationExplicit: true,
+  });
+});
+
+test("TalkBack on, default display: a speed preset does not mark the duration explicit", async () => {
+  const h = harness();
+  talkBackOn(h);
+  h.adb.setCommandResult(
+    "shell cmd display get-displays",
+    'Display id 0: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+  );
+  await h.action.execute(swipe);
+  expect(h.talkback.mock.calls[0]?.[0].gestureOptions?.durationExplicit).toBeUndefined();
 });
 
 test("TalkBack off: swipeOn on a display keeps the raw CtrlProxy swipe and no TalkBack call", async () => {

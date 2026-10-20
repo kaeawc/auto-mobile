@@ -70,6 +70,7 @@ function tapOn(next: ObserveResult, extra: Record<string, unknown> = {}): Record
       createStructuredToolResponse({ success: true, ...extra, observation: next }),
       {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: store,
       },

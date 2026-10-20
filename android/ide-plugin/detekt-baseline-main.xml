@@ -2,6 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>UnsafeCallOnNullableType:TestPlanSchemaStore.kt:TestPlanSchemaStore$rootSchema!!</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -1,207 +1,248 @@
 /**
  * Typed registry of environment variables (#11848).
  *
- * Every variable AutoMobile reads should be declared here once, with its legacy
+ * Every variable AutoMobile reads should be declared once (product variables in
+ * `envDaemon.ts`, `envMedia.ts` and `envDevices.ts`, ambient ones below), with its legacy
  * spelling, kind, default and a one-line description, and read through
  * {@link readEnvTrimmed}. Readers take an injected `env` so tests never mutate
- * `process.env`. Unmigrated raw reads are listed in
- * `test/lint/env-registry-baseline.txt`, which may only shrink.
+ * `process.env`. `test/lint/envRegistry.test.ts` fails on any unregistered read.
  */
 
-export type EnvVarKind = "path" | "string" | "bool" | "int" | "number" | "enum" | "list";
+import { DAEMON_ENV } from "./envDaemon";
+import { DEVICES_ENV } from "./envDevices";
+import { MEDIA_ENV } from "./envMedia";
+import type { EnvVarSpec } from "./envSpec";
 
-export interface EnvVarSpec {
-  /** Canonical variable name. */
-  readonly name: string;
-  /** Deprecated `AUTO_MOBILE_` spelling, consulted only when `name` is unset. */
-  readonly legacyName?: string;
-  readonly kind: EnvVarKind;
-  /** Human-readable default (documentation only; resolution stays at the call site). */
-  readonly default: string;
-  readonly doc: string;
-  /** `int` / `number`: smallest accepted value (inclusive unless `minExclusive`). */
-  readonly min?: number;
-  readonly minExclusive?: boolean;
-  /** `int`: value used when the variable is unset or unusable. */
-  readonly fallback?: number;
-  /** `enum`: accepted lowercase values. */
-  readonly values?: readonly string[];
-}
+export type { EnvVarSpec } from "./envSpec";
 
+/** Every AutoMobile-owned variable; the entries live in the domain modules next to this file. */
 export const ENV = {
-  DATA_DIR: {
-    name: "AUTOMOBILE_DATA_DIR",
-    legacyName: "AUTO_MOBILE_DATA_DIR",
-    kind: "path",
-    default: "~/.auto-mobile",
-    doc: "Base directory for AutoMobile state; relative to the daemon launch directory.",
-  },
-  LOG_DIR: {
-    name: "AUTOMOBILE_LOG_DIR",
-    legacyName: "AUTO_MOBILE_LOG_DIR",
-    kind: "path",
-    default: "$AUTOMOBILE_DATA_DIR/logs",
-    doc: "Daemon and client log directory; relative to the daemon launch directory.",
-  },
-  COORDINATION_DIR: {
-    name: "AUTOMOBILE_COORDINATION_DIR",
-    legacyName: "AUTO_MOBILE_COORDINATION_DIR",
-    kind: "path",
-    default: "~/.auto-mobile",
-    doc: "Absolute root of cross-process coordination state shared by cooperating agents.",
-  },
-  SESSION_BROKER_CONFIG: {
-    name: "AUTOMOBILE_SESSION_BROKER_CONFIG",
-    kind: "path",
-    default: "unset (broker disabled)",
-    doc: "Operator session-broker host configuration file; never a session requester input.",
-  },
-  SESSION_CONFIG: {
-    name: "AUTOMOBILE_SESSION_CONFIG",
+  ...DAEMON_ENV,
+  ...MEDIA_ENV,
+  ...DEVICES_ENV,
+} as const satisfies Record<string, EnvVarSpec>;
+
+/**
+ * Ambient variables owned by the OS or the Android toolchain, not by AutoMobile. They are
+ * declared and read through the same readers, but kept apart from {@link ENV} because the
+ * product-variable conformance checks (AUTOMOBILE_ prefix, path classification) do not apply.
+ */
+export const AMBIENT_ENV = {
+  DEVELOPER_DIR: {
+    name: "DEVELOPER_DIR",
     kind: "path",
     default: "unset",
-    doc: "Session configuration file read by the CLI, equivalent to --session-config.",
+    doc: "Active Xcode developer directory; overrides xcode-select for simulator profile caching.",
   },
-  ADB_SERVER_COORDINATION_DIR: {
-    name: "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR",
-    legacyName: "AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR",
-    kind: "path",
-    default: "~/.auto-mobile/adb-servers",
-    doc: "Absolute root of per-ADB-server claims shared by every daemon on one ADB server.",
-  },
-  PRIVATE_DAEMON_ORPHAN_IDLE_MS: {
-    name: "AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS",
-    kind: "number",
-    default: "900000",
-    min: 0,
-    doc: "Idle timeout in ms for an orphaned private daemon; 0 disables the watchdog.",
-  },
-  OBSERVE_PERF_SNAPSHOT: {
-    name: "AUTOMOBILE_OBSERVE_PERF_SNAPSHOT",
-    legacyName: "AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT",
-    kind: "bool",
-    default: "off",
-    doc: "Attach a windowed performance snapshot to observe results.",
-  },
-  OBSERVE_PERF_WINDOW_MS: {
-    name: "AUTOMOBILE_OBSERVE_PERF_WINDOW_MS",
-    legacyName: "AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS",
-    kind: "number",
-    default: "5000",
-    min: 0,
-    minExclusive: true,
-    doc: "Rolling window for the performance snapshot; fractions are rounded.",
-  },
-  VIDEO_RETENTION_DAYS: {
-    name: "AUTOMOBILE_VIDEO_RETENTION_DAYS",
-    legacyName: "AUTO_MOBILE_VIDEO_RETENTION_DAYS",
-    kind: "number",
-    default: "see docs",
-    min: 0,
-    doc: "Age in days after which recordings are deleted; 0 disables the sweep.",
-  },
-  VIDEO_RETENTION_SWEEP_MINUTES: {
-    name: "AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES",
-    legacyName: "AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES",
-    kind: "number",
-    default: "see docs",
-    min: 0,
-    minExclusive: true,
-    doc: "How often the recording retention sweep runs, in minutes.",
-  },
-  VIDEO_INPROGRESS_CHECK_SECONDS: {
-    name: "AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS",
-    legacyName: "AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS",
-    kind: "number",
-    default: "see docs",
-    min: 0,
-    minExclusive: true,
-    doc: "How often an in-progress recording's size is checked, in seconds.",
-  },
-  PORT_RANGE_START: {
-    name: "AUTOMOBILE_PORT_RANGE_START",
-    legacyName: "AUTO_MOBILE_PORT_RANGE_START",
-    kind: "int",
-    default: "see docs",
-    min: 1,
-    doc: "First CtrlProxy host port.",
-  },
-  PORT_RANGE_END: {
-    name: "AUTOMOBILE_PORT_RANGE_END",
-    legacyName: "AUTO_MOBILE_PORT_RANGE_END",
-    kind: "string",
-    default: "unset",
-    doc: "Inclusive last CtrlProxy host port.",
-  },
-  PORT_RANGE_SIZE: {
-    name: "AUTOMOBILE_PORT_RANGE_SIZE",
-    legacyName: "AUTO_MOBILE_PORT_RANGE_SIZE",
-    kind: "string",
-    default: "unset",
-    doc: "Number of CtrlProxy host ports.",
-  },
-  DOCTOR_TIMEOUT_MS: {
-    name: "AUTOMOBILE_DOCTOR_TIMEOUT_MS",
-    kind: "int",
-    default: "5000",
-    fallback: 5000,
-    min: 1,
-    doc: "Timeout in ms for each external doctor probe.",
-  },
-  WORK_PROFILE_POLL_INTERVAL_MS: {
-    name: "AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS",
-    kind: "int",
-    default: "5000",
-    min: 1,
-    doc: "Work-profile polling interval in ms.",
-  },
-  DISABLE_PERF_AUDIT: {
-    name: "AUTOMOBILE_DISABLE_PERF_AUDIT",
-    kind: "bool",
-    default: "off",
-    doc: "Disable the UI performance audit.",
-  },
-  TOUCH_LATENCY_SAMPLING: {
-    name: "AUTOMOBILE_TOUCH_LATENCY_SAMPLING",
-    kind: "bool",
-    default: "off",
-    doc: "Opt into synthetic tap latency sampling.",
-  },
-  MAX_OBSERVATION_AGE_MS: {
-    name: "AUTOMOBILE_MAX_OBSERVATION_AGE_MS",
-    kind: "int",
-    default: "see docs",
-    min: 1,
-    doc: "Hierarchy freshness budget in ms.",
-  },
-  IOS_SCREEN_CAPTURE_HELPER: {
-    name: "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER",
-    legacyName: "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER",
+  ANDROID_HOME: {
+    name: "ANDROID_HOME",
     kind: "path",
     default: "unset",
-    doc: "Absolute path to a locally built screen-capture-helper.",
+    doc: "Android SDK root; ambient Android toolchain variable, read for emulator resolution.",
   },
-  ACTION_OBSERVATION_SKIP_SCREENSHOT: {
-    name: "AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT",
-    kind: "string",
-    default: "skip",
-    doc: "Skip automatic screenshots after actions unless set to false or 0.",
+  ANDROID_SDK_ROOT: {
+    name: "ANDROID_SDK_ROOT",
+    kind: "path",
+    default: "unset",
+    doc: "Android SDK root (deprecated by Google); ambient, read for emulator resolution.",
   },
-  OBSERVE_WAIT_FOR_SKIP_SCREENSHOT: {
-    name: "AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT",
-    kind: "string",
-    default: "skip",
-    doc: "Skip automatic screenshots for waitFor observations unless set to false or 0.",
+  ANDROID_SDK_HOME: {
+    name: "ANDROID_SDK_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android user-data home; ambient, reported in emulator-not-found diagnostics.",
   },
-  OBSERVE_SETTLED_SCREENSHOT: {
-    name: "AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT",
+  HOME: {
+    name: "HOME",
+    kind: "path",
+    default: "unset",
+    doc: "POSIX home directory; ambient, used to probe the default Android SDK locations.",
+  },
+  USERPROFILE: {
+    name: "USERPROFILE",
+    kind: "path",
+    default: "unset",
+    doc: "Windows home directory; ambient, fallback when HOME is unset or empty.",
+  },
+  PATH: {
+    name: "PATH",
     kind: "string",
     default: "unset",
-    doc: "Select settled screenshot mode with true or 1.",
+    doc: "Executable search path; ambient, reported in emulator-not-found diagnostics.",
+  },
+  JAVA_HOME: {
+    name: "JAVA_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Java installation root; ambient, checked by doctor.",
+  },
+  ANTHROPIC_API_KEY: {
+    name: "ANTHROPIC_API_KEY",
+    kind: "string",
+    default: "unset",
+    doc: "Anthropic API key for vision features; ambient, used when no key is configured explicitly.",
+  },
+  DISPLAY: {
+    name: "DISPLAY",
+    kind: "string",
+    default: "unset",
+    doc: "X11 display; ambient, a usable value keeps Linux emulator launches windowed.",
+  },
+  WAYLAND_DISPLAY: {
+    name: "WAYLAND_DISPLAY",
+    kind: "string",
+    default: "unset",
+    doc: "Wayland display; ambient, a usable value keeps Linux emulator launches windowed.",
+  },
+  USER: {
+    name: "USER",
+    kind: "string",
+    default: "unset",
+    doc: "POSIX account name; ambient, locates the emulator advertisement directory.",
+  },
+  LOGNAME: {
+    name: "LOGNAME",
+    kind: "string",
+    default: "unset",
+    doc: "POSIX login name; ambient, fallback when USER is unset.",
+  },
+  XDG_RUNTIME_DIR: {
+    name: "XDG_RUNTIME_DIR",
+    kind: "path",
+    default: "unset",
+    doc: "Linux per-user runtime directory; ambient, locates emulator advertisements.",
+  },
+  ANDROID_AVD_HOME: {
+    name: "ANDROID_AVD_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android AVD home override; ambient, used to locate AVD definitions.",
+  },
+  ANDROID_EMULATOR_HOME: {
+    name: "ANDROID_EMULATOR_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android emulator home override; ambient, used to locate AVD definitions.",
+  },
+  ANDROID_USER_HOME: {
+    name: "ANDROID_USER_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android user home override; ambient, used to locate AVD definitions.",
+  },
+  CI: {
+    name: "CI",
+    kind: "string",
+    default: "unset",
+    doc: "Set to true on CI hosts; ambient.",
+  },
+  GITHUB_ACTIONS: {
+    name: "GITHUB_ACTIONS",
+    kind: "string",
+    default: "unset",
+    doc: "Set to true inside GitHub Actions; ambient.",
+  },
+  GITHUB_WORKSPACE: {
+    name: "GITHUB_WORKSPACE",
+    kind: "path",
+    default: "unset",
+    doc: "GitHub Actions checkout directory; ambient.",
+  },
+  COMSPEC: {
+    name: "ComSpec",
+    legacyName: "COMSPEC",
+    kind: "path",
+    default: "cmd.exe",
+    doc: "Windows command interpreter; ambient.",
+  },
+  DEBUG_ADB_EXEC: {
+    name: "DEBUG_ADB_EXEC",
+    kind: "string",
+    default: "unset",
+    doc: "Any value logs real adb execution with stack traces; ambient debug aid.",
+  },
+  EMULATOR_POLLING_INTERVAL_MS: {
+    name: "EMULATOR_POLLING_INTERVAL_MS",
+    kind: "string",
+    default: "500",
+    doc: "Emulator readiness polling interval in ms (minimum 100).",
+  },
+  LOCALAPPDATA: {
+    name: "LOCALAPPDATA",
+    kind: "path",
+    default: "unset",
+    doc: "Windows local app data directory; ambient.",
+  },
+  MCP_SERVER_VERSION: {
+    name: "MCP_SERVER_VERSION",
+    kind: "string",
+    default: "unset",
+    doc: "Exact override of the reported MCP server version (CI/test pin).",
+  },
+  NPM_PACKAGE_VERSION: {
+    name: "npm_package_version",
+    kind: "string",
+    default: "unset",
+    doc: "Package version exported by npm; ambient fallback for the MCP server version.",
+  },
+  NODE_ENV: {
+    name: "NODE_ENV",
+    kind: "string",
+    default: "unset",
+    doc: "Runtime mode; ambient, exact test arms the test-only guards and defaults.",
+  },
+  WINDOWS_PATH: {
+    name: "Path",
+    kind: "string",
+    default: "unset",
+    doc: "Windows spelling of PATH; ambient, consulted when PATH is unset.",
+  },
+  USERNAME: {
+    name: "USERNAME",
+    kind: "string",
+    default: "unset",
+    doc: "Windows account name; ambient, daemon state file suffix fallback.",
+  },
+  PATHEXT: {
+    name: "PATHEXT",
+    kind: "string",
+    default: "unset",
+    doc: "Windows executable extensions; ambient, used to locate bunx.",
+  },
+  ADB_SERVER_SOCKET: {
+    name: "ADB_SERVER_SOCKET",
+    kind: "string",
+    default: "unset",
+    doc: "adb server socket spec; ambient, identifies the ADB server scope.",
+  },
+  ANDROID_ADB_SERVER_ADDRESS: {
+    name: "ANDROID_ADB_SERVER_ADDRESS",
+    kind: "string",
+    default: "localhost",
+    doc: "adb server host; ambient, identifies the ADB server scope.",
+  },
+  ANDROID_ADB_SERVER_PORT: {
+    name: "ANDROID_ADB_SERVER_PORT",
+    kind: "string",
+    default: "5037",
+    doc: "adb server port; ambient, identifies the ADB server scope.",
+  },
+  CTRL_PROXY_IOS_BUNDLE_ID: {
+    name: "CTRL_PROXY_IOS_BUNDLE_ID",
+    kind: "string",
+    default: "unset",
+    doc: "Target app bundle id passed to the iOS CtrlProxy runner.",
+  },
+  CTRL_PROXY_IOS_TIMEOUT: {
+    name: "CTRL_PROXY_IOS_TIMEOUT",
+    kind: "string",
+    default: "86400",
+    doc: "Runner lifetime in seconds passed to the iOS CtrlProxy runner.",
   },
 } as const satisfies Record<string, EnvVarSpec>;
 
 export const ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(ENV);
+export const AMBIENT_ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(AMBIENT_ENV);
 
 /**
  * Raw value of a variable: the canonical name wins whenever it is set (even to
@@ -266,4 +307,9 @@ export function readEnvList(spec: EnvVarSpec, env: NodeJS.ProcessEnv = process.e
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+/** `AUTOMOBILE_TOOLSET_*` variables were retired in favor of exact enable/disable lists; startup rejects them. */
+export function isRetiredToolsetVariable(name: string): boolean {
+  return name.startsWith("AUTOMOBILE_TOOLSET_");
 }

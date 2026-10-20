@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import os from "node:os";
+import { createExecResult } from "../../../src/utils/execResult";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { DeviceUnreachableError } from "../../../src/models/DeviceUnreachableError";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -29,8 +30,9 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
   let timer: FakeTimer;
   let backend: PlatformVideoCaptureBackend;
 
+  const scratch = useScratchRoot("platform-video-pid-");
   beforeEach(async () => {
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-pid-"));
+    tempDir = scratch.next();
     factory = new FakeAdbClientFactory();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -39,10 +41,6 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
         return "h264";
       },
     });
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
   });
 
   async function startRecording(launchStdout?: string): Promise<RecordingHandle> {
@@ -302,12 +300,12 @@ describe("orphaned Android recorder teardown", () => {
   }
   test.each(["thrown", "returned"])("unanswered orphan probe is unreachable (%s)", async (mode) => {
     const { backend, client } = harness();
-    const cause = new Error("probe timed out");
+    const cause = mode === "thrown" ? new Error("probe timed out") : "probe timed out";
     const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
-      if (mode === "thrown") {
+      if (cause instanceof Error) {
         throw cause;
       }
-      return { stdout: "", stderr: "", error: cause };
+      return { ...createExecResult("", ""), error: cause };
     });
     try {
       const error = await backend
@@ -324,24 +322,16 @@ describe("orphaned Android recorder teardown", () => {
     "live recorder probe retains its original error (%s)",
     async (mode) => {
       const { backend, client } = harness();
-      const cause = new Error("probe timed out");
+      const cause = mode === "thrown" ? new Error("probe timed out") : "probe timed out";
       const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
-        if (mode === "thrown") {
+        if (cause instanceof Error) {
           throw cause;
         }
-        return { stdout: "", stderr: "", error: cause };
+        return { ...createExecResult("", ""), error: cause };
       });
-      const signal = backend as unknown as {
-        signalDeviceRecorder(
-          adb: typeof client,
-          descriptor: typeof descriptor,
-          pid: number,
-          signal: 2 | 9,
-        ): Promise<unknown>;
-      };
       try {
         for (const kind of [2, 9] as const) {
-          const error = await signal
+          const error = await backend
             .signalDeviceRecorder(client, descriptor, 4321, kind)
             .catch((caught: unknown) => caught);
           expect(error).not.toBeInstanceOf(DeviceUnreachableError);

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { checkIosSimulatorFleetCost } from "../../../src/doctor/checks/iosSimFleet";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../../src/features/iosSimFleet/capacityPolicy";
 import type { FleetCostSource } from "../../../src/features/iosSimFleet/FleetCostCollector";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import { parseSimctlInventory } from "../../../src/features/iosSimFleet/simctlInventory";
 import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
 import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
@@ -89,6 +89,9 @@ describe("checkIosSimulatorFleetCost", () => {
     const result = await checkIosSimulatorFleetCost({
       platform: () => "darwin",
       createFleetSource: () => ({
+        collectFresh: async () => {
+          throw new Error("boom");
+        },
         collect: async () => {
           throw new Error("boom");
         },

@@ -3,7 +3,7 @@ import { waitForTimeoutDiagnostics, waitForTimeoutError } from "./waitForTimeout
 import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
-import type { PlanStep, PlanExecutionResult } from "../../models/Plan";
+import type { PlanStep } from "../../models/Plan";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { logger, type Logger } from "../logger";
@@ -29,6 +29,8 @@ import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
+import { PlanStepError } from "./PlanStepError";
+export { PlanStepError } from "./PlanStepError";
 
 /** Only the registry operations and tool metadata required to execute a step. */
 export interface PlanStepTool {
@@ -176,22 +178,6 @@ function skippedAnsweredFailure(
     details: { ...skipped.details, ...(waitForTimeout ? { waitForTimeout } : {}) },
     ...(warnings ? { warnings } : {}),
   };
-}
-
-/** Retain the plan-shaped failure and diagnostics without changing the legacy message. */
-export class PlanStepError extends ActionableError {
-  readonly warnings: string[];
-  readonly failureObservation;
-
-  constructor(
-    message: string,
-    warnings: string[],
-    readonly failedStep: NonNullable<PlanExecutionResult["failedStep"]>,
-  ) {
-    super(message);
-    this.warnings = [...warnings];
-    this.failureObservation = failedStep.failureObservation;
-  }
 }
 
 /** Which derived session a failure observation targets and the plan signal that can cancel it. */

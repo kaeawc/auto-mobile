@@ -5,6 +5,7 @@ import { logger } from "../../src/utils/logger";
 import {
   DevicePoolStats,
   handleDaemonRequest,
+  type DaemonMethodResult,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import {
@@ -26,7 +27,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
 import type { DeviceLeaseRelinquishPort } from "../../src/daemon/deviceLeaseActivitySources";
 
@@ -217,9 +218,10 @@ describe("handleDaemonRequest", () => {
             claimLivenessOwnership: true,
           }),
           {
-            ...state,
             isInitialized: () => true,
             getSessionManager: () => sessionManager,
+            getDevicePool: () => state.getDevicePool(),
+            getDeviceSessionRegistry: () => state.getDeviceSessionRegistry(),
             getDaemonInstance: () => "daemon-race",
           },
         );
@@ -282,6 +284,7 @@ describe("handleDaemonRequest", () => {
     );
     const capabilities = await handleDaemonRequest(buildRequest("daemon/capabilities"), state);
     expect(capabilities?.result?.capabilities).toContain("session-broker/v1");
+    expect(capabilities?.result?.capabilities).toContain("session-broker-export/v1");
     expect(capabilities?.result?.capabilities).not.toContain("managed-slots/v1"); // Legacy capability is absent after upgrade.
     // A provider that has not completed broker startup cannot grant a session.
     expect(await handleDaemonRequest(buildRequest("daemon/prepareSession"), state)).toMatchObject({
@@ -949,12 +952,21 @@ describe("handleDaemonRequest", () => {
       daemon_session_id: "old-daemon",
       created_at_ms: 1,
       last_used_at_ms: 20,
+      activity_seq: 0,
       expires_at_ms: 30,
       released_at_ms: 25,
       release_reason: "daemon-restart",
       session_timeout_ms: 10_000,
       heartbeat_timeout_ms: 5_000,
       has_received_heartbeat: 1,
+      stable_identity_generation: 0,
+      liveness_contract_generation: 0,
+      heartbeat_timeout_source: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
+      liveness_owner_token: null,
       created_at: "2026-09-14T00:00:00.000Z",
       updated_at: "2026-09-14T00:00:00.000Z",
     };
@@ -1076,7 +1088,7 @@ describe("handleDaemonRequest", () => {
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getDaemonInstance: () => "daemon-not-found",
       };
-      const legacy = {
+      const legacy: DaemonMethodResult = {
         success: false,
         error: `Session not found: ${sessionId}`,
         code: DAEMON_SESSION_NOT_FOUND_CODE,
@@ -1468,7 +1480,7 @@ describe("handleDaemonRequest", () => {
       name: "emulator-5600",
       platform: "android",
       sessionId: "session-unpublished",
-      status: "assigned",
+      status: "busy",
       lastUsedAt: 0,
       assignmentCount: 1,
       errorCount: 0,

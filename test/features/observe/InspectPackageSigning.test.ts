@@ -1,17 +1,21 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { promises as fsPromises, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../../src/models";
 import {
-  AdbPullApkFetcher,
   InspectPackageSigning,
   selectSigners,
-  type ApkFetcher,
 } from "../../../src/features/observe/InspectPackageSigning";
+import {
+  AdbPullApkFetcher,
+  type ApkFetcher,
+} from "../../../src/features/observe/AdbPullApkFetcher";
 import { bufferByteSource } from "../../../src/utils/android-cmdline-tools/apkSigningBlock";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { loadSignedApk, SIGNER_A, SIGNER_B } from "../../helpers/signedApkFixtures";
+
+afterEach(() => mock.restore());
 
 const PACKAGE = "dev.jasonpearson.automobile.playground";
 const APK_PATH = "/data/app/~~x/dev.jasonpearson.automobile.playground-y/base.apk";
@@ -23,7 +27,7 @@ const dump = (name: string) =>
     "utf8",
   );
 
-function setup(apk: string | Error, apiLevel = "36") {
+function setup(apk: Parameters<typeof loadSignedApk>[0] | Error, apiLevel = "36") {
   const adb = new FakeAdbClient();
   adb.setCommandResult("shell getprop ro.build.version.sdk", `${apiLevel}\n`);
   adb.setCommandResult(`shell pm path --user 0 '${PACKAGE}'`, `package:${APK_PATH}\n`);
@@ -188,17 +192,15 @@ describe("selectSigners", () => {
 describe("AdbPullApkFetcher", () => {
   test("closes the pulled APK's handle when stat fails (#11058)", async () => {
     let closed = 0;
-    const handle = {
-      stat: async () => {
-        throw new Error("EIO");
-      },
-      close: async () => {
-        closed++;
-      },
-    };
-    const open = spyOn(fsPromises, "open").mockResolvedValue(
-      handle as unknown as Awaited<ReturnType<typeof fsPromises.open>>,
-    );
+    // A real handle (this file) whose stat fails; close still releases the descriptor.
+    const handle = await fsPromises.open(import.meta.path, "r");
+    const realClose = handle.close.bind(handle);
+    spyOn(handle, "stat").mockRejectedValue(new Error("EIO"));
+    spyOn(handle, "close").mockImplementation(async () => {
+      closed++;
+      await realClose();
+    });
+    const open = spyOn(fsPromises, "open").mockResolvedValue(handle);
     try {
       await expect(new AdbPullApkFetcher().open(new FakeAdbClient(), APK_PATH)).rejects.toThrow(
         "EIO",

@@ -1,3 +1,4 @@
+import { toolIsError, toolJson, toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import type { ExecutePlanResult } from "../../src/models";
@@ -39,10 +40,10 @@ test.each([false, true])(
       { platform: "ios", deviceId: "fake-device", name: "Fake" },
       { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
     );
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(result);
-    expect(JSON.parse(response.content[0].text!)).toEqual(result);
-    expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+    expect(toolIsError(response)).toBe(false);
+    expect<unknown>(toolStructured(response)).toEqual(result);
+    expect<unknown>(toolJson(response)).toEqual(result);
+    expect(tool.outputSchema!.parse(toolStructured(response))).toEqual(result);
   },
 );
 
@@ -85,14 +86,14 @@ test("executePlan structured content preserves skippedSteps", async () => {
     { platform: "ios", deviceId: "fake-device", name: "Fake" },
     { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
   );
-  expect(response.isError).toBeUndefined();
-  expect(response.structuredContent).toEqual(result);
-  expect(JSON.parse(response.content[0].text!)).toEqual(result);
-  expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+  expect(toolIsError(response)).toBe(false);
+  expect<unknown>(toolStructured(response)).toEqual(result);
+  expect<unknown>(toolJson(response)).toEqual(result);
+  expect(tool.outputSchema!.parse(toolStructured(response))).toEqual(result);
 });
 
 // Results from the orchestrator, rather than hand-written YAML/parser fixtures.
-test.each([
+test.each<ExecutePlanResult>([
   {
     success: false,
     executedSteps: 0,
@@ -123,10 +124,10 @@ test.each([
     { platform: "ios", deviceId: "fake-device", name: "Fake" },
     { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
   );
-  expect(response.isError).toBe(true);
-  expect(response.structuredContent).toEqual(result);
-  expect(JSON.parse(response.content[0].text!)).toEqual(result);
-  expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+  expect(toolIsError(response)).toBe(true);
+  expect<unknown>(toolStructured(response)).toEqual(result);
+  expect<unknown>(toolJson(response)).toEqual(result);
+  expect(tool.outputSchema!.parse(toolStructured(response))).toEqual(result);
 });
 
 test("executePlan with nothing to execute remains successful", async () => {
@@ -136,14 +137,15 @@ test("executePlan with nothing to execute remains successful", async () => {
     { platform: "ios", deviceId: "fake-device", name: "Fake" },
     { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
   );
-  expect(response.isError).toBeUndefined();
-  expect(response.structuredContent).toEqual(result);
-  expect(JSON.parse(response.content[0].text!)).toEqual(result);
+  expect(toolIsError(response)).toBe(false);
+  expect<unknown>(toolStructured(response)).toEqual(result);
+  expect<unknown>(toolJson(response)).toEqual(result);
 });
 
 test("executePlan describes warnings retained from failed and skipped sections", () => {
   const json = toJSONSchema(ToolRegistry.getTool("executePlan")!.outputSchema!);
-  expect(json.properties?.warnings?.description).toBe(
+  const warnings = json.properties?.warnings;
+  expect(typeof warnings === "object" ? warnings.description : undefined).toBe(
     "Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed",
   );
 });
@@ -201,8 +203,8 @@ test("executePlan failure preserves all device failures in structured and text p
     { platform: "ios", deviceId: "fake-device", name: "Fake" },
     { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
   );
-  expect(response.isError).toBe(true);
-  expect(response.structuredContent).toEqual(result);
-  expect(JSON.parse(response.content[0].text!)).toEqual(result);
-  expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+  expect(toolIsError(response)).toBe(true);
+  expect<unknown>(toolStructured(response)).toEqual(result);
+  expect<unknown>(toolJson(response)).toEqual(result);
+  expect(tool.outputSchema!.parse(toolStructured(response))).toEqual(result);
 });

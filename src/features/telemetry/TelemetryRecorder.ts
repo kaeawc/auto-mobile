@@ -2,7 +2,7 @@ import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeScope } from "../prototype/PrototypeStatusStore";
 import { logger } from "../../utils/logger";
 import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/networkEventRepository";
-import { NetworkState } from "../../server/NetworkState";
+import { NetworkState } from "../../utils/NetworkState";
 import { recordLogEvent, type RecordLogEventInput } from "../../db/logEventRepository";
 import { recordOsEvent, type RecordOsEventInput } from "../../db/osEventRepository";
 import {
@@ -15,6 +15,7 @@ import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import type { TelemetryEventBuffer } from "./TelemetryEventBuffer";
 import { testOverrides } from "../../utils/testOverrides";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 export type TelemetryCategory =
   | "network"
@@ -111,7 +112,7 @@ export class TelemetryRecorder {
 
   constructor(
     repository: TelemetryRepository = TelemetryRecorder.defaultRepositoryOverride === undefined
-      ? process.env.NODE_ENV === "test" && testOverrides.telemetryNoOpDefault
+      ? readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test" && testOverrides.telemetryNoOpDefault
         ? noOpRepository
         : defaultRepository
       : (TelemetryRecorder.defaultRepositoryOverride ?? defaultRepository),

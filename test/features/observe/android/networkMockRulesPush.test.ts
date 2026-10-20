@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
-import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
+import type { NetworkMockRuleSync } from "../../../../src/utils/networkMockRules";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../../../fakes/FakeInstalledAppsRepository";
@@ -40,7 +40,7 @@ async function harness(commands: string[]) {
   const timer = new FakeTimer();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "mock-rules-test", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "mock-rules-test", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -50,7 +50,7 @@ async function harness(commands: string[]) {
   );
   clients.push(client);
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
   const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
   await receive({ type: "connected", supportedCommands: commands });

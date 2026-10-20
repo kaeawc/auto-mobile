@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
+import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -21,18 +20,18 @@ describe("AndroidCtrlProxyClient input delivery", () => {
     socket = new FakeWebSocket("ws://fake", "none", 0, timer);
     await Promise.resolve();
     client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       idGenerator: new FakeIdGenerator(),
       transientObserver: false,
     });
     closedSpy = spyOn(client, "onConnectionClosed").mockImplementation(() => {});
-    client["ws"] = socket as unknown as WebSocket;
+    client.connectionTestHooks.socket = socket;
     client["autoReconnectEnabled"] = false;
     socket.on("message", (data: string) => {
       void client["handleMessage"](data);
     });
-    socket.on("close", () => client["finishEstablishedConnection"](socket as unknown as WebSocket));
+    socket.on("close", () => client["finishEstablishedConnection"](socket));
     connectionSpy = spyOn(client, "connectWebSocket").mockResolvedValue(true);
   });
 
@@ -61,7 +60,7 @@ describe("AndroidCtrlProxyClient input delivery", () => {
         dispatched = true;
       };
       if (scenario === "not connected") {
-        client["ws"] = null;
+        client.connectionTestHooks.socket = null;
         connectionSpy.mockResolvedValue(false);
       }
       const send = spyOn(socket, "send").mockImplementation((data: unknown) => {
@@ -114,4 +113,8 @@ describe("AndroidCtrlProxyClient input delivery", () => {
       send.mockRestore();
     });
   }
+});
+
+afterEach(() => {
+  mock.restore();
 });

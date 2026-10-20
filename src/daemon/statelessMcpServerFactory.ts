@@ -1,5 +1,6 @@
 import type { IncomingHttpHeaders } from "node:http";
 import { createMcpServer, type McpServerOptions } from "../server";
+import { daemonTaskLeaseKeepalive } from "./tasks/daemonTaskManager";
 import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
@@ -89,6 +90,8 @@ function contextReader(
  * Build one request's MCP server (#4678 stateless). The request scope id is the session id of its
  * session context, so the executions it starts cancel with the request; the caller's
  * session key travels as `requestMcpSessionId`. Keyed bindings live in the daemon-scoped store.
+ * A task the request starts outlives it and keeps its device session's lease alive through the
+ * daemon-scoped keepalive (#4668).
  */
 export function createStatelessMcpServer(
   base: StatelessMcpServerBase,
@@ -97,9 +100,15 @@ export function createStatelessMcpServer(
 ): ReturnType<typeof createMcpServer> {
   return createMcpServer({
     ...base,
+    ...(scope.taskOwnerKey !== undefined && { taskOwnerKey: scope.taskOwnerKey }),
     sessionContext: { ...context, sessionId: scope.requestScopeId },
     daemonMode: true,
     requestMcpSessionId: scope.requestMcpSessionId,
+    ...(scope.trustedForwarder === true && { trustForwardedMcpSessionId: true }),
     stateless: true,
+    taskLeaseKeepalive: daemonTaskLeaseKeepalive(),
   });
 }
+
+/** The resource-list freshness hook shared by the MCP handler and control discovery cache. */
+export { refreshMcpResourceList } from "../server";

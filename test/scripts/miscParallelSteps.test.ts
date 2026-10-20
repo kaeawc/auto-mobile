@@ -133,7 +133,7 @@ describe("#4130 hadolint hoist (fast-validation)", () => {
   });
 
   test("the environment variable docs gate is in the fast-validation --only list", () => {
-    // Docs-only PRs skip node-unit-tests, so Fast Validation must select this guard.
+    // Docs-only PRs skip the unit lane, so Fast Validation must select this guard.
     const checks = stepNamed(steps, "Run fast validation checks");
     expect(checks?.run).toContain("env-var-docs");
   });

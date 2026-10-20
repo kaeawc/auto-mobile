@@ -39,9 +39,9 @@ export function runConfigRepositoryContract<TConfig>(
     test("setConfig round-trips and a second set replaces it", () =>
       withRepository(async (repository) => {
         await repository.setConfig(samples.first);
-        expect(await repository.getConfig()).toEqual(samples.first);
+        expect<TConfig | null>(await repository.getConfig()).toEqual(samples.first);
         await repository.setConfig(samples.second);
-        expect(await repository.getConfig()).toEqual(samples.second);
+        expect<TConfig | null>(await repository.getConfig()).toEqual(samples.second);
       }));
 
     test("clearConfig removes the config and tolerates an empty repository", () =>
@@ -56,12 +56,12 @@ export function runConfigRepositoryContract<TConfig>(
       withRepository(async (repository) => {
         await repository.setConfig(samples.first);
         await repository.setConfig(samples.second, "session-a");
-        expect(await repository.getConfig()).toEqual(samples.first);
-        expect(await repository.getConfig("session-a")).toEqual(samples.second);
+        expect<TConfig | null>(await repository.getConfig()).toEqual(samples.first);
+        expect<TConfig | null>(await repository.getConfig("session-a")).toEqual(samples.second);
         expect(await repository.getConfig("session-b")).toBeNull();
         await repository.clearConfig("session-a");
         expect(await repository.getConfig("session-a")).toBeNull();
-        expect(await repository.getConfig()).toEqual(samples.first);
+        expect<TConfig | null>(await repository.getConfig()).toEqual(samples.first);
       }));
 
     test("neither the stored nor the returned config aliases the caller's objects, at any depth", () =>
@@ -69,10 +69,10 @@ export function runConfigRepositoryContract<TConfig>(
         const input = structuredClone(samples.second);
         await repository.setConfig(input);
         mutateDeep(input);
-        expect(await repository.getConfig()).toEqual(samples.second);
+        expect<TConfig | null>(await repository.getConfig()).toEqual(samples.second);
         const read = await repository.getConfig();
         mutateDeep(read);
-        expect(await repository.getConfig()).toEqual(samples.second);
+        expect<TConfig | null>(await repository.getConfig()).toEqual(samples.second);
       }));
   });
 }

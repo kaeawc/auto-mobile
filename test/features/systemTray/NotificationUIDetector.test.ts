@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { AndroidNotificationUIDetector } from "../../../src/features/systemTray/AndroidNotificationUIDetector";
 import { IosNotificationUIDetector } from "../../../src/features/systemTray/IosNotificationUIDetector";
@@ -13,6 +15,13 @@ import type {
 import type { NotificationUIDetector } from "../../../src/utils/interfaces/NotificationUIDetector";
 import type { SystemTrayDependencies } from "../../../src/features/systemTray/systemTrayHelpers";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { readFileSync } from "node:fs";
+import { wireCapture } from "../../helpers/wireCapture";
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
+import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon";
+import settings from "../../fixtures/ios/ctrlproxy-golden/settings-tap-general/0002-push-hierarchy_update.json";
+import { IOS_NOTIFICATION_CENTER_CLASS_HINTS } from "../../../src/features/systemTray/notificationHints";
+import { collectNotificationCandidates } from "../../../src/features/systemTray/systemTrayHelpers";
 
 /**
  * Conformance check for the platform-agnostic NotificationUIDetector
@@ -89,11 +98,11 @@ describe("NotificationUIDetector", () => {
     text: "Hello",
   } as Element;
 
-  const observationWithSize: ObserveResult = {
+  const observationWithSize: ObserveResult = buildObserveResult({
     updatedAt: 0,
     screenSize: { width: 375, height: 812 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 
   describe("FakeNotificationUIDetector", () => {
     let fake: FakeNotificationUIDetector;
@@ -269,6 +278,73 @@ describe("NotificationUIDetector", () => {
   });
 
   describe("IosNotificationUIDetector behavior", () => {
+    // Already-converted ViewHierarchyResult from manual-test batch 20261019d,
+    // evidence/i1-notification-center-hierarchy.json; do not reconvert compact bounds.
+    const ios27NotificationCenterHierarchy = wireCapture(
+      JSON.parse(
+        readFileSync(
+          new URL(
+            "../../fixtures/ios-notification-center/ios27-notification-center-hierarchy.json",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ),
+    );
+    // Closest captured home hierarchy: the Photos icon subtree from #8060/#8081.
+    // ios-lock-state/observe-unlocked.json has no raw viewHierarchy.
+    const capturedIosHomeIconHierarchy = convertIosHierarchy({
+      packageName: "com.apple.springboard",
+      updatedAt: 0,
+      hierarchy: springBoardPhotosIcon,
+    });
+    const capturedIosSettingsHierarchy = convertIosHierarchy({
+      hierarchy: settings.push.data.hierarchy,
+      packageName: settings.push.data.packageName,
+      updatedAt: settings.push.data.updatedAt,
+    });
+    const capturedDetector = new IosNotificationUIDetector(iosDevice, {
+      requestSwipe: async () => ({ success: true }),
+      requestTapCoordinates: async () => ({ success: true }),
+      now: () => 0,
+    });
+
+    it("detects the captured empty iOS 27 Notification Center", () => {
+      expect(capturedDetector.isTrayOpen(ios27NotificationCenterHierarchy)).toBe(true);
+      // The captured ListCell is an empty list placeholder, not a notification.
+      expect(collectNotificationCandidates(ios27NotificationCenterHierarchy)).toEqual([]);
+    });
+
+    it.each([
+      ["SpringBoard home icon subtree", capturedIosHomeIconHierarchy],
+      ["Settings app", capturedIosSettingsHierarchy],
+      [
+        "Settings hierarchy with SpringBoard fallback",
+        {
+          ...capturedIosSettingsHierarchy,
+          packageName: "com.apple.springboard",
+        },
+      ],
+      [
+        "Notification Center structure in another package",
+        {
+          ...ios27NotificationCenterHierarchy,
+          packageName: "com.example.app",
+        },
+      ],
+    ] as const)("rejects %s", (_name, hierarchy) => {
+      expect(capturedDetector.isTrayOpen(hierarchy)).toBe(false);
+    });
+
+    it.each(IOS_NOTIFICATION_CENTER_CLASS_HINTS)("preserves legacy %s detection", (hint) => {
+      expect(
+        capturedDetector.isTrayOpen({
+          ...iosNotificationCenterHierarchy,
+          hierarchy: { node: { $: { class: hint } } },
+        }),
+      ).toBe(true);
+    });
+
     it("detects NotificationCenter only under SpringBoard", () => {
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async () => ({ success: true }),
@@ -336,7 +412,9 @@ describe("NotificationUIDetector", () => {
       const taps: Array<{ x: number; y: number }> = [];
       const detector = new IosNotificationUIDetector(iosDevice, {
         requestSwipe: async () => ({ success: true }),
-        requestTapCoordinates: async (x, y) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { x, y } = request;
+
           taps.push({ x, y });
           return { success: true };
         },

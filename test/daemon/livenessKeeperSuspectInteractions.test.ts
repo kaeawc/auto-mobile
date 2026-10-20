@@ -25,6 +25,7 @@ const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };
 

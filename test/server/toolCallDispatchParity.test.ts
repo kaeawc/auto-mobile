@@ -1,6 +1,6 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { afterAll, beforeEach, beforeAll, describe, expect, spyOn, test } from "bun:test";

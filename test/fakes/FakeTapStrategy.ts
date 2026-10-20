@@ -16,6 +16,14 @@ import type { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
 export class FakeTapStrategy implements TapStrategy {
   longPressDurationMs: number = 500;
   retryTapIfNoChange: boolean = false;
+  warnsOnDisabledElement: boolean = true;
+  settlesPostTapChange: boolean = true;
+  verifiesRefreshedDisplay: boolean = true;
+  promotesClickableAncestor: boolean = true;
+  settlesFocusChangeAfterTap: boolean = false;
+  rethrowsKeyboardOcclusion: boolean = true;
+  /** Restamps nothing by default; iOS-parity tests may record via `refreshedRotations`. */
+  readonly refreshedRotations: Array<number | undefined> = [];
 
   private readonly iosClip = new IosTapStrategy({
     name: "fake",
@@ -75,6 +83,14 @@ export class FakeTapStrategy implements TapStrategy {
     // Real iOS clipping (a no-op for hierarchies without captured chrome), so tests that
     // drive an iOS device through this fake keep the navigation-bar refusal behaviour.
     return this.iosClip.clipNavigationTapBounds(bounds, hierarchy, screenSize, elements);
+  }
+
+  applyRefreshedObservationRotation(
+    _observation: ObserveResult,
+    hierarchyRotation: number | undefined,
+  ): void {
+    this.executedOperations.push("applyRefreshedObservationRotation");
+    this.refreshedRotations.push(hierarchyRotation);
   }
 
   async isAccessibilityServiceEnabled(): Promise<boolean> {

@@ -1,3 +1,4 @@
+import { readToolResponse, toolJson, schemaPropertyDescription } from "../helpers/toolResponse";
 import { z } from "zod/v4";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
@@ -9,7 +10,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DEFAULT_MAX_INTERACTIONS, Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
-import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../../src/features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import {
   exploreSchema,
@@ -28,6 +32,15 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
+/** The private collaborators the NavigateTo/Explore spies read off the instance they replace. */
+interface ExecuteReceiver {
+  navigationManager: unknown;
+  sessionUuid: unknown;
+}
 
 describe("navigation tool session graph selection", () => {
   const device: BootedDevice = {
@@ -37,14 +50,22 @@ describe("navigation tool session graph selection", () => {
   };
 
   let adbFactorySpy: ReturnType<typeof spyOn>;
+  let activeGraph: NavigationGraphService;
+  let resolvedSessions: Array<string | undefined>;
+  const navigationManagerFactory = (sessionUuid?: string): NavigationGraphService => {
+    resolvedSessions.push(sessionUuid);
+    return activeGraph;
+  };
   beforeEach(() => {
+    activeGraph = new FakeNavigationGraphManager();
+    resolvedSessions = [];
     const fakeAdbFactory = new FakeAdbClientFactory();
     adbFactorySpy = spyOn(defaultAdbClientFactory, "create").mockImplementation((selectedDevice) =>
       fakeAdbFactory.create(selectedDevice),
     );
     ToolRegistry.clearTools();
     setDebugModeEnabled(true);
-    registerNavigationTools();
+    registerNavigationTools({ navigationManagerFactory });
   });
 
   afterEach(() => {
@@ -63,10 +84,8 @@ describe("navigation tool session graph selection", () => {
         }),
         executeIosDetailedResult: async () => ({ successful: true, apps: [] }),
       };
-      registerNavigationTools({ installedAppsFactory: () => list });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      registerNavigationTools({ navigationManagerFactory, installedAppsFactory: () => list });
+      activeGraph = new FakeNavigationGraphManager();
       const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
         new Error("must not start exploration"),
       );
@@ -76,10 +95,9 @@ describe("navigation tool session graph selection", () => {
           handler({ ...device, platform }, { packageName: "com.nope.missing" }),
         ).rejects.toThrow("Package not installed: com.nope.missing");
         expect(execute).not.toHaveBeenCalled();
-        expect(graphSpy).not.toHaveBeenCalled();
+        expect(resolvedSessions).toEqual([]);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -88,6 +106,7 @@ describe("navigation tool session graph selection", () => {
     "explore rejects an inconclusive %s inventory",
     async (platform) => {
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => ({
           executeDetailedResult: async () => ({
             successful: false,
@@ -96,9 +115,7 @@ describe("navigation tool session graph selection", () => {
           executeIosDetailedResult: async () => ({ successful: false, apps: [] }),
         }),
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
         new Error("must not start exploration"),
       );
@@ -113,7 +130,6 @@ describe("navigation tool session graph selection", () => {
         expect(execute).not.toHaveBeenCalled();
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -123,6 +139,7 @@ describe("navigation tool session graph selection", () => {
     async (listing) => {
       const cause = new Error("work profile listing failed");
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => ({
           executeDetailedResult: async () => ({
             successful: listing === "complete",
@@ -139,9 +156,7 @@ describe("navigation tool session graph selection", () => {
           executeIosDetailedResult: async () => ({ successful: false, apps: [] }),
         }),
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
         new Error("must not start exploration"),
       );
@@ -157,10 +172,9 @@ describe("navigation tool session graph selection", () => {
           ...(listing === "incomplete" ? { cause } : {}),
         });
         expect(execute).not.toHaveBeenCalled();
-        expect(graphSpy).not.toHaveBeenCalled();
+        expect(resolvedSessions).toEqual([]);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -175,6 +189,7 @@ describe("navigation tool session graph selection", () => {
         recent: false,
       };
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => ({
           executeDetailedResult: async () => ({
             successful: false,
@@ -186,9 +201,7 @@ describe("navigation tool session graph selection", () => {
           executeIosDetailedResult: async () => ({ successful: false, apps: [] }),
         }),
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const result = {
         success: true as const,
         cancelled: false,
@@ -208,12 +221,11 @@ describe("navigation tool session graph selection", () => {
           { ...device, platform: "android" },
           { packageName: "com.test.app" },
         );
-        expect(response.isError).toBeUndefined();
-        expect(JSON.parse(response.content[0].text)).toMatchObject(result);
+        expect(readToolResponse(response).isError).toBeUndefined();
+        expect(toolJson(response)).toMatchObject(result);
         expect(execute).toHaveBeenCalledTimes(1);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -223,6 +235,7 @@ describe("navigation tool session graph selection", () => {
     async (platform) => {
       let listings = 0;
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => {
           listings++;
           return {
@@ -242,9 +255,7 @@ describe("navigation tool session graph selection", () => {
           };
         },
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const normal = {
         success: true as const,
         cancelled: false,
@@ -262,13 +273,13 @@ describe("navigation tool session graph selection", () => {
       try {
         const handler = ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!;
         const response = await handler({ ...device, platform }, { packageName: " com.test.app " });
-        expect(response.isError).toBeUndefined();
-        expect(JSON.parse(response.content[0].text)).toMatchObject(normal);
+        expect(readToolResponse(response).isError).toBeUndefined();
+        expect(toolJson(response)).toMatchObject(normal);
         expect(listings).toBe(1);
         execute.mockResolvedValue({ ...normal, stopReason: "Exploration completed successfully" });
         const completed = await handler({ ...device, platform }, {});
-        expect(completed.isError).toBeUndefined();
-        expect(JSON.parse(completed.content[0].text).success).toBe(true);
+        expect(readToolResponse(completed).isError).toBeUndefined();
+        expect(toolJson(completed).success).toBe(true);
         expect(listings).toBe(1);
         const dryRun = {
           success: true as const,
@@ -288,12 +299,11 @@ describe("navigation tool session graph selection", () => {
           { ...device, platform },
           { packageName: "com.nope.missing", dryRun: true },
         );
-        expect(dryResponse.isError).toBeUndefined();
-        expect(JSON.parse(dryResponse.content[0].text)).toMatchObject(dryRun);
+        expect(readToolResponse(dryResponse).isError).toBeUndefined();
+        expect(toolJson(dryResponse)).toMatchObject(dryRun);
         expect(listings).toBe(1);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -313,27 +323,39 @@ describe("navigation tool session graph selection", () => {
       ["Settings", 200],
       ["Home", 300],
     ] as const) {
-      await graph.recordNavigationEvent({ destination, timestamp });
+      await graph.recordNavigationEvent({
+        destination,
+        timestamp,
+        source: "",
+        arguments: {},
+        metadata: {},
+        sequenceNumber: 0,
+      });
     }
     ToolRegistry.register(
       "budgetReplay",
       "Fake replay",
       z.object({ text: z.string() }),
       async () => {
-        await graph.recordNavigationEvent({ destination: "Settings", timestamp: timer.now() });
+        await graph.recordNavigationEvent({
+          destination: "Settings",
+          timestamp: timer.now(),
+          source: "",
+          arguments: {},
+          metadata: {},
+          sequenceNumber: 0,
+        });
         return { success: true };
       },
     );
     const navigateToHandler = createNavigateToHandler({
       navigateToFactory: (selectedDevice) =>
-        new NavigateTo(
-          selectedDevice,
-          new FakeAdbClientFactory(),
-          { setupUIState: async () => [], setupScrollPosition: async () => null },
-          { waitForScreen: async () => true },
-          graph,
+        new NavigateTo(selectedDevice, new FakeAdbClientFactory(), {
+          uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+          screenWaiter: { waitForScreen: async () => true },
+          navigationManager: graph,
           timer,
-        ),
+        }),
     });
     const call = spyOn(ToolRegistry, "callInternal");
     try {
@@ -344,7 +366,7 @@ describe("navigation tool session graph selection", () => {
         [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
       });
       const response = await navigateToHandler(device, args);
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
       expect(call).toHaveBeenCalledTimes(1);
       expect(call.mock.calls[0]).toEqual([
         "budgetReplay",
@@ -372,6 +394,7 @@ describe("navigation tool session graph selection", () => {
           return {
             success: true,
             targetScreen: options.targetScreen,
+            currentScreen: options.targetScreen,
             stepsExecuted: 0,
             durationMs: 0,
           };
@@ -386,7 +409,7 @@ describe("navigation tool session graph selection", () => {
       },
     ]) {
       const response = await navigateToHandler(device, { targetScreen: "Settings", ...budget });
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     }
   });
 
@@ -440,7 +463,7 @@ describe("navigation tool session graph selection", () => {
   test("explore advertises the pinned runtime default of 200 interactions", () => {
     const schema = z.toJSONSchema(exploreSchema);
     expect(DEFAULT_MAX_INTERACTIONS).toBe(200);
-    expect(schema.properties?.maxInteractions.description).toBe(
+    expect(schemaPropertyDescription(schema.properties, "maxInteractions")).toBe(
       `Max interactions (default: ${DEFAULT_MAX_INTERACTIONS})`,
     );
   });
@@ -489,16 +512,19 @@ describe("navigation tool session graph selection", () => {
       }),
       exportGraphForApp: async () => ({ nodes: [], edges: [] }),
     });
-    const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager,
-    );
+    activeGraph = graph;
     const exploreSpy = spyOn(Explore.prototype, "execute").mockResolvedValue({
       success: true,
       interactionsPerformed: 0,
       screensDiscovered: 0,
-      coverage: { explored: 0, total: 0, percentage: 0 },
-    } as Awaited<ReturnType<Explore["execute"]>>);
+      coverage: { exploredScreens: 0, totalScreens: 0, percentage: 0 },
+      edgesAdded: 0,
+      navigationGraph: { nodes: [], edges: [], appId: "com.test.app", currentScreen: null },
+      explorationPath: [],
+      durationMs: 0,
+    });
     registerNavigationTools({
+      navigationManagerFactory,
       navigateToFactory: () => ({
         execute: async () => ({
           success: true,
@@ -530,7 +556,6 @@ describe("navigation tool session graph selection", () => {
     } finally {
       restorePipelineOverrides();
       ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDevices });
-      graphSpy.mockRestore();
       exploreSpy.mockRestore();
     }
   });
@@ -539,17 +564,14 @@ describe("navigation tool session graph selection", () => {
     const sessionGraph = new FakeNavigationGraphManager();
     const usedManagers: unknown[] = [];
     const usedSessions: unknown[] = [];
-    const sessionManagerSpy = spyOn(
-      NavigationGraphManager,
-      "getInstanceForSession",
-    ).mockReturnValue(sessionGraph as unknown as NavigationGraphManager);
+    activeGraph = sessionGraph;
     PortManager.setPortAvailabilityCheckerForTesting({
       isPortAvailable: () => true,
     });
     const navigateExecuteSpy = spyOn(NavigateTo.prototype, "execute").mockImplementation(
-      async function () {
-        usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
-        usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
+      async function (this: ExecuteReceiver) {
+        usedManagers.push(this.navigationManager);
+        usedSessions.push(this.sessionUuid);
         return {
           success: false,
           error: "No path",
@@ -560,15 +582,19 @@ describe("navigation tool session graph selection", () => {
       },
     );
     const exploreExecuteSpy = spyOn(Explore.prototype, "execute").mockImplementation(
-      async function () {
-        usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
-        usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
+      async function (this: ExecuteReceiver) {
+        usedManagers.push(this.navigationManager);
+        usedSessions.push(this.sessionUuid);
         return {
           success: true,
           interactionsPerformed: 0,
           screensDiscovered: 0,
-          coverage: { explored: 0, total: 0, percentage: 0 },
-        } as any;
+          coverage: { exploredScreens: 0, totalScreens: 0, percentage: 0 },
+          edgesAdded: 0,
+          navigationGraph: { nodes: [], edges: [], appId: "com.test.app", currentScreen: null },
+          explorationPath: [],
+          durationMs: 0,
+        };
       },
     );
 
@@ -591,12 +617,10 @@ describe("navigation tool session graph selection", () => {
         sessionUuid: "session-123:B",
       });
 
-      expect(sessionManagerSpy).toHaveBeenCalledTimes(2);
-      expect(sessionManagerSpy).toHaveBeenCalledWith("session-123:B");
+      expect(resolvedSessions).toEqual(["session-123:B", "session-123:B"]);
       expect(usedManagers).toEqual([sessionGraph, sessionGraph]);
       expect(usedSessions).toEqual(["session-123:B", "session-123:B"]);
     } finally {
-      sessionManagerSpy.mockRestore();
       navigateExecuteSpy.mockRestore();
       exploreExecuteSpy.mockRestore();
       PortManager.reset();
@@ -652,9 +676,7 @@ describe("navigation tool session graph selection", () => {
         };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      staleGraph as unknown as NavigationGraphManager,
-    );
+    activeGraph = staleGraph;
     const observationSpy = spyOn(
       RealObserveScreen,
       "getRecentCachedResultForDevice",
@@ -667,7 +689,7 @@ describe("navigation tool session graph selection", () => {
 
       const response = await handler!(device, { platform: "ios" });
 
-      const result = JSON.parse(response.content[0].text);
+      const result = toolJson(response);
       expect(result.message).toBe("Navigation graph for app: com.apple.Preferences");
       expect(result).toMatchObject({
         currentScreen: null,
@@ -691,7 +713,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 
@@ -732,9 +753,7 @@ describe("navigation tool session graph selection", () => {
         };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager,
-    );
+    activeGraph = graph;
     // A concurrent hierarchy update marked SpringBoard current.
     const observationSpy = spyOn(
       RealObserveScreen,
@@ -751,7 +770,7 @@ describe("navigation tool session graph selection", () => {
         appId: "com.apple.reminders",
       });
 
-      const result = JSON.parse(response.content[0].text);
+      const result = toolJson(response);
       // Failures identify the queried app and the current app (diagnostics).
       expect(result.message).toBe("Navigation graph for app: com.apple.reminders");
       expect(result.requestedAppId).toBe("com.apple.reminders");
@@ -769,7 +788,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 
@@ -799,9 +817,7 @@ describe("navigation tool session graph selection", () => {
         return { appId, currentScreen: null, nodes: [], edges: [] };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      staleGraph as unknown as NavigationGraphManager,
-    );
+    activeGraph = staleGraph;
     const observationSpy = spyOn(
       RealObserveScreen,
       "getRecentCachedResultForDevice",
@@ -812,7 +828,7 @@ describe("navigation tool session graph selection", () => {
 
       const response = await handler!(device, { platform: "ios" });
 
-      expect(JSON.parse(response.content[0].text)).toEqual({
+      expect(toolJson(response)).toEqual({
         message: "Navigation graph for app: none",
         requestedAppId: null,
         observedAppId: null,
@@ -826,7 +842,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 
@@ -862,9 +877,7 @@ describe("navigation tool session graph selection", () => {
         };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager,
-    );
+    activeGraph = graph;
     const observationSpy = spyOn(
       RealObserveScreen,
       "getRecentCachedResultForDevice",
@@ -877,7 +890,7 @@ describe("navigation tool session graph selection", () => {
 
       const response = await handler!(device, { platform: "ios" });
 
-      expect(JSON.parse(response.content[0].text)).toMatchObject({
+      expect(toolJson(response)).toMatchObject({
         message: "Navigation graph for app: com.apple.Preferences",
         currentScreen: "iOS Settings",
         nodeCount: 1,
@@ -887,7 +900,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 });
@@ -912,7 +924,7 @@ describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
     const repository = new NavigationRepository(db);
     const manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
     );
     await repository.getOrCreateApp(APP);
     const traversals = Array.from({ length: 10 }, (_, index) => ({
@@ -931,7 +943,7 @@ describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
 
       const response = await handler(device, { platform: "android", appId: APP });
 
-      const result = JSON.parse(response.content[0].text);
+      const result = toolJson(response);
       expect(result).toMatchObject({ edgeCount: 1, knownEdges: 1, unknownEdges: 0 });
       expect(result.transitions).toEqual([
         { from: "Home", to: "Settings", type: "tool", tool: "tapOn", args: { text: "Settings" } },

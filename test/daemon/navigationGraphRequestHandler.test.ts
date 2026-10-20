@@ -7,13 +7,10 @@ import {
 import { ActionableError } from "../../src/models/ActionableError";
 import type { NavigationGraphSummary } from "../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../src/utils/logger";
-import {
-  DeviceDataStreamSocketServer,
-  type NavigationGraphStreamData,
-} from "../../src/daemon/deviceDataStreamSocketServer";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import { Socket } from "node:net";
+import { ackFrameSchema, navigationGraphFrameSchema } from "../helpers/wireMessageSchemas";
 
 const EMPTY_SUMMARY: NavigationGraphSummary = {
   appId: null,
@@ -64,7 +61,7 @@ class TestableServer extends DeviceDataStreamSocketServer {
   }
 
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {
-    await this.processLine(socket as unknown as Socket, line);
+    await this.processLine(socket, line);
   }
 }
 
@@ -140,12 +137,7 @@ describe("createNavigationGraphRequestHandler", () => {
         JSON.stringify({ id: "req-err", command: "request_navigation_graph" }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("req-err");
@@ -166,11 +158,7 @@ describe("createNavigationGraphRequestHandler", () => {
         JSON.stringify({ id: "req-empty", command: "request_navigation_graph" }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        navigationGraph?: NavigationGraphStreamData;
-      }>();
+      const msgs = socket.getWrittenMessages(navigationGraphFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("navigation_update");
       expect(msgs[0].id).toBe("req-empty");
@@ -192,13 +180,7 @@ describe("createNavigationGraphRequestHandler", () => {
       );
 
       // Round-trip the raw wire bytes exactly as a client would receive them.
-      const rawLine = socket.getWrittenDataString().trim();
-      const decoded = JSON.parse(rawLine) as {
-        type: string;
-        success?: boolean;
-        error?: string;
-        id?: string;
-      };
+      const [decoded] = socket.getWrittenMessages(ackFrameSchema);
 
       // Mirror the desktop client's `when (type) { ... else -> ignore }` dispatch: every known
       // frame type routes, and any unrecognized type is silently ignored rather than throwing.

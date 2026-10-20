@@ -1,5 +1,3 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -9,7 +7,7 @@ import {
 } from "../../src/daemon/toolCallActivity";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -18,6 +16,11 @@ import {
   createFakeDaemonState,
   createFakeDeviceManager,
 } from "./helpers/inputSocketHarness";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
@@ -35,13 +38,7 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * as `socketServer.start()` wires it.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
-  liftSessionlessStrokesOn(deviceId: string): void;
-}
+type StrokeResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestGestureStart"]>>;
 
 const NEW_OWNER = "new-owner-session";
 const DEVICE = androidDevice.deviceId;
@@ -50,12 +47,12 @@ const IDLE_MS = 60_000;
 describe("an open sessionless input stroke vs. a session acquiring its device", () => {
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let server: UnixSocketServerHarness;
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
   let acquisitions: string[];
   /** When set, the fake device holds the start's ack until it resolves. */
-  let startAck: PromiseWithResolvers<{ success: boolean }> | undefined;
+  let startAck: PromiseWithResolvers<StrokeResult> | undefined;
   let unsubscribeActivity: () => void;
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
 
@@ -76,7 +73,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
       params: { platform: "android", deviceId: DEVICE, x: 1, y: 2, gestureId: "drag-1" },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -93,48 +90,40 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       acquisitions.push(`${sessionId}@${deviceId}`);
       executionTracker.cancelSessionlessDeviceUse(deviceId);
-      internals.liftSessionlessStrokesOn(deviceId);
+      server.liftSessionlessStrokesOn(deviceId);
     });
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    const stroke =
-      (kind: string) => async (_id: string, _x: number, _y: number, last?: unknown) => {
-        strokes.push(kind === "end" && last === true ? "cancel" : kind);
-        return { success: true };
-      };
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    const stroke = async (kind: string) => {
+      strokes.push(kind);
+      return { success: true, totalTimeMs: 0 };
+    };
+    spyOnAndroidClientInstance(androidDevice, {
       getScreenScaleMetadata: () => null,
       requestGestureStart: async () => {
         strokes.push("start");
-        return startAck ? await startAck.promise : { success: true };
+        return startAck ? await startAck.promise : { success: true, totalTimeMs: 0 };
       },
-      requestGestureMove: stroke("move"),
-      requestGestureEnd: stroke("end"),
-    }));
-    const fakePool = createFakeDaemonState().getDevicePool();
-    const server = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      {
-        isInitialized: () => true,
-        getSessionManager: () => sessionManager,
-        getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
-      new FakeTimer(),
-    );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+      requestGestureMove: () => stroke("move"),
+      requestGestureEnd: (_id, _x, _y, cancel) => stroke(cancel === true ? "cancel" : "end"),
+    });
+    const serverState: DaemonStateAccess = {
+      ...createFakeDaemonState(),
+      getSessionManager: () => sessionManager,
+    };
+    server = createHarnessServer("unused", serverState, new FakeTimer());
+    server.allowRequests();
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    server.connect(socket);
     // socketServer.start(): the session-release subscription that lifts a released holder's strokes.
-    sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+    sessionManager.onSessionRelease((sessionId) => void server.liftStrokesHeldBy(sessionId));
   });
 
   afterEach(async () => {
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     unsubscribeActivity();
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
@@ -169,14 +158,14 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     });
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     expect(strokes).toEqual(["start", "cancel"]);
   });
 
   test("a stroke on another device, and one a session holds, are left alone", async () => {
     expect(await sendSessionlessGesture("Start")).toMatchObject({ success: true });
 
-    internals.liftSessionlessStrokesOn("some-other-device");
+    server.liftSessionlessStrokesOn("some-other-device");
     await settle();
     expect(strokes).toEqual(["start"]);
 
@@ -197,17 +186,17 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
       },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     expect(socket.responses.find((frame) => frame.id === "owner-start")).toMatchObject({
       success: true,
     });
-    internals.liftSessionlessStrokesOn(DEVICE);
+    server.liftSessionlessStrokesOn(DEVICE);
     await settle();
     expect(strokes).toEqual(["start", "cancel", "start"]);
   });
 
   test("a sessionless start still awaiting its ack when the session arrives is lifted on the ack, once", async () => {
-    startAck = Promise.withResolvers<{ success: boolean }>();
+    startAck = Promise.withResolvers<StrokeResult>();
     socket.send({
       id: "gesture-Start",
       type: "mcp_request",
@@ -222,9 +211,9 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     await settle();
     expect(strokes).toEqual(["start"]);
 
-    startAck.resolve({ success: true });
+    startAck.resolve({ success: true, totalTimeMs: 0 });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
 
     expect(strokes).toEqual(["start", "cancel"]);
     expect(socket.responses.find((frame) => frame.id === "gesture-Start")).toMatchObject({
@@ -233,12 +222,12 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     });
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     expect(strokes).toEqual(["start", "cancel"]);
   });
 
   test("a sessionless start the runner refused opened nothing, so the acquisition cancels nothing", async () => {
-    startAck = Promise.withResolvers<{ success: boolean }>();
+    startAck = Promise.withResolvers<StrokeResult>();
     socket.send({
       id: "gesture-Start",
       type: "mcp_request",
@@ -249,9 +238,9 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     await sessionManager.createSession(NEW_OWNER, DEVICE, "android", { timeoutMs: IDLE_MS });
     await settle();
 
-    startAck.resolve({ success: false });
+    startAck.resolve({ success: false, totalTimeMs: 0 });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
 
     expect(strokes).toEqual(["start"]);
   });

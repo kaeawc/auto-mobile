@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { AndroidPhysicalDisplayIdResolver } from "../../../src/features/observe/android/AndroidPhysicalDisplayId";
@@ -60,18 +61,18 @@ describe("screencap physical-id resolution follows display inventory events (#99
   test("a secondary display re-added under the same logical id resolves to its new physical id", async () => {
     const deviceId = uniqueDevice("replug");
     const { adb, resolver } = setup();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: displayList(secondaryDisplay(2, INNER)),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(displayList(secondaryDisplay(2, INNER)), ""),
+    );
     expect(await resolver.resolveLogical(adb, deviceId, 2)).toBe(INNER);
     expect(getDisplaysReads(adb)).toBe(1);
 
     // Same logical id, another panel behind it: no default-display transition happens.
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: displayList(secondaryDisplay(2, COVER)),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(displayList(secondaryDisplay(2, COVER)), ""),
+    );
     displayTransitions.notifyAndroidTransition(deviceId, { change: "removed", displayId: 2 });
     displayTransitions.notifyAndroidTransition(deviceId, { change: "added", displayId: 2 });
 
@@ -82,16 +83,16 @@ describe("screencap physical-id resolution follows display inventory events (#99
   test("a changed secondary display is looked up again", async () => {
     const deviceId = uniqueDevice("changed");
     const { adb, resolver } = setup();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: displayList(secondaryDisplay(2, INNER)),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(displayList(secondaryDisplay(2, INNER)), ""),
+    );
     expect(await resolver.resolveLogical(adb, deviceId, 2)).toBe(INNER);
 
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: displayList(secondaryDisplay(2, COVER)),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(displayList(secondaryDisplay(2, COVER)), ""),
+    );
     displayTransitions.notifyAndroidTransition(deviceId, { change: "changed", displayId: 2 });
 
     expect(await resolver.resolveLogical(adb, deviceId, 2)).toBe(COVER);
@@ -100,18 +101,18 @@ describe("screencap physical-id resolution follows display inventory events (#99
   test("a second physical display appearing ends the cached single-display answer", async () => {
     const deviceId = uniqueDevice("hotplug");
     const { adb, resolver } = setup();
-    adb.setCommandResponse("dumpsys SurfaceFlinger", {
-      stdout: surfaceFlingerOneDisplay,
-      stderr: "",
-    });
-    adb.setCommandResponse("cmd display get-displays", { stdout: displayList(), stderr: "" });
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger",
+      createExecResult(surfaceFlingerOneDisplay, ""),
+    );
+    adb.setCommandResponse("cmd display get-displays", createExecResult(displayList(), ""));
     // One physical display: plain `screencap`, so no explicit id.
     expect(await resolver.resolve(adb, deviceId)).toBeNull();
 
-    adb.setCommandResponse("dumpsys SurfaceFlinger", {
-      stdout: surfaceFlingerTwoDisplays,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger",
+      createExecResult(surfaceFlingerTwoDisplays, ""),
+    );
     displayTransitions.notifyAndroidTransition(deviceId, { change: "added", displayId: 2 });
 
     expect(await resolver.resolve(adb, deviceId)).toBe(COVER);
@@ -120,10 +121,10 @@ describe("screencap physical-id resolution follows display inventory events (#99
   test("a rotation-only change of the default display keeps the cached mapping", async () => {
     const deviceId = uniqueDevice("rotation");
     const { adb, resolver } = setup();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: displayList(secondaryDisplay(2, INNER)),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(displayList(secondaryDisplay(2, INNER)), ""),
+    );
     expect(await resolver.resolveLogical(adb, deviceId, 2)).toBe(INNER);
     displayTransitions.record(deviceId, {
       display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
@@ -146,10 +147,10 @@ describe("screencap physical-id resolution follows display inventory events (#99
     const deviceId = uniqueDevice("mine");
     const otherDeviceId = uniqueDevice("other");
     const { adb, resolver } = setup();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: displayList(secondaryDisplay(2, INNER)),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(displayList(secondaryDisplay(2, INNER)), ""),
+    );
     expect(await resolver.resolveLogical(adb, deviceId, 2)).toBe(INNER);
 
     displayTransitions.notifyAndroidTransition(otherDeviceId, { change: "removed", displayId: 2 });

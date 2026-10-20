@@ -10,7 +10,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   DeviceTransportOfflineError,
   DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import {
   deviceAssignedToOtherSessionError,
   devicePreparedForOtherRequestError,
@@ -18,7 +18,7 @@ import {
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DisplayPinNeedsSessionError } from "../../src/models/PinnedDisplayError";
 import { ActionableError } from "../../src/models/ActionableError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

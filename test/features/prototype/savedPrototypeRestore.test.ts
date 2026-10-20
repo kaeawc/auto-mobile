@@ -16,7 +16,7 @@ const entry: MirroredSavedPrototype = {
   icon: "photo",
   spec: {
     id: "one",
-    window: { placement: { type: "fullscreen" } },
+    window: { placement: { type: "fullscreen" }, opacity: 1 },
     root: { type: "image", asset: "photo" },
   },
   assets: [{ id: "photo", mimeType: "image/png", bytes: new Uint8Array([1]) }],
@@ -152,7 +152,7 @@ function adapterHarness(commands: string[], timeoutMs?: number) {
     },
   };
   const adapter = new AndroidSavedPrototypeRestoreDevice(
-    { deviceId: "serial", name: "Android", platform: "android", isEmulator: true },
+    { deviceId: "serial", name: "Android", platform: "android" },
     timer,
     async () => {
       calls.push("resolve");

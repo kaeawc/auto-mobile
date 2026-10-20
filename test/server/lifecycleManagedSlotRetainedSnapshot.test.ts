@@ -1,4 +1,5 @@
 import { describe, expect, spyOn } from "bun:test";
+import { bindDevice } from "../../src/daemon/deviceBinding";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
@@ -52,14 +53,15 @@ describe("lifecycle retained binding snapshot", () => {
     await pool.initializeWithDevices([DEVICE]);
     await assignBindingDevice(registry, "ios", DEVICE.deviceId, "runner-b", "exec-previous");
     await sessions.createSession(EXECUTION, DEVICE.deviceId, "ios");
-    pool.getDevice(DEVICE.deviceId)!.sessionId = EXECUTION;
-    pool.getDevice(DEVICE.deviceId)!.status = "assigned";
+    bindDevice(pool.getDevice(DEVICE.deviceId)!, EXECUTION);
     DaemonState.getInstance().initialize(sessions, pool);
     cleanups.push(() => {
       DaemonState.getInstance().reset();
       expect(DaemonState.getInstance().isInitialized()).toBe(false);
     });
-    const input = (sessionUuid: string | undefined = EXECUTION) => ({
+    const input = (
+      sessionUuid: string | undefined = EXECUTION,
+    ): Parameters<typeof assertLifecycleCallerHoldsDevice>[0] => ({
       toolName: "killDevice",
       device: DEVICE,
       requester: { sessionUuid, mcpSessionId: undefined },

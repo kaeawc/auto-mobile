@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -39,16 +40,16 @@ async function run(
     },
   );
   const observation: ObserveResult = {
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     observationId: "synthetic-navigation",
     updatedAt: 1,
     screenSize: navigationScreen,
     viewHierarchy: initial,
-    systemInsets: initial.systemInsets,
+    systemInsets: initial.systemInsets ?? { top: 0, right: 0, bottom: 0, left: 0 },
   };
   const points: Array<{ x: number; y: number }> = [];
   let refreshes = 0;
-  tap.observedInteraction = async (action) => ({
-    ...(await action(recordObservationRead(observation))),
+  tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
     observation,
   });
   tap.refreshViewHierarchy = async () => {
@@ -58,15 +59,16 @@ async function run(
   tap.executeAndroidTap = async (_action, x, y) => {
     points.push({ x, y });
   };
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    effect: undefined,
     observation: current,
   });
   tap.prepareSelectionCapture = async () => null;
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({ text, action: "tap", searchUntil: { duration: 200 } });
   return { result, points, refreshes };
@@ -94,7 +96,11 @@ describe("tapOn synthetic iOS navigation occlusion (#9096)", () => {
     expect(points).toEqual([]);
     expect(refreshes).toBeGreaterThan(0);
     const labelled = syntheticNavigationHierarchy();
-    labelled.hierarchy.node!.node![0].node![0].node![0].$.bounds = {
+    const target = labelled.hierarchy.node!.node![0].node![0].node![0];
+    if (!target.$) {
+      throw new Error("Expected captured node attributes");
+    }
+    target.$.bounds = {
       left: 16,
       top: 50,
       right: 386,

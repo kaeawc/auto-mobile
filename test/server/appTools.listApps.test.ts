@@ -1,3 +1,11 @@
+import {
+  readToolResponse,
+  toolField,
+  toolIsError,
+  toolJson,
+  toolStructured,
+  toolText,
+} from "../helpers/toolResponse";
 import { AppPermissions } from "../../src/features/action/AppPermissions";
 import { TerminateApp } from "../../src/features/action/TerminateApp";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -6,8 +14,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOn } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { crashAppResultSchema } from "../../src/server/appToolOutputSchemas";
 import {
-  crashAppResultSchema,
   describeListAppsResult,
   registerAppTools,
   resetInstalledAppResourceRefresh,
@@ -19,11 +27,13 @@ import {
   type AppsQueryOptions,
   type AppsQueryResourceContent,
 } from "../../src/server/appResources";
-import { getStructuredField } from "../../src/utils/toolUtils";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import type { BootedDevice } from "../../src/models";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const appTools = createAppToolsHarness();
 
@@ -121,14 +131,13 @@ describe("listApps tool", () => {
       profile: undefined,
     });
 
-    const payload = result.structuredContent as Record<string, unknown>;
+    const payload = toolStructured(result);
     expect(typeof payload.message).toBe("string");
     expect(payload.devices).toEqual(fakeContent.devices);
     expect(payload.totalCount).toBe(1);
 
-    const content = result.content?.[0];
-    expect(content?.type).toBe("text");
-    expect(JSON.parse(content!.text)).toEqual(payload);
+    expect(readToolResponse(result).content[0]?.type).toBe("text");
+    expect(toolJson(result)).toEqual(payload);
   });
 
   test("passes an explicit type filter through to the query", async () => {
@@ -190,7 +199,7 @@ describe("listApps tool", () => {
 
     const result = await tool!.deviceAwareHandler!(device, {});
 
-    const message = getStructuredField(result, "message") as string;
+    const message = String(toolField(result, "message"));
     expect(message).toContain("Found 3 app(s)");
     expect(message).toContain("type=launchable");
     expect(message).toContain("177");
@@ -210,7 +219,7 @@ describe("listApps tool", () => {
 
     const result = await tool!.deviceAwareHandler!(device, {});
 
-    const message = getStructuredField(result, "message") as string;
+    const message = String(toolField(result, "message"));
     expect(message).toContain("Found 180 app(s)");
     expect(message).not.toContain("hidden");
   });
@@ -287,7 +296,7 @@ describe("terminateApp tool", () => {
       "execute",
     );
     appTools.configure("terminateApp", { createTerminateApp: () => ({ execute }) });
-    setInstalledAppResourceRefresh(async () => {});
+    setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
     try {
       await ToolRegistry.getTool("terminateApp")!.deviceAwareHandler!(
         device,
@@ -315,7 +324,7 @@ describe("terminateApp tool", () => {
     const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       throw new Error("CtrlProxy unavailable");
     });
-    setInstalledAppResourceRefresh(async () => {});
+    setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
     appTools.configure("terminateApp", {
       createTerminateApp: () => {
         return { execute: (appId) => app.execute(appId, { skipObservation: true }) };
@@ -393,12 +402,12 @@ describe("crashApp tool", () => {
     const response = await tool!.deviceAwareHandler!(device, {
       appId: "com.example.app",
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(response.structuredContent).toEqual(payload);
-    expect(crashAppResultSchema.safeParse(response.structuredContent).success).toBe(true);
-    expect(response.isError).toBe(true);
-    expect(response.content[0].text).toBe(JSON.stringify(response.structuredContent));
+    expect(toolStructured(response)).toEqual(payload);
+    expect(crashAppResultSchema.safeParse(toolStructured(response)).success).toBe(true);
+    expect(toolIsError(response)).toBe(true);
+    expect(toolText(response)).toBe(JSON.stringify(toolStructured(response)));
     expect(payload).toMatchObject({
       message: "Physical iOS devices are unsupported",
       success: false,
@@ -431,10 +440,10 @@ describe("crashApp tool", () => {
     const response = await tool!.deviceAwareHandler!(device, {
       appId: "com.example.app",
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(response.structuredContent).toEqual(payload);
-    expect(crashAppResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolStructured(response)).toEqual(payload);
+    expect(crashAppResultSchema.safeParse(toolStructured(response)).success).toBe(true);
     expect(payload.message).toContain("ios_simulator_sigabrt");
     expect(payload.message).toContain("OS crash confirmed");
     expect(payload.confirmed).toBe(true);
@@ -488,6 +497,8 @@ describe("app permission tools", () => {
       const result = {
         success,
         appId: "com.example.app",
+        deviceId: "fake",
+        platform: "android" as const,
         permissions: [],
         ...(success ? {} : { error: "Package lookup failed" }),
       };
@@ -501,11 +512,12 @@ describe("app permission tools", () => {
           ? `Read 0 app permission state row(s) for ${result.appId}`
           : result.error;
         // The pre-structured wire carried exactly this text and isError flag (#11830).
-        expect({ content: response.content, isError: response.isError }).toEqual({
+        const wire = readToolResponse(response);
+        expect<unknown>({ content: wire.content, isError: wire.isError }).toEqual({
           content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
           ...(success ? {} : { isError: true }),
         });
-        expect(response.structuredContent).toEqual({ message, ...result });
+        expect(toolStructured(response)).toEqual({ message, ...result });
       } finally {
         query.mockRestore();
       }
@@ -687,9 +699,9 @@ describe("app permission tools", () => {
         platform: "ios",
       }),
     ).toBe(true);
-    expect(setAppPermissions!.description).toContain("userId grant/revoke");
-    expect(setAppPermissions.description).toContain("device-wide reset ['all']");
-    expect(setAppPermissions.description).toContain("no POST_NOTIFICATIONS");
+    expect(setAppPermissions?.description).toContain("userId grant/revoke");
+    expect(setAppPermissions?.description).toContain("device-wide reset ['all']");
+    expect(setAppPermissions?.description).toContain("no POST_NOTIFICATIONS");
   });
 });
 

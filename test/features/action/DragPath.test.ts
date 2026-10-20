@@ -1,3 +1,5 @@
+import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
+import type { GestureStartRequest } from "../../../src/features/observe/android/CtrlProxyGestures";
 import { describe, expect, test } from "bun:test";
 import { DragPath } from "../../../src/features/action/DragPath";
 import {
@@ -37,7 +39,9 @@ function fakeClient(
   const frames: Frame[] = [];
   let moves = 0;
   const client: StrokeClient = {
-    requestGestureStart: async (_id, x, y, _t, _p, displayId) => {
+    requestGestureStart: async (request: GestureStartRequest) => {
+      const { x, y, displayId } = request;
+
       frames.push({ kind: "start", at: timer.now(), x, y, displayId });
       return behavior.failStart ? { success: false, totalTimeMs: 0, error: "no" } : ok();
     },
@@ -271,7 +275,9 @@ describe("runDragPathStroke", () => {
     const { client: base } = fakeClient(timer);
     const client: StrokeClient = {
       ...base,
-      requestGestureStart: async (_id, x, y) => {
+      requestGestureStart: async (request: GestureStartRequest) => {
+        const { x, y } = request;
+
         frames.push({ kind: "start", at: timer.now(), x, y });
         await timer.sleep(2000);
         throw new Error("Gesture start timed out");
@@ -320,6 +326,50 @@ describe("DragPath", () => {
     dragPath.observeScreen = observe;
     return dragPath;
   }
+
+  test.each([android, ios])(
+    "rejects a changed snapshot layout before a drag on $platform",
+    async (device) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const references = new SnapshotReferenceStore(timer, new CountingIdGenerator());
+      const captured = observation(100, 200);
+      const capture = references.capture(device.deviceId, captured);
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      const { client, frames } = fakeClient(timer);
+      const iosClient = new FakeIOSCtrlProxy();
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult(
+        observation(100, 200, "frame-124", 0, {
+          bounds: { left: 0, top: 0, right: 90, bottom: 90 },
+        }),
+      );
+      const dragPath = new DragPath(device, new FakeAdbExecutor(), {
+        timer,
+        androidClient: client,
+        iosClient,
+        snapshotReferences: references,
+        idGenerator: new CountingIdGenerator(),
+      });
+      dragPath.window = new FakeWindow();
+      dragPath.observeScreen = observe;
+      const result = await dragPath.execute({
+        points: [
+          { x: 10, y: 10 },
+          { x: 10, y: 100, durationMs: 50 },
+        ],
+        snapshotId: capture.reference.snapshotId,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+      );
+      expect(frames).toEqual([]);
+      expect(iosClient.getPathGestureHistory()).toEqual([]);
+    },
+  );
 
   test("drags an L-shaped path in native pixels", async () => {
     const timer = new FakeTimer();

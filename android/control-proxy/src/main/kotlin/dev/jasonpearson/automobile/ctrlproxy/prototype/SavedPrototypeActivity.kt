@@ -15,7 +15,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -25,14 +27,20 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.ctrlproxy.CtrlProxyTheme
 import dev.jasonpearson.automobile.ctrlproxy.R
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
+import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
+import dev.jasonpearson.automobile.prototype.PrototypeAssets
+import dev.jasonpearson.automobile.prototype.PrototypeNetwork
+import dev.jasonpearson.automobile.prototype.PrototypeStorage
+import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
+import dev.jasonpearson.automobile.prototype.prototypeHostStorage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -50,8 +58,7 @@ class SavedPrototypeActivity : ComponentActivity() {
   private val interactions = Mutex()
   private var state by mutableStateOf<SavedPrototypeScreenState>(SavedPrototypeScreenState.Loading)
   private var runtime: PrototypeRuntime? = null
-  private var images: PrototypeImageCache? = null
-  private var fonts: PrototypeFontCache? = null
+  private var content by mutableStateOf<SavedPrototypeContent?>(null)
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -65,15 +72,42 @@ class SavedPrototypeActivity : ComponentActivity() {
     )
     setContent {
       CtrlProxyTheme {
-        val current = runtime
-        if (state is SavedPrototypeScreenState.Ready && current != null) {
-          Surface(Modifier.fillMaxSize().testTag("saved-prototype-state-ready")) {
-            PrototypeRuntimeContent(current, images, fonts) { interact(it, current) }
-          }
-        } else SavedPrototypeStatus(state) { finish() }
+        val current = content
+        if (current != null) SavedContent(current) else SavedPrototypeStatus(state) { finish() }
       }
     }
     reload(intent)
+  }
+
+  @Composable
+  private fun SavedContent(current: SavedPrototypeContent) {
+    val ready = state is SavedPrototypeScreenState.Ready
+    val tag = if (ready) Modifier.testTag("saved-prototype-state-ready") else Modifier
+    Surface(Modifier.fillMaxSize().then(tag)) {
+      // A document relaunch must replace even an identical spec, without a dismissal.
+      key(current) {
+        ProvideEmbeddedPrototypeHost(current.host) {
+          AutoMobilePrototype(
+            spec = current.spec,
+            assets = current.assets,
+            storage = current.storage,
+            network = current.network,
+            onEvent = { if (current.host.eventSink == null) SavedPrototypeEvents.send(it) },
+            onDismiss = { finish() },
+            handleBack = true,
+            onError = {
+              SideEffect {
+                content = null
+                state = SavedPrototypeScreenState.Corrupt
+              }
+            },
+          )
+        }
+      }
+      // Keep the loading screen and withhold the ready tag until storage has restored. Opening
+      // underneath it publishes the runtime before the first content draw.
+      if (!ready) SavedPrototypeStatus(state) { finish() }
+    }
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -90,14 +124,13 @@ class SavedPrototypeActivity : ComponentActivity() {
         runtime?.flushStorage()
         runtime?.close()
         runtime = null
-        images = null
-        fonts = null
+        content = null
         state = SavedPrototypeScreenState.Loading
         val loadedState =
           withContext(SavedPrototypeActivityDependencies.ioDispatcher) { loadState(id) }
         if (isFinishing) return@withLock
-        if (loadedState is SavedPrototypeScreenState.Ready) prepareRuntime(loadedState.loaded)
-        state = loadedState
+        if (loadedState is SavedPrototypeScreenState.Ready) prepareContent(loadedState.loaded)
+        else state = loadedState
       }
     }
   }
@@ -115,40 +148,43 @@ class SavedPrototypeActivity : ComponentActivity() {
     }
   }
 
-  private suspend fun prepareRuntime(loaded: SavedPrototypeLoadResult.Loaded) {
+  private fun prepareContent(loaded: SavedPrototypeLoadResult.Loaded) {
     val source = SavedPrototypeAssetSource(loaded)
-    images =
-      PrototypeImageCache(
-        source,
-        BitmapPrototypeImageDecoder(),
-        dispatcher = SavedPrototypeActivityDependencies.ioDispatcher,
-      )
-    fonts = PrototypeFontCache(source, ComposePrototypeFontLoader())
-    // The stored values replace the saved spec's before the first draw, as for a shown prototype.
-    val opened =
-      PrototypeStoragePersistence(
-          SavedPrototypeActivityDependencies.storageStore(this),
-          CoroutinePrototypeScheduler(scope),
-          SavedPrototypeActivityDependencies.ioDispatcher,
-          registry = PrototypeStorageSessionRegistry.Shared,
-        )
-        .prepare(loaded.spec) { restored ->
-          PrototypeSpecValidator.validate(Json.encodeToString(restored)) is
-            PrototypeSpecValidation.Success
+    val host =
+      EmbeddedPrototypeHost(scope, interactions, SavedPrototypeActivityDependencies.ioDispatcher)
+        .apply {
+          clock = SavedPrototypeActivityDependencies.clock
+          nextSequence = SavedPrototypeEvents::nextSequence
+          storageRegistry = PrototypeStorageSessionRegistry.Shared
+          flushScope = SavedPrototypeActivityDependencies.flushScope
+          // Default delivery uses public onEvent. Await injected suspending sinks inside the
+          // runtime so consecutive events cannot overtake one another.
+          eventSink =
+            SavedPrototypeActivityDependencies.eventSink.takeUnless {
+              it === SavedPrototypeActivityDependencies.defaultEventSink
+            }
+          requestDismiss = {
+            finish()
+            true
+          }
+          isCurrent = { content?.host === this && !isFinishing && scope.isActive }
+          onRuntime = { opened ->
+            if (isCurrent()) {
+              runtime = opened
+              state = SavedPrototypeScreenState.Ready(loaded)
+            } else opened.close()
+          }
+          onInteraction = { interaction, target -> interact(interaction, target) }
         }
-    opened.commit()
-    runtime =
-      PrototypeRuntime(
-        opened.spec,
-        SavedPrototypeActivityDependencies.eventSink,
-        SavedPrototypeActivityDependencies.clock,
-        nextSequence = { SavedPrototypeEvents.nextSequence(loaded.spec.id) },
-        requestDismiss = {
-          finish()
-          true
-        },
-        storage = opened.session,
-        httpClients = SavedPrototypeActivityDependencies.httpClients(),
+    content =
+      SavedPrototypeContent(
+        // Serialize the validated model: test stores and replaced documents need not keep their
+        // original JSON text in sync with the immutable saved snapshot.
+        Json.encodeToString(loaded.spec),
+        PrototypeAssets(image = source::read, font = source::read),
+        prototypeHostStorage(SavedPrototypeActivityDependencies.storageStore(this)),
+        SavedPrototypeActivityDependencies.network(),
+        host,
       )
   }
 
@@ -187,6 +223,14 @@ class SavedPrototypeActivity : ComponentActivity() {
     super.onDestroy()
   }
 }
+
+private class SavedPrototypeContent(
+  val spec: String,
+  val assets: PrototypeAssets,
+  val storage: PrototypeStorage,
+  val network: PrototypeNetwork,
+  val host: EmbeddedPrototypeHost,
+)
 
 @Composable
 private fun SavedPrototypeStatus(state: SavedPrototypeScreenState, close: () -> Unit) {

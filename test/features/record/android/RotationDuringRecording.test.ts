@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -157,15 +157,19 @@ async function setupTapPipeline(withClientNotifications = false) {
   let restoreClientSpy: (() => void) | undefined;
   let a11y: FakeA11y | undefined;
   if (withClientNotifications) {
-    const client = {
-      ensureConnected: async () => true,
-      getSupportedCommands: async () => [],
-      notifyRecordingStarted: () => notificationCounts.started++,
-      notifyRecordingStopped: () => notificationCounts.stopped++,
-      onInteraction: () => () => notificationCounts.unsubscribed++,
-      onDisplayTransition: undefined,
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, { timer });
+    client.ensureConnected = async () => true;
+    client.getSupportedCommands = async () => [];
+    client.notifyRecordingStarted = () => {
+      notificationCounts.started++;
     };
-    const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    client.notifyRecordingStopped = () => {
+      notificationCounts.stopped++;
+    };
+    client.onInteraction = () => () => {
+      notificationCounts.unsubscribed++;
+    };
+    clientSpy.mockReturnValue(client);
     restoreClientSpy = () => clientSpy.mockRestore();
   } else {
     a11y = new FakeA11y();
@@ -191,6 +195,7 @@ async function setupTapPipeline(withClientNotifications = false) {
 
 function toNodeAxes(axes: TouchAxes) {
   return {
+    kind: "touch" as const,
     axisXMin: axes.xMin,
     axisXMax: axes.xMax,
     axisYMin: axes.yMin,
@@ -801,4 +806,12 @@ describe("a superseded geometry refresh is discarded (#10181)", () => {
     await tracker.settle();
     expect(inForce()).not.toContain("display size changed");
   });
+});
+
+let clientSpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
+beforeEach(() => {
+  clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+});
+afterEach(() => {
+  clientSpy.mockRestore();
 });

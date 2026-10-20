@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
+import { describe, expect } from "bun:test";
+import { warmedTests } from "../helpers/warmedTests";
+import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
@@ -15,7 +16,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { DeviceInfo } from "../../src/models";
 import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -41,7 +42,10 @@ isolateToolRegistry();
  * `DeviceAlreadyRunningError`; this models that one contract and nothing else.
  */
 class RefusingRunningImageDeviceUtils extends FakeDeviceUtils {
-  override async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess | null> {
+  override async startDevice(
+    device: DeviceInfo,
+    timeoutMs?: number,
+  ): Promise<HostChildProcess | null> {
     if (await this.isDeviceImageRunning(device)) {
       throw new DeviceAlreadyRunningError(
         `${device.platform} device '${device.name}' is already running`,
@@ -84,8 +88,9 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
   let sessions: SessionManager;
   let devices: RefusingRunningImageDeviceUtils;
   let coordinator: InMemoryVirtualDeviceLifecycleCoordinator;
+  const test = warmedTests(resetHarness);
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
@@ -128,17 +133,29 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  }
 
-  afterEach(() => {
+  // Rebuild the harness inside every measured test after the shared warm-up.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function resetHarness(): void {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
-    sessions.stopCleanupTimer();
+    sessions?.stopCleanupTimer();
     clearDirectSessionDevices();
     setDeviceManager(null);
     PlatformDeviceManagerFactory.reset();
-    timer.reset();
-  });
+    timer?.reset();
+  }
 
   const spin = async (turns = 400): Promise<void> => {
     for (let turn = 0; turn < turns; turn++) {
@@ -191,7 +208,7 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
   };
 
   // Control: iOS (#9902) serves the queued start from the simulator the first one booted.
-  test("control: the same client's queued iOS start adopts the booted simulator", async () => {
+  arranged("control: the same client's queued iOS start adopts the booted simulator", async () => {
     const [first, second] = await startTwoBehindHeldLease("ios", "mcp-a");
 
     expect(first.ok).toBe(true);
@@ -202,18 +219,21 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
     );
   });
 
-  test("the same client's queued Android start adopts the emulator the first start booted", async () => {
-    const [first, second] = await startTwoBehindHeldLease("android", "mcp-a");
+  arranged(
+    "the same client's queued Android start adopts the emulator the first start booted",
+    async () => {
+      const [first, second] = await startTwoBehindHeldLease("android", "mcp-a");
 
-    expect(first.ok).toBe(true);
-    expect(second.ok ? "adopted" : second.error.message).toBe("adopted");
-    expect(second.ok && second.payload.acquisition).toBe("already-booted");
-    expect(second.ok && second.payload.runtime.session.sessionUuid).toBe(
-      first.ok ? first.payload.runtime.session.sessionUuid : undefined,
-    );
-  });
+      expect(first.ok).toBe(true);
+      expect(second.ok ? "adopted" : second.error.message).toBe("adopted");
+      expect(second.ok && second.payload.acquisition).toBe("already-booted");
+      expect(second.ok && second.payload.runtime.session.sessionUuid).toBe(
+        first.ok ? first.payload.runtime.session.sessionUuid : undefined,
+      );
+    },
+  );
 
-  test("another client's queued Android start gets the typed held-device refusal", async () => {
+  arranged("another client's queued Android start gets the typed held-device refusal", async () => {
     const [first, second] = await startTwoBehindHeldLease("android", "mcp-b");
 
     expect(first.ok).toBe(true);

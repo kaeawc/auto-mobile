@@ -27,11 +27,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -45,11 +48,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -67,11 +73,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(available = false),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(available = false),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -86,11 +95,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = null,
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -103,14 +115,17 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient =
-            FakeVideoRecordingConfigClient(
-              VideoRecordingConfig(qualityPreset = "high", fps = 60, maxArchiveSizeMb = 2048),
-            ),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient =
+                FakeVideoRecordingConfigClient(
+                  VideoRecordingConfig(qualityPreset = "high", fps = 60, maxArchiveSizeMb = 2048),
+                ),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -124,12 +139,15 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient =
-            FakeAppearanceClient(AppearanceConfig(syncWithHost = false, defaultMode = "dark")),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient =
+                FakeAppearanceClient(AppearanceConfig(syncWithHost = false, defaultMode = "dark")),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -142,12 +160,15 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient =
-            FakeAppearanceClient(AppearanceConfig(syncWithHost = true, defaultMode = "auto")),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient =
+                FakeAppearanceClient(AppearanceConfig(syncWithHost = true, defaultMode = "auto")),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -161,11 +182,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = actions,
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = actions,
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -182,12 +206,15 @@ class DeviceControlsDashboardUiTest {
       setContent {
         MaterialTheme {
           DeviceControlsDashboard(
-            appearanceClient = FakeAppearanceClient(),
-            recordingActions = actions,
-            recordingConfigClient = FakeVideoRecordingConfigClient(),
-            streamClient = FakeWebRtcStreamClient(),
             activeDeviceId = "emulator-5554",
             releasedDeviceId = released.value,
+            options =
+              DeviceControlsClients(
+                appearanceClient = FakeAppearanceClient(),
+                recordingActions = actions,
+                recordingConfigClient = FakeVideoRecordingConfigClient(),
+                streamClient = FakeWebRtcStreamClient(),
+              ),
           )
         }
       }
@@ -213,11 +240,14 @@ class DeviceControlsDashboardUiTest {
       setContent {
         MaterialTheme {
           DeviceControlsDashboard(
-            appearanceClient = FakeAppearanceClient(),
-            recordingActions = actions,
-            recordingConfigClient = FakeVideoRecordingConfigClient(),
-            streamClient = FakeWebRtcStreamClient(),
             activeDeviceId = selected.value,
+            options =
+              DeviceControlsClients(
+                appearanceClient = FakeAppearanceClient(),
+                recordingActions = actions,
+                recordingConfigClient = FakeVideoRecordingConfigClient(),
+                streamClient = FakeWebRtcStreamClient(),
+              ),
           )
         }
       }
@@ -251,11 +281,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = actions,
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = actions,
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -278,11 +311,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = actions,
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = actions,
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -302,11 +338,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -321,11 +360,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(),
+            ),
         )
       }
     }
@@ -338,11 +380,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = FakeWebRtcStreamClient(available = false),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = FakeWebRtcStreamClient(available = false),
+            ),
         )
       }
     }
@@ -358,11 +403,14 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient = streamClient,
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient = streamClient,
+            ),
         )
       }
     }
@@ -381,14 +429,18 @@ class DeviceControlsDashboardUiTest {
     setContent {
       MaterialTheme {
         DeviceControlsDashboard(
-          appearanceClient = FakeAppearanceClient(),
-          recordingActions = FakeVideoRecordingActions(),
-          recordingConfigClient = FakeVideoRecordingConfigClient(),
-          streamClient =
-            FakeWebRtcStreamClient(
-              startFailure = "WebRTC streaming is not configured (AUTOMOBILE_WEBRTC_WHIP_ENDPOINT)",
-            ),
           activeDeviceId = "emulator-5554",
+          options =
+            DeviceControlsClients(
+              appearanceClient = FakeAppearanceClient(),
+              recordingActions = FakeVideoRecordingActions(),
+              recordingConfigClient = FakeVideoRecordingConfigClient(),
+              streamClient =
+                FakeWebRtcStreamClient(
+                  startFailure =
+                    "WebRTC streaming is not configured (AUTOMOBILE_WEBRTC_WHIP_ENDPOINT)",
+                ),
+            ),
         )
       }
     }

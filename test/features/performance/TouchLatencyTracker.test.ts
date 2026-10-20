@@ -1,44 +1,32 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { logger } from "../../../src/utils/logger";
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { TouchLatencyTracker } from "../../../src/features/performance/TouchLatencyTracker";
-import { BootedDevice, ScreenSize } from "../../../src/models";
+import { BootedDevice, ExecResult, ScreenSize } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 /**
  * Extended FakeAdbExecutor that supports dynamic responses based on call count.
  * Used for testing scenarios where command responses change over time.
  */
 class DynamicFakeAdbExecutor extends FakeAdbExecutor {
-  private commandHandlers: Map<
-    string,
-    (command: string, callCount: number) => { stdout: string; stderr: string }
-  > = new Map();
+  private commandHandlers: Map<string, (command: string, callCount: number) => ExecResult> =
+    new Map();
   private callCounts: Map<string, number> = new Map();
 
   setDynamicCommandHandler(
     pattern: string,
-    handler: (command: string, callCount: number) => { stdout: string; stderr: string },
+    handler: (command: string, callCount: number) => ExecResult,
   ): void {
     this.commandHandlers.set(pattern, handler);
     this.callCounts.set(pattern, 0);
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<{
-    stdout: string;
-    stderr: string;
-    toString: () => string;
-    trim: () => string;
-    includes: (search: string) => boolean;
-  }> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     // Check for dynamic handlers first
     for (const [pattern, handler] of this.commandHandlers.entries()) {
       if (command.includes(pattern)) {
@@ -55,7 +43,7 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
       }
     }
     // Fall back to parent behavior
-    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return super.executeCommand(command, options);
   }
 
   resetCallCounts(): void {
@@ -112,8 +100,8 @@ describe("TouchLatencyTracker - Unit Tests", function () {
   beforeEach(function () {
     device = {
       deviceId: "test-device",
+      name: "Test Device",
       platform: "android",
-      state: "device",
     };
 
     screenSize = {
@@ -135,8 +123,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       const factory: AdbClientFactory = { create: () => fakeAdb };
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
-      // Access private method via type assertion for testing
-      const location = (tracker as any).selectSafeTouchLocation(screenSize);
+      const location = tracker.selectSafeTouchLocation(screenSize);
 
       expect(location.x).toBe(Math.floor(1080 * 0.5));
       expect(location.y).toBe(Math.floor(1920 * 0.12));
@@ -150,7 +137,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
       const smallScreen: ScreenSize = { width: 720, height: 1280 };
-      const location = (tracker as any).selectSafeTouchLocation(smallScreen);
+      const location = tracker.selectSafeTouchLocation(smallScreen);
 
       expect(location.x).toBe(Math.floor(720 * 0.5));
       expect(location.y).toBe(Math.floor(1280 * 0.12));
@@ -162,7 +149,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       const factory: AdbClientFactory = { create: () => fakeAdb };
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
-      const location = (tracker as any).selectSafeTouchLocation(screenSize, { x: 42, y: 84 });
+      const location = tracker.selectSafeTouchLocation(screenSize, { x: 42, y: 84 });
 
       expect(location).toEqual({ x: 42, y: 84 });
     });
@@ -174,11 +161,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       // App occupies only the lower half of the screen.
       const windowBounds = { left: 0, top: 960, right: 1080, bottom: 1920 };
-      const location = (tracker as any).selectSafeTouchLocation(
-        screenSize,
-        undefined,
-        windowBounds,
-      );
+      const location = tracker.selectSafeTouchLocation(screenSize, undefined, windowBounds);
 
       expect(location).toEqual({ x: 540, y: 1440 });
     });
@@ -189,11 +172,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
       const invalidBounds = { left: 100, top: 100, right: 100, bottom: 100 };
-      const location = (tracker as any).selectSafeTouchLocation(
-        screenSize,
-        undefined,
-        invalidBounds,
-      );
+      const location = tracker.selectSafeTouchLocation(screenSize, undefined, invalidBounds);
 
       expect(location).toEqual({ x: Math.floor(1080 * 0.5), y: Math.floor(1920 * 0.12) });
     });
@@ -207,7 +186,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         // Two identical no-input snapshots first (no growth between them),
@@ -215,8 +194,8 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         gfxinfoCallCount++;
         if (gfxinfoCallCount <= 2) {
           // Pre-tap snapshots
-          return {
-            stdout: `
+          return createExecResult(
+            `
               50th percentile: 8.5ms
               90th percentile: 12.3ms
               95th percentile: 15.7ms
@@ -225,12 +204,12 @@ describe("TouchLatencyTracker - Unit Tests", function () {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: "",
-          };
+            "",
+          );
         } else {
           // After touch - show frame activity
-          return {
-            stdout: `
+          return createExecResult(
+            `
               50th percentile: 10.2ms
               90th percentile: 15.8ms
               95th percentile: 18.3ms
@@ -239,12 +218,12 @@ describe("TouchLatencyTracker - Unit Tests", function () {
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: "",
-          };
+            "",
+          );
         }
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -273,34 +252,34 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           callCount = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         callCount++;
         // Two identical pre-tap snapshots (no growth), then activity once
         // polling for the post-tap response begins.
         if (callCount <= 2) {
-          return {
-            stdout: `
+          return createExecResult(
+            `
               Number Missed Vsync: 0
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: "",
-          };
+            "",
+          );
         } else {
-          return {
-            stdout: `
+          return createExecResult(
+            `
               Number Missed Vsync: 1
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: "",
-          };
+            "",
+          );
         }
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -325,21 +304,21 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         // Always return same stats - no frame activity
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -365,32 +344,32 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         callCount++;
         if (callCount <= 2) {
-          return {
-            stdout: `
+          return createExecResult(
+            `
               Number Missed Vsync: 0
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: "",
-          };
+            "",
+          );
         } else {
-          return {
-            stdout: `
+          return createExecResult(
+            `
               Number Missed Vsync: 0
               Number Slow UI thread: 1
               Number Frame deadline missed: 0
             `,
-            stderr: "",
-          };
+            "",
+          );
         }
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -415,32 +394,32 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         callCount++;
         if (callCount <= 2) {
-          return {
-            stdout: `
+          return createExecResult(
+            `
               Number Missed Vsync: 0
               Number Slow UI thread: 0
               Number Frame deadline missed: 0
             `,
-            stderr: "",
-          };
+            "",
+          );
         } else {
-          return {
-            stdout: `
+          return createExecResult(
+            `
               Number Missed Vsync: 0
               Number Slow UI thread: 0
               Number Frame deadline missed: 2
             `,
-            stderr: "",
-          };
+            "",
+          );
         }
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -467,26 +446,26 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         callCount++;
         // Two identical pre-tap snapshots at zero, then +3 frames per poll
         // once the touch is injected, jank flat throughout.
         const totalFrames = callCount <= 2 ? 0 : (callCount - 2) * 3;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Total frames rendered: ${totalFrames}
             Janky frames: 0 (0.00%)
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -514,25 +493,25 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         // Frame counter present but flat at zero: no frame was rendered
         // during the pre-tap idle window (not animating) and none after the
         // tap either (frozen), so this exercises the "no increase" timeout
         // path rather than the animating path (#6167).
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Total frames rendered: 0
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -559,25 +538,25 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         // The app keeps rendering (spinner/video) with no input at all - the
         // counter keeps growing across the two consecutive no-input
         // snapshots, not just showing a single one-off frame.
         callCount++;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Total frames rendered: ${12 + callCount * 3}
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -607,7 +586,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           pollCount = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         pollCount++;
@@ -615,18 +594,18 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         // frames, no growth between them. Only after the synthetic tap does
         // the frame counter move.
         const totalFrames = pollCount <= 2 ? 0 : 5;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Total frames rendered: ${totalFrames}
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -659,7 +638,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         callCount++;
@@ -667,18 +646,18 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         // pre-tap snapshots see the same non-zero count - no growth between
         // them), then a real frame only after the synthetic tap.
         const totalFrames = callCount <= 2 ? 1 : 4;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Total frames rendered: ${totalFrames}
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -718,7 +697,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         const elapsed = fakeTimer.now();
@@ -726,18 +705,18 @@ describe("TouchLatencyTracker - Unit Tests", function () {
           elapsed < FIRST_FRAME_AT_MS
             ? 0
             : Math.floor((elapsed - FIRST_FRAME_AT_MS) / FRAME_PERIOD_MS) + 1;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Total frames rendered: ${totalFrames}
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -763,19 +742,19 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -804,7 +783,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         // A slow animation manages only a single extra frame between the two
@@ -813,18 +792,18 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         // app is rendering with no input.
         callCount++;
         const totalFrames = callCount === 1 ? 0 : 1;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Total frames rendered: ${totalFrames}
             Number Missed Vsync: 0
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -849,7 +828,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         // Some gfxinfo variants omit "Total frames rendered" entirely, but
@@ -858,17 +837,17 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         // the app rendered with no input.
         callCount++;
         const missedVsync = 2 * callCount;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Number Missed Vsync: ${missedVsync}
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -894,24 +873,24 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           pollCount = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
         pollCount++;
         // No "Total frames rendered" line at all in this gfxinfo variant.
         // Both pre-tap snapshots are a true zero on every counter (no
         // growth); only after the tap does a jank counter move.
         const missedVsync = pollCount <= 2 ? 0 : 1;
-        return {
-          stdout: `
+        return createExecResult(
+          `
             Number Missed Vsync: ${missedVsync}
             Number Slow UI thread: 0
             Number Frame deadline missed: 0
           `,
-          stderr: "",
-        };
+          "",
+        );
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -938,17 +917,14 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           pollCount = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
         pollCount++;
         const totalFrames = pollCount <= 2 ? 0 : 5;
-        return {
-          stdout: `Total frames rendered: ${totalFrames}`,
-          stderr: "",
-        };
+        return createExecResult(`Total frames rendered: ${totalFrames}`, "");
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -976,22 +952,22 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         if (command.includes("reset")) {
           sampleIndex++;
           pollInSample = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         pollInSample++;
         if (sampleIndex === 1) {
           // Sample 1: animating - the counter keeps growing across the two
           // consecutive pre-tap snapshots.
-          return { stdout: `Total frames rendered: ${4 * pollInSample}`, stderr: "" };
+          return createExecResult(`Total frames rendered: ${4 * pollInSample}`, "");
         }
         // Sample 2: static across both pre-tap snapshots, then a real
         // post-tap frame.
         const totalFrames = pollInSample <= 2 ? 0 : 3;
-        return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
+        return createExecResult(`Total frames rendered: ${totalFrames}`, "");
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -1023,22 +999,22 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         if (command.includes("reset")) {
           sampleIndex++;
           pollInSample = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
 
         pollInSample++;
         if (sampleIndex === 1) {
           // Sample 1: animating - the counter keeps growing across the two
           // consecutive pre-tap snapshots.
-          return { stdout: `Total frames rendered: ${4 * pollInSample}`, stderr: "" };
+          return createExecResult(`Total frames rendered: ${4 * pollInSample}`, "");
         }
         // Sample 2: a genuinely frozen app - flat at zero across both
         // pre-tap snapshots and after the tap, no frame activity ever, times
         // out.
-        return { stdout: `Total frames rendered: 0`, stderr: "" };
+        return createExecResult(`Total frames rendered: 0`, "");
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -1067,12 +1043,12 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
-        return { stdout: `Total frames rendered: 0`, stderr: "" };
+        return createExecResult(`Total frames rendered: 0`, "");
       });
 
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
@@ -1103,7 +1079,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
     // must use the CURRENT inert point, not the stale one from the first tap.
     test("re-derives the inert point before each tap so a moved control never reuses a stale point (#6228)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       // Model frames as rendered only AFTER the tap, not by pure poll count: the
       // quiescence snapshots AND the refreshed post-revalidation baseline (#6228)
       // all read idle, then real frames land once the synthetic tap fires. Gate
@@ -1116,10 +1092,10 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         if (command.includes("reset")) {
           tapsAtReset = taps;
           framesAfterTap = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
         const totalFrames = taps > tapsAtReset ? (framesAfterTap += 3) : 0;
-        return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
+        return createExecResult(`Total frames rendered: ${totalFrames}`, "");
       });
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
@@ -1170,7 +1146,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
     // point, not the never-tapped initial selection.
     test("touchCoordinates must not report the never-tapped initial point when the last sample is obstructed (#6318)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       let tapsAtReset = 0;
       let framesAfterTap = 0;
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command) => {
@@ -1178,10 +1154,10 @@ describe("TouchLatencyTracker - Unit Tests", function () {
         if (command.includes("reset")) {
           tapsAtReset = taps;
           framesAfterTap = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
         const totalFrames = taps > tapsAtReset ? (framesAfterTap += 3) : 0;
-        return { stdout: `Total frames rendered: ${totalFrames}`, stderr: "" };
+        return createExecResult(`Total frames rendered: ${totalFrames}`, "");
       });
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
@@ -1222,12 +1198,12 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
         // Idle baseline snapshots so the sample reaches the re-validation step.
-        return { stdout: `Total frames rendered: 0`, stderr: "" };
+        return createExecResult(`Total frames rendered: 0`, "");
       });
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 
       const resolver = {
@@ -1262,18 +1238,18 @@ describe("TouchLatencyTracker - Unit Tests", function () {
     // be folded into the baseline, not misattributed as the tap's response.
     test("does not attribute a frame rendered during re-observe to the tap (#6228)", async function () {
       const dynamicAdb = new DynamicFakeAdbExecutor();
-      dynamicAdb.setCommandResponse("input tap", { stdout: "", stderr: "" });
+      dynamicAdb.setCommandResponse("input tap", createExecResult("", ""));
       let frames = 0;
 
       dynamicAdb.setDynamicCommandHandler("dumpsys gfxinfo", (command, _callCount) => {
         if (command.includes("reset")) {
           frames = 0;
-          return { stdout: "", stderr: "" };
+          return createExecResult("", "");
         }
         // Frames only ever come from the re-observe render below; the tap itself
         // renders nothing. So if the baseline is refreshed after re-observe, the
         // post-tap polls see no NEW frame and the sample correctly times out.
-        return { stdout: `Total frames rendered: ${frames}`, stderr: "" };
+        return createExecResult(`Total frames rendered: ${frames}`, "");
       });
       const factory: AdbClientFactory = { create: () => dynamicAdb };
 

@@ -1,17 +1,21 @@
+import { createExecResult } from "../../src/utils/execResult";
 import { warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
-import { KeyboardOpenIndeterminateError } from "../../src/features/action/Keyboard";
+import { KeyboardOpenIndeterminateError } from "../../src/features/action/KeyboardOpenIndeterminateError";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetKeyboardFactory,
-  setKeyboardFactory,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+isolateToolRegistry();
+
+const interactionDeps: InteractionToolDependencies = {};
 const test = warmedTests(() => ToolRegistry.clearTools());
 
 test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME switch or tap", async () => {
@@ -20,7 +24,8 @@ test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME sw
   let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
-      keyboardHandler = args[3];
+      keyboardHandler = (device, input, progress, signal) =>
+        args[3](device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });
@@ -33,7 +38,7 @@ test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME sw
   );
   try {
     ToolRegistry.clearTools();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     expect(keyboardHandler).toBeDefined();
     const controller = new AbortController();
     controller.abort();
@@ -59,7 +64,8 @@ test("registered keyboard setIme completes verification after cancellation follo
   let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
-      keyboardHandler = args[3];
+      keyboardHandler = (device, input, progress, signal) =>
+        args[3](device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });
@@ -67,18 +73,18 @@ test("registered keyboard setIme completes verification after cancellation follo
   const oldIme = "com.example/.OldIme";
   const newIme = "com.example/.NewIme";
   adb.setThrowOnAbortedSignal();
-  adb.setCommandResponse("shell ime list -a -s", { stdout: `${oldIme}\n${newIme}\n`, stderr: "" });
-  adb.setCommandResponse("shell ime list -s", { stdout: `${oldIme}\n${newIme}\n`, stderr: "" });
+  adb.setCommandResponse("shell ime list -a -s", createExecResult(`${oldIme}\n${newIme}\n`, ""));
+  adb.setCommandResponse("shell ime list -s", createExecResult(`${oldIme}\n${newIme}\n`, ""));
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: oldIme, stderr: "" },
-    { stdout: newIme, stderr: "" },
+    createExecResult(oldIme, ""),
+    createExecResult(newIme, ""),
   ]);
   const controller = new AbortController();
   adb.abortAfterCommand(`shell ime set ${newIme}`, controller);
   const create = spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
   try {
     ToolRegistry.clearTools();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     expect(keyboardHandler).toBeDefined();
     const device = { deviceId: "fake-keyboard-set-ime", platform: "android" } as BootedDevice;
     const response = await keyboardHandler!(
@@ -119,27 +125,28 @@ async function openKeyboardWithAbortedFailure(failure: Error) {
   let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
-      keyboardHandler = args[3];
+      keyboardHandler = (device, input, progress, signal) =>
+        args[3](device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });
   const controller = new AbortController();
-  setKeyboardFactory(() => ({
+  interactionDeps.keyboardFactory = () => ({
     execute: async () => {
       controller.abort();
       throw failure;
     },
-  }));
+  });
   try {
     ToolRegistry.clearTools();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const device = { deviceId: "fake-keyboard-open", platform: "android" } as BootedDevice;
     return await keyboardHandler!(device, { action: "open" }, undefined, controller.signal).then(
       () => undefined,
       (error: unknown) => error,
     );
   } finally {
-    resetKeyboardFactory();
+    delete interactionDeps.keyboardFactory;
     registration.mockRestore();
     ToolRegistry.clearTools();
   }

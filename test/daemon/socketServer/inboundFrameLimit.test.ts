@@ -1,9 +1,10 @@
-import { createTestUnixSocketServer } from "../../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
+import { createHarnessServer } from "../helpers/UnixSocketServerHarness";
+import { UnixSocketServerHarness } from "../helpers/UnixSocketServerHarness";
+import { createFakeDaemonState } from "../helpers/inputSocketHarness";
+import { FakeSocket } from "../../fakes/FakeNetServer";
 import type { Socket } from "node:net";
 import { describe, expect, it } from "bun:test";
 import { FailuresStreamSocketServer } from "../../../src/daemon/failuresStreamSocketServer";
-import { type UnixSocketServer } from "../../../src/daemon/socketServer";
 import { BaseSocketServer } from "../../../src/daemon/socketServer/BaseSocketServer";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import {
@@ -15,38 +16,29 @@ import type {
   SocketRequest,
   SocketResponse,
 } from "../../../src/daemon/socketServer/SocketServerTypes";
-import type { DaemonResponse } from "../../../src/daemon/types";
 import { FakeFailuresStreamRepository } from "../../fakes/FakeFailuresStreamRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const LIMIT = 64;
 
 /** Socket double that flushes writes immediately and records destruction. */
-class FlushingSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly writes: string[] = [];
+class FlushingSocket extends FakeSocket<unknown> {}
 
-  setTimeout(): this {
-    return this;
+/** Socket whose writes are recorded but never flushed: the peer is not reading. */
+class UnflushedSocket extends FakeSocket<unknown> {
+  write(data: string | Buffer): boolean {
+    return super.write(data);
   }
+}
 
-  write(payload: string, callback?: (error?: Error | null) => void): boolean {
-    this.writes.push(payload);
-    callback?.();
-    return true;
-  }
+/** Control socket server with a tiny inbound frame limit. */
+class SmallFrameControlServer extends UnixSocketServerHarness {
+  protected readonly maxInboundFrameBytes = LIMIT;
+}
 
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-
-  asSocket(): Socket {
-    return this as unknown as Socket;
+class FailuresStreamHarness extends FailuresStreamSocketServer {
+  attach(socket: Socket): void {
+    this.handleConnection(socket);
   }
 }
 
@@ -105,7 +97,7 @@ describe("auxiliary socket inbound frame limit", () => {
   it("destroys a base-server connection that never sends a newline", () => {
     const server = new RawServer();
     const socket = new FlushingSocket();
-    server.attach(socket.asSocket());
+    server.attach(socket);
 
     for (let sent = 0; sent <= LIMIT && !socket.destroyed; sent += 8) {
       socket.emit("data", Buffer.from("aaaaaaaa"));
@@ -118,12 +110,12 @@ describe("auxiliary socket inbound frame limit", () => {
   it("answers an over-limit request/response frame with a structured error, then destroys", async () => {
     const server = new EchoServer();
     const socket = new FlushingSocket();
-    server.attach(socket.asSocket());
+    server.attach(socket);
 
     socket.emit("data", Buffer.from(`{"id":"1","value":"${"x".repeat(LIMIT * 2)}"}\n`));
     await flushMicrotasks();
 
-    expect(socket.writes.map((write) => JSON.parse(write))).toEqual([
+    expect(socket.responses).toEqual([
       { success: false, error: "Invalid request: frame too large" },
     ]);
     expect(socket.destroyed).toBe(true);
@@ -133,8 +125,8 @@ describe("auxiliary socket inbound frame limit", () => {
     const server = new EchoServer();
     const bad = new FlushingSocket();
     const good = new FlushingSocket();
-    server.attach(bad.asSocket());
-    server.attach(good.asSocket());
+    server.attach(bad);
+    server.attach(good);
 
     bad.emit("data", Buffer.from("x".repeat(LIMIT + 1)));
     good.emit("data", Buffer.from('{"id":"7","value":"hi"}\n'));
@@ -142,15 +134,13 @@ describe("auxiliary socket inbound frame limit", () => {
 
     expect(bad.destroyed).toBe(true);
     expect(good.destroyed).toBe(false);
-    expect(good.writes.map((write) => JSON.parse(write))).toEqual([
-      { id: "7", success: true, value: "hi" },
-    ]);
+    expect(good.responses).toEqual([{ id: "7", success: true, value: "hi" }]);
   });
 
   it("still serves a frame at the limit", async () => {
     const server = new EchoServer();
     const socket = new FlushingSocket();
-    server.attach(socket.asSocket());
+    server.attach(socket);
     const prefix = '{"id":"1","value":"';
     const suffix = '"}';
     const value = "y".repeat(LIMIT - prefix.length - suffix.length);
@@ -159,28 +149,17 @@ describe("auxiliary socket inbound frame limit", () => {
     await flushMicrotasks();
 
     expect(socket.destroyed).toBe(false);
-    expect(socket.writes.map((write) => JSON.parse(write))).toEqual([
-      { id: "1", success: true, value },
-    ]);
+    expect(socket.responses).toEqual([{ id: "1", success: true, value }]);
   });
 });
 
 describe("control socket inbound frame limit", () => {
-  function connect(socket: FlushingSocket): UnixSocketServer {
-    const server = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      undefined,
-      new FakeTimer(),
-    );
-    const internals = server as unknown as {
-      acceptingRequests: boolean;
-      maxInboundFrameBytes: number;
-      handleConnection(socket: Socket): void;
-    };
-    internals.acceptingRequests = true;
-    internals.maxInboundFrameBytes = LIMIT;
-    internals.handleConnection(socket.asSocket());
+  function connect(socket: Socket): UnixSocketServerHarness {
+    const server = new SmallFrameControlServer("unused", createFakeDaemonState(), new FakeTimer());
+    server.allowRequests();
+    // Frame handling is under test, not request routing: a complete frame is answered by no one.
+    server.requestHandler = async () => undefined;
+    server.connect(socket);
     return server;
   }
 
@@ -194,7 +173,7 @@ describe("control socket inbound frame limit", () => {
     }
 
     expect(socket.destroyed).toBe(true);
-    const frames = socket.writes.map((write) => JSON.parse(write) as DaemonResponse);
+    const frames = socket.responses;
     expect(frames).toHaveLength(1);
     expect(frames[0]).toMatchObject({
       id: null,
@@ -205,11 +184,7 @@ describe("control socket inbound frame limit", () => {
   });
 
   it("ignores bytes that arrive after the overflow while the reply is unflushed", () => {
-    const socket = new FlushingSocket();
-    socket.write = (payload: string): boolean => {
-      socket.writes.push(payload);
-      return true; // flush callback never fires: the peer is not reading
-    };
+    const socket = new UnflushedSocket();
     connect(socket);
 
     socket.emit("data", Buffer.from("z".repeat(LIMIT + 1)));
@@ -235,36 +210,22 @@ describe("per-server inbound frame limits", () => {
     expect(CONTROL_SOCKET_MAX_FRAME_BYTES).toBe(256 * 1024 * 1024);
     expect(AUX_SOCKET_MAX_FRAME_BYTES).toBe(1024 * 1024);
     expect(FAILURES_STREAM_MAX_FRAME_BYTES).toBeGreaterThan(AUX_SOCKET_MAX_FRAME_BYTES);
-    const control = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      undefined,
-      new FakeTimer(),
-    );
-    expect((control as unknown as { maxInboundFrameBytes: number }).maxInboundFrameBytes).toBe(
-      CONTROL_SOCKET_MAX_FRAME_BYTES,
-    );
+    const control = createHarnessServer("unused", undefined, new FakeTimer());
+    expect(control.inboundFrameLimit).toBe(CONTROL_SOCKET_MAX_FRAME_BYTES);
   });
 
   it("accepts a failures-stream acknowledge frame larger than the 1 MiB default", async () => {
     const repository = new FakeFailuresStreamRepository();
     const socket = new FlushingSocket();
     const authorizedSessions: Array<string | undefined> = [];
-    const server = new FailuresStreamSocketServer(
-      "/fake/failures.sock",
-      new FakeTimer(),
-      repository,
-      {
-        authenticator: {
-          authorize({ sessionUuid }) {
-            authorizedSessions.push(sessionUuid);
-          },
+    const server = new FailuresStreamHarness("/fake/failures.sock", new FakeTimer(), repository, {
+      authenticator: {
+        authorize({ sessionUuid }) {
+          authorizedSessions.push(sessionUuid);
         },
       },
-    );
-    (server as unknown as { handleConnection(socket: Socket): void }).handleConnection(
-      socket.asSocket(),
-    );
+    });
+    server.attach(socket);
     const ids = Array.from({ length: 250_000 }, (_, index) => index);
     const frame = JSON.stringify({
       id: "1",
@@ -280,27 +241,23 @@ describe("per-server inbound frame limits", () => {
     expect(socket.destroyed).toBe(false);
     expect(repository.acknowledgedIds).toHaveLength(ids.length);
     expect(authorizedSessions).toEqual(["frame-test-session"]);
-    expect(socket.writes.map((write) => JSON.parse(write))).toEqual([
-      { success: true, acknowledgedCount: ids.length },
-    ]);
+    expect(socket.responses).toEqual([{ success: true, acknowledgedCount: ids.length }]);
   });
 
   it("rejects a failures-stream frame over its own 8 MiB limit", async () => {
     const socket = new FlushingSocket();
-    const server = new FailuresStreamSocketServer(
+    const server = new FailuresStreamHarness(
       "/fake/failures.sock",
       new FakeTimer(),
       new FakeFailuresStreamRepository(),
     );
-    (server as unknown as { handleConnection(socket: Socket): void }).handleConnection(
-      socket.asSocket(),
-    );
+    server.attach(socket);
 
     socket.emit("data", Buffer.alloc(FAILURES_STREAM_MAX_FRAME_BYTES + 1, 0x61));
     await flushMicrotasks();
 
     expect(socket.destroyed).toBe(true);
-    expect(socket.writes.map((write) => JSON.parse(write))).toEqual([
+    expect(socket.responses).toEqual([
       { success: false, error: "Invalid request: frame too large" },
     ]);
   });

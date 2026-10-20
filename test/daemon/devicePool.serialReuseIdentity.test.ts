@@ -1,3 +1,5 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { logger, LogLevel } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
@@ -12,7 +14,6 @@ import { SessionManager, SessionRecoveryIdentityLossError } from "../../src/daem
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { warmedTests } from "../helpers/warmedTests";
@@ -50,16 +51,13 @@ async function setup(
   const sessions = new SessionManager(timer, persistence);
   sessions.stopCleanupTimer();
   const manager = new FakeDeviceManager([], [device]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon-test", {
-      timer,
-      deviceManager: manager,
-      emulatorLossIncidentStore: incidents,
-      cancelDeviceSessionExecutions,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      ...overrides,
-    }),
-  );
+  const pool = makePool(sessions, "daemon-test", {
+    timer,
+    deviceManager: manager,
+    emulatorLossIncidentStore: incidents,
+    cancelDeviceSessionExecutions,
+    ...overrides,
+  });
   if (knownAvd) {
     await pool.addDevice(device, { ...device, source: "local", isRunning: true });
   } else {
@@ -177,7 +175,11 @@ for (const [path, knownAvd] of [
       const h = await setup(original, knownAvd);
       const kill = spyOn(h.manager, "killDevice");
       try {
-        await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+        await h.pool.bindOrReuseDeviceSession({
+          sessionId: "holder",
+          deviceId: original.deviceId,
+          platform: "android",
+        });
         h.manager.bootedDevices = [replacement];
         if (path === "two-tick monitor") {
           await h.pool.reconcileDiscoveryObservation([placeholder], "disconnect-monitor", {
@@ -215,9 +217,13 @@ for (const [path, knownAvd] of [
         expect(current).not.toBe(h.entry);
         expect(current.incarnation).not.toBe(h.entry.incarnation);
         expect(current).toMatchObject({ name: "AVD-B", sessionId: null });
-        expect(await h.pool.bindOrReuseDeviceSession("rival", original.deviceId, "android")).toBe(
-          "rival",
-        );
+        expect(
+          await h.pool.bindOrReuseDeviceSession({
+            sessionId: "rival",
+            deviceId: original.deviceId,
+            platform: "android",
+          }),
+        ).toBe("rival");
         expect(h.sessions.getSession("rival")?.assignedDevice).toBe(original.deviceId);
         expect(
           h.pool.restartReservationForStart("android", ["AVD-A"], { sessionUuid: "holder" })?.owned,
@@ -249,7 +255,11 @@ for (const idleMs of [600_000, 120_000]) {
     async () => {
       const h = await setup();
       try {
-        await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+        await h.pool.bindOrReuseDeviceSession({
+          sessionId: "holder",
+          deviceId: original.deviceId,
+          platform: "android",
+        });
         const live = h.sessions.getSession("holder")!;
         live.expiresAt = h.timer.now() + idleMs;
         live.sessionTimeoutMs = idleMs;
@@ -303,8 +313,12 @@ warmedTest(
       },
     );
     try {
-      await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
-      const live = h.sessions.getSession("holder");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "holder",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
+      const live = h.sessions.getSession("holder")!;
       h.manager.bootedDevices = [replacement];
       const pending = h.pool.settlePooledRuntimeIdentity(original.deviceId);
       await drainUntil(() => paused.mock.calls.length === 1, {
@@ -431,7 +445,11 @@ for (const path of ["monitor", "fresh settlement"] as const) {
     async () => {
       const h = await setup(handset);
       try {
-        await h.pool.bindOrReuseDeviceSession("handset-holder", handset.deviceId, "android");
+        await h.pool.bindOrReuseDeviceSession({
+          sessionId: "handset-holder",
+          deviceId: handset.deviceId,
+          platform: "android",
+        });
         const incarnation = h.entry.incarnation;
         const holder = h.sessions.getSession("handset-holder");
         const discovery = spyOn(h.manager, "getBootedDevicesDetailed");
@@ -521,17 +539,15 @@ for (const pin of [
       try {
         if (pin === "unresolved pooled identity") {
           await h.sessions.createSession("holder", device.deviceId, device.platform);
-          h.entry.sessionId = "holder";
-          h.entry.status = "assigned";
+          patchDeviceBinding(h.entry, { sessionId: "holder" });
+          patchDeviceBinding(h.entry, { status: "busy" });
         } else {
-          await h.pool.bindOrReuseDeviceSession(
-            "holder",
-            device.deviceId,
-            device.platform,
-            undefined,
-            undefined,
-            device,
-          );
+          await h.pool.bindOrReuseDeviceSession({
+            sessionId: "holder",
+            deviceId: device.deviceId,
+            platform: device.platform,
+            expectedIdentity: device,
+          });
         }
         const observation =
           pin === "unresolved observation"
@@ -591,7 +607,11 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
       { ambientExecutionIdReader: { getExecutionId: () => executionId } },
     );
     try {
-      await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "holder",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       h.manager.bootedDevices = [replacement];
       if (path === "monitor") {
         await h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
@@ -627,7 +647,11 @@ warmedTest("newer A confirmation during cancellation aborts handoff before reser
     return gate.promise;
   });
   try {
-    await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: original.deviceId,
+      platform: "android",
+    });
     h.manager.bootedDevices = [replacement];
     const pending = h.pool.settlePooledRuntimeIdentity(original.deviceId);
     await drainUntil(() => cancelling, { description: "holder cancellation" });
@@ -662,8 +686,8 @@ warmedTest(
       const born = h.pool.getDevice(original.deviceId)!;
       expect(born.identityUnresolved).toBe(true);
       await h.sessions.createSession("holder", original.deviceId, "android");
-      born.sessionId = "holder";
-      born.status = "assigned";
+      patchDeviceBinding(born, { sessionId: "holder" });
+      patchDeviceBinding(born, { status: "busy" });
       h.manager.bootedDevices = [replacement];
       await h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
         settleMembership: true,
@@ -692,7 +716,11 @@ for (const reused of [false, true]) {
     async () => {
       const h = await setup();
       try {
-        await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+        await h.pool.bindOrReuseDeviceSession({
+          sessionId: "holder",
+          deviceId: original.deviceId,
+          platform: "android",
+        });
         const live = h.sessions.getSession("holder")!;
         live.expiresAt = 600_000;
         live.sessionTimeoutMs = 600_000;
@@ -703,7 +731,11 @@ for (const reused of [false, true]) {
         await h.pool.settlePooledRuntimeIdentity(original.deviceId);
         if (!reused) {
           h.manager.bootedDevices = [];
-          await h.pool.removeDevice(original.deviceId, true, h.pool.getDevice(original.deviceId));
+          await h.pool.removeDevice(
+            original.deviceId,
+            true,
+            h.pool.getDevice(original.deviceId) ?? undefined,
+          );
         }
         const [incident] = await h.incidents.list();
         h.timer.advanceTime(500);
@@ -805,13 +837,17 @@ for (const pin of ["no deadline", "duplicate exact matches", "deadline reached"]
 warmedTest("terminal target-busy recovery drops the restart hold", async () => {
   const h = await setup();
   try {
-    await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: original.deviceId,
+      platform: "android",
+    });
     h.manager.bootedDevices = [replacement];
     await h.pool.settlePooledRuntimeIdentity(original.deviceId);
     const returned = { ...original, deviceId: "emulator-5556" };
     h.manager.bootedDevices = [replacement, returned];
     await h.pool.initializeWithDevices([returned]);
-    h.pool.getDevice(returned.deviceId)!.status = "busy";
+    patchDeviceBinding(h.pool.getDevice(returned.deviceId)!, { status: "busy" });
     await expect(
       h.sessions.getOrCreateSession("holder", h.pool, undefined, undefined, true),
     ).rejects.toMatchObject({ reason: "target-busy" });
@@ -849,7 +885,11 @@ warmedTest(
       },
     });
     try {
-      await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "holder",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       h.pool.markIntentionalShutdown(original.deviceId);
       h.manager.bootedDevices = [];
       const recovery = h.pool.recoverSessionBoundAndroidDeviceAfterLoss(
@@ -861,8 +901,8 @@ warmedTest(
       // Another pool observation republishes the old identity while that release is fenced.
       await h.pool.initializeWithDevices([original]);
       const republished = h.pool.getDevice(original.deviceId)!;
-      republished.sessionId = "holder";
-      republished.status = "assigned";
+      patchDeviceBinding(republished, { sessionId: "holder" });
+      patchDeviceBinding(republished, { status: "busy" });
       h.manager.bootedDevices = [replacement];
       expect(await h.pool.settlePooledRuntimeIdentity(original.deviceId)).toBe("replaced");
       expect((await h.persistence.getSession!("holder"))?.release_reason).toBe(
@@ -904,7 +944,11 @@ for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
     );
     let reservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
     try {
-      await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "holder",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       reservation = await h.pool.reserveDeviceForShutdown(original.deviceId);
       expect(reservation).toBeDefined();
       h.manager.bootedDevices = [replacement];

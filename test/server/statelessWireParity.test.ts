@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createFakeDeviceManager } from "../daemon/helpers/inputSocketHarness";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -128,9 +128,39 @@ function normalize(message: unknown): unknown {
   return parsed;
 }
 
+/** The `tools` array of the first `tools/list` result frame the server sent. */
+function listToolsFrameTools(sent: JSONRPCMessage[]): unknown[] {
+  for (const message of sent) {
+    if ("result" in message && Array.isArray(message.result.tools)) {
+      return message.result.tools;
+    }
+  }
+  throw new Error("no tools/list result frame was sent");
+}
+
 describe("tools/list through the proxy matches schemas/tool-definitions.json", () => {
-  beforeEach(() => {
+  interface CommittedTool {
+    name: string;
+    description?: string;
+    inputSchema: unknown;
+    _meta?: Record<string, unknown>;
+  }
+  // Parsing the committed catalog and registering every tool are one-time setup; the single test
+  // below clears the registry afterwards, so beforeAll (outside the 100 ms budget) is enough.
+  let committed: CommittedTool[];
+  let expectedNames: string[];
+  beforeAll(() => {
     registerMcpTools(false);
+    committed = JSON.parse(readFileSync(TOOL_DEFINITIONS_PATH, "utf8")) as CommittedTool[];
+    const defaultEnabled = new Map(
+      ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => [
+        tool.name,
+        tool.defaultEnabled ?? true,
+      ]),
+    );
+    expectedNames = committed
+      .filter((tool) => defaultEnabled.get(tool.name) ?? true)
+      .map((tool) => tool.name);
   });
 
   /*
@@ -146,21 +176,6 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
   ];
 
   test("the wire frame carries the committed definitions byte for byte", async () => {
-    const committed = JSON.parse(readFileSync(TOOL_DEFINITIONS_PATH, "utf8")) as Array<{
-      name: string;
-      description?: string;
-      inputSchema: unknown;
-      _meta?: Record<string, unknown>;
-    }>;
-    const defaultEnabled = new Map(
-      ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => [
-        tool.name,
-        tool.defaultEnabled ?? true,
-      ]),
-    );
-    const expectedNames = committed
-      .filter((tool) => defaultEnabled.get(tool.name) ?? true)
-      .map((tool) => tool.name);
     expect(expectedNames.length).toBeGreaterThan(0);
 
     const availability = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -185,8 +200,7 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
       await client.connect(clientTransport);
       await client.listTools();
 
-      const frame = sent.find((message) => "result" in message && "tools" in message.result);
-      const tools = (frame as { result: { tools: unknown[] } }).result.tools;
+      const tools = listToolsFrameTools(sent);
       const served = tools as Array<{
         name: string;
         description?: string;
@@ -217,12 +231,15 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
 describe("desktop handshake against the real daemon streamable endpoint", () => {
   async function captureHandshake(): Promise<HandshakeFixture> {
     const port = await freePort();
-    const daemon = new Daemon({ port, host: "127.0.0.1" }, { timer: new FakeTimer() });
+    const daemon = new Daemon(
+      { port, host: "127.0.0.1" },
+      { timer: new FakeTimer(), httpToken: "test-http-token" },
+    );
     // The HTTP listener lifecycle is private; Daemon.start() would also boot devices and the DB.
     const call = async (method: string): Promise<void> => {
       await Reflect.get(daemon, method).call(daemon);
     };
-    await call("startHttpServer");
+    await Reflect.get(daemon, "httpIngress").start();
     await call("resolveStartupCompletion");
     await Promise.resolve();
 
@@ -231,6 +248,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     try {
       for (const frame of DESKTOP_FRAMES) {
         const headers: Record<string, string> = {
+          authorization: "Bearer test-http-token",
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
         };
@@ -254,7 +272,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
         });
       }
     } finally {
-      await call("closeHttpListener");
+      await Reflect.get(daemon, "httpIngress").closeListener();
     }
     return {
       scenario: "stateless-handshake",

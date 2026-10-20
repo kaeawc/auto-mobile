@@ -11,7 +11,6 @@ import { createInstantFailureWebSocketFactory } from "../../fakes/FakeWebSocket"
 const device: BootedDevice = {
   deviceId: "shared-methods-test-device",
   platform: "android",
-  isEmulator: true,
   name: "Shared methods test device",
 };
 
@@ -127,7 +126,7 @@ describe("DeviceServiceClient shared methods", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     try {
       client.bindSession("shared-methods-session-a");

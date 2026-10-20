@@ -4,7 +4,11 @@ import type { DaemonSocketReachabilityLike } from "./daemonSocketReachability";
 import type { DaemonLauncher, DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 import type { IdentityRecoveryIO } from "./identityRecovery";
 import type { DaemonPortAvailabilityChecker } from "./portAvailability";
-import type { DaemonProcessFinder, DaemonProcessSignaler } from "./processTable";
+import type {
+  DaemonProcessFinder,
+  DaemonProcessLivenessChecker,
+  DaemonProcessSignaler,
+} from "./processTable";
 import type { ExtractionCleaner } from "./manager";
 import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import type { RetryExecutor } from "../utils/retry/RetryExecutor";
@@ -22,7 +26,8 @@ export interface DaemonManagerOptions {
   lockFilePath?: string;
   pidFilePath?: string;
   socketPath?: string;
-  processFinder?: DaemonProcessFinder;
+  /** A finder may also act as the liveness checker (the default one does). */
+  processFinder?: DaemonProcessFinder & Partial<DaemonProcessLivenessChecker>;
   processSpawner?: DaemonProcessSpawner;
   extractionCleaner?: ExtractionCleaner;
   launcher?: DaemonLauncher;

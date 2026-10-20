@@ -1,4 +1,4 @@
-import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -13,11 +13,70 @@ import {
   PerAvdBlockingReadyManager,
   FailingGetIncidentStore,
   setup,
-  DaemonDisconnectInternals,
-  DaemonDeferredRecoverySweepInternals,
   assertNoRecoveryReservationsRemain,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
+
+type RecoveryFixture = Pick<
+  Awaited<ReturnType<typeof setup>>,
+  "timer" | "manager" | "pool" | "captured"
+>;
+
+/** First loss recovery cannot confirm the emulator shutdown, so it defers after the 30s cooldown. */
+const deferFirstLossRecovery = async (
+  { timer, manager, pool, captured }: RecoveryFixture,
+  incidentId?: string,
+): Promise<void> => {
+  const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+    original.deviceId,
+    incidentId,
+    captured,
+  );
+  await manager.killAccepted.promise;
+  await flush();
+  timer.advanceTime(30_000);
+  expect(await firstRecovery).toBe("deferred");
+};
+
+/** First ADB-reset recovery cannot confirm the emulator shutdown, so it returns false after 30s. */
+const deferFirstAdbResetRecovery = async ({
+  timer,
+  manager,
+  pool,
+  captured,
+}: RecoveryFixture): Promise<void> => {
+  const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
+    original.deviceId,
+    captured,
+  );
+  await manager.killAccepted.promise;
+  await flush();
+  timer.advanceTime(30_000);
+  expect(await firstRecovery).toBe(false);
+};
+
+/** Step a terminal recovery attempt through its cooldown and release-retry windows. */
+const advanceThroughTerminalRecovery = async (timer: FakeTimer): Promise<void> => {
+  await flush();
+  timer.advanceTime(30_000);
+  await flush();
+  timer.advanceTime(1_000);
+  await flush();
+  timer.advanceTime(1_000);
+};
+
+const recordLossIncident = async (pool: RecoveryFixture["pool"]): Promise<string> => {
+  const incidentId = await pool.recordEmulatorLossIncident(
+    original.deviceId,
+    "device-discovery-miss",
+    undefined,
+    "absent",
+  );
+  if (!incidentId) {
+    throw new Error("Expected emulator-loss incident to be recorded");
+  }
+  return incidentId;
+};
 
 // These tests exercise the three-minute restart recovery window, which the idle deadline caps.
 useSessionIdleWindowForSuite();
@@ -114,14 +173,7 @@ test("ADB-reset recovery releases after its retry also has unconfirmed shutdown"
     if (!incidentId) {
       throw new Error("Expected ADB-reset incident to be recorded");
     }
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
-      original.deviceId,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe(false);
+    await deferFirstAdbResetRecovery({ timer, manager, pool, captured });
     expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
 
     timer.advanceTime(30_000);
@@ -145,7 +197,7 @@ test("ADB-reset recovery releases after its retry also has unconfirmed shutdown"
 
 test("ADB-reset terminal release failure retains its recovery fence", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = poolInternals(pool);
+  const internals = pool.testHooks;
   const recoveryState = recoveryInternals(pool);
   const originalReleaseSession = sessions.releaseSession.bind(sessions);
   sessions.releaseSession = async () => {
@@ -153,26 +205,14 @@ test("ADB-reset terminal release failure retains its recovery fence", async () =
   };
   try {
     await pool.detachAdbServerResetCohort([captured]);
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
-      original.deviceId,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe(false);
+    await deferFirstAdbResetRecovery({ timer, manager, pool, captured });
 
     timer.advanceTime(30_000);
     const terminalRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
       original.deviceId,
       captured,
     );
-    await flush();
-    timer.advanceTime(30_000);
-    await flush();
-    timer.advanceTime(1_000);
-    await flush();
-    timer.advanceTime(1_000);
+    await advanceThroughTerminalRecovery(timer);
     await expect(terminalRecovery).rejects.toThrow("ADB-reset release persistence failed");
 
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
@@ -186,7 +226,7 @@ test("ADB-reset terminal release failure retains its recovery fence", async () =
 
 test("ADB-reset recovery clears its failed-release fence after a later release", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = poolInternals(pool);
+  const internals = pool.testHooks;
   const recoveryState = recoveryInternals(pool);
   const originalReleaseSession = sessions.releaseSession.bind(sessions);
   sessions.releaseSession = async () => {
@@ -194,26 +234,14 @@ test("ADB-reset recovery clears its failed-release fence after a later release",
   };
   try {
     const cohort = await pool.detachAdbServerResetCohort([captured]);
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
-      original.deviceId,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe(false);
+    await deferFirstAdbResetRecovery({ timer, manager, pool, captured });
 
     timer.advanceTime(30_000);
     const failedRecovery = pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
       original.deviceId,
       captured,
     );
-    await flush();
-    timer.advanceTime(30_000);
-    await flush();
-    timer.advanceTime(1_000);
-    await flush();
-    timer.advanceTime(1_000);
+    await advanceThroughTerminalRecovery(timer);
     await expect(failedRecovery).rejects.toThrow("ADB-reset release persistence failed");
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
     expect(recoveryState.recoveringSessionLosses.has("session")).toBe(true);
@@ -294,24 +322,8 @@ test("ordinary session recovery retries after its deferred shutdown cooldown", a
 test("a deferred session recovery incident remains pending until its retry recovers", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
-    const incidentId = await pool.recordEmulatorLossIncident(
-      original.deviceId,
-      "device-discovery-miss",
-      undefined,
-      "absent",
-    );
-    if (!incidentId) {
-      throw new Error("Expected emulator-loss incident to be recorded");
-    }
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      incidentId,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    const incidentId = await recordLossIncident(pool);
+    await deferFirstLossRecovery({ timer, manager, pool, captured }, incidentId);
     expect(
       (await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome,
     ).toBeUndefined();
@@ -330,13 +342,15 @@ test("a deferred session recovery incident remains pending until its retry recov
 
 test("release during shutdown confirmation finalizes session recovery instead of deferring it", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = poolInternals(pool);
-  const completeRecovery = internals.completeEmulatorLossRecovery;
+  const internals = pool.testHooks;
   let finalizations = 0;
-  internals.completeEmulatorLossRecovery = async (...args) => {
-    finalizations++;
-    await completeRecovery.call(pool, ...args);
-  };
+  const restoreComplete = internals.completeEmulatorLossRecovery.intercept(
+    (completeRecovery) =>
+      async (...args) => {
+        finalizations++;
+        await completeRecovery(...args);
+      },
+  );
   try {
     const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
       original.deviceId,
@@ -355,6 +369,7 @@ test("release during shutdown confirmation finalizes session recovery instead of
     const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
     await releaseLease();
   } finally {
+    restoreComplete();
     sessions.stopCleanupTimer();
   }
 });
@@ -436,7 +451,7 @@ test("release with an unavailable incident repository still finalizes the releas
 test("a stale due-recovery snapshot does not finalize a record another sweep is recovering", async () => {
   const manager = new PerAvdBlockingReadyManager();
   const { timer, sessions, pool, captured } = await setup(manager);
-  const internals = poolInternals(pool);
+  const internals = pool.testHooks;
   const recoveryState = recoveryInternals(pool);
   const second: BootedDevice = {
     name: "Pixel_8_API_35_2",
@@ -446,14 +461,13 @@ test("a stale due-recovery snapshot does not finalize a record another sweep is 
   const secondImage: DeviceInfo = { ...image, name: second.name };
   manager.bootedDevices = [original, second];
   await pool.addDevice(second, secondImage);
-  await pool.bindOrReuseDeviceSession(
-    "session-2",
-    second.deviceId,
-    "android",
-    secondImage,
-    undefined,
-    second,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session-2",
+    deviceId: second.deviceId,
+    platform: "android",
+    sourceImage: secondImage,
+    expectedIdentity: second,
+  });
   const capturedSecond = pool.getDevice(second.deviceId)!;
   try {
     for (const [deviceId, device] of [
@@ -506,7 +520,7 @@ test("a stale due-recovery snapshot does not finalize a record another sweep is 
 
 test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async () => {
   const { sessions, pool, captured } = await setup();
-  const internals = poolInternals(pool);
+  const internals = pool.testHooks;
   const recoveryState = recoveryInternals(pool);
   try {
     const oldRecord = internals.startAndroidRecoveryRecord(
@@ -519,11 +533,17 @@ test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async
     captured.adbServerResetSession = sessions.getSession("session") ?? undefined;
     captured.adbServerResetRecoveryGeneration = oldRecord.generation;
     let resolved = false;
+    const reservationSettled = Promise.withResolvers<void>();
     internals.adbServerResetRecoveryReservations.set(original.name, {
+      deviceId: original.deviceId,
+      image,
+      cancelled: false,
+      settled: reservationSettled.promise,
       sessionId: "session",
       recoveryGeneration: oldRecord.generation,
       resolve: () => {
         resolved = true;
+        reservationSettled.resolve();
       },
     });
 
@@ -551,7 +571,7 @@ test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async
 
 test("terminal recovery release failure retains the recovery fence until a later release", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = poolInternals(pool);
+  const internals = pool.testHooks;
   const recoveryState = recoveryInternals(pool);
   const incidentId = await pool.recordEmulatorLossIncident(
     original.deviceId,
@@ -567,15 +587,7 @@ test("terminal recovery release failure retains the recovery fence until a later
     throw new Error("release persistence failed");
   };
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      incidentId,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured }, incidentId);
 
     timer.advanceTime(30_000);
     const terminalRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
@@ -583,12 +595,7 @@ test("terminal recovery release failure retains the recovery fence until a later
       incidentId,
       captured,
     );
-    await flush();
-    timer.advanceTime(30_000);
-    await flush();
-    timer.advanceTime(1_000);
-    await flush();
-    timer.advanceTime(1_000);
+    await advanceThroughTerminalRecovery(timer);
     await expect(terminalRecovery).rejects.toThrow("release persistence failed");
 
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
@@ -625,15 +632,7 @@ test("a retained failure fence is not re-swept as a due deferred recovery", asyn
     throw new Error("release persistence failed");
   };
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      undefined,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured });
 
     timer.advanceTime(30_000);
     const terminalRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
@@ -641,12 +640,7 @@ test("a retained failure fence is not re-swept as a due deferred recovery", asyn
       undefined,
       captured,
     );
-    await flush();
-    timer.advanceTime(30_000);
-    await flush();
-    timer.advanceTime(1_000);
-    await flush();
-    timer.advanceTime(1_000);
+    await advanceThroughTerminalRecovery(timer);
     await expect(terminalRecovery).rejects.toThrow("release persistence failed");
     expect(recoveryState.failedTerminalRecoveryReleases.has("session")).toBe(true);
     expect(manager.startedDevices).toHaveLength(0);
@@ -684,9 +678,9 @@ test("disconnect recovery retries through the daemon after its deferred shutdown
     {},
     { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
   );
-  const internals = daemon as unknown as DaemonDisconnectInternals;
-  internals.devicePool = pool;
-  internals.sessionManager = sessions;
+  const internals = daemon.testHooks;
+  internals.replaceDevicePool(pool);
+  internals.replaceSessionManager(sessions);
   pool.isCurrentDisconnectedDevice = async () => "current";
   try {
     const firstPass = internals.recordAndTryRecoverCapturedDisconnect(
@@ -732,21 +726,13 @@ test("a tracked deferred recovery sweep does not block another due-retry check",
     {},
     { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
   );
-  const internals = daemon as unknown as DaemonDeferredRecoverySweepInternals;
+  const internals = daemon.testHooks;
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      undefined,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured });
 
     timer.advanceTime(30_000);
     const blockedRetry = pool.retryDueDeferredSessionRecoveries();
-    internals.trackDeferredSessionRecoverySweep(blockedRetry);
+    daemon.trackDeferredSessionRecoverySweep(blockedRetry);
     await flush();
     expect(internals.deferredSessionRecoverySweeps.has(blockedRetry)).toBe(true);
 
@@ -769,15 +755,7 @@ test("a tracked deferred recovery sweep does not block another due-retry check",
 test("ordinary session recovery releases after its retry also has unconfirmed shutdown", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      undefined,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured });
 
     timer.advanceTime(30_000);
     const retry = pool.recoverSessionBoundAndroidDeviceAfterLoss(
@@ -798,24 +776,8 @@ test("ordinary session recovery releases after its retry also has unconfirmed sh
 test("a deferred session recovery incident is not terminal before its retry releases", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
-    const incidentId = await pool.recordEmulatorLossIncident(
-      original.deviceId,
-      "device-discovery-miss",
-      undefined,
-      "absent",
-    );
-    if (!incidentId) {
-      throw new Error("Expected emulator-loss incident to be recorded");
-    }
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      incidentId,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    const incidentId = await recordLossIncident(pool);
+    await deferFirstLossRecovery({ timer, manager, pool, captured }, incidentId);
     expect(
       (await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome,
     ).toBeUndefined();
@@ -837,15 +799,7 @@ test("a deferred session recovery incident is not terminal before its retry rele
 test("due deferred session recovery releases while its AVD remains visible", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      undefined,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured });
     expect(manager.bootedDevices).toEqual([original]);
     expect(pool.isSessionRecoveryInFlight("session")).toBe(true);
 
@@ -889,15 +843,7 @@ test("matching startup lease wakes when a deferred recovery settles", async () =
   const manager = new BlockingRecoveryReadyManager();
   const { timer, sessions, pool, captured } = await setup(manager);
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      undefined,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured });
 
     let releaseLease: (() => Promise<void>) | undefined;
     const lease = pool.reserveAndroidStartupLease(original.name, true).then((release) => {
@@ -931,15 +877,7 @@ test("startup lease does not cool down when matching recovery clears before sett
   const manager = new BlockingRecoveryReadyManager();
   const { timer, sessions, pool, captured } = await setup(manager);
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      undefined,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured });
 
     manager.bootedDevices = [];
     timer.advanceTime(30_000);
@@ -951,11 +889,11 @@ test("startup lease does not cool down when matching recovery clears before sett
     await manager.readinessStarted.promise;
 
     let releaseLease: (() => Promise<void>) | undefined;
-    const internals = poolInternals(pool);
-    internals.afterAndroidStartupRecoverySnapshot = () => {
+    const internals = pool.testHooks;
+    internals.setAfterAndroidStartupRecoverySnapshot(() => {
       manager.releaseReadiness.resolve();
       internals.recoveryCoordinator.clearRecoveringAndroidImage(original.name);
-    };
+    });
     const recoverySettledAt = timer.now();
     const lease = pool.reserveAndroidStartupLease(original.name, true).then((release) => {
       releaseLease = release;
@@ -1004,15 +942,7 @@ test("startup lease beats a shorter timeout when matching recovery settles", asy
   const manager = new BlockingRecoveryReadyManager();
   const { timer, sessions, pool, captured } = await setup(manager);
   try {
-    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
-      original.deviceId,
-      undefined,
-      captured,
-    );
-    await manager.killAccepted.promise;
-    await flush();
-    timer.advanceTime(30_000);
-    expect(await firstRecovery).toBe("deferred");
+    await deferFirstLossRecovery({ timer, manager, pool, captured });
 
     manager.bootedDevices = [];
     timer.advanceTime(30_000);

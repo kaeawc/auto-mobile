@@ -10,23 +10,27 @@ import {
   PerformanceStreamSocketServer,
   type PerformanceStreamRepository,
 } from "../../src/daemon/performanceStreamSocketServer";
-import type { PerformanceAuditStreamQuery } from "../../src/db/performanceAuditRepository";
 import type {
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse,
 } from "../../src/daemon/performanceStreamSocketTypes";
 import { STREAM_LIMIT_MAX } from "../../src/daemon/streamQueryNormalizers";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { performanceStreamResponseFrameSchema } from "../helpers/wireMessageSchemas";
+import type { PerformanceStreamResponseFrame } from "../helpers/wireMessageSchemas";
 
 /**
  * Records the query the server hands the repository so the normalization of
  * `since`/`until` timestamps and `limit` can be asserted without a real
  * database (issue #6677; the real repository would resolve getDatabase()).
  */
-class FakePerformanceAuditRepository implements PerformanceStreamRepository {
-  lastQuery: PerformanceAuditStreamQuery | null = null;
+type StreamQuery = Parameters<PerformanceStreamRepository["listResultsSince"]>[0];
 
-  async listResultsSince(query: PerformanceAuditStreamQuery) {
+class FakePerformanceAuditRepository implements PerformanceStreamRepository {
+  lastQuery: StreamQuery | null = null;
+
+  async listResultsSince(query: StreamQuery) {
     this.lastQuery = query;
     return [];
   }
@@ -37,6 +41,14 @@ class TestablePerformanceStreamSocketServer extends PerformanceStreamSocketServe
     request: PerformanceStreamSocketRequest,
   ): Promise<PerformanceStreamSocketResponse> {
     return this.handleRequest(request);
+  }
+
+  /** Send `wire` (any JSON-serializable frame) through the real line path and return the reply. */
+  async sendRawForTest(wire: unknown): Promise<PerformanceStreamResponseFrame | undefined> {
+    const socket = new FakeSocket<PerformanceStreamSocketResponse>();
+    await this.processLine(socket, JSON.stringify(wire));
+    await this.pendingBySocket.get(socket);
+    return socket.getWrittenMessages(performanceStreamResponseFrameSchema).at(-1);
   }
 }
 
@@ -75,13 +87,10 @@ describe("PerformanceStreamSocketServer query normalization (#6677)", () => {
     await server.handleRequestForTest({
       command: "poll",
       sinceTimestamp: String(epochMs),
-    } as PerformanceStreamSocketRequest);
+    });
     const fromString = repository.lastQuery?.sinceTimestamp;
 
-    await server.handleRequestForTest({
-      command: "poll",
-      sinceTimestamp: epochMs,
-    } as unknown as PerformanceStreamSocketRequest);
+    await server.sendRawForTest({ id: "numeric", command: "poll", sinceTimestamp: epochMs });
 
     expect(fromString).toBe(new Date(epochMs).toISOString());
     expect(repository.lastQuery?.sinceTimestamp).toBe(fromString);

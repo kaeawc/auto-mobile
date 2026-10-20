@@ -1,8 +1,10 @@
+import { NoOpMigrationLock } from "./NoOpMigrationLock";
 import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync, realpathSync } from "fs";
 import { basename, dirname, join } from "path";
 import { ActionableError } from "../models/ActionableError";
+import { ENV, readEnvBool } from "../config/env";
 import { logger } from "../utils/logger";
 import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import type { Timer } from "../utils/SystemTimer";
@@ -41,26 +43,6 @@ export interface MigrationLock {
   acquire(): Promise<void>;
   /** Release the lock. Best-effort; safe to call once per successful acquire. */
   release(): Promise<void>;
-}
-
-/**
- * No-op lock for the single-opener default and in-memory test databases, where
- * no second process can share the connection. Keeps the migrator's DB-path-
- * agnostic callers unchanged.
- *
- * NOTE: this default provides NO cross-process protection — it is correct only
- * for `:memory:` DBs and the single-daemon path (already serialized by the
- * in-process mutex). Production DB openers must pass a {@link FileMigrationLock}
- * via {@link createFileMigrationLock}; `database.ts#startMigrations` does so.
- */
-export class NoOpMigrationLock implements MigrationLock {
-  async acquire(): Promise<void> {
-    // Nothing to serialize.
-  }
-
-  async release(): Promise<void> {
-    // No lock file to remove.
-  }
 }
 
 export interface FileMigrationLockOptions {
@@ -235,7 +217,7 @@ export function isInMemoryDatabasePath(dbPath: string): boolean {
  * `:memory:` unless this flag is truthy, so production misuse fails fast and
  * legibly while lifecycle tests keep the fast, file-free seam (issue #3065).
  */
-export const IN_MEMORY_DB_OPT_IN_ENV = "AUTOMOBILE_ALLOW_IN_MEMORY_DB";
+export const IN_MEMORY_DB_OPT_IN_ENV = ENV.ALLOW_IN_MEMORY_DB.name;
 
 /**
  * True when {@link IN_MEMORY_DB_OPT_IN_ENV} is set to a truthy value
@@ -245,8 +227,7 @@ export const IN_MEMORY_DB_OPT_IN_ENV = "AUTOMOBILE_ALLOW_IN_MEMORY_DB";
  * migrated-but-empty `:memory:` footgun (issue #3065).
  */
 export function isInMemoryDatabaseOptInEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const normalized = env[IN_MEMORY_DB_OPT_IN_ENV]?.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes";
+  return readEnvBool(ENV.ALLOW_IN_MEMORY_DB, env);
 }
 
 /**
@@ -267,8 +248,8 @@ export function resolveMigrationLockTimeoutMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number | undefined {
   return readOptionalEnvPositiveInteger(
-    "AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS",
-    "AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS",
+    ENV.MIGRATION_LOCK_TIMEOUT_MS.name,
+    ENV.MIGRATION_LOCK_TIMEOUT_MS.legacyName,
     {},
     env,
   );

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type { PlanExecutionResult } from "../../src/models";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { PlanExecutionOrchestrator } from "../../src/server/planExecutionOrchestrator";
 import { PLAN_HEALTH_DIR_ENV } from "../../src/server/planHealthSummary";
 import { FakeTimer } from "../fakes/FakeTimer";

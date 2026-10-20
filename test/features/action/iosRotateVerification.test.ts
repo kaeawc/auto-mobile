@@ -6,7 +6,9 @@ import {
 import type { ObserveResult } from "../../../src/models";
 
 const observation = (rotation?: number, width = 402, height = 874): ObserveResult => ({
-  timestamp: 1000,
+  updatedAt: 1000,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   rotation,
   screenSize: { width, height },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -24,7 +26,7 @@ describe("iOS rotation verification vocabulary (#8778)", () => {
       ["face_up", "unknown"],
       [undefined, "unknown"],
     ]) {
-      expect(normalizeIosOrientation(raw)).toBe(expected);
+      expect<unknown>(normalizeIosOrientation(raw)).toBe(expected);
     }
   });
   test("prefers cardinal observation rotation even when dimensions disagree", () => {

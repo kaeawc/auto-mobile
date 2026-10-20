@@ -11,6 +11,7 @@ import {
   parsePmPathOutput,
   type AppContentHasher,
 } from "../../src/utils/ContentHashProvider";
+import { createExecResult } from "../../src/utils/execResult";
 
 /**
  * AC2 coverage for #4984: contentHash is derived from installed app *bytes*,
@@ -23,7 +24,7 @@ import {
  * contract is unit-tested deterministically (<100ms).
  */
 function fakeDevice(deviceId: string, platform: "android" | "ios" = "android"): BootedDevice {
-  return { deviceId, platform, name: deviceId } as unknown as BootedDevice;
+  return { deviceId, platform, name: deviceId };
 }
 
 class FakeHasher implements AppContentHasher {
@@ -107,16 +108,16 @@ describe("AndroidApkContentHasher device-shell boundary", () => {
     const adb = new FakeAdbExecutor();
     const packageId = "com.example; input keyevent 3";
     const apkPath = "/data/app/base$(id).apk";
-    adb.setCommandResponse(`shell pm path 'com.example; input keyevent 3'`, {
-      stdout: `package:${apkPath}\n`,
-      stderr: "",
-    });
-    adb.setCommandResponse(`shell sh -c 'sha256sum '\\''/data/app/base$(id).apk'\\'''`, {
-      stdout: `${DIGEST_A}  ${apkPath}\n`,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      `shell pm path 'com.example; input keyevent 3'`,
+      createExecResult(`package:${apkPath}\n`, ""),
+    );
+    adb.setCommandResponse(
+      `shell sh -c 'sha256sum '\\''/data/app/base$(id).apk'\\'''`,
+      createExecResult(`${DIGEST_A}  ${apkPath}\n`, ""),
+    );
 
-    await new AndroidApkContentHasher(adb).computeHash(fakeDevice("emu-1"), packageId, 1);
+    await new AndroidApkContentHasher(adb).computeHash(fakeDevice("emu-1"), packageId);
 
     expect(adb.getExecutedCommands()).toEqual([
       "shell pm path 'com.example; input keyevent 3'",
@@ -298,7 +299,7 @@ describe("CachingContentHashProvider", () => {
         }
         return "sha256:FRESH";
       },
-    } as unknown as AppContentHasher;
+    };
     const provider = new CachingContentHashProvider(hasher);
 
     const pending = provider.resolveContentHash(fakeDevice("emu-1"), "com.example.app", 5);
@@ -364,14 +365,14 @@ describe("parsePmPathOutput", () => {
 });
 
 /** Minimal AdbExecutor fake routing by command substring. */
-function fakeAdb(routes: (command: string) => ExecResult): AdbExecutor {
+function fakeAdb(routes: (command: string) => ExecResult): Pick<AdbExecutor, "executeCommand"> {
   return {
     executeCommand: async (command: string) => routes(command),
-  } as unknown as AdbExecutor;
+  };
 }
 
 function ok(stdout: string): ExecResult {
-  return { stdout, stderr: "", exitCode: 0, success: true } as unknown as ExecResult;
+  return createExecResult(stdout, "");
 }
 
 describe("AndroidApkContentHasher (pm path resolution)", () => {
@@ -388,7 +389,7 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
       return ok("");
     });
     const hasher = new AndroidApkContentHasher(adb);
-    const hash = await hasher.computeHash(fakeDevice("emu-1"), "com.example.app", 0);
+    const hash = await hasher.computeHash(fakeDevice("emu-1"), "com.example.app");
     expect(hash).toBe(combineApkDigests(`${DIGEST_A}  x\n`));
     expect(hash).not.toBe("");
   });
@@ -396,7 +397,7 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
   test("throws when pm path returns no APKs", async () => {
     const adb = fakeAdb(() => ok("Unable to find package\n"));
     const hasher = new AndroidApkContentHasher(adb);
-    await expect(hasher.computeHash(fakeDevice("emu-1"), "com.missing.app", 0)).rejects.toThrow();
+    await expect(hasher.computeHash(fakeDevice("emu-1"), "com.missing.app")).rejects.toThrow();
   });
 
   test("falls back to pull when the on-device digest count is incomplete (one split failed)", async () => {
@@ -427,7 +428,7 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
       },
     } as AdbExecutor;
     const hasher = new AndroidApkContentHasher(adb, checksum);
-    const hash = await hasher.computeHash(fakeDevice("emu-1"), "com.example.app", 0);
+    const hash = await hasher.computeHash(fakeDevice("emu-1"), "com.example.app");
 
     // Fell back to pull (hashed both APKs), NOT the partial single on-device digest.
     expect(pullChecksums).toBe(2);

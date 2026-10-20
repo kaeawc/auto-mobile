@@ -1,5 +1,6 @@
+import { guardDirectoryEntries, readGuardFile } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+
 import { join } from "node:path";
 import { load } from "js-yaml";
 
@@ -163,7 +164,7 @@ function listRepositoryFiles(): FileListing {
   const files: string[] = [];
   const paths = new Set<string>();
   function walk(directory: string): void {
-    for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+    for (const entry of guardDirectoryEntries(join(root, directory))) {
       if (excluded.has(entry.name) || (!directory && ["coverage", "site"].includes(entry.name))) {
         continue;
       }
@@ -184,7 +185,7 @@ let missingScripts: string[];
 let missingFilters: string[];
 beforeAll(() => {
   const listing = listRepositoryFiles();
-  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+  const pkg = JSON.parse(readGuardFile(join(root, "package.json"))) as {
     scripts: Record<string, string>;
   };
   missingScripts = missingPaths(scriptPaths(pkg.scripts), listing);
@@ -195,10 +196,8 @@ beforeAll(() => {
   );
   missingFilters = yamlFiles.flatMap((path) =>
     missingPaths(
-      filterPaths(load(readFileSync(join(root, path), "utf8")), (filterPath) =>
-        listing.files.includes(filterPath)
-          ? readFileSync(join(root, filterPath), "utf8")
-          : undefined,
+      filterPaths(load(readGuardFile(join(root, path))), (filterPath) =>
+        listing.files.includes(filterPath) ? readGuardFile(join(root, filterPath)) : undefined,
       ),
       listing,
     ).map((missing) => `${path}: ${missing}`),

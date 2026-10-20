@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  InMemoryToolSelectionProfileRegistry,
-  PersistentToolSelectionProfileRegistry,
-} from "../../src/server/toolSelectionProfileRegistry";
+import { PersistentToolSelectionProfileRegistry } from "../../src/daemon/toolSelectionProfileRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/daemon/InMemoryToolSelectionProfileRegistry";
 import { FakeToolSelectionProfileProvenanceStore } from "../fakes/FakeToolSelectionProfileProvenanceStore";
 
 /**

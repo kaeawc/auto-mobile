@@ -1,16 +1,18 @@
 import {
-  McpServer,
   type ReadResourceResult,
   type Resource,
   type ResourceTemplateType as ResourceTemplate,
 } from "@modelcontextprotocol/server";
-import { McpError } from "./mcpError";
+import { McpError } from "../daemon/mcpError";
+import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
+import { setDefaultResourceNotifier } from "../utils/NetworkState";
+import { registerResourceUpdateNotifier } from "../daemon/resourceUpdateNotifier";
 import {
   ListChangedBroadcaster,
   ResourceUpdatedBroadcaster,
   type ServerRegistrationOptions,
-} from "./listChangedBroadcast";
+} from "../daemon/listChangedBroadcast";
 import { MALFORMED_URI_SEGMENT_MESSAGE, MalformedResourceUriError } from "./resourceUriSegments";
 
 export interface ResourceReadContext {
@@ -254,20 +256,42 @@ class ResourceRegistryClass {
   // all live sessions, resource updates reach subscribed sessions. A single
   // retained server would be last-writer-wins (issue #3223). Entries and their
   // subscriptions are pruned when a session's transport closes.
-  private servers: Set<McpServer> = new Set();
+  private servers: Set<ResourceRegistryHost> = new Set();
   // Per-request servers (#4678), tracked only until they close and never sent
   // notifications; see ServerRegistrationOptions.
-  private ephemeralServers: Set<McpServer> = new Set();
+  private ephemeralServers: Set<ResourceRegistryHost> = new Set();
   // Tail of each session's pending notification chain (per-session ordering).
-  private deliveryTails: Map<McpServer, Promise<void>> = new Map();
-  private subscriptions: Map<McpServer, Set<string>> = new Map();
-  private readContexts = new Map<McpServer, (signal: AbortSignal) => ResourceReadContext>();
+  private deliveryTails: Map<ResourceRegistryHost, Promise<void>> = new Map();
+  private subscriptions: Map<ResourceRegistryHost, Set<string>> = new Map();
+  private readContexts = new Map<
+    ResourceRegistryHost,
+    (signal: AbortSignal) => ResourceReadContext
+  >();
   // Bumped when the registered set is cleared, so a registration skipped while the set
   // was intact runs again afterwards (#13068).
   private clearEpoch = 0;
+  // Run before every resources/list reply so a source that only changes outside
+  // AutoMobile (devices booted by hand) can refresh the roster it contributes.
+  private listRefreshers = new Map<string, () => Promise<void>>();
 
   get clearEpochForRegistration(): number {
     return this.clearEpoch;
+  }
+
+  /** Register (or replace) a named hook awaited before each resources/list reply. */
+  registerListRefresher(name: string, refresh: () => Promise<void>): void {
+    this.listRefreshers.set(name, refresh);
+  }
+
+  /** Await every registered list refresher; the resources/list handler calls this before replying. */
+  async refreshBeforeList(): Promise<void> {
+    for (const [name, refresh] of this.listRefreshers) {
+      try {
+        await refresh();
+      } catch (error) {
+        logger.warn(`[ResourceRegistry] List refresher ${name} failed: ${error}`);
+      }
+    }
   }
 
   // Register a new resource
@@ -278,6 +302,7 @@ class ResourceRegistryClass {
     mimeType: string,
     handler: ResourceHandler,
   ): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources.set(uri, { uri, name, description, mimeType, handler });
   }
 
@@ -291,6 +316,7 @@ class ResourceRegistryClass {
     paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
+    ListChangedBroadcaster.invalidate("resources");
     this.templates.set(uriTemplate, {
       uriTemplate,
       name,
@@ -313,6 +339,7 @@ class ResourceRegistryClass {
     paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
+    ListChangedBroadcaster.invalidate("resources");
     this.templates.set(uriTemplate, {
       uriTemplate,
       name,
@@ -361,6 +388,7 @@ class ResourceRegistryClass {
 
   // Unregister a resource by URI
   unregister(uri: string): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources.delete(uri);
   }
 
@@ -388,7 +416,7 @@ class ResourceRegistryClass {
   // transport closes. The underlying Protocol preserves a pre-set `onclose`
   // (both the transport's and the server's), so chaining here cannot clobber
   // other lifecycle hooks (e.g. ToolRegistry's identical prune hook).
-  private trackServer(server: McpServer, ephemeral: boolean): void {
+  private trackServer(server: ResourceRegistryHost, ephemeral: boolean): void {
     if (this.servers.has(server) || this.ephemeralServers.has(server)) {
       return;
     }
@@ -409,7 +437,7 @@ class ResourceRegistryClass {
    * closed before it ever connected has no transport, so the SDK never fires its
    * `onclose` and the prune hook installed by `trackServer` would not run.
    */
-  untrackServer(server: McpServer): void {
+  untrackServer(server: ResourceRegistryHost): void {
     this.servers.delete(server);
     this.ephemeralServers.delete(server);
     this.subscriptions.delete(server);
@@ -418,7 +446,7 @@ class ResourceRegistryClass {
 
   // Register all resources with an MCP server
   registerWithServer(
-    server: McpServer,
+    server: ResourceRegistryHost,
     getReadContext: (signal: AbortSignal) => ResourceReadContext = () => ({}),
     options: ServerRegistrationOptions = {},
   ): void {
@@ -431,6 +459,7 @@ class ResourceRegistryClass {
 
     // Set handler for listing resources
     server.server.setRequestHandler("resources/list", async () => {
+      await this.refreshBeforeList();
       return {
         resources: this.getResourceDefinitions(),
       };
@@ -618,7 +647,7 @@ class ResourceRegistryClass {
   // Per-session FIFO: two notifications to the same session are never reordered,
   // while different sessions proceed independently. A failing task never poisons
   // the tail (tasks catch their own errors; the chain logs any remainder).
-  private enqueueForServer(server: McpServer, task: () => Promise<void>): Promise<void> {
+  private enqueueForServer(server: ResourceRegistryHost, task: () => Promise<void>): Promise<void> {
     const previous = this.deliveryTails.get(server) ?? Promise.resolve();
     const tail = previous.then(task).catch((error) => {
       logger.warn(`[ResourceRegistry] Notification delivery failed unexpectedly: ${error}`);
@@ -633,7 +662,7 @@ class ResourceRegistryClass {
   }
 
   private ownsUpdateSession(
-    server: McpServer,
+    server: ResourceRegistryHost,
     sessionUuid?: string,
     unboundSessionUuid?: string,
   ): boolean {
@@ -648,7 +677,10 @@ class ResourceRegistryClass {
     );
   }
 
-  private async notifySubscribedServer(server: McpServer, targetUris: string[]): Promise<void> {
+  private async notifySubscribedServer(
+    server: ResourceRegistryHost,
+    targetUris: string[],
+  ): Promise<void> {
     for (const targetUri of targetUris) {
       if (!this.servers.has(server)) {
         return;
@@ -718,9 +750,26 @@ class ResourceRegistryClass {
     return { notified: this.servers.size, ephemeral: this.ephemeralServers.size };
   }
 
+  /** Test-only: copy of the registered resources and templates, for {@link restoreForTesting}. */
+  snapshotForTesting(): {
+    resources: Map<string, RegisteredResource>;
+    templates: Map<string, RegisteredResourceTemplate>;
+  } {
+    return { resources: new Map(this.resources), templates: new Map(this.templates) };
+  }
+
+  /** Test-only: put back what {@link snapshotForTesting} captured, replacing current entries. */
+  restoreForTesting(snapshot: ReturnType<ResourceRegistryClass["snapshotForTesting"]>): void {
+    ListChangedBroadcaster.invalidate("resources");
+    this.resources = new Map(snapshot.resources);
+    this.templates = new Map(snapshot.templates);
+  }
+
   // Clear all registered resources, templates, and subscriptions (for testing)
   clearResources(): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.clearEpoch++;
+    this.listRefreshers.clear();
     this.resources.clear();
     this.templates.clear();
     this.subscriptions.clear();
@@ -729,3 +778,12 @@ class ResourceRegistryClass {
 
 // Export a singleton instance
 export const ResourceRegistry = new ResourceRegistryClass();
+
+registerResourceUpdateNotifier((uris) => ResourceRegistry.notifyResourcesUpdated(uris));
+
+// NetworkState (a lower layer) notifies through this registry by default.
+setDefaultResourceNotifier({
+  notifyResourceUpdated(uri: string): void {
+    void ResourceRegistry.notifyResourceUpdated(uri);
+  },
+});

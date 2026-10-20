@@ -1,12 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
-import android.annotation.TargetApi
 import android.content.Context
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.Log
 import android.view.WindowInsets
 import android.view.WindowManager
+import androidx.annotation.RequiresApi
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
@@ -20,7 +20,7 @@ internal interface DisplayInsetsProvider {
 }
 
 /** The same mapping is used for the service window and a requested display's window metrics. */
-@TargetApi(Build.VERSION_CODES.R)
+@RequiresApi(Build.VERSION_CODES.R)
 internal fun observationInsetsFromWindowInsets(
   windowInsets: WindowInsets,
   screenDimensions: ScreenDimensions?,
@@ -79,8 +79,20 @@ internal class WindowMetricsDisplayInsetsProvider(
     if (sdkInt < Build.VERSION_CODES.R) return unavailableInsets()
     return try {
       val windowInsets = windowInsetsFor(displayId) ?: return unavailableInsets()
-      observationInsetsFromWindowInsets(windowInsets, screenDimensions)
-    } catch (e: Exception) {
+      // Production sdkInt is SDK_INT; keep the injected gate above for API-branch tests.
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        observationInsetsFromWindowInsets(windowInsets, screenDimensions)
+      } else {
+        unavailableInsets()
+      }
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get system insets for display $displayId", e)
+      unavailableInsets()
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get system insets for display $displayId", e)
+      unavailableInsets()
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to get system insets for display $displayId", e)
       unavailableInsets()
     }
@@ -122,7 +134,7 @@ private fun unavailableInsets(): ObservationInsetsInfo =
   )
 
 // Only reached from the API 30+ WindowInsets path (see WindowMetricsDisplayInsetsProvider).
-@TargetApi(Build.VERSION_CODES.Q)
+@RequiresApi(Build.VERSION_CODES.Q)
 private fun toSystemInsetsInfo(insets: android.graphics.Insets): SystemInsetsInfo =
   SystemInsetsInfo(
     top = insets.top,

@@ -1,7 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
@@ -11,7 +11,7 @@ import {
   joinInFlightDeviceGestureRecordingStop,
   stopDeviceGestureRecording,
   NoUserInputCapturedError,
-} from "../server/deviceGestureRecordingManager";
+} from "./deviceGestureRecordingManager";
 import { logger } from "../utils/logger";
 import {
   DeviceGestureRecordingCommand,
@@ -26,7 +26,7 @@ import {
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { assertInputNotOnForeignBindingDevice } from "./inputDeviceOwnership";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import { deviceGestureRecordingStartOwnershipRefusal } from "./deviceGestureRecordingStartAdmission";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
@@ -128,8 +128,9 @@ export type DeviceGestureRecordingBindingGate = (input: {
 }) => Promise<void>;
 
 const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const sessionManager = defaultDaemonContext.sessionManager();
+  const pool = defaultDaemonContext.devicePool();
+  if (!sessionManager || !pool) {
     return;
   }
   await assertInputNotOnForeignBindingDevice({
@@ -137,8 +138,8 @@ const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
     deviceId: input.device.deviceId,
     platform: input.device.platform,
     requesterSessionUuid: input.requesterSessionUuid,
-    sessionManager: daemonState.getSessionManager(),
-    gate: daemonState.getDevicePool(),
+    sessionManager,
+    gate: pool,
   });
 };
 
@@ -230,7 +231,7 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
             return refusal;
           }
         }
-        const daemonInitialized = DaemonState.getInstance().isInitialized();
+        const daemonInitialized = defaultDaemonContext.isInitialized();
         // With a daemon registry, resolve the target before authentication so an unheld-device
         // start gets the same acquire-session refusal even without a requester identity.
         if (!daemonInitialized) {

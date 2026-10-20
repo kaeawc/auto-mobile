@@ -31,9 +31,10 @@ export interface SessionBrokerDevicePort {
   release(sessionId: string): Promise<{ settled: boolean }>;
   /**
    * Drives the existing durable deletion journal. "absent" requires authoritative absence, not
-   * delete-command success. Pending work remains counted and discoverable on the next pass.
+   * delete-command success. Shutdown cancellation must settle this call and fence later work.
+   * Pending work remains counted and discoverable on the next pass.
    */
-  destroy(resource: BrokerResourceRecord): Promise<"absent" | "pending">;
+  destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<"absent" | "pending">;
   /** Optional until the clean baseline is qualified; absence means zero pooling. */
   reset?(resource: BrokerResourceRecord): Promise<"clean" | "pending">;
 }

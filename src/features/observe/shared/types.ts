@@ -11,9 +11,29 @@ import type WebSocket from "ws";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+export type { SwipeRequest, SwipeRequestOptions } from "../../../utils/interfaces/SwipeRequest";
+export type { DragRequest } from "../../../utils/interfaces/DragRequest";
 import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
 import type { PrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import type { SavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
+
+/**
+ * The slice of the `ws` WebSocket surface the CtrlProxy clients, delegates and
+ * exchange recorder actually use. `WebSocketFactory` returns this narrow type
+ * rather than the full `ws` class so test fakes (`FakeWebSocket`) can satisfy it
+ * structurally; the real `ws` WebSocket is assignable to it.
+ */
+export interface CtrlSocket {
+  readonly readyState: number;
+  send(data: WebSocket.Data, cb?: (error?: Error) => void): void;
+  close(): void;
+  ping(): void;
+  terminate(): void;
+  removeAllListeners(): this;
+  on(event: "message", listener: (data: WebSocket.Data) => void): this;
+  on(event: "open" | "close" | "ping" | "pong", listener: () => void): this;
+  on(event: "error", listener: (error: Error) => void): this;
+}
 
 // =============================================================================
 // Performance Timing
@@ -60,6 +80,13 @@ export interface GestureTimingResult extends BaseResult {
    * gestures. See issue #2910.
    */
   pinchPath?: string;
+  /**
+   * Single-finger iOS swipe: the dispatch route the runner took ("xcuiCoordinate",
+   * "unpinnedSynthesized" or "lockScreenSynthesized") and the stroke duration it really used.
+   * Absent from older runners and other gestures (#13145).
+   */
+  swipeRoute?: string;
+  effectiveDurationMs?: number;
 }
 
 /**
@@ -93,7 +120,7 @@ export interface DelegateContext {
    */
   wireDeadlineParams?(messageType: string, timeoutMs: number): Record<string, unknown>;
   /** Get the current WebSocket connection (may be null if not connected) */
-  getWebSocket(): WebSocket | null;
+  getWebSocket(): CtrlSocket | null;
   /** RequestManager for correlating requests and responses */
   requestManager: RequestManager;
   /** Timer for setTimeout/setInterval operations */
@@ -110,10 +137,4 @@ export interface DelegateContext {
   unsupportedCommandError?(messageType: string): string;
   /** Cancel any pending screenshot backoff captures */
   cancelScreenshotBackoff(): void;
-}
-
-/** Optional iOS swipe context; a legacy frame-context string remains accepted. */
-export interface SwipeRequestOptions {
-  frameContext?: string;
-  lockScreen?: boolean;
 }

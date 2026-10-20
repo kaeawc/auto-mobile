@@ -1173,7 +1173,7 @@ without them. A device advertising `prototype_network_v1` also writes `/data` fo
 
 | Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`                  | Required, at most 2048 characters. Any absolute `http` or `https` URL, with **no host allowlist** (localhost, loopback and private addresses included). Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`.                                                                                                                                                                                                                                                                                                        |
+| `url`                  | Required, at most 2048 characters. Any absolute `http` or `https` URL. Host requests apply the egress policy described below. Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`.                                                                                                                                                                                                                                                                                                                                  |
 | `method`               | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`, the same `PROTOTYPE_REQUEST_METHODS` the host executor accepts. `body` is refused with `GET` and `HEAD`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `headers`, `query`     | Up to 16 entries each: a literal string (text placeholders apply) or a value binding `{state}`, `{data}`, `{value}`, and `{item}` / `{index: true}` in a repeat. A bound value must be a string, number or boolean. Header names must be HTTP tokens. Query entries are set on the URL in sorted key order (UTF-16 code units, like JS `sort()`), on every runtime, so the resolved URL does not depend on authoring order. With no authored `query` the URL's raw query is kept verbatim. Each authored key replaces the value at its first existing piece in place and removes later duplicates; new keys are appended in sorted order. Only those pieces are re-encoded (form encoding: space is `+`, `~` is `%7E`); untouched pieces keep their exact spelling (`?flag`, `%20`). E.g. `?a=1&b=x%20y&a=3&c` with `{a:"2"}` gives `?a=2&b=x%20y&c`. |
 | `body`                 | A value binding, so a literal is `{value: json}`. Non-string values are sent as JSON with `Content-Type: application/json` unless a header sets one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1206,7 +1206,7 @@ the native runtimes):
    (`message` `HTTP <status>`). The status decides this before the body is consumed: a non-2xx body
    is never read or capped (it is reported as `null`), so an oversized error page is `http_error`,
    not `too_large`; the size cap applies to 2xx bodies only. A transport failure is an error with the executor's code (`timeout`,
-   `too_large`, `connection_refused`, `cancelled`, `invalid_url`, `invalid_request`, `network`,
+   `too_large`, `connection_refused`, `blocked_destination` (the destination is not permitted), `cancelled`, `invalid_url`, `invalid_request`, `network`,
    `too_many_in_flight`).
 3. With `into`, the metadata is then written to **`<into>__meta`**: the same pointer with `__meta`
    appended to its last segment (`/data/feed` reports at `/data/feed__meta`; `prototypeRequestMetaPath`).
@@ -1229,7 +1229,7 @@ authored `emit` with that name is a validation error) and a payload decoded by
 {
   "requestId": "r-1",
   "method": "GET",
-  "url": "http://localhost:8080/feed?q=cats",
+  "url": "https://api.example.com/feed?q=cats",
   "via": "host",
   "into": "/data/feed",
   "outcome": "success",
@@ -1279,8 +1279,9 @@ tested against the same fixture, `request-actions.json`.
   `android.permission.INTERNET` and a `network_security_config` with `cleartextTrafficPermitted="true"`
   on the `base-config`. There is no host allowlist; CtrlProxy is sideloaded over adb and never
   distributed.
-- Saved prototypes (`SavedPrototypeActivity`) are not wired to a transport yet: a `request` in one
-  finishes as a `network` error.
+- Saved prototypes (`SavedPrototypeActivity`) run `via: "device"` requests on the same Retrofit
+  client; `via: "host"` finishes as an `invalid_request` error, since no host connection serves the
+  activity.
 
 Worked example: a feed that shows a spinner, the result and an error (state
 `{"feedStatus": "idle", "search": "cats"}`, data `{"title": "Feed"}`):
@@ -1303,7 +1304,7 @@ Worked example: a feed that shows a spinner, the result and an error (state
     "onTap": [
       {
         "type": "request",
-        "url": "http://localhost:8080/feed",
+        "url": "https://api.example.com/feed",
         "query": { "q": { "state": "search" } },
         "into": "/data/feed",
         "statusKey": "feedStatus"
@@ -1628,6 +1629,101 @@ ignored.
   `via: "device"` requests to localhost fail until a host shows or re-shows it. Use a reachable
   address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
 - iOS simulators share the Mac's network, so nothing is reversed there.
+
+## Data, storage and network (#12531)
+
+The three features compose: a `request` writes its response into `/data`, data actions edit `/data`
+from a tap, and `storage` makes chosen `state` and `/data` values survive a re-show or relaunch.
+The detailed contracts are [Data actions](#data-actions-12519), [Storage](#storage-12522) and
+[Request action](#request-action-12523); this section is the one-page overview and the capability
+map.
+
+| Capability                    | Gates                                                     | Android CtrlProxy | iOS agent  |
+| ----------------------------- | --------------------------------------------------------- | ----------------- | ---------- |
+| `prototype_data_actions_v1`   | `setData`, `appendData`, `removeData`                     | Advertised        | Advertised |
+| `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clearStorage` | Advertised        | Advertised |
+| `prototype_network_v1`        | the `request` action with `via: "host"`                   | Advertised        | Advertised |
+| `prototype_network_device_v1` | `request` with `via: "device"`                            | Advertised        | Advertised |
+
+A device without a capability is refused before uploads or show, with a message naming the
+capability. Device-side verification is the manual run in `skills/manual-test/prototype-acceptance.md`
+("Data, storage and network").
+
+**Data actions.** Each write is applied to the shown spec's `/data` with the host's own function,
+bumps the data revision, rebuilds the drawn tree (repeat rows included) and sends one `change` event
+named for the path. A refused write changes nothing and the rest of the action list still runs. Once
+the device has written a prototype's data, a host patch to `/data` needs `baseRevision`.
+
+**Storage precedence.** On a show of an id with a `storage` block: a changed `version` discards all
+stored values; otherwise a stored value replaces the spec's for each listed key, a stored key no longer
+listed is dropped, and a stored value that no longer fits (state type changed, data of another JSON
+kind, unwritable pointer) is dropped and the spec's value stands. Writes are debounced after every
+change (user edit, data action, request response) and flushed on dismiss. `clearStorage {id}` and
+`deleteSaved` wipe an id's values.
+
+**Request lifecycle.** `statusKey` moves `loading` then `success` or `error`; a 2xx body is written to
+`into` and `{status, headers, durationMs, error?}` to `<into>__meta`; a non-2xx status, transport
+failure or a body `/data` cannot hold leaves `into` alone and sets `meta.error`. The completion is
+atomic: if the body fits but no form of `__meta` fits beside it, nothing is written but the error
+metadata. A newer request to the same `into` cancels the older (latest wins), and dismissing the
+prototype cancels its requests. Each finished request is a `prototype_request` emit event.
+
+**The two transports.**
+
+- `via: "host"` (the default): the device sends a `prototype_request` frame and the host runs the
+  HTTP transport, with an egress policy checked before every connection and redirect. The host needs a
+  connection; with none the request fails with `network`. Closing the owning connection fails its
+  calls at once, and a cancelled call sends `prototype_request_cancel` so the host frees the slot.
+- `via: "device"`: the device runs the request itself. On Android `localhost` is the device, so the
+  host runs `adb reverse` for each loopback port it finds in the shown spec (see
+  [Loopback requests from the device](#loopback-requests-from-the-device-12530)); on an iOS
+  simulator `localhost` is the Mac, which shares its loopback, and nothing is reversed.
+
+**Host egress policy.** Host requests refuse localhost names, loopback, unspecified and link-local
+addresses, emulator host aliases, and IPv6 forms embedding those IPv4 destinations.
+SIIT and both NAT64 prefixes use the embedded IPv4 classification;
+Teredo and site-local IPv6 addresses are refused. Every DNS
+answer must be permitted; the connection is pinned to a validated IP while retaining the original
+HTTP authority and TLS hostname. Daemon HTTP ports (including the configured port and fallback
+range) and CtrlProxy's port are refused on private addresses; public addresses remain permitted on
+those ports. Redirects are checked at each hop (at most five); HTTPS-to-HTTP redirects are refused.
+An origin change removes all authored headers. Host, connection/framing, Cookie, Origin and Proxy-
+headers and Expect are not accepted from requests. Other RFC1918 destinations remain permitted
+on ordinary ports, including `10.1.2.3` and `192.168.1.10`.
+A policy refusal is `blocked_destination`: the destination
+is not permitted. Device requests retain their platform transport behavior.
+
+The host transport makes a direct connection. Node uses a fresh agent with an empty `proxyEnv`,
+ignoring HTTP(S)_PROXY, ALL_PROXY and NO_PROXY routing configuration. Bun refuses the request
+before connecting if any nonempty HTTP_PROXY, HTTPS_PROXY or ALL_PROXY variable is present
+(case-insensitive), even with NO_PROXY set; NO_PROXY alone is permitted. That refusal is a
+`network` outcome. Environment variables are never changed during a request.
+For gzip, deflate and Brotli responses, the size cap applies to decoded bytes; the returned
+headers omit content-encoding and content-length because they describe the encoded body.
+
+**Cleartext and transport security.** CtrlProxy declares `INTERNET` and a `network_security_config`
+with cleartext permitted, so `http://` works for `via: "device"` on Android. On iOS, `via: "device"`
+runs inside the target app and obeys its App Transport Security: `localhost` and IP addresses are
+exempt, other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
+`via: "host"` is not subject to ATS.
+
+**Saved prototypes.** A saved Android prototype (see
+[Saved prototypes on the Android home screen](#saved-prototypes-on-the-android-home-screen)) supports
+`request` actions with `via: "device"` (it still needs a reachable URL, since no host runs `adb reverse`
+when it launches alone). `via: "host"` has no host to run it there, so it fails with an `invalid_request`
+error whose message points to `via: "device"`.
+
+**Limits.**
+
+| Limit                                        | Value                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 262144 bytes of data cost                                  |
+| Response body                                | `MAX_PROTOTYPE_RESPONSE_BYTES`, 262144 bytes, 2xx only (a non-2xx body is never read)        |
+| Request `timeoutMs`                          | 1 to 30000, default 10000                                                                    |
+| Requests in flight                           | 4 per device                                                                                 |
+| Header and query entries                     | 16 each, values up to 4096 characters                                                        |
+| Storage                                      | at most 64 keys, 262144 stored bytes per prototype id                                        |
+| Emit payload                                 | 4096 bytes; a larger `change` event drops its `value` and the host stops mirroring that spec |
 
 ## Anchors
 
@@ -2348,8 +2444,9 @@ CtrlProxy calls `ShortcutManager.requestPinShortcut` with the stored label and a
 prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
 
 - Android never pins silently: the default launcher always shows its confirmation dialog, so a
-  fresh pin is reported `pending`. Declining delivers no callback. Automatic acceptance is #12266
-  and is device-verification work (launcher dialogs differ).
+  fresh pin is reported `pending`. Declining delivers no callback. `autoConfirm` taps the dialog's accept
+  button by label and reports `pinned` only after `listSaved` confirms (#12266, device-verification
+  work: launcher dialogs differ).
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
   screen-off device reports `device_locked`; the save remains and a retry is safe.
 - The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`

@@ -6,9 +6,10 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
-import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -318,9 +319,12 @@ class CaCertificateControllerTest {
 
     fun newController() =
       CaCertificateController(
-        devicePolicy = policy,
-        packageName = PACKAGE,
-        filesDir = { directory },
+        dependencies =
+          CaCertificateDependencies(
+            devicePolicy = policy,
+            packageName = PACKAGE,
+            filesDir = { directory },
+          ),
         perfProvider = perfProvider,
         timeProvider = timer,
         resultBroadcaster =
@@ -424,16 +428,17 @@ class CaCertificateControllerTest {
 
     override fun isRunning() = running
 
-    override suspend fun broadcastWithPerf(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
+    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
       failure?.let { throw it }
       assertTrue(running)
       // Match production's flush-before-build ordering, without opening a WebSocket server.
-      perfProvider.flush()
-      frames += CapturedFrame(type, requestId, buildJsonObject(buildContent))
+      val frame = Json.parseToJsonElement(messageBuilder(perfProvider.flush())).jsonObject
+      frames +=
+        CapturedFrame(
+          frame.getValue("type").jsonPrimitive.content,
+          frame["requestId"]?.jsonPrimitive?.content,
+          JsonObject(frame - setOf("type", "timestamp", "requestId", "perfTiming")),
+        )
     }
 
     override fun getConnectionCount(): Int {

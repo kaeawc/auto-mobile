@@ -1,6 +1,6 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { TransitionalAdbBindWait } from "../../src/daemon/transitionalAdbBindWait";
-import { DeviceTransportOfflineError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceTransportOfflineError } from "../../src/models/deviceAcquisitionRefusals";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -379,4 +379,8 @@ test("opted-in absence never seen transitional returns immediately", async () =>
   });
   expect(await wait.waitIfTransitional()).toBe(false);
   expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+afterEach(() => {
+  mock.restore();
 });

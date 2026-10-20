@@ -54,10 +54,20 @@ export type HelperSpawner = (
   options: Parameters<HostProcessExecutor["spawn"]>[2],
 ) => HelperProcess;
 
-type HelperProcess = ReturnType<HostProcessExecutor["spawn"]> & {
+/** The child-process surface the helper drives; narrow so tests can fake just these members. */
+type HelperProcess = Pick<
+  ReturnType<HostProcessExecutor["spawn"]>,
+  "exitCode" | "kill" | "killed" | "pid" | "signalCode"
+> & {
   stdin: Writable;
   stdout: Readable;
   stderr: Readable;
+  once(event: "error", listener: (error: Error) => void): unknown;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
+  removeAllListeners(): unknown;
 };
 
 export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;

@@ -1,6 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
-import type { NewRecompositionMetrics } from "../../db/types";
+import { RecompositionMetricsRepository } from "../../db/recompositionMetricsRepository";
+import type { Database, NewRecompositionMetrics } from "../../db/types";
 import {
   BootedDevice,
   ObserveResult,
@@ -50,17 +52,23 @@ interface RecompositionDeviceState {
   latestSummaryByPackage: Map<string, RecompositionSummary>;
 }
 
+function readLabels(recomposition: RecompositionNodeInfo, props: Record<string, any> | undefined) {
+  return {
+    likelyCause: recomposition.likelyCause ?? "unknown",
+    resourceId: recomposition.resourceId ?? props?.["resource-id"] ?? null,
+    testTag: recomposition.testTag ?? props?.["test-tag"] ?? null,
+  };
+}
 export class RecompositionTracker {
   private static instance: RecompositionTracker;
   private readonly stateByDevice = new Map<string, RecompositionDeviceState>();
   private readonly parser = new DefaultElementParser();
   private timer: Timer;
+  private readonly repository: RecompositionMetricsRepository;
 
-  constructor(
-    timer: Timer = defaultTimer,
-    private readonly database: () => ReturnType<typeof getDatabase> = getDatabase,
-  ) {
+  constructor(timer: Timer = defaultTimer, database: () => Kysely<Database> = getDatabase) {
     this.timer = timer;
+    this.repository = new RecompositionMetricsRepository(database);
   }
 
   static getInstance(): RecompositionTracker {
@@ -157,45 +165,57 @@ export class RecompositionTracker {
 
     for (const root of nodesToTraverse) {
       this.parser.traverseNode(root, (node: any) => {
-        const props = this.parser.extractNodeProperties(node);
-        const recomposition = (props?.recomposition ?? node?.recomposition) as
-          | RecompositionNodeInfo
-          | undefined;
-        if (!recomposition || !recomposition.id) {
-          return;
+        const entry = this.entryFromNode(node);
+        if (entry) {
+          entries.push(entry);
         }
-
-        const total = this.coerceNumber(recomposition.total);
-        if (total === null) {
-          return;
-        }
-
-        const skipCount = this.coerceNumber(recomposition.skipCount) ?? 0;
-        const rolling1sAverage = this.coerceNumber(recomposition.rolling1sAverage) ?? 0;
-        const durationMs = this.coerceNumber(recomposition.durationMs) ?? undefined;
-        const likelyCause = recomposition.likelyCause ?? "unknown";
-        const resourceId = recomposition.resourceId ?? props?.["resource-id"] ?? null;
-        const testTag = recomposition.testTag ?? props?.["test-tag"] ?? null;
-
-        entries.push({
-          id: recomposition.id,
-          composableName: recomposition.composableName,
-          resourceId,
-          testTag,
-          total,
-          skipCount,
-          rolling1sAverage,
-          durationMs,
-          likelyCause,
-          parentChain: recomposition.parentChain,
-          stableAnnotated: recomposition.stableAnnotated,
-          rememberedCount: recomposition.rememberedCount,
-          nodeRef: node,
-        });
       });
     }
 
     return entries;
+  }
+
+  /** The recomposition entry a hierarchy node carries, or null when it has none usable. */
+  private entryFromNode(node: any): RecompositionEntryInput | null {
+    const props = this.parser.extractNodeProperties(node);
+    const recomposition = (props?.recomposition ?? node?.recomposition) as
+      | RecompositionNodeInfo
+      | undefined;
+    if (!recomposition || !recomposition.id) {
+      return null;
+    }
+
+    const total = this.coerceNumber(recomposition.total);
+    if (total === null) {
+      return null;
+    }
+
+    const { skipCount, rolling1sAverage, durationMs } = this.readCounters(recomposition);
+    const { likelyCause, resourceId, testTag } = readLabels(recomposition, props);
+
+    return {
+      id: recomposition.id,
+      composableName: recomposition.composableName,
+      resourceId,
+      testTag,
+      total,
+      skipCount,
+      rolling1sAverage,
+      durationMs,
+      likelyCause,
+      parentChain: recomposition.parentChain,
+      stableAnnotated: recomposition.stableAnnotated,
+      rememberedCount: recomposition.rememberedCount,
+      nodeRef: node,
+    };
+  }
+
+  private readCounters(recomposition: RecompositionNodeInfo) {
+    return {
+      skipCount: this.coerceNumber(recomposition.skipCount) ?? 0,
+      rolling1sAverage: this.coerceNumber(recomposition.rolling1sAverage) ?? 0,
+      durationMs: this.coerceNumber(recomposition.durationMs) ?? undefined,
+    };
   }
 
   private computeMetrics(
@@ -301,7 +321,6 @@ export class RecompositionTracker {
       return;
     }
 
-    const db = this.database();
     const sessionId = new Date(this.timer.now()).toISOString().split("T")[0];
     const timestamp = new Date(observationTimestamp).toISOString();
 
@@ -330,9 +349,7 @@ export class RecompositionTracker {
         timestamp,
       }));
 
-      if (rows.length > 0) {
-        await db.insertInto("recomposition_metrics").values(rows).execute();
-      }
+      await this.repository.insertMany(rows);
 
       // Emit layout telemetry for recompositions
       const recorder = TelemetryRecorder.getInstance();
@@ -365,37 +382,15 @@ export class RecompositionTracker {
           });
       }
 
-      await this.pruneOldRecords(db);
+      await this.pruneOldRecords();
     } catch (error) {
       logger.error(`[RecompositionTracker] Failed to store recomposition metrics: ${error}`);
     }
   }
 
-  private async pruneOldRecords(db: ReturnType<typeof getDatabase>): Promise<void> {
+  private async pruneOldRecords(): Promise<void> {
     try {
-      const result = await db
-        .selectFrom("recomposition_metrics")
-        .select(({ fn }) => fn.count<number>("id").as("count"))
-        .executeTakeFirst();
-
-      const count = Number(result?.count ?? 0);
-      if (count <= MAX_RECOMPOSITION_RECORDS) {
-        return;
-      }
-
-      const deleteCount = count - MAX_RECOMPOSITION_RECORDS;
-      await db
-        .deleteFrom("recomposition_metrics")
-        .where(
-          "id",
-          "in",
-          db
-            .selectFrom("recomposition_metrics")
-            .select("id")
-            .orderBy("timestamp")
-            .limit(deleteCount),
-        )
-        .execute();
+      await this.repository.pruneToMaxRows(MAX_RECOMPOSITION_RECORDS);
     } catch (error) {
       logger.warn(`[RecompositionTracker] Failed to prune recomposition metrics: ${error}`);
     }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
@@ -8,6 +8,13 @@ import { WorkflowBindingDeviceDeleter } from "../../../../src/daemon/sessionBrok
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { assignBindingDevice } from "./bindingFixtures";
+
+afterEach(() => mock.restore());
+
+let deletedSpy: ReturnType<typeof spyOn<WorkflowBindingDeviceDeleter, "deleteAndVerifyAbsence">>;
+beforeEach(() => {
+  deletedSpy = spyOn(WorkflowBindingDeviceDeleter.prototype, "deleteAndVerifyAbsence");
+});
 
 const RUNTIME = "system-images;android-36;google_apis;x86_64";
 const OLD = "usable-avd";
@@ -34,17 +41,15 @@ async function harness(assigned = true) {
     : [];
   const key = assigned ? await assignBindingDevice(registry, "android", OLD) : undefined;
   const before = key ? await registry.getAssignment(key) : null;
-  const deleted = spyOn(
-    WorkflowBindingDeviceDeleter.prototype,
-    "deleteAndVerifyAbsence",
-  ).mockImplementation(async (target) => {
+  const deleted = deletedSpy.mockImplementation(async (target) => {
     const index = images.findIndex((image) => image.name === target.stableId);
     if (index >= 0) {
       images.splice(index, 1);
     }
     return { kind: "absent" };
   });
-  const journal = spyOn(registry, "openBindingJournal");
+  const journal = mock(registry.openBindingJournal.bind(registry));
+  registry.openBindingJournal = journal;
   const provisioned: Array<{ name: string; spec: { deviceType: string } }> = [];
   let reads = 0;
   let unreadable = false;
@@ -74,7 +79,7 @@ async function harness(assigned = true) {
     owner: () => ({ daemonId: "daemon", pid: 1 }),
     timer,
     journal: {
-      owner: { daemonId: "daemon", pid: 1, processGeneration: "gen-1" },
+      owner: { daemonId: "daemon", pid: 1, processGenerationToken: "gen-1" },
       inFlight: new BindingJournalInFlight(),
     },
     invokeTool: async (_name, args) => {
@@ -151,8 +156,6 @@ async function harness(assigned = true) {
 }
 
 describe("daemon acquisition validates Android creation profiles", () => {
-  afterEach(() => mock.restore());
-
   test("unsupported explicit profile refuses acquisition and preserves the assigned AVD", async () => {
     const h = await harness();
     const result = await h.acquire(UNKNOWN);

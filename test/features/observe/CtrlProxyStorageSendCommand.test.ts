@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { CtrlProxyStorage } from "../../../src/features/observe/android/CtrlProxyStorage";
 import { isCtrlProxyStorageUnavailableError } from "../../../src/features/observe/android/CtrlProxyStorage";
@@ -32,10 +31,10 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "storage-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "storage-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
@@ -43,7 +42,7 @@ async function harness() {
   );
   await Promise.resolve();
   timer.advanceTime(123);
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     "discover_keystore",
     "get_sdk_capabilities",
@@ -79,7 +78,7 @@ async function flushDispatch() {
   }
 }
 
-const keystoreState = {
+const keystoreState: Awaited<ReturnType<CtrlProxyStorage["discoverKeystore"]>> = {
   schemaVersion: 1,
   capability: "storage.keystore",
   outcome: "disabled",
@@ -96,7 +95,33 @@ const snapshot = {
   policy: { captureHeaders: false, captureBodies: false, allowMutations: false },
 };
 const subscription = { packageName: "pkg", fileName: "prefs", subscriptionId: "pkg:prefs" };
-const methods = [
+type StorageResult = Awaited<
+  ReturnType<
+    CtrlProxyStorage[
+      | "getPreference"
+      | "listPreferenceFiles"
+      | "getPreferenceEntries"
+      | "discoverKeystore"
+      | "getSdkCapabilities"
+      | "subscribeStorage"
+      | "unsubscribeStorage"
+      | "setPreference"
+      | "removePreference"
+      | "clearPreferenceStore"]
+  >
+>;
+const methods: Array<{
+  operation: string;
+  label: string;
+  invoke: (storage: CtrlProxyStorage) => Promise<StorageResult>;
+  frame: (
+    requestId: string,
+  ) => ReturnType<(typeof ctrlProxyRequests)[keyof typeof ctrlProxyRequests]>;
+  literal: string;
+  response: object;
+  result: StorageResult;
+  write?: boolean;
+}> = [
   {
     operation: "list_preference_files",
     label: "List preference files",
@@ -311,7 +336,7 @@ for (const method of methods) {
           h.client.ensureConnected = async () => false;
         }
         if (failure === "socket") {
-          h.client["ws"] = null;
+          h.client.connectionTestHooks.socket = null;
         }
         if (failure === "send") {
           h.socket.sendError = new Error("send failed");

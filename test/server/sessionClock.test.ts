@@ -1,3 +1,4 @@
+import { unbindDevice } from "../../src/daemon/deviceBinding";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { retireShutdownOwnership } from "../../src/server/deviceToolsShutdown";
@@ -679,7 +680,7 @@ describe("session clock restoration", () => {
       await pool.releaseDevice(device.deviceId, "clock-session");
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
       // Model the ownership detachment performed after a proven device shutdown.
-      pool.getDevice(device.deviceId)!.sessionId = null;
+      unbindDevice(pool.getDevice(device.deviceId)!);
       await pool.removeDevice(device.deviceId);
       expect(h.restoreSignals.at(-1)?.aborted).toBe(true);
       const writes = h.adapter.calls.filter((call) => call.startsWith("instant:")).length;

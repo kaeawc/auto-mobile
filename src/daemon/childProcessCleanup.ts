@@ -7,7 +7,7 @@ import {
   forceStopVideoRecording,
   stopAcceptingVideoRecordingStarts,
   stopVideoRecording,
-} from "../server/videoRecordingManager";
+} from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";

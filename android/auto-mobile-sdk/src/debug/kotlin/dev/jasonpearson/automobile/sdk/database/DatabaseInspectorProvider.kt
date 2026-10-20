@@ -65,28 +65,13 @@ class DatabaseInspectorProvider : ContentProvider() {
 
     try {
       val driver = DatabaseInspector.getDriver(extras?.getString("storeName"))
-      val response =
-        when (method) {
-          "getReadOnlyCapability" -> JSONObject().put("readOnlyEnforced", true)
-          "listDatabases" -> handleListDatabases(driver)
-          "listTables" -> handleListTables(driver, extras)
-          "getTableData" -> handleGetTableData(driver, extras)
-          "getTableStructure" -> handleGetTableStructure(driver, extras)
-          "executeSQL" -> handleExecuteSQL(driver, extras, capabilities)
-          else -> throw IllegalArgumentException("Unknown method: $method")
-        }
+      val response = dispatchCall(method, driver, extras, capabilities)
       result.putBoolean("success", true)
       result.putString("result", response.toString())
+    } catch (e: DatabaseError.SqlError) {
+      result.putSqlError(e)
     } catch (e: DatabaseError) {
-      val multipleStatements =
-        e is DatabaseError.SqlError &&
-          e.message == "SQL error: Multiple SQL statements are not supported"
-      result.putError(
-        if (multipleStatements) "multiple_statements_not_supported"
-        else e::class.simpleName ?: "UNKNOWN",
-        if (multipleStatements) "Multiple SQL statements are not supported"
-        else e.message ?: "Unknown error",
-      )
+      result.putError(e::class.simpleName ?: "UNKNOWN", e.message ?: "Unknown error")
     } catch (e: IllegalArgumentException) {
       result.putError("INVALID_ARGUMENT", e.message ?: "Invalid argument")
     } catch (e: Exception) {
@@ -94,6 +79,60 @@ class DatabaseInspectorProvider : ContentProvider() {
     }
 
     return result
+  }
+
+  private fun dispatchCall(
+    method: String,
+    driver: DatabaseDriver,
+    extras: Bundle?,
+    capabilities: SdkCapabilityDocument,
+  ): JSONObject =
+    when (method) {
+      "getReadOnlyCapability" -> JSONObject().put("readOnlyEnforced", true)
+      "listDatabases" -> handleListDatabases(driver)
+      "listTables" -> handleListTables(driver, extras)
+      "getTableData" -> handleGetTableData(driver, extras)
+      "getTableStructure" -> handleGetTableStructure(driver, extras)
+      "executeSQL" -> handleExecuteSQL(driver, extras, capabilities)
+      else -> throw IllegalArgumentException("Unknown method: $method")
+    }
+
+  private fun Bundle.putSqlError(e: DatabaseError.SqlError) {
+    val multipleStatements = e.message == "SQL error: Multiple SQL statements are not supported"
+    putError(
+      if (multipleStatements) "multiple_statements_not_supported"
+      else e::class.simpleName ?: "UNKNOWN",
+      if (multipleStatements) "Multiple SQL statements are not supported"
+      else e.message ?: "Unknown error",
+    )
+  }
+
+  private fun executionJson(execution: SQLExecutionResult): JSONObject {
+    return when (val result = execution) {
+      is SQLExecutionResult.Query -> {
+        val columnsArray = JSONArray()
+        result.columns.forEach { columnsArray.put(it) }
+
+        val rowsArray = JSONArray()
+        result.rows.forEach { row ->
+          val rowArray = JSONArray()
+          row.forEach { value -> rowArray.put(value ?: JSONObject.NULL) }
+          rowsArray.put(rowArray)
+        }
+
+        JSONObject().apply {
+          put("type", "query")
+          put("columns", columnsArray)
+          put("rows", rowsArray)
+        }
+      }
+      is SQLExecutionResult.Mutation -> {
+        JSONObject().apply {
+          put("type", "mutation")
+          put("rowsAffected", result.rowsAffected)
+        }
+      }
+    }
   }
 
   /**
@@ -220,31 +259,7 @@ class DatabaseInspectorProvider : ContentProvider() {
         else -> throw DatabaseError.MutationNotAllowed()
       }
 
-    return when (val result = execution) {
-      is SQLExecutionResult.Query -> {
-        val columnsArray = JSONArray()
-        result.columns.forEach { columnsArray.put(it) }
-
-        val rowsArray = JSONArray()
-        result.rows.forEach { row ->
-          val rowArray = JSONArray()
-          row.forEach { value -> rowArray.put(value ?: JSONObject.NULL) }
-          rowsArray.put(rowArray)
-        }
-
-        JSONObject().apply {
-          put("type", "query")
-          put("columns", columnsArray)
-          put("rows", rowsArray)
-        }
-      }
-      is SQLExecutionResult.Mutation -> {
-        JSONObject().apply {
-          put("type", "mutation")
-          put("rowsAffected", result.rowsAffected)
-        }
-      }
-    }
+    return executionJson(execution)
   }
 
   // Required ContentProvider methods - not used for content call

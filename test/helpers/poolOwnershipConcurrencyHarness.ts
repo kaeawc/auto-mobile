@@ -314,17 +314,9 @@ export interface RunResult {
  * its acquired sets), read without side effects. Private state, read only here.
  */
 function autolockConnections(pool: DevicePool): Set<string> {
-  const manager: unknown = Reflect.get(pool, "autolockManager");
-  const routes: unknown = manager ? Reflect.get(manager, "mcpSessionAutolockMap") : undefined;
-  const acquired: unknown = manager
-    ? Reflect.get(manager, "mcpSessionAcquiredAutolocks")
-    : undefined;
-  if (!(routes instanceof Map) || !(acquired instanceof Map)) {
-    throw new Error("DeviceAutolockManager no longer keeps its MCP route maps; update the harness");
-  }
-  return new Set(
-    [...routes.keys(), ...acquired.keys()].filter((c): c is string => typeof c === "string"),
-  );
+  const { mcpSessionAutolockMap, mcpSessionAcquiredAutolocks } =
+    pool.testHooks.autolockManager.testHooks;
+  return new Set([...mcpSessionAutolockMap.keys(), ...mcpSessionAcquiredAutolocks.keys()]);
 }
 
 /**
@@ -346,7 +338,7 @@ export function isExpectedRefusal(error: unknown): boolean {
  * getSession() and so can start a lazy-expiry release mid-check. Private state, read only here.
  */
 function connectionOwnership(pool: DevicePool): ReadonlyMap<string, ReadonlySet<string>> {
-  const raw: unknown = Reflect.get(pool, "mcpSessionAcquiredDeviceSessions");
+  const raw: unknown = pool.testHooks.mcpSessionAcquiredDeviceSessions;
   if (!(raw instanceof Map)) {
     throw new Error(
       "DevicePool no longer keeps mcpSessionAcquiredDeviceSessions; update the harness",
@@ -876,20 +868,14 @@ class OwnershipWorld {
               undefined,
               { autolockEnabled: true },
             )
-          : await this.pool.bindOrReuseDeviceSession(
+          : await this.pool.bindOrReuseDeviceSession({
               sessionId,
-              device.deviceId,
-              "android",
-              undefined,
-              undefined,
-              undefined,
-              false,
-              undefined,
-              undefined,
-              undefined,
-              connection,
-              kind === "cli",
-            );
+              deviceId: device.deviceId,
+              platform: "android",
+              allowSessionRebind: false,
+              mcpSessionId: connection,
+              oneShotCli: kind === "cli",
+            });
       if (bound === undefined) {
         return;
       }
@@ -1430,39 +1416,25 @@ class OwnershipWorld {
             keepScreenAwake: { applied: true, method: "svc", svcWasEnabled: false },
           });
           const receipt: AcquisitionReceipt = {};
-          await this.pool.bindOrReuseDeviceSession(
+          await this.pool.bindOrReuseDeviceSession({
             sessionId,
-            device.deviceId,
-            "android",
-            undefined,
-            undefined,
-            undefined,
-            true,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
+            deviceId: device.deviceId,
+            platform: "android",
+            allowSessionRebind: true,
             receipt,
-            true,
-          );
+            refusePreparedForOtherRequest: true,
+          });
           commitAcquisition(receipt);
           await drainMicrotasks(SETTLE_TURNS);
         } else {
-          await this.pool.bindOrReuseDeviceSession(
+          await this.pool.bindOrReuseDeviceSession({
             sessionId,
-            device.deviceId,
-            "android",
-            undefined,
-            undefined,
-            undefined,
-            true,
-            undefined,
-            undefined,
-            undefined,
-            client.kind === "mcp" ? client.connection : undefined,
-            client.kind === "cli",
-          );
+            deviceId: device.deviceId,
+            platform: "android",
+            allowSessionRebind: true,
+            mcpSessionId: client.kind === "mcp" ? client.connection : undefined,
+            oneShotCli: client.kind === "cli",
+          });
         }
       } catch (error) {
         // Losing the race with the session's own release is the expected outcome of a rebind.

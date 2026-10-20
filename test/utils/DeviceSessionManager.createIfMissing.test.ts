@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -9,7 +9,8 @@ import {
   resetDeviceCreationGate,
   setDeviceCreationGate,
 } from "../../src/devices/deviceCreationGate";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { DeviceClientSimctl } from "../../src/daemon/readiness/DeviceSessionManager";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -35,8 +36,12 @@ interface SimctlRecorder {
  * Minimal injected simctl fake. It never reaches a real simulator, and records
  * the creation and boot decisions made by findOrStartIosDevice.
  */
-function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []): SimCtlClient {
+function makeSimctl(
+  recorder: SimctlRecorder,
+  simulatorImages: DeviceInfo[] = [],
+): DeviceClientSimctl {
   return {
+    ...fakeDeviceManagerSimctl(),
     listSimulatorImages: async () => simulatorImages,
     getBootedSimulators: async () => [],
     getBootedSimulatorsChecked: async () => [],
@@ -74,17 +79,18 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
       recorder.deleteSignalAborted?.push(options?.signal?.aborted ?? false);
     },
     // verifyIosDevice returns early for a non-Booted, available device.
-    getDeviceInfo: async () => {
+    getDeviceInfo: async (udid) => {
       if (recorder.verifyError) {
         throw recorder.verifyError;
       }
       return {
+        udid,
         name: "AutoMobile-iPhone-17",
         isAvailable: true,
         state: "Shutdown",
       };
     },
-  } as unknown as SimCtlClient;
+  };
 }
 
 function simulatorImage(
@@ -121,7 +127,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder),
     );
-    manager = new DeviceSessionManager(provider);
+    manager = DeviceSessionManager.createInstance(provider);
   });
 
   afterEach(() => {
@@ -217,7 +223,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder, [simulatorImage("EXISTING-UDID", true)]),
     );
-    manager = new DeviceSessionManager(provider);
+    manager = DeviceSessionManager.createInstance(provider);
     recorder.verifyError = new Error("verify failed");
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow("verify failed");
@@ -241,7 +247,7 @@ describe("findOrStartIosDevice creation gate", () => {
         simulatorImage("999-available", true),
       ]),
     );
-    manager = new DeviceSessionManager(provider);
+    manager = DeviceSessionManager.createInstance(provider);
 
     await manager.findOrStartIosDevice();
 
@@ -255,7 +261,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder, [simulatorImage("unavailable", false, "runtime unavailable")]),
     );
-    manager = new DeviceSessionManager(provider);
+    manager = DeviceSessionManager.createInstance(provider);
     setDeviceCreationGate(new FakeDeviceCreationGate(true));
 
     await manager.findOrStartIosDevice();
@@ -270,7 +276,7 @@ describe("findOrStartIosDevice creation gate", () => {
       new FakeDeviceUtils(),
       makeSimctl(recorder, [simulatorImage("unavailable", false, "runtime unavailable")]),
     );
-    manager = new DeviceSessionManager(provider);
+    manager = DeviceSessionManager.createInstance(provider);
     setDeviceCreationGate(new FakeDeviceCreationGate(false));
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow(

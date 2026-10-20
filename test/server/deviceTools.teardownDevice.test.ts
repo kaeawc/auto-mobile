@@ -28,7 +28,7 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import {
   registerDeviceTools,
   getDeviceTeardownService,
@@ -43,7 +43,7 @@ import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarr
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import {
   registerVideoRecordingTools,
   resetSegmentedSessions,
@@ -63,9 +63,14 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
-  override async upsertActiveSession(): Promise<void> {}
+  override async upsertActiveSession(): Promise<number> {
+    return 0;
+  }
   override async replaceLivenessOwnership(): Promise<void> {}
   override async getSession(): Promise<undefined> {
     return undefined;
@@ -858,7 +863,12 @@ describe("deleteDevice handler", () => {
       );
       manager.setBootedDevices("android", [device]);
       await pool.initializeWithDevices([device]);
-      await pool.bindOrReuseDeviceSession("session-1", device.deviceId, "android", image);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: image,
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       manager.setDeviceImages("android", [image]);
       manager.setBootedDevices("android", []);
@@ -1180,10 +1190,7 @@ describe("deleteDevice handler", () => {
       deviceId: "11111111-1111-1111-1111-111111111111",
     };
     const old = IOSCtrlProxyManager.getInstance(device);
-    const stop = spyOn(
-      old as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const stop = spyOn(old, "forceStopForShutdown").mockResolvedValue();
     try {
       const response = await teardownTool().handler(
         request("ios", byName ? device.name : device.deviceId, device.name),
@@ -1319,7 +1326,7 @@ describe("deleteDevice handler", () => {
     };
     await pool.addDevice(pooledRuntime, image);
     DaemonState.getInstance().initialize(sessionManager, pool);
-    const staleManager = AndroidCtrlProxyManager.getInstance(pooledRuntime);
+    const staleManager = AndroidCtrlProxyManager.getInstanceForTesting(pooledRuntime);
     manager.setBootedDevices("android", []);
     manager.setDeviceImages("android", []);
 
@@ -3100,17 +3107,14 @@ describe("deleteDevice handler", () => {
 
   test("evicts iOS state when a cancelled destroy later succeeds", async () => {
     const timer = new FakeTimer();
-    const device: DeviceInfo = {
+    const device = {
       platform: "ios",
       name: "iPhone 16",
       deviceId: "IOS-CANCELLED-DEVICE-1",
       isRunning: false,
-    };
+    } satisfies DeviceInfo;
     const proxy = IOSCtrlProxyManager.getInstance(device);
-    const forceStop = spyOn(
-      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     const controller = new AbortController();
     let releaseDestroy!: () => void;
     const destroyStarted = Promise.withResolvers<void>();
@@ -3145,7 +3149,7 @@ describe("deleteDevice handler", () => {
 
       expect(forceStop).toHaveBeenCalledTimes(1);
       expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
-      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.registry.peek(device.deviceId)).toBeUndefined();
       expect(resolveDirectSessionDevice("late-cancelled-destroy-session")).toBeUndefined();
     } finally {
       forceStop.mockRestore();
@@ -3156,17 +3160,14 @@ describe("deleteDevice handler", () => {
 
   test("evicts the CtrlProxy manager after a timed-out destroy later succeeds", async () => {
     const timer = new FakeTimer();
-    const device: DeviceInfo = {
+    const device = {
       platform: "ios",
       name: "iPhone 16",
       deviceId: "IOS-DEVICE-1",
       isRunning: false,
-    };
+    } satisfies DeviceInfo;
     const proxy = IOSCtrlProxyManager.getInstance(device);
-    const forceStop = spyOn(
-      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     let releaseDestroy!: () => void;
     const destroyStarted = new Promise<void>((resolve) => {
       manager.destroyStarted = resolve;
@@ -3199,7 +3200,7 @@ describe("deleteDevice handler", () => {
 
       expect(forceStop).toHaveBeenCalledTimes(1);
       expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
-      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.registry.peek(device.deviceId)).toBeUndefined();
       expect(resolveDirectSessionDevice("late-destroy-session")).toBeUndefined();
     } finally {
       forceStop.mockRestore();
@@ -3210,17 +3211,14 @@ describe("deleteDevice handler", () => {
 
   test("does not evict the CtrlProxy manager after a timed-out destroy later rejects", async () => {
     const timer = new FakeTimer();
-    const device: DeviceInfo = {
+    const device = {
       platform: "ios",
       name: "iPhone 16",
       deviceId: "IOS-DEVICE-1",
       isRunning: false,
-    };
+    } satisfies DeviceInfo;
     const proxy = IOSCtrlProxyManager.getInstance(device);
-    const forceStop = spyOn(
-      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     let releaseDestroy!: () => void;
     const destroyStarted = new Promise<void>((resolve) => {
       manager.destroyStarted = resolve;
@@ -3454,7 +3452,7 @@ describe("deleteDevice handler", () => {
               name: provisionRequest.name,
               isRunning: false,
             },
-            resolvedSpec: provisionRequest.spec,
+            resolvedSpec: { ...provisionRequest.spec, displayCutout: "unknown" },
           };
         },
       }),
@@ -3513,7 +3511,7 @@ describe("deleteDevice handler", () => {
           return {
             created: false,
             device,
-            resolvedSpec: provisionRequest.spec,
+            resolvedSpec: { ...provisionRequest.spec, displayCutout: "unknown" },
           };
         },
       }),
@@ -3903,6 +3901,7 @@ describe("deleteDevice handler", () => {
     const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
     setDeviceToolsDependencies({
       lifecycleCoordinator: {
+        isReserved: (identity) => coordinator.isReserved(identity),
         reserve: async (identity, options) => {
           const lease = await coordinator.reserve(identity, options);
           return {

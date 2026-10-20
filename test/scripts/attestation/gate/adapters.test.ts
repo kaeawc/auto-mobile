@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, expect, mock, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { logger } from "../../../../src/utils/logger";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
@@ -27,14 +27,13 @@ import { AttestationServiceClient } from "../../../../scripts/ci/attestation/tra
 import { fixture, HASH, NOW } from "../validators/helpers";
 import { FakeTokenProvider, harness, response, validEnv, tokenResponse } from "../transport/fakes";
 
-let warning: ReturnType<typeof spyOn<typeof logger, "warn">> | undefined;
+let warning: ReturnType<typeof spyOn<typeof logger, "warn">>;
 afterEach(() => {
-  warning?.mockRestore();
-  warning = undefined;
+  warning.mockRestore();
 });
-function quiet() {
+beforeEach(() => {
   warning = spyOn(logger, "warn").mockImplementation(() => {});
-}
+});
 const query = {
   tier: 1 as const,
   repo: "owner/repo",
@@ -131,7 +130,6 @@ test.each(["transport-unavailable", "invalid-response", "unauthenticated"] as co
 );
 
 test("transport errors never throw or expose remote error text", async () => {
-  quiet();
   const transport = serviceTransport({
     lookup: async () => {
       throw new Error("SECRET");
@@ -155,7 +153,7 @@ test("a service skip without a canonical envelope cannot become found", async ()
   ).toEqual({ kind: "unavailable", reason: "invalid-response" });
 });
 
-test.each([
+test.each<Record<string, string | undefined>>([
   {},
   { AUTOMOBILE_ATTESTATION_APP_ID: "123" },
   { ...validEnv, AUTOMOBILE_ATTESTATION_SERVICE_URL: "http://unsafe.test" },
@@ -336,7 +334,6 @@ test("recorder bridge maps observations and retains JSONL using fakes", async ()
 test.each(["jsonl", "store"])(
   "%s recorder failure preserves the other write and never escapes the gate",
   async (failure) => {
-    quiet();
     const written: string[] = [];
     const recorder = shadowRecorderBridge({
       jsonl: {

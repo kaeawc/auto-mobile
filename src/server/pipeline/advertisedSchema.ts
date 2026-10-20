@@ -7,7 +7,7 @@ import {
   applyPostFlattenJsonSchemaOverride,
   enforceAnthropicToolSchemaSubset,
   isInjectedDeviceIdSchema,
-} from "../toolSchemaHelpers";
+} from "../../utils/schemaHelpers";
 import { toolOutputArtifactDetailsSchema } from "../toolOutputSchemas";
 import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,

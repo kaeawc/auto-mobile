@@ -5,23 +5,14 @@ import {
   resetInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
 import {
-  setPressButtonFactory,
-  resetPressButtonFactory,
-  setWakeAndUnlockFactory,
-  resetWakeAndUnlockFactory,
+  registerInteractionTools,
+  type InteractionToolDependencies,
 } from "../../src/server/interactionTools";
 import Ajv2020 from "ajv/dist/2020";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
-import {
-  rotateHandler,
-  setPostureHandler,
-  setRotateFactory,
-  resetRotateFactory,
-  setSetPostureFactory,
-  resetSetPostureFactory,
-} from "../../src/server/interactionTools";
+import { rotateHandler, setPostureHandler } from "../../src/server/interactionTools";
 import {
   afterAll,
   afterEach,
@@ -42,6 +33,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
 
+const interactionDeps: InteractionToolDependencies = {};
 const appTools = createAppToolsHarness();
 
 isolateToolRegistry();
@@ -110,12 +102,9 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
     const { client } = fixture.getContext();
     const res: any = await client.callTool({ name: TOOL, arguments: {} });
     expect(res.structuredContent).toBeDefined();
-    // This test asserts the RAW wire envelope, so it must read `structuredContent`
-    // directly rather than via getStructuredField() — that helper is the #2907
-    // production dead-read guard, but here inspecting the pre-strip wire shape is
-    // the whole point of the test.
-    // oxlint-disable-next-line auto-mobile/no-structured-content-read -- intentional raw-wire assertion
-    expect(res.structuredContent.marker).toBe("probe");
+    // Assert the raw wire envelope with a matcher: it inspects the pre-strip shape without
+    // reading a field off `structuredContent` (the #2907 dead-read pattern).
+    expect(res.structuredContent).toMatchObject({ marker: "probe" });
   });
 
   test("gate on: structuredContent stripped, content text retains the full payload", async () => {
@@ -416,10 +405,10 @@ describe("device lifecycle ordinary-client structured output", () => {
   });
 
   afterEach(() => {
-    resetRotateFactory();
-    resetSetPostureFactory();
-    resetPressButtonFactory();
-    resetWakeAndUnlockFactory();
+    delete interactionDeps.rotateFactory;
+    delete interactionDeps.setPostureFactory;
+    delete interactionDeps.pressButtonFactory;
+    delete interactionDeps.wakeAndUnlockFactory;
     resetInstalledAppResourceRefresh();
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
@@ -436,25 +425,25 @@ describe("device lifecycle ordinary-client structured output", () => {
   ] as const)(
     "%s retains structuredContent for an ordinary client and respects suppression",
     async (name) => {
-      setRotateFactory(() => ({
+      interactionDeps.rotateFactory = () => ({
         execute: async () => ({
           success: true,
           orientation: "portrait",
           value: 0,
           rotationPerformed: false,
         }),
-      }));
-      setSetPostureFactory(() => ({
+      });
+      interactionDeps.setPostureFactory = () => ({
         executeHingeAngle: async () => ({ status: "unsupported", message: "unused angle fake" }),
         execute: async () => ({
           posture: "opened",
           display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
         }),
-      }));
-      setPressButtonFactory(() => ({
+      });
+      interactionDeps.pressButtonFactory = () => ({
         execute: async () => ({ success: true, button: "home", keyCode: 3 }),
-      }));
-      setWakeAndUnlockFactory(() => ({
+      });
+      interactionDeps.wakeAndUnlockFactory = () => ({
         execute: async () => ({
           success: true,
           platform: "android",
@@ -462,7 +451,7 @@ describe("device lifecycle ordinary-client structured output", () => {
           wasLocked: false,
           unlocked: true,
         }),
-      }));
+      });
       appTools.configure("launchApp", {
         createLaunchApp: () => ({
           execute: async () => ({ success: true, packageName: "com.example" }),
@@ -477,12 +466,19 @@ describe("device lifecycle ordinary-client structured output", () => {
           }),
         }),
       });
-      setInstalledAppResourceRefresh(async () => {});
+      setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
       const state = { success: true, deviceId: device.deviceId, platform: device.platform };
       const getStateSpy = spyOn(DeviceState.prototype, "getState").mockResolvedValue(state);
       const setStateSpy = spyOn(DeviceState.prototype, "setState").mockResolvedValue(state);
+      if (name === "pressButton" || name === "wakeAndUnlock") {
+        // Re-register with the fakes so the registered handler reaches them.
+        registerInteractionTools(interactionDeps);
+      }
       const tool = ToolRegistry.getRegisteredTool(name)!;
-      expect(tool.outputSchema).toBeDefined();
+      const outputSchema = tool.outputSchema;
+      if (!outputSchema) {
+        throw new Error(`${name} declares no outputSchema`);
+      }
       const args =
         name === "rotate"
           ? { orientation: "portrait" }
@@ -498,9 +494,21 @@ describe("device lifecycle ordinary-client structured output", () => {
       const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
         const response =
           name === "rotate"
-            ? await rotateHandler(device, { orientation: "portrait" })
+            ? await rotateHandler(
+                device,
+                { orientation: "portrait" },
+                undefined,
+                undefined,
+                interactionDeps,
+              )
             : name === "setPosture"
-              ? await setPostureHandler(device, { posture: "opened" })
+              ? await setPostureHandler(
+                  device,
+                  { posture: "opened" },
+                  undefined,
+                  undefined,
+                  interactionDeps,
+                )
               : await tool.deviceAwareHandler!(device, args);
         return finalizeToolResponse(response, {
           name,
@@ -515,7 +523,7 @@ describe("device lifecycle ordinary-client structured output", () => {
         expect(result.structuredContent).toEqual(
           JSON.parse((result.content[0] as { text: string }).text),
         );
-        expect(tool.outputSchema.safeParse(result.structuredContent).success).toBe(true);
+        expect(outputSchema.safeParse(result.structuredContent).success).toBe(true);
         expect(validators.get(name)!(result.structuredContent)).toBe(true);
 
         serverConfig.setToolResultsNoStructuredContentEnabled(true);

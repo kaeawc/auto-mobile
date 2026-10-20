@@ -1,4 +1,4 @@
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { expect, test } from "bun:test";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";

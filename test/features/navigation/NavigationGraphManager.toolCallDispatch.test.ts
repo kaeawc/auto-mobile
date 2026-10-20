@@ -36,7 +36,7 @@ describe("NavigationGraphManager tool-call dispatch window (#10196)", () => {
     timer.setCurrentTime(T0 - 100_000);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
     await navigate("Login", T0 - 100_000);

@@ -11,16 +11,33 @@ class WaitForToolBackoffTest {
   private class ThrowingClient(val calls: AtomicInteger) : AutoMobileAgent.MCPClient {
     override fun isConnected(): Boolean = true
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
+
+    override fun disconnect() {
+      disconnectCalls++
+    }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>): String {
       calls.incrementAndGet()
-      throw RuntimeException("observe failed")
+      throw IllegalStateException("observe failed")
     }
 
     override fun listAvailableTools(): List<AutoMobileAgent.MCPToolDefinition> = emptyList()
+  }
+
+  private class FakeTimer : AutoMobileAgent.TimeProvider {
+    private var nowMs = 0L
+
+    override fun currentTimeMillis() = nowMs
+
+    fun advance(delayMs: Long) {
+      nowMs += delayMs
+    }
   }
 
   /**
@@ -31,16 +48,17 @@ class WaitForToolBackoffTest {
   @Test
   fun `throwing observe does not busy-spin the daemon`() = runBlocking {
     val calls = AtomicInteger(0)
-    val tool = AutoMobileAgent.WaitForTool(ThrowingClient(calls))
+    val timer = FakeTimer()
+    val tool = AutoMobileAgent.WaitForTool(ThrowingClient(calls), timer, timer::advance)
 
-    val start = System.currentTimeMillis()
+    val start = timer.currentTimeMillis()
     try {
       tool.execute(AutoMobileAgent.WaitForTool.Args(text = "hello", timeout = 1100))
       fail("expected a timeout")
     } catch (e: RuntimeException) {
       assertTrue(e.message!!.contains("Timeout"))
     }
-    val elapsed = System.currentTimeMillis() - start
+    val elapsed = timer.currentTimeMillis() - start
 
     // With ~500ms pacing over an ~1100ms window this is a handful of attempts; a
     // busy-spin would be thousands.

@@ -1,6 +1,8 @@
 /**
  * Simple logger utility with different log levels
  */
+import { productionStallTimer, type LogSinkTimer } from "./loggerStreamLifecycle";
+import { formatLogRecord } from "./loggerValues";
 import { testOverrides } from "./testOverrides";
 import fs from "fs";
 import path from "path";
@@ -15,12 +17,33 @@ import {
   resolveAutomobileLogFormat,
   resolveAutomobileLogSink,
   writeEmergencyLog,
+  logStreamFactory,
+  type LogStream,
 } from "./loggingConfig";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { toActionableError } from "../models/ActionableError";
 import { raceWithDeadline } from "./raceWithDeadline";
 import { isProcessRunning } from "./processLiveness";
 import { LogSinkStallGuard } from "./logSinkStallGuard";
+import { ENV, readEnvRaw } from "../config/env";
+import {
+  Logger,
+  LogLevel,
+  parseAutomobileLogLevel,
+  resolveProcessLogPrefix,
+  SENSITIVE_ENV_KEYS,
+  safeStringify,
+  sanitizeMessage,
+} from "./loggerValues";
+import { CLOSE_LOG_STREAM_TIMEOUT_MS, closeLogStream } from "./loggerStreamLifecycle";
+export { CLOSE_LOG_STREAM_TIMEOUT_MS, closeLogStream } from "./loggerStreamLifecycle";
+
+export {
+  type Logger,
+  LogLevel,
+  parseAutomobileLogLevel,
+  resolveProcessLogPrefix,
+} from "./loggerValues";
 
 export {
   parseAutomobileLogFormat,
@@ -31,117 +54,8 @@ export {
   type LogSink,
 } from "./loggingConfig";
 
-/**
- * Interface for logger functionality
- */
-export interface Logger {
-  /**
-   * Logs a debug message
-   */
-  debug(message: string, ...args: any[]): void;
-
-  /**
-   * Logs an info message
-   */
-  info(message: string, ...args: any[]): void;
-
-  /**
-   * Logs a warning message
-   */
-  warn(message: string, ...args: any[]): void;
-
-  /**
-   * Logs an error message
-   */
-  error(message: string, ...args: any[]): void;
-
-  /**
-   * Sets the current log level
-   */
-  setLogLevel(level: LogLevel): void;
-
-  /**
-   * Gets the current log level
-   */
-  getLogLevel(): LogLevel;
-
-  /**
-   * Enables logging to STDOUT in addition to log files
-   */
-  enableStdoutLogging(): void;
-
-  /**
-   * Disables logging to STDOUT
-   */
-  disableStdoutLogging(): void;
-
-  /**
-   * Awaits any in-flight fire-and-forget log writes so callers (chiefly tests)
-   * can deterministically observe a just-emitted line at the sink instead of
-   * racing the async write with a real-timer poll. Resolves once the most
-   * recent write settled; never rejects (write failures are already swallowed).
-   */
-  flush(): Promise<void>;
-
-  /**
-   * Flushes queued writes and closes the log stream.
-   */
-  close(): void;
-
-  /**
-   * Flushes pending writes and waits until the log stream finishes closing.
-   * Use this before an explicit process exit so the final log entries reach
-   * the stream.
-   */
-  closeAfterFlush(timer?: Timer): Promise<void>;
-}
-
-export const LogLevel = {
-  DEBUG: 0 as const,
-  INFO: 1 as const,
-  WARN: 2 as const,
-  ERROR: 3 as const,
-  NONE: 4 as const,
-};
-
-export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
-
 export function isStructuredLoggingEnabled(): boolean {
   return logFormat === "json";
-}
-
-/**
- * Parse `AUTOMOBILE_LOG_LEVEL` values: debug, info, warn|warning, error, none|silent.
- * Returns null if unset, blank, or unrecognized (caller keeps current level).
- */
-export function parseAutomobileLogLevel(value: string | undefined): LogLevel | null {
-  if (value === undefined) {
-    return null;
-  }
-  const v = value.trim().toLowerCase();
-  if (v.length === 0) {
-    return null;
-  }
-  switch (v) {
-    case "debug":
-      return LogLevel.DEBUG;
-    case "info":
-      return LogLevel.INFO;
-    case "warn":
-    case "warning":
-      return LogLevel.WARN;
-    case "error":
-      return LogLevel.ERROR;
-    case "none":
-    case "silent":
-      return LogLevel.NONE;
-    default:
-      return null;
-  }
-}
-
-export function resolveProcessLogPrefix(argv: readonly string[], pid: number): string {
-  return argv.includes("--daemon-mode") ? "daemon" : `stdio-${pid}`;
 }
 
 // Seed the level from AUTOMOBILE_LOG_LEVEL at process start (issue #3845) so a
@@ -151,9 +65,7 @@ export function resolveProcessLogPrefix(argv: readonly string[], pid: number): s
 // DaemonManager-spawned daemon inherits the var via its `{ ...process.env }`
 // child env. Falls back to INFO when unset/unrecognized; still overridable at
 // runtime via setLogLevel.
-let currentLogLevel: LogLevel =
-  parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL ?? process.env.AUTO_MOBILE_LOG_LEVEL) ??
-  LogLevel.INFO;
+let currentLogLevel: LogLevel = parseAutomobileLogLevel(readEnvRaw(ENV.LOG_LEVEL)) ?? LogLevel.INFO;
 
 const logFormat = resolveAutomobileLogFormat();
 const logSink = resolveAutomobileLogSink();
@@ -200,7 +112,7 @@ const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefi
 // preceding 'error' is rare enough (and self-healing via the next write's
 // lazy retry once a subsequent write actually fails) that it doesn't need a
 // handler here.
-const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): void => {
+const attachStreamFailureHandlers = (stream: LogStream, target: string): void => {
   stream.on("error", (error) => {
     try {
       writeEmergencyLog(`Log stream error on ${target}`, error);
@@ -225,7 +137,7 @@ const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): vo
 // Every old descriptor whose close was not confirmed keeps this path unavailable.
 // These are old-stream release barriers, never references to the current sink.
 const unconfirmedCloses = new Map<
-  fs.WriteStream,
+  LogStream,
   {
     timer: Pick<Timer, "setTimeout" | "clearTimeout">;
     timeoutHandle: NodeJS.Timeout;
@@ -233,7 +145,7 @@ const unconfirmedCloses = new Map<
   }
 >();
 const deferReopenUntilClose = (
-  stream: fs.WriteStream,
+  stream: LogStream,
   timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
 ): void => {
   if (stream.closed) {
@@ -268,7 +180,7 @@ const deferReopenUntilClose = (
 // importing process ("Unhandled error between tests" in the host-integration
 // lane). File logging is best-effort, so swallow the construction failure and
 // fall back to console-only logging rather than taking the process down.
-const openLogStream = (target: string): fs.WriteStream | undefined => {
+const openLogStream = (target: string): LogStream | undefined => {
   for (const [stream, entry] of unconfirmedCloses) {
     if (stream.closed) {
       entry.onClose();
@@ -278,7 +190,7 @@ const openLogStream = (target: string): fs.WriteStream | undefined => {
     return undefined;
   }
   try {
-    const stream = fs.createWriteStream(target, { flags: "a" });
+    const stream = logStreamFactory.create(target, { flags: "a" });
     attachStreamFailureHandlers(stream, target);
     return stream;
   } catch (error) {
@@ -299,45 +211,14 @@ function fileLogPaths(): { dir: string; path: string } | undefined {
   }
   return { dir: logsDir, path: logFilePath };
 }
-
-interface EndableLogStream {
-  end(callback?: () => void): void;
-  once(event: "error" | "close", listener: (...args: any[]) => void): void;
-  off(event: "error" | "close", listener: (...args: any[]) => void): void;
-  // Node/Bun WriteStreams expose this once the fd has actually been released.
-  // Optional so plain EventEmitter fakes that never set it still type-check.
-  readonly closed?: boolean;
-  // Node/Bun WriteStreams (via Writable) expose this. Called only on the
-  // error-without-close path below, to nudge a stalled fd toward release
-  // rather than passively waiting on a `close` that may never come. Optional
-  // so plain EventEmitter fakes that never implement it still type-check.
-  destroy?(error?: Error): void;
-}
-
-// Bounds how long closeLogStream() waits for the confirming `close`, including
-// a stream that silently never closes. A stuck fd must not hold the next test
-// file's logger teardown (or production shutdown) indefinitely.
-export const CLOSE_LOG_STREAM_TIMEOUT_MS = 5_000;
 // Busy integration files can enqueue many best-effort log records. Allow their
 // callbacks to drain before treating a stalled writer as a shutdown failure;
 // the subsequent fd-close wait has its own shorter bound.
 export const CLOSE_LOG_WRITES_TIMEOUT_MS = 20_000;
 export const LOG_WRITE_STALL_TIMEOUT_MS = 5_000;
 export const LOG_SINK_ABANDON_TIMEOUT_MS = 30_000;
-
-type LogSinkTimer = Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
-// The logger is process infrastructure: its watchdog must not enter the timer
-// history of code whose tests assert no real timers, even under later spies.
-const runtimeSetTimeout = globalThis.setTimeout;
-const runtimeClearTimeout = globalThis.clearTimeout;
-const runtimeNow = Date.now;
-const productionStallTimer = {
-  setTimeout: (callback: () => void, ms: number) => runtimeSetTimeout(callback, ms),
-  clearTimeout: (handle: NodeJS.Timeout) => runtimeClearTimeout(handle),
-  now: () => runtimeNow(),
-};
 let logSinkStallTimer: LogSinkTimer = productionStallTimer;
-const streamStallGuards = new WeakMap<fs.WriteStream, LogSinkStallGuard>();
+const streamStallGuards = new WeakMap<LogStream, LogSinkStallGuard>();
 let intentionalDrainCount = 0;
 let rotationWait:
   | {
@@ -349,102 +230,6 @@ let rotationWait:
 
 export function setLogSinkStallTimerForTesting(timer: Timer | undefined): void {
   logSinkStallTimer = timer ?? productionStallTimer;
-}
-
-/**
- * Resolves once a log stream has ACTUALLY closed (its file descriptor
- * released), or rejects if closing it failed.
- *
- * `WriteStream.end(callback)` fires its callback on writable completion — the
- * same moment as the `finish` event — but the underlying fd is only released
- * later, on the `close` event. On Bun (and Node) the observed order is: end
- * callback, then `finish`, then `close`. Reopening the same path on the earlier
- * `finish` signal therefore still races bun's epoll registration for the not-
- * yet-released fd and can throw `EEXIST: ... epoll_ctl` on the replacement
- * stream's construction — the exact race rotation exists to avoid (issue
- * #6149). So we drive `end()` to start the shutdown but wait for `close`.
- *
- * Two more orderings, both confirmed on Node 24 and Bun 1.2.14:
- *  - An `error` during shutdown (e.g. a failing fd, `/dev/full`) does NOT mean
- *    the fd was released — `close` still follows. Settling on `error` alone
- *    let the caller rename/reopen the path while the old descriptor was still
- *    live, recreating the exact race this function exists to avoid. The error
- *    is recorded and still surfaced (so the failure is not silently lost) but
- *    only once the confirming `close` actually arrives.
- *  - A stream whose fd was already released before this call (e.g. a repeated
- *    `logger.close()` / `closeAfterFlush()`) never emits a second `close` —
- *    Node/Bun only fire it once per stream — so waiting for a listener would
- *    hang forever. Check `closed` up front and resolve immediately.
- *
- * Bounded close policy (issue #6700): the ordering above is the observed
- * contract on the runtimes this was verified against, not a guarantee the
- * platform makes. If a supported runtime (or an already-broken stream) emits
- * `error` and then never emits `close`, this must not hang the caller
- * forever. So once an `error` is observed, this (a) explicitly `destroy()`s
- * the stream if it exposes that method, nudging a stalled fd toward release,
- * and (b) keeps a bounded timer. The `close` listener stays authoritative —
- * a `close` that arrives before the bound (whether from the normal shutdown
- * or as a result of the `destroy()` call) still settles exactly as before,
- * rejecting with the recorded error. Only if `close` never arrives within
- * `timeoutMs` does this reject with an actionable timeout instead of hanging.
- * The timer is armed even without an error, for a stream that emits neither
- * `error` nor `close`. Deliberately does NOT settle immediately on `error` alone — that would
- * recreate the fd race fixed by #6149.
- */
-export function closeLogStream(
-  stream: EndableLogStream,
-  timer: Timer = defaultTimer,
-  timeoutMs: number = CLOSE_LOG_STREAM_TIMEOUT_MS,
-): Promise<void> {
-  if (stream.closed) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let pendingError: Error | undefined;
-    const timeoutHandle = timer.setTimeout(() => {
-      settle(() => {
-        stream.destroy?.();
-        reject(
-          toActionableError(
-            pendingError ?? new Error("Log stream close stalled"),
-            `Log stream did not emit 'close' within ${timeoutMs}ms — the file descriptor may still be held`,
-          ),
-        );
-      });
-    }, timeoutMs);
-    const settle = (run: () => void): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      stream.off("error", onError);
-      stream.off("close", onClose);
-      timer.clearTimeout(timeoutHandle);
-      run();
-    };
-    // Do NOT settle here — only record the error and keep waiting for the
-    // `close` that confirms the fd is actually released. Do arm the bounded
-    // fallback below so an error that is never followed by `close` cannot
-    // hang this promise forever.
-    const onError = (error: Error): void => {
-      pendingError = error;
-      // Let every listener record the error before a synchronous destroy can
-      // emit close (concurrent close callers may share this stream).
-      queueMicrotask(() => {
-        if (!settled) {
-          stream.destroy?.(error);
-        }
-      });
-    };
-    const onClose = (): void => settle(() => (pendingError ? reject(pendingError) : resolve()));
-    stream.once("error", onError);
-    stream.once("close", onClose);
-    // Start the shutdown; the `close` listener above (not end()'s finish-time
-    // callback, and not a same-tick `error`) is what actually resolves this
-    // promise once the fd is released.
-    stream.end();
-  });
 }
 
 // Maximum log file size (10MB)
@@ -642,7 +427,7 @@ let startupLogSweep = logsDir ? createStartupLogSweep(defaultTimer, pruneOldLogF
 // can throw `EEXIST: file already exists, epoll_ctl` on the new stream's own
 // construction (issue #6149). A failed close defers rotation until the
 // descriptor confirms release; writes degrade to stderr in the meantime.
-const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<boolean> => {
+const closeStreamBeforeRotation = async (stream: LogStream): Promise<boolean> => {
   streamStallGuards.get(stream)?.suspend();
   try {
     await closeLogStream(stream);
@@ -796,110 +581,8 @@ const checkAndRotateLog = async (lineByteLength: number): Promise<boolean> => {
   }
 };
 
-// Sensitive environment variable keys to filter from logs
-const SENSITIVE_ENV_KEYS = new Set([
-  "PASSWORD",
-  "TOKEN",
-  "SECRET",
-  "KEY",
-  "CREDENTIAL",
-  "AUTH",
-  "API_KEY",
-  "PRIVATE_KEY",
-  "ACCESS_TOKEN",
-  "REFRESH_TOKEN",
-  "CLIENT_SECRET",
-  "DATABASE_URL",
-  "DB_PASSWORD",
-  "GITHUB_TOKEN",
-  "NPM_TOKEN",
-  "AWS_SECRET_ACCESS_KEY",
-]);
-
-// Function to safely stringify objects while filtering sensitive data
-const safeStringify = (obj: any): string => {
-  if (typeof obj !== "object" || obj === null) {
-    return String(obj);
-  }
-
-  // Track only the current ancestor path (not every object ever visited) so a
-  // shared child referenced from two sibling positions — a DAG/diamond, which is
-  // NOT a cycle — renders fully at both, instead of the second occurrence being
-  // mis-flagged as "[circular]". Each entry pairs the filtered object we return
-  // (which becomes `this`, the holder, in the child calls) with the original value
-  // it was built from (whose identity a true cycle repeats on the path). See #5617.
-  const ancestors: Array<{ holder: object; original: object }> = [];
-  try {
-    return JSON.stringify(obj, function (this: unknown, _key, value) {
-      if (typeof value === "object" && value !== null) {
-        // Unwind the path back to this value's holder before testing/pushing, so
-        // siblings don't inherit each other's descendants as false ancestors.
-        while (ancestors.length > 0 && ancestors[ancestors.length - 1].holder !== this) {
-          ancestors.pop();
-        }
-        if (ancestors.some((entry) => entry.original === value)) {
-          return "[circular]";
-        }
-        // Filter sensitive environment-like keys
-        const filtered: any = {};
-        for (const [k, v] of Object.entries(value)) {
-          if (!SENSITIVE_ENV_KEYS.has(k.toUpperCase())) {
-            filtered[k] = v;
-          }
-        }
-        ancestors.push({ holder: filtered, original: value });
-        return filtered;
-      }
-      // JSON has no representation for non-finite numbers, so JSON.stringify would
-      // emit them as `null` — masking what a caller actually sent (e.g. the daemon
-      // request log showing a rejected `Infinity`/`NaN` argument as `null`, #5854).
-      // Render the literal marker instead so the trace is faithful.
-      if (typeof value === "number" && !Number.isFinite(value)) {
-        return String(value);
-      }
-      return value;
-    });
-  } catch (error) {
-    // Circular diagnostic values are expected at a logging boundary. Preserve
-    // the primary record rather than creating a second, potentially unsinkable
-    // logging failure.
-    void error;
-    return "[unserializable]";
-  }
-};
-
-// Function to sanitize log message to prevent log injection
-const sanitizeMessage = (message: string): string => {
-  return message.replace(/[\r\n\t]/g, " ");
-};
-
 // Exported for unit tests that pin the redaction / injection-sanitizing contract.
 export { SENSITIVE_ENV_KEYS, safeStringify, sanitizeMessage };
-
-// Function to write to log file
-const formatLogRecord = (level: string, message: string, args: any[]): string => {
-  const timestamp = new Date().toISOString();
-  const sanitizedMessage = sanitizeMessage(message);
-  const argsStr =
-    args.length > 0
-      ? ` ${args.map((arg) => sanitizeMessage(typeof arg === "object" ? safeStringify(arg) : String(arg))).join(" ")}`
-      : "";
-  const fullMessage = `${sanitizedMessage}${argsStr}`;
-  const boundedMessage =
-    fullMessage.length > 1000 ? `${fullMessage.substring(0, 1000)}... (truncated)` : fullMessage;
-
-  if (logFormat === "json") {
-    return JSON.stringify({
-      timestamp,
-      level: level.toLowerCase(),
-      component: ownLogPrefix,
-      event: "log",
-      message: boundedMessage,
-    });
-  }
-
-  return `${timestamp} [${level}] ${boundedMessage}`;
-};
 
 const writeToStderr = (line: string): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -946,6 +629,7 @@ const writeSynchronousStderr = (line: string): void => {
 };
 
 const reportSinkStall = (timer: LogSinkTimer, event: string, message: string): void => {
+  lastSinkStallReportedAtMs = timer.now();
   writeSynchronousStderr(
     logFormat === "json"
       ? JSON.stringify({
@@ -964,6 +648,8 @@ const writeResumedRecord = (elapsedMs: number, diverted: number): void => {
   trackWrite(
     writeToFile(
       formatLogRecord(
+        logFormat,
+        ownLogPrefix,
         "WARN",
         `Log sink ${logFilePath} resumed after ${elapsedMs}ms; ${diverted} line(s) were diverted while it was stalled`,
         [],
@@ -973,7 +659,7 @@ const writeResumedRecord = (elapsedMs: number, diverted: number): void => {
 };
 
 const abandonStalledStream = (
-  stream: fs.WriteStream,
+  stream: LogStream,
   timer: LogSinkTimer,
   elapsed: number,
   dropped: number,
@@ -995,7 +681,7 @@ const abandonStalledStream = (
   }
 };
 
-const stallGuardForStream = (stream: fs.WriteStream): LogSinkStallGuard => {
+const stallGuardForStream = (stream: LogStream): LogSinkStallGuard => {
   let guard = streamStallGuards.get(stream);
   if (!guard) {
     const timer = logSinkStallTimer;
@@ -1092,6 +778,23 @@ const divertFileRecord = (line: string): void => {
 const sinkStalled = (): boolean =>
   rotationWait?.guard.stalled === true ||
   (logStream !== undefined && streamStallGuards.get(logStream)?.stalled === true);
+
+/**
+ * When a stall was last reported. A stalled stream is abandoned after LOG_SINK_ABANDON_TIMEOUT_MS
+ * and only counts as stalled again once a later write has itself gone unanswered, so the live flag
+ * alone drops out for part of every long host-wide I/O stall (#11990).
+ */
+let lastSinkStallReportedAtMs: number | undefined;
+
+/**
+ * True if the file log sink is stalled now, or reported a stall within `windowMs`: a signal that
+ * host disk I/O is blocked, not that any one consumer is broken (#11990). Always false when the
+ * sink is not a file (stderr), since nothing then writes to disk.
+ */
+export const logSinkStalledWithin = (windowMs: number): boolean =>
+  sinkStalled() ||
+  (lastSinkStallReportedAtMs !== undefined &&
+    logSinkStallTimer.now() - lastSinkStallReportedAtMs <= windowMs);
 
 const waitForPriorRotation = async (): Promise<boolean> => {
   while (rotationInFlight) {
@@ -1190,7 +893,10 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
     return;
   }
   try {
-    const safeLogMessage = formatLogRecord(level, message, args).replace(/[\r\n\t]/g, " ");
+    const safeLogMessage = formatLogRecord(logFormat, ownLogPrefix, level, message, args).replace(
+      /[\r\n\t]/g,
+      " ",
+    );
     // Start both configured writes before awaiting either one. A failed file
     // sink must not suppress the process-stream record in `both` mode.
     mirrorToLegacyStdout(safeLogMessage);

@@ -23,7 +23,7 @@ describe("navigation build-context changes", () => {
   test("set, change and clear notify once; identical sets and absent clears do nothing", () => {
     const manager = new NavigationGraphManager(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       new FakeTimer(),
     );
     const changes: Array<{
@@ -55,12 +55,16 @@ describe("navigation build-context changes", () => {
   test("changing device attribution publishes only that device's new context", () => {
     const manager = new NavigationGraphManager(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       new FakeTimer(),
     );
     const context = { appId: "app", deviceId: "device-a", versionCode: 1, contentHash: "hash" };
     manager.setBuildContext(context);
-    const changes: Array<{ deviceId: string; buildContext: NavigationBuildContext | null }> = [];
+    const changes: Array<{
+      appId: string;
+      deviceId: string;
+      buildContext: NavigationBuildContext | null;
+    }> = [];
     manager.setBuildContextUpdateListener((change) => changes.push(change));
     manager.setBuildContext({ ...context, deviceId: "device-b" });
     expect(changes).toEqual([

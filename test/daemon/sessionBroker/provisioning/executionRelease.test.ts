@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, mock } from "bun:test";
 import {
   BrokerExecutionRelease,
   managedExecutionSessionsFrom,
@@ -9,7 +9,7 @@ import type { KeepAwakeRestoreReport } from "../../../../src/utils/KeepScreenAwa
 import { FakeDbWriteBarrier } from "../../../fakes/FakeDbWriteBarrier";
 import type { BindingKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/daemon/sessionBroker/provisioning/executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/models/managedExecutionLiveness";
 import { logger } from "../../../../src/utils/logger";
 import { SessionManager } from "../../../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
@@ -425,7 +425,9 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       expect(timer.now() - start).toBeGreaterThanOrEqual(CAP_MS + 5 * SLOW_POLL_MS);
       expect(polls.filter((ms) => ms === SLOW_POLL_MS).length).toBeGreaterThanOrEqual(4);
       expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("did not settle")),
+        warn.mock.calls.filter(([message]: unknown[]) =>
+          String(message).includes("did not settle"),
+        ),
       ).toHaveLength(1);
     });
 
@@ -621,4 +623,8 @@ describe("managed execution release wiring", () => {
       manager.stopCleanupTimer();
     }
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

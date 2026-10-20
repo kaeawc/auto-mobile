@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import {
   ActionableError,
   BootedDevice,
@@ -34,7 +35,7 @@ export interface IosNotificationUIDetectorDeps {
     y2: number,
     duration?: number,
   ): Promise<IosGestureResult>;
-  requestTapCoordinates(x: number, y: number): Promise<IosGestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<IosGestureResult>;
   /** Host-side monotonic clock used as the iOS observation timestamp. */
   now(): number;
 }
@@ -46,7 +47,7 @@ const IOS_CLOSE_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
  * iOS implementation of {@link NotificationUIDetector}. NotificationCenter
  * is hosted by SpringBoard, so the predicate first gates on the
  * observation's `packageName` containing "springboard" before scanning
- * for any of the known NotificationCenter class / identifier hints.
+ * for legacy NotificationCenter hints or the captured cover-sheet list structure.
  *
  * Expand and collapse are vertical swipes anchored at the screen's
  * mid-X. The detector requires the caller to pass the most recent
@@ -66,7 +67,7 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
     if (!viewHierarchy) {
       return false;
     }
-    const packageName = (viewHierarchy as any).packageName ?? "";
+    const packageName = viewHierarchy.packageName ?? "";
     if (!packageName.includes("springboard")) {
       return false;
     }
@@ -105,7 +106,7 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
   async tapElement(element: Element): Promise<void> {
     const geometry = new DefaultElementGeometry();
     const center = geometry.getElementCenter(element);
-    const result = await this.deps.requestTapCoordinates(center.x, center.y);
+    const result = await this.deps.requestTapCoordinates({ x: center.x, y: center.y });
     this.requireGestureSuccess(result, "tap notification");
   }
 

@@ -1,5 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -11,13 +11,11 @@ import {
 } from "../../../src/features/preferences/AppPreferences";
 import { IOS_SDK_REDACTED_VALUE } from "../../../src/features/preferences/IosPreferenceTypes";
 import { parseIosUserDefaultsPlist } from "../../../src/features/preferences/IosUserDefaultsPlist";
-import {
-  CtrlProxyServicePortChangedError,
-  IOSCtrlProxyClient,
-} from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyServicePortChangedError } from "../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/storageTypes";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
-import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/server/storageSdkErrors";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/utils/storageSdkErrors";
 import { buildPlist, PlistReal } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -82,14 +80,23 @@ class FakeKeyValueClient implements IosPreferenceKeyValueClient {
     key: string,
     value: string | null,
     type: KeyValueType,
-    timeoutMs?: number,
-  ): Promise<void> {
-    this.calls.push({ operation: "set", appId, store, key, value, type, timeoutMs });
+    timeoutMs?: Parameters<IosPreferenceKeyValueClient["setPreference"]>[5],
+  ): ReturnType<IosPreferenceKeyValueClient["setPreference"]> {
+    this.calls.push({
+      operation: "set",
+      appId,
+      store,
+      key,
+      value,
+      type,
+      timeoutMs: typeof timeoutMs === "number" ? timeoutMs : timeoutMs?.timeoutMs,
+    });
     this.onWrite?.();
     if (this.writeError) {
       throw typeof this.writeError === "string" ? new Error(this.writeError) : this.writeError;
     }
     this.entry = { key, value, type };
+    return undefined;
   }
 }
 
@@ -132,13 +139,13 @@ class FakeContainerSimctl {
       if (this.processListError) {
         throw new Error(this.processListError);
       }
-      return { stdout: this.processList, stderr: "" };
+      return createExecResult(this.processList, "");
     }
     if (args[0] === "get_app_container") {
       if (this.containerError) {
         throw new Error(this.containerError);
       }
-      return { stdout: `${this.containerPath}\n`, stderr: "" };
+      return createExecResult(`${this.containerPath}\n`, "");
     }
     if (args[3] !== "write") {
       throw new Error("Unexpected defaults read");
@@ -146,7 +153,7 @@ class FakeContainerSimctl {
     if (this.writeError) {
       throw new Error(this.writeError);
     }
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   }
 }
 
@@ -662,7 +669,7 @@ describe("iOS app UserDefaults resolution", () => {
     // Model the open connection this test advertises before resolving its replies.
     const socket = createSuccessWebSocketFactory(timer)("ws://fake");
     await Promise.resolve();
-    client["ws"] = socket as unknown as WebSocket;
+    client["ws"] = socket;
     const connect = spyOn(client, "ensureConnected").mockImplementation(() => {
       throw new Error("Auto-start forbidden");
     });

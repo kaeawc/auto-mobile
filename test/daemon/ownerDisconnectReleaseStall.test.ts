@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
@@ -51,20 +52,14 @@ async function setUp(checkIntervalMs?: number): Promise<Rig> {
   deviceManager.bootedDevices = [DEVICE];
   const devicePool = makePool(sessionManager, "test-daemon-session-id", { timer, deviceManager });
   await devicePool.initializeWithDevices([DEVICE]);
-  await devicePool.bindOrReuseDeviceSession(
-    OWNER_SESSION,
-    DEVICE.deviceId,
-    "android",
-    undefined,
-    undefined,
-    undefined,
-    false,
-    undefined,
-    undefined,
-    undefined,
-    OWNER_CONNECTION,
-  );
-  sessionManager.recordHeartbeat(OWNER_SESSION);
+  await devicePool.bindOrReuseDeviceSession({
+    sessionId: OWNER_SESSION,
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+    allowSessionRebind: false,
+    mcpSessionId: OWNER_CONNECTION,
+  });
+  await deliverDaemonHeartbeat(sessionManager, OWNER_SESSION);
   const monitor = new SessionHeartbeatMonitor(
     sessionManager,
     () => false,
@@ -107,12 +102,12 @@ describe("owner-disconnect release across a daemon stall or host sleep (#11162)"
 
       await r.resume();
       expect(r.releaseReasons).toEqual([]);
-      r.sessionManager.recordHeartbeat(OWNER_SESSION);
+      await deliverDaemonHeartbeat(r.sessionManager, OWNER_SESSION);
       for (let tick = 0; tick < 6; tick++) {
         await r.timer.advanceTimeAsync(PROXY_HEARTBEAT_INTERVAL_MS, () =>
           drainMicrotasks(FAKE_TIMER_QUIET_TURNS),
         );
-        r.sessionManager.recordHeartbeat(OWNER_SESSION);
+        await deliverDaemonHeartbeat(r.sessionManager, OWNER_SESSION);
       }
 
       expect(r.releaseReasons).toEqual([]);

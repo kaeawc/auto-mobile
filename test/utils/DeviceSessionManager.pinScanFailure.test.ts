@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -82,7 +82,7 @@ describe("DeviceSessionManager platform scan status", () => {
     try {
       const scan = await manager.detectConnectedPlatformsWithStatus();
       expect(scan.scanned.android).toBe(false);
-      expect(scan.scannedSources.android).toBe(false);
+      expect(scan.scannedSources?.android).toBe(false);
       await expect(manager.ensureDeviceReady("android", "absent-device")).rejects.toThrow(
         "not found",
       );

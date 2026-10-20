@@ -1,5 +1,4 @@
-import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { createExecResult } from "../../src/utils/execResult";
 import { InMemoryControlSocket, RawFrameClient } from "../helpers/inMemoryDaemonWire";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -12,6 +11,7 @@ import {
   HOLDER,
   type HarnessOptions,
 } from "../helpers/transportAliasHarness";
+import { spyOnIosClientFactory } from "../helpers/iosCtrlProxyClientSpies";
 
 interface Scenario extends HarnessOptions {
   name: string;
@@ -134,14 +134,11 @@ async function runScenario(scenario: Scenario, cleanups: Array<() => void>) {
     h.adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
     h.connect([booted(scenario.target)]);
   }
-  const ios = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        bindSession: () => undefined,
-        getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-        requestTapCoordinates: async () => ({ success: true }),
-      }) as unknown as IOSCtrlProxyClient,
-  );
+  const ios = spyOnIosClientFactory(() => ({
+    bindSession: () => undefined,
+    getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
+    requestTapCoordinates: async () => ({ success: true }),
+  }));
   cleanups.push(() => ios.mockRestore());
   const wire = InMemoryControlSocket.attach({
     timer: h.timer,
@@ -164,7 +161,13 @@ async function runScenario(scenario: Scenario, cleanups: Array<() => void>) {
     sessionUuid: scenario.requester,
   };
   const frame = await client.request("input/tap", { ...args, x: 1, y: 2 });
-  const frameVerdict = verdict(frame.success ? "ran" : (frame.code ?? frame.error));
+  const frameVerdict = verdict(
+    frame.success
+      ? "ran"
+      : typeof frame.code === "number"
+        ? String(frame.code)
+        : (frame.code ?? frame.error),
+  );
   const toolVerdict = verdict(await h.outcome("controlProbe", args));
   return { frame: frameVerdict, tool: toolVerdict };
 }

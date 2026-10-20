@@ -1,3 +1,4 @@
+import type { reserveBootCapacity } from "../../../features/bootAdmission/sharedBootAdmissionGates";
 /**
  * Assembles the broker's native-device acquisition (#11173 part b) from production parts: the
  * host-wide binding registry, the reconciler over real inventory / provisionDevice / deleteDevice /
@@ -25,15 +26,13 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { runAsBindingReconciler } from "./exclusion";
 import { WorkflowBindingDeviceDeleter } from "./deviceDeleter";
 import { BrokerDeviceAcquisition, type BrokerDeviceAcquisitionSessions } from "./deviceAcquisition";
+import { DeviceManagerBindingInventory } from "./DeviceManagerBindingInventory";
 import {
-  DeviceManagerBindingInventory,
   GateBindingBootCapacity,
-  PoolBindingDeviceClaims,
-  ToolBindingProvisioner,
   type BindingBootCapacityAssertion,
-  type BindingClaimPool,
-  type BindingToolInvoker,
-} from "./reconcilerPorts";
+} from "./GateBindingBootCapacity";
+import { PoolBindingDeviceClaims, type BindingClaimPool } from "./PoolBindingDeviceClaims";
+import { ToolBindingProvisioner, type BindingToolInvoker } from "./reconcilerPorts";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
@@ -43,11 +42,8 @@ import {
   type ManagedAndroidImageCatalog,
   type ManagedAndroidProfileCatalog,
 } from "./reconciler";
-import {
-  BindingJournalRedriveLoop,
-  type BindingJournal,
-  type BindingJournalInFlight,
-} from "../registry/bindingJournal";
+import { BindingJournalRedriveLoop } from "../registry/BindingJournalRedriveLoop";
+import { type BindingJournal, type BindingJournalInFlight } from "../registry/bindingJournal";
 import type {
   BindingJournalOwner,
   BindingProcessIdentity,
@@ -58,6 +54,7 @@ import {
   withLiveExecutionSessions,
   type LiveExecutionSessions,
 } from "../registry/ownerLiveness";
+import { daemonToolRegistry } from "../../toolRegistryPort";
 
 export interface DaemonBrokerDeviceAcquisitionOptions {
   registry: () => Promise<BindingRegistry>;
@@ -77,13 +74,15 @@ export interface DaemonBrokerDeviceAcquisitionOptions {
 
 /** Each part defaults to the host's real tooling. */
 export interface DaemonBindingTooling {
-  deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages">;
+  deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages"> &
+    Partial<Pick<PlatformDeviceManager, "getBootedDevicesDetailed">>;
   androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   androidImageCatalog?: ManagedAndroidImageCatalog;
   androidProfileCatalog?: ManagedAndroidProfileCatalog;
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: BindingBootCapacityAssertion;
+  reserveBootCapacity?: typeof reserveBootCapacity;
   /** Native preparation port; defaults to the daemon tool workflow. */
   provisioner?: BindingDeviceProvisioner;
   /** Verified native deletion port; defaults to the daemon delete workflow. */
@@ -114,6 +113,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}) {
       tooling.iosRuntimeCatalog ??
       (process.platform === "darwin" ? new SimCtlClient(null) : undefined),
     checkBootCapacity: tooling.checkBootCapacity,
+    reserveBootCapacity: tooling.reserveBootCapacity,
   };
 }
 
@@ -123,8 +123,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}) {
  * tool module. Exported so the real-handler integration test drives exactly this seam (#11266).
  */
 export const defaultBindingToolInvoker: BindingToolInvoker = async (name, args, signal) => {
-  const { ToolRegistry } = await import("../../../server/toolRegistry");
-  return await ToolRegistry.callInternal(name, args, undefined, signal);
+  return await daemonToolRegistry().callInternal(name, args, undefined, signal);
 };
 
 export interface DaemonBrokerDeviceAcquisitionHandle {
@@ -194,9 +193,13 @@ export function createDaemonBrokerDeviceAcquisition(
               ),
             }
           : {}),
-        // The provision path refuses a boot at the limit, but only after a replacement deleted the
-        // old device: the reconciler asks the same gates first, so it fails before deleting.
-        capacity: new GateBindingBootCapacity(options.timer, tooling.checkBootCapacity),
+        // Replacement reserves in the shared boot ledger before deletion, then transfers the slot
+        // to the provision-path boot. Fresh creates retain their read-only preflight.
+        capacity: new GateBindingBootCapacity(
+          options.timer,
+          tooling.checkBootCapacity,
+          tooling.reserveBootCapacity,
+        ),
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },
       });

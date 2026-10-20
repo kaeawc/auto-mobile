@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
+import { spyOnDatabasePrepare } from "../../../helpers/sqlitePrepareSpy";
 import { Database } from "bun:sqlite";
 import {
   BINDING_REGISTRY_BUSY_TIMEOUT_MS,
@@ -16,7 +17,7 @@ describe("registry busy configuration", () => {
   let registry: SqliteBindingRegistry;
   let busyTimeout: number | undefined;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     const exec = Database.prototype.exec;
     const capture = spyOn(Database.prototype, "exec").mockImplementation(function (
       this: Database,
@@ -33,7 +34,7 @@ describe("registry busy configuration", () => {
       capture.mockRestore();
     }
   });
-  afterAll(async () => {
+  afterEach(async () => {
     await registry?.close();
   });
 
@@ -68,17 +69,14 @@ describe("registry busy configuration", () => {
 
   test("attempts a busy BEGIN once without scheduling a dialect retry or warning", async () => {
     const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
-    const prepare = Database.prototype.prepare;
     let attempts = 0;
-    const query = spyOn(Database.prototype, "prepare").mockImplementation(function (
-      this: Database,
-      sql: string,
-    ) {
-      if (sql === BEGIN_TRANSACTION_SQL) {
-        attempts++;
-        throw busy;
-      }
-      return prepare.call(this, sql);
+    const query = spyOnDatabasePrepare({
+      beforePrepare: (sql) => {
+        if (sql === BEGIN_TRANSACTION_SQL) {
+          attempts++;
+          throw busy;
+        }
+      },
     });
     const sleep = spyOn(defaultTimer, "sleep");
     const warn = spyOn(logger, "warn");
@@ -97,4 +95,8 @@ describe("registry busy configuration", () => {
       warn.mockRestore();
     }
   });
+});
+
+afterEach(() => {
+  mock.restore();
 });

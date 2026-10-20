@@ -1,3 +1,5 @@
+import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
+import { SwipeOnAndroidDisplay, containerFailureOf } from "./SwipeOnAndroidDisplay";
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import {
   pendingWindowResolutionGeneration,
@@ -5,17 +7,11 @@ import {
 } from "../../observe/cache/ObserveCacheRegistry";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../observe/DeviceHierarchyCapture";
 import { hasWrongWindowEvidence } from "../../observe/observationFreshness";
-import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
-import { inputDurationArgument } from "../touchscreenInput";
+import { SETTLE_BUDGET_MS } from "../observedInteractionProfiles";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
-import { runBoomerangReturnLeg, throwIfAbortedKeepingForwardNote } from "./boomerangReturnLeg";
-import { isDeviceLostError } from "../../../models/DeviceLostError";
-import {
-  withStaleDisplay,
-  StaleDisplayError,
-  staleDisplayError,
-} from "../../observe/StaleDisplayError";
+import { throwIfAbortedKeepingForwardNote } from "./boomerangReturnLeg";
+import { withStaleDisplay, StaleDisplayError } from "../../observe/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { SwipeSearchCancelledError } from "./searchCancellation";
@@ -52,14 +48,9 @@ import {
 } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
-import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { resolveSwipeDirection } from "./swipeOnUtils";
-import {
-  AccessibilityDetector,
-  TALKBACK_STATE_UNKNOWN_WARNING,
-} from "../../accessibility/interfaces/AccessibilityDetector";
-import { talkBackDisplayRefusal } from "../../talkback/talkBackDisplayRefusal";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
+import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../../ctrlProxy/accessibility/AccessibilityDetector";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -70,7 +61,6 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../../navigation/SelectionStateTracker";
-
 import {
   GestureExecutor,
   SwipeOnDependencies,
@@ -82,7 +72,6 @@ import {
 import {
   resolveSwipeDuration,
   resolveBoomerangConfig,
-  getReturnDuration,
   validateSwipeTimingOptions,
 } from "./swipeTiming";
 import { OverlayDetector } from "./OverlayDetector";
@@ -90,41 +79,21 @@ import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
 import { SwipeOutcomeIndeterminateError } from "./SwipeOutcomeIndeterminateError";
 import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
-import { ScrollUntilVisible, type ScrollUntilVisibleStrategy } from "./ScrollUntilVisible";
-import { buildContainerFromElement, isTruthyFlag } from "../../utility/elementProperties";
+import { ScrollUntilVisible } from "./ScrollUntilVisible";
+import { isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { edgeSwipeCoordinates, validateResolvedEdgeSwipe } from "./edgeSwipe";
-import {
-  effectiveSwipeInsets,
-  insetSwipeBounds,
-  iosSwipeStartWarning,
-  swipeScreenSize,
-} from "./iosChromeInsets";
+import { effectiveSwipeInsets, iosSwipeStartWarning, swipeScreenSize } from "./iosChromeInsets";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
-import { explicitDuration } from "./swipeDurationReport";
-import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
-import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
+import { explicitDuration, withSwipeOnVelocity } from "./swipeDurationReport";
+import { type RenderedObservationReader } from "../TargetDisplayAction";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService, type FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
-import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayContext";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { assessSwipeNavigation } from "./swipeNavigation";
 import { settleSdkRouteAssessment, type SdkRouteSource } from "./sdkRouteSettle";
 import { resolveActionCall, type ActionCall } from "../ActionCall";
-
-const DISPLAY_SWIPE_OPTIONS = [
-  "lookFor",
-  "focusTarget",
-  "autoTarget",
-  "includeSystemInsets",
-  "scrollMode",
-  // Display routes resolve and dispatch without the layer checks below (issue #9305).
-  "layer",
-] as const;
-
-/** TalkBack state for an explicit-display swipe; `unknownWarning` is set when detection is unconfirmed. */
-type DisplayTalkBackState = { enabled: boolean; unknownWarning?: string };
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
 /**
@@ -141,34 +110,6 @@ function iosGestureFailureError(result: Pick<SwipeResult, "error" | "outcomeInde
 /** A confirmed swipe, or one dispatched without a reply (#9972), may have moved the screen. */
 function swipeMayHaveMoved(result: Pick<SwipeResult, "success" | "outcomeIndeterminate">): boolean {
   return result.success || result.outcomeIndeterminate === true;
-}
-
-function withUnknownTalkBackWarning(result: SwipeOnResult, warning?: string): SwipeOnResult {
-  if (!warning || result.warnings?.includes(warning)) {
-    return result;
-  }
-  return { ...result, warnings: [...(result.warnings ?? []), warning] };
-}
-
-type AutoTargetDecision = {
-  element?: Element;
-  container?: SwipeOnOptions["container"];
-  warning?: string;
-  scrollableCandidates?: ScrollableCandidate[];
-};
-
-function unsupportedDisplaySwipeOption({
-  options,
-  platform,
-}: {
-  options: SwipeOnOptions;
-  platform: BootedDevice["platform"];
-}) {
-  return DISPLAY_SWIPE_OPTIONS.find(
-    (key) =>
-      options[key] !== undefined &&
-      (platform !== "android" || key === "focusTarget" || key === "layer"),
-  );
 }
 
 /**
@@ -203,48 +144,6 @@ function screenEdgeSwipe(
   return { startX: x1, startY: y1, endX: x2, endY: y2 };
 }
 
-function displaySwipeCoordinates(
-  options: SwipeOnOptions,
-  observation: ObserveResult,
-  bounds?: Element["bounds"],
-): { x1: number; y1: number; x2: number; y2: number } {
-  const rect = bounds ?? {
-    left: 0,
-    top: 0,
-    right: observation.screenSize.width,
-    bottom: observation.screenSize.height,
-  };
-  if (options.fromEdge) {
-    return edgeSwipeCoordinates({
-      edge: options.fromEdge,
-      bounds: rect,
-      inset: options.edgeInset,
-      at: options.at,
-    });
-  }
-  const centerX = Math.round((rect.left + rect.right) / 2);
-  const centerY = Math.round((rect.top + rect.bottom) / 2);
-  const dx = Math.round((rect.right - rect.left) * 0.6) / 2;
-  const dy = Math.round((rect.bottom - rect.top) * 0.6) / 2;
-  switch (options.direction) {
-    case "left":
-      return { x1: centerX + dx, y1: centerY, x2: centerX - dx, y2: centerY };
-    case "right":
-      return { x1: centerX - dx, y1: centerY, x2: centerX + dx, y2: centerY };
-    case "up":
-      return { x1: centerX, y1: centerY + dy, x2: centerX, y2: centerY - dy };
-    default:
-      return { x1: centerX, y1: centerY - dy, x2: centerX, y2: centerY + dy };
-  }
-}
-
-/** The structured container diagnostic a selector failure carries onto the result (#10325). */
-function containerFailureOf(error: unknown): Pick<SwipeOnResult, "containerFailure"> {
-  return error instanceof ActionableError && error.containerFailure
-    ? { containerFailure: error.containerFailure }
-    : {};
-}
-
 export class SwipeOn extends BaseVisualChange {
   private readonly skipCallerDisplayFence: boolean;
   private readonly stopAfterIosGestureFailure: boolean;
@@ -254,11 +153,13 @@ export class SwipeOn extends BaseVisualChange {
   private executeGesture!: GestureExecutor;
   private scrollables!: ScrollableElementsQuery;
   private geometry!: ElementGeometry;
-  private accessibilityService!: AndroidCtrlProxyClient;
+  private accessibilityService!: import("./types").SwipeOnCtrlProxy;
   private accessibilityDetector!: AccessibilityDetector;
   private featureFlags!: FeatureFlagReader;
   private overlayDetector: OverlayDetector;
   private autoTargetSelector: AutoTargetSelectorService;
+  private readonly autoTargeting: SwipeOnAutoTargeting;
+  private readonly androidDisplay: SwipeOnAndroidDisplay;
   private talkBackExecutor: TalkBackSwipeExecutor;
   private voiceOverExecutor: VoiceOverSwipeRunner;
   private scrollUntilVisible: ScrollUntilVisible;
@@ -293,15 +194,48 @@ export class SwipeOn extends BaseVisualChange {
     // Initialize extracted modules
     this.overlayDetector = new OverlayDetector(this.geometry, parser);
     this.autoTargetSelector = dependencies.autoTargetSelector ?? new AutoTargetSelector();
-    this.talkBackExecutor = new TalkBackSwipeExecutor(
+    this.autoTargeting = new SwipeOnAutoTargeting(device, () => this.autoTargetSelector);
+    this.androidDisplay = new SwipeOnAndroidDisplay(() => ({
+      device: this.device,
+      adb: this.adb,
+      timer: this.timer,
+      observeScreen: this.observeScreen,
+      displayTransitionReader: this.displayTransitionReader,
+      accessibilityService: this.accessibilityService,
+      accessibilityDetector: this.accessibilityDetector,
+      featureFlags: this.featureFlags,
+      talkBackExecutor: this.talkBackExecutor,
+      scrollUntilVisible: this.scrollUntilVisible,
+      scrollables: this.scrollables,
+      geometry: this.geometry,
+      lastRenderedObservation: this.lastRenderedObservation,
+      autoTargeting: this.autoTargeting,
+      visual: this,
+      getDuration: (options) => this.getDuration(options),
+      createErrorResult: (error) => this.createErrorResult(error),
+      observedSwipeInteraction: (block, options, diagnostics) =>
+        this.observedSwipeInteraction(block, options, diagnostics),
+      checkPostActionDisplay: (result, assertCurrent, signal) =>
+        this.checkPostActionDisplay(result, assertCurrent, signal),
+      rethrowObservationAbort: (error, signal, enabled) =>
+        this.rethrowObservationAbort(error, signal, enabled),
+      resolveContainerSwipeCoordinates: (options, viewHierarchy, containerElement, observeResult) =>
+        this.resolveContainerSwipeCoordinates(
+          options,
+          viewHierarchy,
+          containerElement,
+          observeResult,
+        ),
+    }));
+    this.talkBackExecutor = new TalkBackSwipeExecutor({
       device,
-      this.executeGesture,
-      this.accessibilityService,
-      this.accessibilityDetector,
-      this.adb,
-      this.timer,
+      executeGesture: this.executeGesture,
+      accessibilityService: this.accessibilityService,
+      accessibilityDetector: this.accessibilityDetector,
+      adb: this.adb,
+      timer: this.timer,
       featureFlags,
-    );
+    });
     const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.voiceOverExecutor =
       dependencies.voiceOverExecutor ??
@@ -424,745 +358,8 @@ export class SwipeOn extends BaseVisualChange {
     const scrollables = this.scrollables.findScrollableElements(
       scopeHierarchyForSelector(observeResult.viewHierarchy, layer),
     );
-    const candidates = this.buildScrollableCandidates(scrollables);
+    const candidates = this.autoTargeting.buildScrollableCandidates(scrollables);
     return { scrollables, candidates, observeResult };
-  }
-
-  private buildScrollableCandidates(scrollables: Element[]): ScrollableCandidate[] {
-    const candidates: ScrollableCandidate[] = [];
-    const seen = new Set<string>();
-
-    for (const scrollable of scrollables) {
-      const candidate: ScrollableCandidate = {
-        elementId: scrollable["resource-id"],
-        text: scrollable.text,
-        contentDesc: scrollable["content-desc"],
-        className: scrollable.class,
-      };
-
-      if (
-        !candidate.elementId &&
-        !candidate.text &&
-        !candidate.contentDesc &&
-        !candidate.className
-      ) {
-        continue;
-      }
-
-      const key = `${candidate.elementId ?? ""}|${candidate.text ?? ""}|${candidate.contentDesc ?? ""}|${candidate.className ?? ""}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      candidates.push(candidate);
-    }
-
-    return candidates;
-  }
-
-  private async executeOnAndroidDisplay({
-    options: requestedOptions,
-    target,
-    signal,
-    talkBack,
-  }: {
-    options: SwipeOnOptions;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-    signal?: AbortSignal;
-    talkBack: DisplayTalkBackState;
-  }): Promise<SwipeOnResult> {
-    let resolutionObservation = target.observation;
-    if (requestedOptions.container || requestedOptions.autoTarget === true) {
-      resolutionObservation = await freshSwipeHierarchy(
-        resolutionObservation,
-        (timeoutMs) =>
-          this.observeScreen.execute({
-            ...INTERMEDIATE_OBSERVATION_OPTIONS,
-            display: target.observation.display.key,
-            freshness: "fresh",
-            timeoutMs,
-            signal,
-          }),
-        this.timer,
-        signal,
-      );
-    }
-    const observation = this.validateSelectedDisplayObservation({
-      observation: resolutionObservation,
-      target,
-      includeSystemInsets: requestedOptions.includeSystemInsets,
-    });
-    const { options, decision } = this.selectedDisplayAutoTarget({
-      options: requestedOptions,
-      observation,
-    });
-    const { x1, y1, x2, y2, targetType, warning } = this.resolveDisplaySwipeCoordinates({
-      options,
-      decision,
-      observation,
-    });
-    const duration = resolveSwipeDuration({ ...options, geometry: this.geometry });
-    const boomerang = resolveBoomerangConfig(options);
-    if (talkBack.enabled) {
-      // A raw one-finger swipe only moves TalkBack focus; reuse the default route's executor.
-      const swipe = await this.dispatchTalkBackDisplaySwipe({
-        options,
-        element: decision.element,
-        coordinates: { x1, y1, x2, y2 },
-        duration,
-        boomerang,
-        target,
-        signal,
-      });
-      return this.withAutoTargetDecision({
-        result: { ...swipe, targetType, warning },
-        decision,
-      });
-    }
-    const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
-    await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
-    let totalDuration = duration;
-    if (boomerang) {
-      const returnDuration = getReturnDuration({
-        forwardDuration: duration,
-        returnSpeed: boomerang.returnSpeed,
-      });
-      totalDuration += boomerang.apexPauseMs + returnDuration;
-      // The forward leg landed: a pause cancel, a failed return leg or a throw must say so (#9973).
-      const returnResult = await runBoomerangReturnLeg({
-        timer: this.timer,
-        apexPauseMs: boomerang.apexPauseMs,
-        signal,
-        returnSwipe: () =>
-          this.dispatchDisplayReturnLeg({
-            x1: x2,
-            y1: y2,
-            x2: x1,
-            y2: y1,
-            duration: returnDuration,
-            target,
-            useCtrlProxy,
-            signal,
-          }),
-      });
-      if (!returnResult.success) {
-        return this.withAutoTargetDecision({
-          result: {
-            ...returnResult,
-            targetType,
-            x1,
-            y1,
-            x2,
-            y2,
-            duration: totalDuration,
-            warning,
-          },
-          decision,
-        });
-      }
-    }
-    return this.withAutoTargetDecision({
-      result: {
-        success: true,
-        targetType,
-        x1,
-        y1,
-        x2,
-        y2,
-        duration: totalDuration,
-        warning,
-        ...(talkBack.unknownWarning ? { warnings: [talkBack.unknownWarning] } : {}),
-      },
-      decision,
-    });
-  }
-
-  /**
-   * TalkBack on for an explicit display: refuse a non-default display before any dispatch (the
-   * shared TalkBack driver has no display-addressed request); an unknown state keeps the raw
-   * gesture and carries the same warning as the default route (#9905).
-   */
-  private async resolveDisplayTalkBack(
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
-    signal?: AbortSignal,
-  ): Promise<DisplayTalkBackState> {
-    const state = await this.accessibilityDetector.resolveTalkBackState(
-      this.device.deviceId,
-      this.adb,
-      this.featureFlags,
-    );
-    throwIfAborted(signal);
-    if (state !== true) {
-      return {
-        enabled: false,
-        unknownWarning: state === null ? TALKBACK_STATE_UNKNOWN_WARNING : undefined,
-      };
-    }
-    const refusal = talkBackDisplayRefusal(target.displayId, "scrolling");
-    if (refusal) {
-      throw refusal;
-    }
-    return { enabled: true };
-  }
-
-  private async dispatchTalkBackDisplaySwipe({
-    options,
-    element,
-    coordinates,
-    duration,
-    boomerang,
-    target,
-    signal,
-  }: {
-    options: SwipeOnOptions;
-    element?: Element | null;
-    coordinates: { x1: number; y1: number; x2: number; y2: number };
-    duration: number;
-    boomerang?: BoomerangConfig;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-    signal?: AbortSignal;
-  }): Promise<SwipeResult> {
-    const direction = resolveSwipeDirection(options);
-    if (!direction.direction) {
-      throw new ActionableError(direction.error ?? "direction is required");
-    }
-    target.assertCurrent();
-    const { x1, y1, x2, y2 } = coordinates;
-    const swipe = await this.talkBackExecutor.executeSwipeGesture(
-      x1,
-      y1,
-      x2,
-      y2,
-      direction.direction,
-      element ?? null,
-      {
-        displayFence: { assertCurrent: target.assertCurrent },
-        duration,
-        scrollMode: options.scrollMode,
-      },
-      undefined,
-      boomerang,
-      signal,
-    );
-    throwIfAborted(signal);
-    if (!swipe.success) {
-      throw new ActionableError(swipe.error ?? "TalkBack swipe failed");
-    }
-    return swipe;
-  }
-
-  private resolveDisplaySwipeCoordinates({
-    options,
-    decision,
-    observation,
-  }: {
-    options: SwipeOnOptions;
-    decision: AutoTargetDecision;
-    observation: ObserveResult;
-  }): Pick<SwipeOnResult, "x1" | "y1" | "x2" | "y2" | "targetType" | "warning"> {
-    if (decision.element && observation.viewHierarchy) {
-      const coordinates = this.resolveContainerSwipeCoordinates(
-        { ...options, direction: options.direction! },
-        observation.viewHierarchy,
-        decision.element,
-        observation,
-      );
-      return {
-        x1: coordinates.startX,
-        y1: coordinates.startY,
-        x2: coordinates.endX,
-        y2: coordinates.endY,
-        targetType: "element",
-        warning: coordinates.warning,
-      };
-    }
-    const bounds = this.selectedDisplayContainerBounds(options, observation);
-    if (options.container && !bounds) {
-      throw new ActionableError("Swipe container not found on selected display");
-    }
-    return {
-      ...displaySwipeCoordinates(
-        options,
-        observation,
-        this.resolveDisplaySwipeBounds(options, observation, bounds),
-      ),
-      targetType: bounds ? "element" : "screen",
-    };
-  }
-
-  private resolveDisplaySwipeBounds(
-    options: SwipeOnOptions,
-    observation: ObserveResult,
-    bounds?: Element["bounds"],
-  ): Element["bounds"] | undefined {
-    // Preserve explicit display-container geometry; automatic screen fallback
-    // uses available per-display insets unless the caller opts into system bars.
-    return options.includeSystemInsets === false ||
-      (options.autoTarget === true && !bounds && options.includeSystemInsets !== true)
-      ? this.insetDisplaySwipeBounds({ observation, bounds })
-      : bounds;
-  }
-
-  private selectedDisplayAutoTarget({
-    options,
-    observation,
-  }: {
-    options: SwipeOnOptions;
-    observation: ObserveResult;
-  }): { options: SwipeOnOptions; decision: AutoTargetDecision } {
-    if (options.autoTarget !== true || options.container) {
-      return { options, decision: {} };
-    }
-    const direction = resolveSwipeDirection(options);
-    if (!direction.direction) {
-      throw new ActionableError(direction.error ?? "direction is required");
-    }
-    const scrollables = observation.viewHierarchy
-      ? this.scrollables.findScrollableElements(observation.viewHierarchy)
-      : [];
-    const decision = this.resolveAutoTargetDecision({
-      scrollables,
-      candidates: this.buildScrollableCandidates(scrollables),
-      observeResult: observation,
-      direction: direction.direction,
-      includeSystemInsets: options.includeSystemInsets,
-    });
-    return {
-      options: { ...options, direction: direction.direction, container: decision.container },
-      decision,
-    };
-  }
-
-  private async resolveDisplaySwipeRoute({
-    options,
-    target,
-  }: {
-    options: SwipeOnOptions;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-  }): Promise<boolean> {
-    if (options.scrollMode === "adb") {
-      return false;
-    }
-    const supported = await supportsCtrlProxyGestureDisplay(
-      this.accessibilityService,
-      target.displayId,
-    );
-    if (options.scrollMode === "a11y" && !supported) {
-      throw new ActionableError(
-        `scrollMode "a11y" requires CtrlProxy capability gesture_display_id_v1 for display "${target.observation.display.key}". Update CtrlProxy or use scrollMode "adb".`,
-      );
-    }
-    return supported;
-  }
-
-  private insetDisplaySwipeBounds({
-    observation,
-    bounds,
-  }: {
-    observation: ObserveResult;
-    bounds?: Element["bounds"];
-  }): Element["bounds"] {
-    const insetOptions = { observation, platform: this.device.platform };
-    const screenSize = swipeScreenSize(insetOptions) ?? observation.screenSize;
-    return insetSwipeBounds({ ...insetOptions, bounds: bounds ?? getScreenBounds(screenSize) });
-  }
-
-  private validateSelectedDisplayObservation(options: {
-    observation: ObserveResult;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-    includeSystemInsets?: boolean;
-  }): ObserveResult {
-    const { observation, target, includeSystemInsets } = options;
-    target.assertCurrent();
-    if (observation.display.key !== target.observation.display.key) {
-      throw staleDisplayError(
-        target.observation.display.generation,
-        this.displayTransitionReader.identityRevision(this.device.deviceId),
-        this.displayTransitionReader.currentObservedPanel(this.device.deviceId)?.key,
-      );
-    }
-    if (includeSystemInsets !== undefined && observation.insets?.available !== true) {
-      throw new ActionableError(
-        `includeSystemInsets is not supported with \`display\` for display "${target.observation.display.key}": per-display system insets are unavailable`,
-      );
-    }
-    // Unavailable metadata can contain default-display or compatibility values.
-    return observation.insets?.available === true
-      ? observation
-      : { ...observation, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
-  }
-
-  private async resolveSearchDisplaySwipeRoute({
-    options,
-    target,
-    signal,
-  }: {
-    options: SwipeOnOptions;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-    signal?: AbortSignal;
-  }): Promise<boolean> {
-    if (options.scrollMode === "a11y") {
-      return this.resolveDisplaySwipeRoute({ options, target });
-    }
-    try {
-      return await this.resolveDisplaySwipeRoute({ options, target });
-    } catch (error) {
-      throwIfAborted(signal);
-      // Auto mode's optional capability probe sends no gesture, so ADB remains safe.
-      logger.debug("[SwipeOn] CtrlProxy display gesture capability unavailable", error);
-      return false;
-    }
-  }
-
-  /** The TalkBack executor exposes no send point, so its swipes are counted as attempted. */
-  private executeDisplayTalkBackSwipe(input: {
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-    duration: number;
-    direction: SwipeDirection;
-    options: SwipeOnOptions;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-    searchDragState?: AndroidSearchDragState;
-    signal?: AbortSignal;
-    onDispatched?: () => void;
-  }): Promise<SwipeResult> {
-    input.onDispatched?.();
-    return this.talkBackExecutor.executeSwipeGesture(
-      input.x1,
-      input.y1,
-      input.x2,
-      input.y2,
-      input.direction,
-      null,
-      {
-        displayFence: { assertCurrent: input.target.assertCurrent },
-        duration: input.duration,
-        scrollMode: input.options.scrollMode,
-        searchDragState: input.searchDragState,
-      },
-      undefined,
-      undefined,
-      input.signal,
-    );
-  }
-
-  private async searchOnAndroidDisplay({
-    options,
-    target,
-    progress,
-    signal,
-    talkBack,
-  }: {
-    options: SwipeOnOptions;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-    progress?: ProgressCallback;
-    signal?: AbortSignal;
-    talkBack: DisplayTalkBackState;
-  }): Promise<SwipeOnResult> {
-    const direction = resolveSwipeDirection(options);
-    if (direction.error) {
-      throw new ActionableError(direction.error);
-    }
-    const useCtrlProxy = await this.resolveSearchDisplaySwipeRoute({ options, target, signal });
-    const display = target.observation.display.key;
-    const validateObservation = (observation: ObserveResult) =>
-      this.validateSelectedDisplayObservation({
-        observation,
-        target,
-        includeSystemInsets: options.includeSystemInsets,
-      });
-    // Forward optional finalization/cache seams while checking every capture,
-    // including BaseVisualChange's retries and settle polls.
-    const postActionObserveScreen: ObserveScreen = {
-      execute: async (captureOptions) => {
-        target.assertCurrent();
-        return validateObservation(await this.observeScreen.execute(captureOptions));
-      },
-      getMostRecentCachedObserveResult: this.observeScreen.getMostRecentCachedObserveResult.bind(
-        this.observeScreen,
-      ),
-      appendRawViewHierarchy: this.observeScreen.appendRawViewHierarchy.bind(this.observeScreen),
-      captureScreenshot: this.observeScreen.captureScreenshot?.bind(this.observeScreen),
-      runAccessibilityAudit: this.observeScreen.runAccessibilityAudit?.bind(this.observeScreen),
-      processRecomposition: this.observeScreen.processRecomposition?.bind(this.observeScreen),
-      captureCacheGeneration: this.observeScreen.captureCacheGeneration?.bind(this.observeScreen),
-      cacheObserveResult: this.observeScreen.cacheObserveResult?.bind(this.observeScreen),
-    };
-    let dispatched = false;
-    const observe: ScrollUntilVisibleStrategy["observe"] = async (captureOptions) => {
-      try {
-        target.assertCurrent();
-        return validateObservation(
-          await this.observeScreen.execute({
-            display,
-            freshness: captureOptions?.freshness ?? "cached-ok",
-            timeoutMs: captureOptions?.timeoutMs,
-            skipScreenshot: true,
-            skipAccessibilityAudit: true,
-            signal,
-          }),
-        );
-      } catch (error) {
-        this.rethrowObservationAbort(error, signal);
-        logger.warn(`[SwipeOn] Display search read failed: ${errorMessage(error)}`, error);
-        throw dispatched ? new DispatchedObservationError(error) : error;
-      }
-    };
-    const result = await this.scrollUntilVisible.executeWithStrategy({
-      options: { ...options, direction: direction.direction as SwipeDirection },
-      progress,
-      signal,
-      strategy: {
-        observe,
-        swipe: async ({ previousObservation, searchDragState, onDispatched, ...coordinates }) => {
-          const result = await this.observedInteraction<SwipeOnResult>(
-            async () => {
-              const fallback = async () => {
-                coordinates.onSearchFallback?.();
-                await this.dispatchDisplaySwipeLeg({
-                  ...coordinates,
-                  target,
-                  useCtrlProxy: false,
-                  signal,
-                  onDispatched,
-                });
-                dispatched = true;
-                return { ...coordinates, success: true };
-              };
-              const gesture = await (talkBack.enabled
-                ? this.executeDisplayTalkBackSwipe({
-                    ...coordinates,
-                    direction: direction.direction as SwipeDirection,
-                    options,
-                    target,
-                    searchDragState,
-                    signal,
-                    onDispatched,
-                  })
-                : useCtrlProxy
-                  ? executeAndroidSearchDrag({
-                      ...coordinates,
-                      searchDragState,
-                      client: this.accessibilityService,
-                      signal,
-                      displayId: target.displayId === 0 ? undefined : target.displayId,
-                      beforeSend: target.assertCurrent,
-                      fallback,
-                      onDispatched,
-                      onIndeterminate: (cause) => {
-                        throw new DispatchedObservationError(cause);
-                      },
-                    })
-                  : fallback());
-              dispatched ||= gesture.success;
-              return gesture;
-            },
-            {
-              changeExpected: false,
-              timeoutMs: 500,
-              display,
-              previousObservation,
-              progress,
-              signal,
-              deferPostActionScreenshot: true,
-              postActionObserveScreen,
-            },
-          );
-          this.checkPostActionDisplay(
-            result,
-            () => validateObservation(result.observation!),
-            signal,
-          );
-          return {
-            ...coordinates,
-            targetType: "screen",
-            success: result.success,
-            error: result.error,
-            outcomeIndeterminate: result.outcomeIndeterminate,
-            observation: result.observation!,
-            staleDisplay: result.staleDisplay,
-          };
-        },
-      },
-    });
-    if (dispatched) {
-      // A changed revision cannot support a found claim, even with a kept capture.
-      this.checkPostActionDisplay({}, target.assertCurrent, signal);
-    } else {
-      target.assertCurrent();
-    }
-    return withUnknownTalkBackWarning(result, talkBack.unknownWarning);
-  }
-
-  /**
-   * Return leg of a display-addressed boomerang as a SwipeResult, so a plain dispatch failure
-   * reaches `runBoomerangReturnLeg` as a result it can mark partially applied. Cancellation, device
-   * loss and stale-display errors stay thrown: the callers branch on those types.
-   */
-  private async dispatchDisplayReturnLeg(
-    options: Parameters<SwipeOn["dispatchDisplaySwipeLeg"]>[0],
-  ): Promise<SwipeResult> {
-    const { x1, y1, x2, y2, duration, signal } = options;
-    try {
-      await this.dispatchDisplaySwipeLeg(options);
-      return { success: true, x1, y1, x2, y2, duration };
-    } catch (error) {
-      throwIfAborted(signal);
-      if (isDeviceLostError(error) || error instanceof StaleDisplayError) {
-        throw error;
-      }
-      if (error instanceof Error && error.name === "AbortError") {
-        throw error;
-      }
-      logger.warn(`swipeOn display return leg failed: ${errorMessage(error)}`, error);
-      return { success: false, error: errorMessage(error), x1, y1, x2, y2, duration };
-    }
-  }
-
-  private async dispatchDisplaySwipeLeg(options: {
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-    duration: number;
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-    useCtrlProxy: boolean;
-    signal?: AbortSignal;
-    /** Fires as the gesture is handed to the device, after the pre-send checks. */
-    onDispatched?: () => void;
-  }): Promise<void> {
-    const { x1, y1, x2, y2, duration, target, useCtrlProxy, signal, onDispatched } = options;
-    target.assertCurrent();
-    throwIfAborted(signal);
-    if (useCtrlProxy) {
-      const result = await this.accessibilityService.requestSwipe(
-        x1,
-        y1,
-        x2,
-        y2,
-        duration,
-        undefined,
-        undefined,
-        undefined,
-        onDispatched,
-        signal,
-        target.displayId === 0 ? undefined : target.displayId,
-        target.assertCurrent,
-      );
-      throwIfAborted(signal);
-      if (!result.success) {
-        throw new ActionableError(result.error ?? "Android swipe failed");
-      }
-    } else {
-      await executeTouchscreenInput(
-        this.adb,
-        `swipe ${x1} ${y1} ${x2} ${y2} ${inputDurationArgument(duration)}`,
-        target.displayId,
-        signal,
-        target.assertCurrent,
-        { onDispatch: onDispatched },
-      );
-    }
-  }
-
-  private selectedDisplayContainerBounds(
-    options: SwipeOnOptions,
-    observation: ObserveResult,
-  ): Element["bounds"] | undefined {
-    if (!options.container || !observation.viewHierarchy) {
-      return undefined;
-    }
-    if (usesScopedSwipeContainer(options.container)) {
-      return this.scrollUntilVisible.resolveSwipeContainer(
-        observation.viewHierarchy,
-        options.container,
-      ).bounds;
-    }
-    const container = this.scrollUntilVisible.resolveElement(
-      observation.viewHierarchy,
-      options.container,
-      "inspect",
-      options.container.text !== undefined,
-    );
-    // A page inside a pager swipes as its scrollable ancestor (#10752).
-    return container && options.direction
-      ? this.scrollUntilVisible.resolveSwipeTarget(
-          observation.viewHierarchy,
-          container,
-          options.direction,
-        ).bounds
-      : container?.bounds;
-  }
-
-  private async executeExplicitDisplay(
-    options: SwipeOnOptions,
-    context: { progress?: ProgressCallback; signal?: AbortSignal } = {},
-  ): Promise<SwipeOnResult | undefined> {
-    const { progress, signal } = context;
-    if (options.display !== undefined) {
-      try {
-        const unsupported = unsupportedDisplaySwipeOption({
-          options,
-          platform: this.device.platform,
-        });
-        if (unsupported) {
-          throw new ActionableError(unsupportedDisplayOptionMessage(unsupported));
-        }
-        const validationError =
-          validateSwipeTimingOptions(options, this.getDuration(options)) ??
-          validateResolvedEdgeSwipe(options);
-        if (validationError) {
-          throw new ActionableError(validationError);
-        }
-        const target = await prepareTargetDisplayAction(
-          this.device,
-          options.display,
-          this.observeScreen,
-          this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
-        );
-        throwIfAborted(signal);
-        if (this.device.platform === "android") {
-          this.validateSelectedDisplayObservation({
-            observation: target.observation,
-            target,
-            includeSystemInsets: options.includeSystemInsets,
-          });
-          const talkBack = await this.resolveDisplayTalkBack(target, signal);
-          return options.lookFor
-            ? await this.searchOnAndroidDisplay({ options, target, progress, signal, talkBack })
-            : await this.observedSwipeInteraction(
-                () => this.executeOnAndroidDisplay({ options, target, signal, talkBack }),
-                {
-                  changeExpected: false,
-                  display: target.observation.display.key,
-                  previousObservation: target.observation,
-                  signal,
-                },
-                { boomerang: resolveBoomerangConfig(options) },
-              );
-        }
-      } catch (error) {
-        // throwIfAborted would replace this with a generic cancellation that loses the swipe count.
-        if (error instanceof SwipeSearchCancelledError) {
-          throw error;
-        }
-        throwIfAbortedKeepingForwardNote(signal, error);
-        if (error instanceof Error && error.name === "AbortError") {
-          throw error;
-        }
-        logger.warn(`swipeOn display routing failed: ${errorMessage(error)}`, error);
-        return withStaleDisplay(
-          { ...this.createErrorResult(errorMessage(error)), ...containerFailureOf(error) },
-          error,
-        );
-      }
-    }
-    return undefined;
   }
 
   async execute(options: SwipeOnOptions, call?: ActionCall): Promise<SwipeOnResult>;
@@ -1178,9 +375,18 @@ export class SwipeOn extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
-    return withSwipeObservationReadScope(() =>
+    const result = await withSwipeObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal),
     );
+    return withSwipeOnVelocity(result, options);
+  }
+
+  /** Explicit-display routing; existing tests replace it to reach the default route. */
+  private executeExplicitDisplay(
+    options: SwipeOnOptions,
+    context: { progress?: ProgressCallback; signal?: AbortSignal } = {},
+  ): Promise<SwipeOnResult | undefined> {
+    return this.androidDisplay.executeExplicitDisplay(options, context);
   }
 
   private async executeWithReadScope(
@@ -1189,94 +395,14 @@ export class SwipeOn extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
     throwIfAborted(signal);
-    const targeted = await this.executeExplicitDisplay(options, { progress, signal });
+    const targeted = await this.executeExplicitDisplay(options, {
+      progress,
+      signal,
+    });
     if (targeted) {
       return targeted;
     }
     return this.executeLegacy(options, progress, signal);
-  }
-
-  private resolveAutoTargetDecision({
-    scrollables,
-    candidates,
-    observeResult,
-    direction,
-    includeSystemInsets,
-  }: {
-    scrollables: Element[];
-    candidates: ScrollableCandidate[];
-    observeResult?: ObserveResult;
-    direction: SwipeDirection;
-    includeSystemInsets?: boolean;
-  }): AutoTargetDecision {
-    if (scrollables.length === 0) {
-      logger.info(`[SwipeOn] Mode: screen swipe (no scrollables found)`);
-      return {};
-    }
-    const screenBounds = observeResult
-      ? this.autoTargetSelector.getScreenBounds(observeResult, {
-          platform: this.device.platform,
-          includeSystemInsets,
-        })
-      : null;
-    const element = this.autoTargetSelector.selectAutoTargetScrollable(
-      scrollables,
-      screenBounds,
-      direction,
-    );
-    if (!element) {
-      logger.info(
-        `[SwipeOn] Mode: screen swipe (scrollables found but none matched direction=${direction})`,
-      );
-      return {
-        warning:
-          "Scrollable containers found but none matched the swipe direction; swiping the screen. Set autoTarget: false to force screen swipes.",
-        scrollableCandidates: candidates,
-      };
-    }
-    const container = buildContainerFromElement(element);
-    if (!container && this.device.platform === "android") {
-      logger.info(`[SwipeOn] Mode: element swipe (auto-target element has no usable identifier)`);
-      return {
-        element,
-        warning:
-          "Auto-targeted scrollable container lacks a usable identifier; swiping within its bounds without container metadata.",
-        scrollableCandidates: candidates,
-      };
-    }
-    if (!container) {
-      logger.info(`[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`);
-      return {
-        warning:
-          "Auto-targeted scrollable container lacks a usable identifier; swiping the screen. Provide container.elementId or container.text to target it explicitly.",
-        scrollableCandidates: candidates,
-      };
-    }
-    logger.info(
-      `[SwipeOn] Mode: auto-target element swipe (container=${JSON.stringify(container)})`,
-    );
-    return {
-      container,
-      warning: `Auto-targeted scrollable container (${this.autoTargetSelector.describeContainer(container)}). Set autoTarget: false to force full-screen swipes.`,
-      scrollableCandidates: candidates,
-    };
-  }
-
-  private withAutoTargetDecision({
-    result,
-    decision,
-  }: {
-    result: SwipeOnResult;
-    decision: AutoTargetDecision;
-  }): SwipeOnResult {
-    if (!decision.warning) {
-      return result;
-    }
-    return {
-      ...result,
-      warning: this.autoTargetSelector.mergeWarnings(result.warning, decision.warning),
-      scrollableCandidates: decision.scrollableCandidates,
-    };
   }
 
   private async executeAutoTargetSwipe({
@@ -1291,7 +417,7 @@ export class SwipeOn extends BaseVisualChange {
     signal?: AbortSignal;
   }): Promise<SwipeOnResult> {
     const context = await this.getScrollableContext(signal, options.layer);
-    const decision = this.resolveAutoTargetDecision({
+    const decision = this.autoTargeting.resolveAutoTargetDecision({
       ...context,
       direction: options.direction,
       includeSystemInsets: options.includeSystemInsets,
@@ -1311,10 +437,9 @@ export class SwipeOn extends BaseVisualChange {
               context.observeResult ? { observation: context.observeResult } : undefined,
             )
           : await this.executeScreenSwipe(options, progress, perf, signal);
-    return this.withAutoTargetDecision({ result, decision });
+    return this.autoTargeting.withAutoTargetDecision({ result, decision });
   }
 
-  // oxlint-disable-next-line max-lines-per-function -- Keep the existing dispatch branches together while threading cancellation.
   private async executeLegacy(
     options: SwipeOnOptions,
     progress?: ProgressCallback,
@@ -1378,8 +503,7 @@ export class SwipeOn extends BaseVisualChange {
           searchCriteria,
           this.visionConfig,
           errorMsg,
-          undefined,
-          this.visionAnalyzer,
+          { visionAnalyzer: this.visionAnalyzer },
         );
       }
 
@@ -1690,30 +814,30 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const swipeResult = await perf.track("executeScreenSwipe", () =>
           this.device.platform === "ios"
-            ? this.voiceOverExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                null, // No container for screen swipe
+            ? this.voiceOverExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              )
-            : this.talkBackExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                null, // No container for screen swipe
+              })
+            : this.talkBackExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              ),
+              }),
         );
         if (
           this.stopAfterIosGestureFailure &&
@@ -1746,7 +870,7 @@ export class SwipeOn extends BaseVisualChange {
         usesObservationForResolution: false,
         changeExpected: false,
         display: options.display,
-        timeoutMs: 500,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         progress,
         perf,
         signal,
@@ -1823,30 +947,30 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const swipeResult = await perf.track("executeElementSwipe", () =>
           this.device.platform === "ios"
-            ? this.voiceOverExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                element ?? null, // Use the container element
+            ? this.voiceOverExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: element ?? null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              )
-            : this.talkBackExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                element, // Use the container element
+              })
+            : this.talkBackExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: element,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              ),
+              }),
         );
         throwIfAborted(signal);
         // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
@@ -1876,7 +1000,7 @@ export class SwipeOn extends BaseVisualChange {
               },
         changeExpected: false,
         display: options.display,
-        timeoutMs: 500,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         progress,
         perf,
         signal,

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
+import { NavigationGraphStreamBridge } from "../../src/daemon/daemonStreamRouting";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../src/db/navigationRepository";
@@ -21,17 +21,25 @@ describe("daemon build-context stream wiring", () => {
   function manager(): NavigationGraphManager {
     return new NavigationGraphManager(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       new FakeTimer(),
     );
   }
   function wiring() {
-    // Exercise only the wiring method, without constructing/starting a resident daemon.
-    const daemon: Daemon = Object.create(Daemon.prototype);
-    daemon["navigationGraphListenerManagers"] = new WeakSet();
-    daemon["navigationGraphSeededStreamManagers"] = new WeakMap();
+    // Exercise only the stream bridge, without constructing/starting a resident daemon.
     const server = new DeviceDataStreamSocketServer("/fake/build-context.sock", new FakeTimer());
-    daemon["deviceDataStreamServer"] = server;
+    const current = { server };
+    const bridge = new NavigationGraphStreamBridge({
+      server: () => current.server,
+      sessionIds: () => [],
+      defaultManager: () => manager(),
+      managerForSession: () => manager(),
+    });
+    const daemon = {
+      current,
+      listenerManagers: bridge.listenerManagers,
+      attach: (m: NavigationGraphManager) => bridge.attach(m),
+    };
     const push = spyOn(server, "pushBuildContextUpdate").mockImplementation(() => {});
     return { daemon, server, push };
   }
@@ -48,8 +56,8 @@ describe("daemon build-context stream wiring", () => {
     const { daemon, push } = wiring();
     const first = manager();
     const second = manager();
-    daemon["setupNavigationGraphUpdateListener"](first);
-    daemon["setupNavigationGraphUpdateListener"](second);
+    daemon.attach(first);
+    daemon.attach(second);
     first.setBuildContext(a);
     first.setBuildContext({ ...a });
     second.setBuildContext(b);
@@ -66,7 +74,7 @@ describe("daemon build-context stream wiring", () => {
       [a.deviceId, a.appId, { packageId: a.appId, versionCode: 1, contentHash: "reinstalled" }],
       [a.deviceId, a.appId, null],
     ]);
-    daemon["navigationGraphListenerManagers"].delete(second);
+    daemon.listenerManagers.delete(second);
     second.clearBuildContext(b.appId);
     expect(push).toHaveBeenCalledTimes(4);
     push.mockRestore();
@@ -76,16 +84,16 @@ describe("daemon build-context stream wiring", () => {
     const { daemon, push } = wiring();
     const first = manager();
     first.setBuildContext(a);
-    daemon["setupNavigationGraphUpdateListener"](first);
-    daemon["setupNavigationGraphUpdateListener"](first);
+    daemon.attach(first);
+    daemon.attach(first);
     expect(push).toHaveBeenCalledTimes(1);
     const replacement = new DeviceDataStreamSocketServer("/fake/replacement.sock", new FakeTimer());
     const replacementPush = spyOn(replacement, "pushBuildContextUpdate").mockImplementation(
       () => {},
     );
-    daemon["deviceDataStreamServer"] = replacement;
-    daemon["setupNavigationGraphUpdateListener"](first);
-    daemon["setupNavigationGraphUpdateListener"](first);
+    daemon.current.server = replacement;
+    daemon.attach(first);
+    daemon.attach(first);
     expect(replacementPush).toHaveBeenCalledTimes(1);
     expect(replacementPush).toHaveBeenCalledWith(a.deviceId, a.appId, {
       packageId: a.appId,
@@ -95,8 +103,8 @@ describe("daemon build-context stream wiring", () => {
     // A different manager paired with the same server must seed independently.
     const second = manager();
     second.setBuildContext(b);
-    daemon["setupNavigationGraphUpdateListener"](second);
-    daemon["setupNavigationGraphUpdateListener"](second);
+    daemon.attach(second);
+    daemon.attach(second);
     expect(replacementPush).toHaveBeenCalledTimes(2);
     expect(replacementPush).toHaveBeenLastCalledWith(b.deviceId, b.appId, {
       packageId: b.appId,
@@ -111,7 +119,7 @@ describe("daemon build-context stream wiring", () => {
     const { daemon, push } = wiring();
     const first = manager();
     first.setBuildContext({ ...a, deviceId: "legacy" });
-    daemon["setupNavigationGraphUpdateListener"](first);
+    daemon.attach(first);
     first.setBuildContext({ ...a, deviceId: "legacy", contentHash: "updated" });
     first.clearBuildContext(a.appId);
     expect(push).not.toHaveBeenCalled();

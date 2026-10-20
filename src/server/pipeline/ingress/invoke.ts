@@ -1,3 +1,4 @@
+import type { ToolHandlerResult } from "../../toolRegistryTypes";
 import {
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_EXECUTION_ID_PARAM,
@@ -13,7 +14,7 @@ import { runWithToolSelectionContext } from "../../../features/toolSelection/too
 import { runWithTextRequestContext } from "../../../features/action/textTransportTimeout";
 import type { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { runWithAbortSignal } from "../../../utils/AbortContext";
-import { executionTracker, sessionExecutionMetadataOf } from "../../executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../../../daemon/executionTracker";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import type { ToolCallProgress } from "../../toolCallDispatch";
@@ -27,7 +28,7 @@ export interface InvocationPlan {
   readonly name: string;
   readonly tool: ResolvedTool;
   readonly toolParams: Record<string, unknown>;
-  readonly parsedParams: unknown;
+  readonly parsedParams: Record<string, unknown>;
   readonly sessionId: string | undefined;
   readonly context: CallContext;
   readonly options: McpServerOptions;
@@ -54,11 +55,8 @@ export interface InvocationPlan {
  * handler needs, re-attached under the internal `__*` keys. This is the only
  * place a parsed {@link CallContext} is written back in-band.
  */
-export function buildHandlerParams(plan: InvocationPlan): unknown {
+export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown> {
   const { parsedParams, context, execution, name } = plan;
-  if (!parsedParams || typeof parsedParams !== "object") {
-    return parsedParams;
-  }
   return {
     ...parsedParams,
     ...(name === "setActiveDevice" && plan.routingSessionUuid
@@ -100,7 +98,7 @@ export function buildHandlerParams(plan: InvocationPlan): unknown {
 }
 
 /** Run the tool handler under the call's selection, text-deadline and abort contexts. */
-export async function invokeHandler(plan: InvocationPlan) {
+export async function invokeHandler(plan: InvocationPlan): Promise<ToolHandlerResult> {
   const { name, tool, toolParams, execution, sessionId, sessionToolBinding, options } = plan;
   const handlerParams = buildHandlerParams(plan);
   // `progress` echoes the client's own token and is undefined when the client
@@ -144,8 +142,11 @@ export async function invokeHandler(plan: InvocationPlan) {
       },
       () => tool.handler(handlerParams, progressCallback, plan.requestSignal),
     );
-  return runWithTextRequestContext(
+  const result = await runWithTextRequestContext(
     { textState: plan.textState, getDeadlineMs: plan.getRequestDeadlineMs },
     () => runWithAbortSignal(plan.requestSignal, runToolHandler),
   );
+  // The registry stores handlers by wire shape (resolving to `unknown`); every registered handler
+  // resolves to an MCP tool result, which is what the rest of the pipeline reads.
+  return result as ToolHandlerResult;
 }

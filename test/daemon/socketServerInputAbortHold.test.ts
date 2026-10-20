@@ -1,8 +1,8 @@
-import type { Socket } from "node:net";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import {
   harness,
   frame,
+  holdDevice,
   runner,
   socketHarness,
   cancel,
@@ -11,31 +11,33 @@ import {
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
 import { TakeScreenshot } from "../../src/features/observe/TakeScreenshot";
-import type { DaemonResponse } from "../../src/daemon/types";
-import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { CtrlProxyText as IosTextDelegate } from "../../src/features/observe/ios/CtrlProxyText";
 import { InputKey } from "../../src/features/action/InputKey";
 import type { BootedDevice } from "../../src/models";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { createIosDelegateHarness } from "../helpers/iosDelegateHarness";
+import { createIosTestClient } from "../helpers/iosCtrlProxyClientSpies";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+
+const originalStart = screenshotPathProtection.start;
+const originalSweepOnce = screenshotPathProtection.sweepOnce;
 
 beforeEach(() => {
   // InputText constructs observation services, but append never observes. Suppress
   // their filesystem/retention work so these tests use no real timers or I/O.
   spyOn(screenshotPathProtection, "start").mockImplementation(() => {});
   spyOn(screenshotPathProtection, "sweepOnce").mockResolvedValue(undefined);
-  spyOn(TakeScreenshot as unknown as { getCacheDir(): string }, "getCacheDir").mockReturnValue(
-    "scratch/restart-edges-codex/screenshots",
-  );
+  spyOn(TakeScreenshot, "getCacheDir").mockReturnValue("scratch/restart-edges-codex/screenshots");
 });
 afterEach(() => {
   mock.restore();
-  expect((screenshotPathProtection.start as { mock?: unknown }).mock).toBeUndefined();
-  expect((screenshotPathProtection.sweepOnce as { mock?: unknown }).mock).toBeUndefined();
+  expect(screenshotPathProtection.start).toBe(originalStart);
+  expect(screenshotPathProtection.sweepOnce).toBe(originalSweepOnce);
   // Spies bypass getInstance; no real clients are constructed or connected.
   AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
   IOSCtrlProxyClient.clearInstanceRegistryForTesting();
@@ -63,14 +65,6 @@ test.each(
   const submit = variant.endsWith("submit");
   const first = runner(end === "deadline");
   const secondDispatches: string[] = [];
-  const client = Object.create(
-    platform === "android" ? AndroidCtrlProxyClient.prototype : IOSCtrlProxyClient.prototype,
-  );
-  if (platform === "android") {
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-  } else {
-    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
-  }
   let textCalls = 0;
   const set = (_text: string, options?: { abortSignal?: AbortSignal; onDispatch?: () => void }) => {
     textCalls++;
@@ -83,15 +77,27 @@ test.each(
     }
     return Promise.resolve({ success: true, totalTimeMs: 0 });
   };
-  spyOn(client, "requestSetText").mockImplementation(set);
-  if (platform === "ios") {
+  const imeAction = (
+    _action: unknown,
+    _timeout: unknown,
+    _perf: unknown,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ) => first.send(signal, onDispatch);
+  if (platform === "android") {
+    const client = createAndroidTestClient(holdDevice("android"));
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    spyOn(client, "requestSetText").mockImplementation(set);
+    spyOn(client, "requestImeAction").mockImplementation(imeAction);
+  } else {
+    const client = createIosTestClient(holdDevice("ios"));
+    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    spyOn(client, "requestSetText").mockImplementation(set);
     spyOn(client, "requestAppendText").mockImplementation(
       (text, _timeout, _perf, _context, options) => set(text, options),
     );
+    spyOn(client, "requestImeAction").mockImplementation(imeAction);
   }
-  spyOn(client, "requestImeAction").mockImplementation(
-    (_action, _timeout, _perf, signal, onDispatch) => first.send(signal, onDispatch),
-  );
   const adb = new FakeAdbExecutor();
   spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
   let commands = 0;
@@ -101,7 +107,7 @@ test.each(
     if (append && !submit && platform === "android" && commands === 1) {
       await first.send(options?.signal);
     }
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   });
   spyOn(InputKey.prototype, "press").mockImplementation(
     async (_key, _timeout, _context, _args, routing) => {
@@ -162,7 +168,7 @@ test.each(
   } // no suffix after abort
   first.reply();
   await drainMicrotasks(100);
-  expect(handler.mcpForwardTails.size).toBe(0);
+  expect(handler.forwardTails.size).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
@@ -175,7 +181,7 @@ test.each(["replace", "append", "legacy append"] as const)(
       supportedCommands: variant === "legacy append" ? ["request_set_text"] : undefined,
     });
     const delegate = new IosTextDelegate(transport.context);
-    const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
+    const client = createIosTestClient(holdDevice("ios"));
     spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
     spyOn(client, "requestSetText").mockImplementation(delegate.requestSetText.bind(delegate));
     spyOn(client, "requestAppendText").mockImplementation(
@@ -206,7 +212,7 @@ test.each(["replace", "append", "legacy append"] as const)(
     await b;
     await drainMicrotasks(100);
     expect(transport.requestManager.getPendingCount()).toBe(0);
-    expect(handler.mcpForwardTails.size).toBe(0);
+    expect(handler.forwardTails.size).toBe(0);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   },
 );
@@ -216,7 +222,7 @@ test("abort before dispatch releases the device key with plain cancellation and 
   const owner = new AbortController();
   let preparing = false;
   let sent = 0;
-  const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
+  const client = createIosTestClient(holdDevice("ios"));
   spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
   spyOn(client, "requestSetText").mockImplementation((_text, options) => {
     if (!preparing) {
@@ -243,7 +249,7 @@ test("abort before dispatch releases the device key with plain cancellation and 
   expect(sent).toBe(1);
   expect(stamps).toEqual(["A"]);
   await drainMicrotasks(100);
-  expect(handler.mcpForwardTails.size).toBe(0);
+  expect(handler.forwardTails.size).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
@@ -252,12 +258,12 @@ test("Android append abort at the dispatch latch cannot escape the request hold"
   const owner = new AbortController();
   const first = runner();
   const reason = new Error("cancel at dispatch");
-  handler.runTrackedDeviceInput = async (_method, device, operation, signal) =>
+  handler.trackedInput = async (_method, device, operation, signal) =>
     operation(signal, () => {
       stamps.push(device.deviceId);
       owner.abort(reason);
     });
-  const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+  const client = createAndroidTestClient(holdDevice("android"));
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
   let nextSent = false;
   spyOn(client, "requestSetText").mockImplementation(async (_text, options) => {
@@ -272,7 +278,7 @@ test("Android append abort at the dispatch latch cannot escape the request hold"
     await options?.beforeDispatch?.(options.timeoutMs);
     commands++;
     await first.send(options?.signal);
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   });
   const a = handler.handleInputTypeText(frame("android", "A", true), undefined, {
     signal: owner.signal,
@@ -291,7 +297,7 @@ test("Android append abort at the dispatch latch cannot escape the request hold"
   expect(commands).toBe(1);
   expect(nextSent).toBe(true);
   await drainMicrotasks(100);
-  expect(handler.mcpForwardTails.size).toBe(0);
+  expect(handler.forwardTails.size).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
@@ -299,7 +305,7 @@ test("ordinary timeout still holds the key until the dispatched request settles"
   const { handler, timer } = harness();
   const first = runner();
   let calls = 0;
-  const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
+  const client = createIosTestClient(holdDevice("ios"));
   spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
   spyOn(client, "requestSetText").mockImplementation((_text, options) => {
     calls++;
@@ -324,7 +330,7 @@ test("ordinary timeout still holds the key until the dispatched request settles"
   await b;
   expect(calls).toBe(3);
   await drainMicrotasks(100);
-  expect(handler.mcpForwardTails.size).toBe(0);
+  expect(handler.forwardTails.size).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
@@ -348,23 +354,21 @@ test.each(["cancel", "close"] as const)(
       params: { platform: "android", deviceId: "A", text: "holder" },
     });
     await drainUntil(() => first.dispatched, { description: "holder dispatch" });
-    const requests = spyOn(f.server, "handleRequest");
+    const handledBefore = f.server.handledRequests.length;
     f.socket.send({ ...frame("android"), id: "parked" });
     await drainMicrotasks(100);
-    expect(f.server.mcpForwardTails.size).toBe(1);
-    const parked = requests.mock.results.at(-1)!;
-    expect(parked.type).toBe("return");
+    expect(f.server.forwardTails.size).toBe(1);
+    const parked = f.server.handledRequests[handledBefore];
+    expect(parked).toBeDefined();
     let answered = false;
-    if (parked.type === "return") {
-      void parked.value.then(
-        () => {
-          answered = true;
-        },
-        () => {
-          answered = true;
-        },
-      );
-    }
+    void parked?.then(
+      () => {
+        answered = true;
+      },
+      () => {
+        answered = true;
+      },
+    );
     if (mode === "cancel") {
       cancel(f.socket, "parked");
     } else {
@@ -387,7 +391,6 @@ test.each(["cancel", "close"] as const)(
     } finally {
       first.reply();
       await finishSockets(f);
-      requests.mockRestore();
     }
     expect(sends).toEqual(mode === "cancel" ? ["holder", "a"] : ["holder"]);
   },
@@ -402,21 +405,19 @@ test("text socket close while queued settles the undispatched frame before its h
   });
   f.socket.send({ ...frame("android"), id: "holder" });
   await drainUntil(() => first.dispatched, { description: "same socket holder dispatch" });
-  const requests = spyOn(f.server, "handleRequest");
+  const handledBefore = f.server.handledRequests.length;
   f.socket.send({ ...frame("android"), id: "queued" });
-  const queued = requests.mock.results.at(-1)!;
-  expect(queued.type).toBe("return");
+  const queued = f.server.handledRequests[handledBefore];
+  expect(queued).toBeDefined();
   let answered = false;
-  if (queued.type === "return") {
-    void queued.value.then(
-      () => {
-        answered = true;
-      },
-      () => {
-        answered = true;
-      },
-    );
-  }
+  void queued?.then(
+    () => {
+      answered = true;
+    },
+    () => {
+      answered = true;
+    },
+  );
   f.socket.destroy();
   await drainMicrotasks(100);
   try {
@@ -427,7 +428,6 @@ test("text socket close while queued settles the undispatched frame before its h
   } finally {
     first.reply();
     await finishSockets(f);
-    requests.mockRestore();
   }
   expect(sends).toBe(1);
 });
@@ -435,8 +435,8 @@ test("text cancelled during target resolution answers and admits another device 
   const f = socketHarness();
   const target = Promise.withResolvers<BootedDevice>();
   let resolving = false;
-  const resolve = f.server.resolveInputTargetDevice;
-  f.server.resolveInputTargetDevice = (platform, id) => {
+  const resolve = f.server.targetResolver;
+  f.server.targetResolver = (platform, id) => {
     if (id === "A") {
       resolving = true;
       return target.promise;
@@ -550,7 +550,7 @@ test("abort during submit holds only the remaining caller budget", async () => {
   const first = runner();
   let calls = 0;
   let actionBudget: number | undefined;
-  const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
+  const client = createIosTestClient(holdDevice("ios"));
   spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
   spyOn(client, "requestSetText").mockImplementation(async (_text, options) => {
     calls++;
@@ -586,7 +586,7 @@ test("abort during submit holds only the remaining caller budget", async () => {
   first.reply();
   await drainMicrotasks(100);
   expect(timer.getPendingTimeoutCount()).toBe(0);
-  expect(handler.mcpForwardTails.size).toBe(0);
+  expect(handler.forwardTails.size).toBe(0);
 });
 
 test("dispatched append session release carries confirmed charsSent without mutating the shared release reason", async () => {
@@ -601,25 +601,13 @@ test("dispatched append session release carries confirmed charsSent without muta
   spyOn(adb, "execute").mockImplementation(async (_args, options) => {
     await options?.beforeDispatch?.(options.timeoutMs);
     commands++;
-    return { stdout: "", stderr: "" };
+    return createExecResult("", "");
   });
   spyOn(f.client, "requestImeAction").mockImplementation(
     (_action, _timeout, _perf, signal, dispatch) => first.send(signal, dispatch),
   );
-  const internals = f.server as unknown as {
-    answeringSessionRelease<T>(
-      execution: { cancelReason: unknown },
-      run: () => Promise<T>,
-    ): Promise<T>;
-    mcpForwardFailureResponse(args: {
-      error: unknown;
-      request: DaemonRequest;
-      sessionId: string;
-      ownerSocket: Socket;
-    }): DaemonResponse;
-  };
   const request = frame("android", "A", true, true);
-  const a = internals.answeringSessionRelease({ cancelReason: release }, () =>
+  const a = f.server.answeringSessionRelease({ cancelReason: release }, () =>
     f.server.handleInputTypeText(request, undefined, { signal: owner.signal }),
   );
   void a.catch(() => {});
@@ -629,39 +617,37 @@ test("dispatched append session release carries confirmed charsSent without muta
   first.reply();
   const error: unknown = await a.catch((value) => value);
   expect(error).toBeInstanceOf(SessionReleasedDuringCallError);
-  const response = internals.mcpForwardFailureResponse({
+  const response = f.server.forwardFailureResponse({
     error,
     request,
     sessionId: "socket",
-    ownerSocket: f.socket as unknown as Socket,
+    ownerSocket: f.socket,
   });
   expect(response).toMatchObject({ success: false, code: "session_ownership_lost", charsSent: 2 });
-  expect(response.error).toContain(
+  expect(response?.error).toContain(
     ". Cancellation arrived after the text request had been dispatched; its outcome is indeterminate.",
   );
   expect(release.message).toBe(originalMessage);
   expect("charsSent" in release).toBe(false);
-  const concurrent = internals.answeringSessionRelease({ cancelReason: release }, async () => {
+  const concurrent = f.server.answeringSessionRelease({ cancelReason: release }, async () => {
     throw release;
   });
   await expect(concurrent).rejects.toBe(release);
   const concurrentError: unknown = await concurrent.catch((value) => value);
   expect(
-    internals.mcpForwardFailureResponse({
+    f.server.forwardFailureResponse({
       error: concurrentError,
       request,
       sessionId: "socket",
-      ownerSocket: f.socket as unknown as Socket,
+      ownerSocket: f.socket,
     }),
   ).toMatchObject({ error: originalMessage });
-  expect(
-    "charsSent" in
-      internals.mcpForwardFailureResponse({
-        error: concurrentError,
-        request,
-        sessionId: "socket",
-        ownerSocket: f.socket as unknown as Socket,
-      }),
-  ).toBe(false);
+  const concurrentResponse = f.server.forwardFailureResponse({
+    error: concurrentError,
+    request,
+    sessionId: "socket",
+    ownerSocket: f.socket,
+  });
+  expect(concurrentResponse !== undefined && "charsSent" in concurrentResponse).toBe(false);
   await finishSockets(f);
 });

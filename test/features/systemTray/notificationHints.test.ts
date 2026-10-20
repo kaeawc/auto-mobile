@@ -7,12 +7,26 @@ import {
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_PACKAGE,
   matchesNotificationResourceId,
+  notificationResourceId,
 } from "../../../src/features/systemTray/notificationHints";
-import type { ViewHierarchyResult } from "../../../src/models";
+import { wireCapture } from "../../helpers/wireCapture";
+import { readFileSync } from "node:fs";
 
-/** Build a ViewHierarchyResult wrapping an arbitrary hierarchy shape. */
-function viewHierarchy(hierarchy: unknown): ViewHierarchyResult {
-  return { hierarchy } as unknown as ViewHierarchyResult;
+const ios27NotificationCenterHierarchy = wireCapture(
+  JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/ios-notification-center/ios27-notification-center-hierarchy.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ),
+);
+
+/** A capture wrapping an arbitrary hierarchy shape, as it would arrive off the wire. */
+function viewHierarchy(hierarchy: object) {
+  return wireCapture({ hierarchy });
 }
 
 describe("getNodeProperties", () => {
@@ -46,8 +60,9 @@ describe("getHierarchyRoots", () => {
   it("returns [] when the hierarchy carries an error", () => {
     expect(getHierarchyRoots(viewHierarchy({ error: "boom", node: { $: {} } }))).toEqual([]);
   });
-  it("returns [] when the hierarchy is missing", () => {
-    expect(getHierarchyRoots(viewHierarchy(undefined))).toEqual([]);
+  it("treats an empty hierarchy object as its own root, as before the wire-boundary refactor", () => {
+    const empty = {};
+    expect(getHierarchyRoots(viewHierarchy(empty))).toEqual([empty]);
   });
   it("wraps a single node object in an array", () => {
     const single = { $: { class: "A" } };
@@ -132,6 +147,19 @@ describe("nodeHasSystemTrayHint", () => {
 });
 
 describe("nodeHasIosNotificationCenterHint", () => {
+  it("matches the captured cover-sheet list, not its generic cells or date subtree", () => {
+    const matchedIds: string[] = [];
+    for (const root of getHierarchyRoots(ios27NotificationCenterHierarchy)) {
+      traverseForHint(root, (node) => {
+        if (nodeHasIosNotificationCenterHint(node)) {
+          matchedIds.push(notificationResourceId(node));
+        }
+        return false;
+      });
+    }
+    expect(matchedIds).toEqual(["SBCoverSheetWindow"]);
+  });
+
   const cases: Array<[string, Record<string, unknown>, boolean]> = [
     ["matches a NotificationCenter class", { class: "NotificationCenterView" }, true],
     ["matches a hint in the content-desc", { "content-desc": "NCNotificationShortLookView" }, true],
@@ -175,6 +203,6 @@ it("enumerates separate notification windows topmost first without repeated root
       { windowLayer: 4, hierarchy: { node: tray } },
       { windowLayer: 1, hierarchy: { node: app } },
     ],
-  } as unknown as ViewHierarchyResult;
-  expect(getHierarchyRoots(capture)).toEqual([tray, app]);
+  };
+  expect(getHierarchyRoots(wireCapture(capture))).toEqual([tray, app]);
 });

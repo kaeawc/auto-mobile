@@ -3,8 +3,7 @@ import { runWithTextRequestContext } from "../../../src/features/action/textTran
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
-import type { BootedDevice, SendTextResult } from "../../../src/models";
+import type { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -12,6 +11,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("InputText iOS IME action", () => {
   const iosDevice: BootedDevice = {
@@ -28,7 +28,6 @@ describe("InputText iOS IME action", () => {
   let imeActionSpy: ReturnType<typeof spyOn>;
 
   const createInputText = (device: BootedDevice): InputText => {
-    const action = new InputText(device, fakeAdb, undefined, fakeTimer);
     const fakeObserveScreen = new FakeObserveScreen();
     fakeObserveScreen.enableAutoVaryHierarchy();
     fakeObserveScreen.setObserveResult(() =>
@@ -41,15 +40,11 @@ describe("InputText iOS IME action", () => {
       activityName: "MainActivity",
       layoutSeqSum: 1,
     });
-    const seams = action as unknown as {
-      observeScreen: FakeObserveScreen;
-      window: FakeWindow;
-      awaitIdle: FakeAwaitIdle;
-    };
-    seams.observeScreen = fakeObserveScreen;
-    seams.window = fakeWindow;
-    seams.awaitIdle = new FakeAwaitIdle();
-    return action;
+    return new InputText(device, fakeAdb, undefined, fakeTimer, undefined, {
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+      awaitIdle: new FakeAwaitIdle(),
+    });
   };
 
   beforeEach(() => {
@@ -58,9 +53,7 @@ describe("InputText iOS IME action", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setAndroidApiLevel(34);
     fakeIosCtrlProxy = new FakeIOSCtrlProxy(fakeTimer);
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient,
-    );
+    iosGetInstanceSpy = spyOnIosClientInstance(fakeIosCtrlProxy);
     imeActionSpy = spyOn(fakeIosCtrlProxy, "requestImeAction");
     inputText = createInputText(iosDevice);
   });
@@ -94,11 +87,7 @@ describe("InputText iOS IME action", () => {
       return typedObservation(after);
     });
     try {
-      const result = await (
-        inputText as unknown as {
-          executeiOSTextInput(text: string): Promise<SendTextResult>;
-        }
-      ).executeiOSTextInput("123456");
+      const result = await inputText.testHooks.executeiOSTextInput("123456");
       expect(result.success).toBe(success);
       if (!success) {
         expect(result.error).toContain("nothing was typed");

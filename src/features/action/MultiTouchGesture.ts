@@ -106,19 +106,20 @@ export class MultiTouchGesture extends BaseVisualChange {
 
   private dispatchIos(request: MultiTouchDispatchRequest): Promise<DispatchOutcome> {
     const { plan } = request;
-    return IOSCtrlProxyClient.getInstance(this.device).requestMultiFingerSwipe(
-      plan.points[0].x,
-      plan.points[0].y,
-      plan.end.x,
-      plan.end.y,
-      plan.fingers,
-      plan.durationMs,
-      resolveGestureCtrlProxyTimeoutMs(plan.durationMs),
-      request.perf,
-      plan.fingerSpacing,
-      request.signal,
-      request.onDispatch,
-    );
+    return IOSCtrlProxyClient.getInstance(this.device).requestMultiFingerSwipe({
+      x1: plan.points[0].x,
+      y1: plan.points[0].y,
+      x2: plan.end.x,
+      y2: plan.end.y,
+      fingerCount: plan.fingers,
+      duration: plan.durationMs,
+      timeoutMs: resolveGestureCtrlProxyTimeoutMs(plan.durationMs),
+      perf: request.perf,
+      fingerSpacing: plan.fingerSpacing,
+      signal: request.signal,
+      onDispatch: request.onDispatch,
+      beforeSend: request.beforeSend,
+    });
   }
 
   async execute(options: MultiTouchOptions, call: ActionCall = {}): Promise<MultiTouchResult> {

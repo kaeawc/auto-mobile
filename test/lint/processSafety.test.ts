@@ -1,5 +1,6 @@
+import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -244,7 +245,7 @@ STUB
 
   test("stale allowlist entries fail the tree's allowlist check", () => {
     const sources = new Map(
-      Object.keys(PROCESS_SAFETY_ALLOWLIST).map((file) => [file, readFileSync(file, "utf8")]),
+      Object.keys(PROCESS_SAFETY_ALLOWLIST).map((file) => [file, readGuardFile(file)]),
     );
     expect(checkProcessSafetyAllowlist(sources)).toEqual([]);
     sources.set("scripts/install.sh", '# pgrep -P "${pid}"\ntrue');
@@ -255,7 +256,7 @@ STUB
     "real uninstall-%s BATS file exists and passes",
     (name) => {
       const file = `test/bats/uninstall-${name}.bats`;
-      expect(checkProcessSafetySource(file, readFileSync(file, "utf8"))).toEqual([]);
+      expect(checkProcessSafetySource(file, readGuardFile(file))).toEqual([]);
     },
   );
 

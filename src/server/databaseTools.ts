@@ -1,15 +1,20 @@
+import { SdkCapabilityQueryError } from "../features/observe/ios/SdkCapabilityQueryError";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
-import { createJSONToolResponse } from "../utils/toolUtils";
-import { iosSqlErrorMessage } from "./storageSdkErrors";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { sqlQueryResultSchema } from "./databaseToolOutputSchemas";
+import { iosSqlErrorMessage } from "../utils/storageSdkErrors";
 import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { notifyDatabaseChanged } from "./databaseResources";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import {
+  defaultIosDatabaseClientResolver,
+  type IosDatabaseClientResolver,
+} from "./iosDatabaseClient";
 import type { SQLResult } from "../features/database/DatabaseInspector";
 import { lexSql, splitSqlStatements, type SqlToken } from "../features/database/sqlLexer";
 
@@ -27,11 +32,7 @@ const sqlQuerySchema = withAppIdAliases(
 );
 
 // Type interface for tool arguments
-interface SqlQueryArgs {
-  appId: string;
-  databasePath: string;
-  query: string;
-}
+type SqlQueryArgs = z.output<typeof sqlQuerySchema>;
 
 /**
  * Extract table names from SQL query for notification purposes.
@@ -204,11 +205,13 @@ export function isReadOnlySqlQuery(query: string): boolean {
  * (listDatabases, listTables, getTableData, getTableStructure) are
  * exposed as MCP resources instead.
  */
-export function registerDatabaseTools() {
+export function registerDatabaseTools(
+  iosClient: IosDatabaseClientResolver = defaultIosDatabaseClientResolver,
+) {
   // SQL Query handler
   const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
     try {
-      const result = await executeSqlForDevice(device, args);
+      const result = await executeSqlForDevice(device, args, iosClient);
 
       // The executed result type is authoritative; SQL text classification is
       // only an approximation for decisions that must happen before execution.
@@ -227,7 +230,7 @@ export function registerDatabaseTools() {
           ? `Query returned ${result.rows?.length ?? 0} row(s)`
           : `Mutation affected ${result.rowsAffected ?? 0} row(s)`;
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message,
         ...result,
       });
@@ -248,6 +251,7 @@ export function registerDatabaseTools() {
     {
       defaultEnabled: false,
       embeddedSdkOnly: true,
+      outputSchema: sqlQueryResultSchema,
       // Only a single read-only statement watches (#10830); anything the classifier cannot prove
       // read-only needs the device's holder and is refused with device_owned_by_other_session.
       deviceReadOnly: (args: SqlQueryArgs) =>
@@ -259,7 +263,11 @@ export function registerDatabaseTools() {
 /**
  * Execute SQL using the platform-specific database bridge.
  */
-async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Promise<SQLResult> {
+async function executeSqlForDevice(
+  device: BootedDevice,
+  args: SqlQueryArgs,
+  iosClient: IosDatabaseClientResolver,
+): Promise<SQLResult> {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
     const inspector = new DatabaseInspector(device, adb, undefined, () =>
@@ -277,7 +285,7 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
 
   if (device.platform === "ios") {
     try {
-      return await IOSCtrlProxyClient.getInstance(device).executeSQLForIos(
+      return await iosClient(device).executeSQLForIos(
         args.appId,
         args.databasePath,
         args.query,
@@ -285,6 +293,9 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
         isReadOnlySqlQuery(args.query),
       );
     } catch (error) {
+      if (error instanceof SdkCapabilityQueryError) {
+        throw error;
+      }
       throw new ActionableError(
         iosSqlErrorMessage(error, args.databasePath, {
           readOnlyQuery: isReadOnlySqlQuery(args.query),

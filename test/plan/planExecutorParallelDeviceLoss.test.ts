@@ -1,10 +1,11 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { DeviceLostError, deviceLostErrorFromAbortSignal } from "../../src/models/DeviceLostError";
 import type { AbortStrategy, Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { waitForObservation } from "../../src/server/observeTools";
@@ -61,11 +62,11 @@ async function checkDeviceLoss(
         }
         throw loss;
       }
-      return {
+      return buildObserveResult({
         updatedAt: index,
         screenSize: { width: 200, height: 200 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      };
+      });
     });
   }
 
@@ -83,9 +84,7 @@ async function checkDeviceLoss(
               return await waitForObservation(
                 screen,
                 { posture: "closed", timeout: 40_000 },
-                signal,
-                false,
-                timer,
+                { signal, skipBackStack: false, timer },
               );
             }
             throw loss;
@@ -122,7 +121,7 @@ async function checkDeviceLoss(
     async () => {
       // Supply a caller signal so tools receive the composed signal, not just
       // the internal controller's signal.
-      const execution = new DefaultPlanExecutor(timer).executePlan(
+      const execution = createDefaultPlanExecutor(timer).executePlan(
         parallelPlan(devices),
         0,
         undefined,
@@ -248,7 +247,7 @@ describe("parallel plan device loss", () => {
         ToolRegistry.getTool(toolName)!.requiresDevice = false;
       },
       async () => {
-        const execution = new DefaultPlanExecutor(new FakeTimer()).executePlan(parallelPlan(), 0);
+        const execution = createDefaultPlanExecutor(new FakeTimer()).executePlan(parallelPlan(), 0);
         try {
           await siblingStarted.promise;
           await flushMicrotasks();
@@ -308,7 +307,7 @@ describe("parallel plan device loss", () => {
         ToolRegistry.getTool(toolName)!.requiresDevice = false;
       },
       async () => {
-        const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+        const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
           parallelPlan(),
           0,
           undefined,
@@ -347,7 +346,7 @@ describe("parallel plan device loss", () => {
         },
         async () => {
           await expect(
-            new DefaultPlanExecutor(new FakeTimer()).executePlan(
+            createDefaultPlanExecutor(new FakeTimer()).executePlan(
               {
                 name: "single-track loss",
                 devices,

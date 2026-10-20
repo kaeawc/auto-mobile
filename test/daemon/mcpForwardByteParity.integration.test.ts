@@ -19,11 +19,12 @@ import {
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
 } from "../../src/daemon/constants";
-import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
+import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import {
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
 } from "../../src/daemon/proxyLivenessRecovery";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
@@ -46,7 +47,7 @@ import {
   runWithSelectedDisplayPin,
 } from "../../src/features/observe/SessionDisplayContext";
 import { ActionableError } from "../../src/models/ActionableError";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -84,10 +85,11 @@ const IO_DEADLINE_MS = 5_000;
 
 const refusals = new Map(buildRefusalWireFixtures().map((fixture) => [fixture.code, fixture]));
 
-function fakeDaemonState() {
+function fakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
@@ -98,6 +100,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 
@@ -239,7 +242,6 @@ async function startHarness(
   const socketPath = join(tmpdir(), `mcp-parity-${randomUUID().slice(0, 8)}.sock`);
   const socketServer = new UnixSocketServer(
     socketPath,
-    endpointUrl,
     fakeDaemonState(),
     defaultTimer,
     null,

@@ -1,5 +1,10 @@
-import { Socket } from "node:net";
+import { Server as NetServer, Socket, type SocketConnectOpts } from "node:net";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+
+/** Any zod schema (v3 or v4): the frames are validated by `parse`, which throws on a mismatch. */
+export interface FrameSchema<T> {
+  parse(data: unknown): T;
+}
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
 
@@ -22,8 +27,10 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   get responses(): Response[] {
     return this._writtenData.map((frame) => JSON.parse(frame) as Response);
   }
+  /** Called with each written frame, e.g. to deliver it to the other end of an in-memory pair. */
+  public onWrite: ((frame: string) => void) | undefined;
   private _writtenData: string[] = [];
-  private _peer: FakeSocket | null = null;
+  private _peer: FakeSocket<unknown> | null = null;
 
   /**
    * Get all data written to this socket
@@ -44,32 +51,51 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   }
 
   /**
-   * Parse all written JSON messages (newline-delimited)
+   * Parse all written JSON messages (newline-delimited). With a `schema`, every frame is
+   * validated against it and returned with the schema's output type; without one the frames are
+   * `unknown`.
    */
-  getWrittenMessages<T = unknown>(): T[] {
-    const allData = this.getWrittenDataString();
-    const lines = allData.split("\n").filter((line) => line.trim());
-    return lines.map((line) => JSON.parse(line) as T);
+  getWrittenMessages(): unknown[];
+  getWrittenMessages<T>(schema: FrameSchema<T>): T[];
+  getWrittenMessages(schema?: FrameSchema<unknown>): unknown[] {
+    const lines = this.getWrittenDataString()
+      .split("\n")
+      .filter((line) => line.trim());
+    const frames: unknown[] = lines.map((line) => JSON.parse(line));
+    return schema === undefined ? frames : frames.map((frame) => schema.parse(frame));
   }
 
   /**
    * Connect this socket to a peer (for bidirectional communication)
    */
-  connectToPeer(peer: FakeSocket): void {
+  connectToPeer(peer: FakeSocket<unknown>): void {
     this._peer = peer;
     peer._peer = this;
   }
 
   /**
-   * Write data to the socket. Returns true if successful.
+   * Write data to the socket. Returns true if successful. The overloads mirror
+   * `net.Socket#write`, so a `FakeSocket` is assignable wherever a `Socket` is expected.
    */
-  write(data: string | Buffer, callback?: (error?: Error | null) => void): boolean {
+  write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
+  write(
+    str: string | Uint8Array,
+    encoding?: BufferEncoding,
+    cb?: (err?: Error | null) => void,
+  ): boolean;
+  write(
+    data: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
     if (this.destroyed && this.throwOnWriteAfterDestroy) {
       throw Object.assign(new Error("Socket is destroyed"), { code: "EPIPE" });
     }
-    const str = typeof data === "string" ? data : data.toString();
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+    const str = typeof data === "string" ? data : Buffer.from(data).toString();
     this.written.push(typeof data === "string" ? data : Buffer.from(data));
     this._writtenData.push(str);
+    this.onWrite?.(str);
     callback?.();
     return this.writeReturnValue;
   }
@@ -128,18 +154,26 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   /**
    * End the socket gracefully
    */
-  end(): void {
+  end(callback?: () => void): this;
+  end(buffer: string | Uint8Array, callback?: () => void): this;
+  end(str: string | Uint8Array, encoding?: BufferEncoding, callback?: () => void): this;
+  end(..._args: unknown[]): this {
     if (!this.destroyed) {
       this.destroyed = true;
       this.writable = false;
       this.emit("close", false);
     }
+    return this;
   }
 
   /**
    * Simulate a connection event
    */
-  connect(_options: { path: string }): this {
+  connect(options: SocketConnectOpts, connectionListener?: () => void): this;
+  connect(port: number, host: string, connectionListener?: () => void): this;
+  connect(port: number, connectionListener?: () => void): this;
+  connect(path: string, connectionListener?: () => void): this;
+  connect(..._target: unknown[]): this {
     // In fake mode, connection is instant
     process.nextTick(() => {
       if (!this.destroyed) {
@@ -175,4 +209,11 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
  */
 export class NonThrowingFakeSocket extends FakeSocket {
   public throwOnWriteAfterDestroy = false;
+}
+
+type FakeListeningNetServerContract = Pick<NetServer, "listening">;
+
+/** A net.Server that reports listening without binding a port, for socket-server subclasses under test. */
+export class FakeListeningNetServer extends NetServer implements FakeListeningNetServerContract {
+  override listening = true;
 }

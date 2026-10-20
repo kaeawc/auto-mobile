@@ -16,13 +16,22 @@ import {
   createReleaseSubscribedBindingStore,
   daemonSessionToolBindingStore,
 } from "./daemonSessionToolBindingStore";
-import { dropToolCallRecording } from "./toolCallRecordingManager";
+import { dropToolCallRecording } from "../daemon/toolCallRecordingManager";
 
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
 export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
 import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
 import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
+import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
+import { installTasksProtocol } from "./tasks/installTasksProtocol";
+import type { TaskManager } from "../daemon/tasks/TaskManager";
+import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
+import {
+  createTaskAwareToolCallExecutor,
+  TASK_ELIGIBILITY,
+  type TaskEligibility,
+} from "./tasks/toolCallTasks";
 import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSessionOfBoundPlan";
 
 // Import the tool registry
@@ -41,7 +50,8 @@ import { registerToolOutputResources } from "./toolOutputResources";
 import { registerObserveAppResource } from "./observeAppResource";
 import { registerBootedDeviceResources } from "./bootedDeviceResources";
 import { registerDeviceImageResources } from "./deviceImageResources";
-import { registerAppResources } from "./appResources";
+import { registerAppResources, syncInstalledAppResources } from "./appResources";
+import { registerInstalledAppResourceListRefresher } from "./installedAppResourceResync";
 import { registerNavigationResources } from "./navigationResources";
 import { registerTestTimingResources } from "./testTimingResources";
 import { registerTestRunResources } from "./testRunResources";
@@ -79,7 +89,7 @@ import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
-} from "./toolSelectionProfileRegistry";
+} from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
   iosDependencies?: IosDoctorDependencies;
@@ -95,10 +105,18 @@ export interface McpServerOptions {
   /**
    * The request's session key (#4678): the `MCP_SESSION_KEY_HEADER` value the
    * daemon's HTTP endpoint read for this request. Session-tool bindings are keyed
-   * on it (an in-band `__mcpSessionId` on a daemon `tools/call` takes precedence),
-   * so a binding survives across per-request servers that present the same key.
+   * on it, so a binding survives across per-request servers that present the same key.
+   * The header wins over an in-band `__mcpSessionId` unless {@link trustForwardedMcpSessionId}
+   * is set (#13315).
    */
   requestMcpSessionId?: string;
+  /**
+   * The server answers the daemon's own in-process forward (stdio proxy / socket-forwarded
+   * calls): the in-band `__mcpSessionId` it carries names the originating client and takes
+   * precedence over {@link requestMcpSessionId}, the connection key. Never set for direct HTTP
+   * clients, whose in-band id is only a fallback when they sent no header (#13315).
+   */
+  trustForwardedMcpSessionId?: boolean;
   /**
    * The server answers a single request and is closed after it (#4678). Keyed
    * bindings then live in the daemon-scoped {@link daemonSessionToolBindingStore}
@@ -126,6 +144,19 @@ export interface McpServerOptions {
    * that explicitly simulate that hop with more than one instance.
    */
   toolSelectionProfileRegistry?: ToolSelectionProfileRegistry;
+  /**
+   * MCP Tasks extension (#4668). The daemon serves tasks from its daemon-scoped manager;
+   * direct stdio does not. Tests inject a manager, the eligible tools and the keepalive.
+   */
+  taskManager?: TaskManager;
+  /**
+   * Who owns the tasks this server creates and serves, when not the request's session key: a
+   * control-socket forward from the stdio proxy names the proxy, so its tasks survive the proxy's
+   * reconnects (a socket session id does not).
+   */
+  taskOwnerKey?: string;
+  taskEligibleTools?: TaskEligibility;
+  taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
 
 // `formatToolParamError` lives in its own module so non-server callers (e.g.
@@ -192,6 +223,7 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerBootedDeviceResources();
   registerDeviceImageResources();
   registerAppResources();
+  registerInstalledAppResourceListRefresher(() => syncInstalledAppResources());
   registerNavigationResources();
   registerTestTimingResources();
   registerTestRunResources();
@@ -222,6 +254,46 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
  */
 function serverBindingKey(options: McpServerOptions): string | undefined {
   return options.requestMcpSessionId ?? options.sessionContext?.sessionId;
+}
+
+/**
+ * The session key a request's tasks belong to (#4668): the explicit key header on a stateless
+ * daemon server (its scope id is one-off and would orphan the task), else the stateful
+ * transport's session id. Keyless stateless requests own no tasks and run synchronously.
+ */
+function taskOwnerKey(options: McpServerOptions): string | undefined {
+  if (options.taskOwnerKey?.trim()) {
+    return options.taskOwnerKey;
+  }
+  const key = options.stateless ? options.requestMcpSessionId : serverBindingKey(options);
+  return key?.trim() ? key : undefined;
+}
+
+function resolveTaskManager(options: McpServerOptions): TaskManager | undefined {
+  return options.taskManager ?? (options.daemonMode ? daemonTaskManager() : undefined);
+}
+
+/**
+ * Serves the Tasks extension on this server when a task manager is available, and wraps the
+ * `tools/call` executor so an eligible tool can answer a declaring request with a task.
+ */
+function installTasks(
+  server: McpServer,
+  options: McpServerOptions,
+  execute: ReturnType<typeof createToolCallExecutor>,
+): ReturnType<typeof createTaskAwareToolCallExecutor> {
+  const taskManager = resolveTaskManager(options);
+  const ownerKey = taskOwnerKey(options);
+  if (taskManager) {
+    installTasksProtocol(server, { taskManager, ownerKey });
+  }
+  return createTaskAwareToolCallExecutor({
+    execute,
+    taskManager,
+    ownerKey,
+    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBILITY,
+    ...(options.taskLeaseKeepalive && { keepalive: options.taskLeaseKeepalive }),
+  });
 }
 
 function resolveBindingStore(options: McpServerOptions): {
@@ -430,9 +502,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   installToolCallDispatcher(server, {
     progressFailureMessage: "Failed to send progress notification",
     prepare: prepareToolCallRequest,
-    execute: executeToolCall,
+    execute: installTasks(server, options, executeToolCall),
   });
   startupBenchmark.endPhase("serverHandlerRegistration");
 
   return server;
 };
+
+/** Refresh externally changed resource rosters before a cached control-socket discovery reply. */
+export function refreshMcpResourceList(): Promise<void> {
+  return ResourceRegistry.refreshBeforeList();
+}

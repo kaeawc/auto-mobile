@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { toolJson } from "../helpers/toolResponse";
 import { z } from "zod/v4";
 import type { BootedDevice, Plan, PlanStep } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { PlanStepError } from "../../src/utils/plan/PlanStepExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -20,7 +21,7 @@ describe("criticalSection shares plan step execution (#6535)", () => {
     sessionUuid: z.string().optional(),
   });
   let timer: FakeTimer;
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let restoreTools: () => void;
   let restoreCoordinator: () => void;
   let coordinator: CriticalSectionCoordinator;
@@ -35,7 +36,7 @@ describe("criticalSection shares plan step execution (#6535)", () => {
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
     timer = new FakeTimer();
-    executor = new DefaultPlanExecutor(timer);
+    executor = createDefaultPlanExecutor(timer);
     coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
     restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
     registerCriticalSectionTools(timer);
@@ -88,7 +89,7 @@ describe("criticalSection shares plan step execution (#6535)", () => {
       const section = await runSection(steps);
       expect(topLevel.success).toBe(true);
       expect(topLevel.skippedSteps).toHaveLength(1);
-      expect(JSON.parse(section.content[0].text)).toMatchObject({
+      expect(toolJson(section)).toMatchObject({
         success: true,
         executedSteps: 2,
         warnings: ["step 1 (sharedFailure): optional step failed; skipped: missing element"],
@@ -224,7 +225,7 @@ describe("criticalSection shares plan step execution (#6535)", () => {
       expect(topLevel.success).toBe(optional);
       if (optional) {
         const section = await runSection(steps);
-        expect(JSON.parse(section.content[0].text).success).toBe(true);
+        expect(toolJson(section).success).toBe(true);
         expect(next).toHaveBeenCalledTimes(2);
       } else {
         await expect(runSection(steps)).rejects.toMatchObject({

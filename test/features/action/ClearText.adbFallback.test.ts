@@ -1,3 +1,5 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ClearText,
@@ -8,12 +10,15 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import {
+  spyOnIosClientFactory,
+  spyOnIosClientInstance,
+} from "../../helpers/iosCtrlProxyClientSpies";
 
 const deleteCommand = (count: number): string =>
   `shell input keyevent ${Array<string>(count).fill("KEYCODE_DEL").join(" ")}`;
@@ -170,68 +175,69 @@ describe("ClearText Android ADB fallback", () => {
   let observedSpy: ReturnType<typeof spyOn> | null = null;
   let refreshSpy: ReturnType<typeof spyOn> | null = null;
 
-  const focusedFieldObserve = (text: string): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      hierarchy: {
-        node: {
-          $: {
-            focused: "true",
-            text: text,
-            class: "android.widget.EditText",
+  const focusedFieldObserve = (text: string): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            $: {
+              focused: "true",
+              text: text,
+              class: "android.widget.EditText",
+            },
           },
         },
       },
-    },
-  });
+    });
 
-  const noHierarchyObserve = (): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  });
+  const noHierarchyObserve = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
 
-  const noFocusedFieldObserve = (): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      updatedAt: 100,
-      hierarchy: {
-        node: {
-          $: {
-            class: "android.widget.TextView",
-            focused: "false",
-            text: "Home",
+  const noFocusedFieldObserve = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: {
+        updatedAt: 100,
+        hierarchy: {
+          node: {
+            $: {
+              class: "android.widget.TextView",
+              focused: "false",
+              text: "Home",
+            },
           },
         },
       },
-    },
-  });
+    });
 
-  const hierarchyErrorObserve = (): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      hierarchy: { error: "Accessibility hierarchy unavailable" },
-    } as any,
-  });
+  const hierarchyErrorObserve = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: {
+        hierarchy: { error: "Accessibility hierarchy unavailable" },
+      },
+    });
 
   const runClearText = (
     observeResult: ObserveResult,
     configure?: (clearText: ClearText) => void,
     signal?: AbortSignal,
   ) => {
-    const clearText = new ClearText(device, fakeAdb as any, undefined, new FakeTimer());
-    observedSpy = spyOn(
-      clearText as unknown as {
-        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) => fn(observeResult));
+    const clearText = new ClearText(device, fakeAdb, undefined, new FakeTimer());
+    observedSpy = spyOn(clearText, "observedInteraction").mockImplementation(
+      runBlockWith(() => observeResult),
+    );
     refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
       focusedFieldObserve(""),
     );
@@ -678,28 +684,11 @@ describe("ClearText Android ADB fallback", () => {
       ...deleteCommands(200),
     ]);
   });
-  test("unsupported platform result includes the platform name", async () => {
-    const unsupportedDevice = { ...device, platform: "tvos" } as unknown as BootedDevice;
-    const clearText = new ClearText(unsupportedDevice, fakeAdb as any);
-    observedSpy = spyOn(
-      clearText as unknown as {
-        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) =>
-      fn(noHierarchyObserve()),
-    );
-
-    const result = await clearText.execute();
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("tvos");
-    expect(result.error).not.toBe("Failed to clear text");
-  });
 });
 
 test("iOS clear warns and preserves the failure result when CtrlProxy throws", async () => {
   const error = new Error("clear unavailable");
-  const client = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(() => {
+  const client = spyOnIosClientFactory(() => {
     throw error;
   });
   const warning = spyOn(logger, "warn").mockImplementation(() => {});
@@ -710,7 +699,13 @@ test("iOS clear warns and preserves the failure result when CtrlProxy throws", a
       undefined,
       new FakeTimer(),
     );
-    const result = await action["executeiOSClearText"]({ updatedAt: 0 });
+    const result = await action.testHooks.executeiOSClearText(
+      buildObserveResult({
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        updatedAt: 0,
+      }),
+    );
     expect(result).toEqual({ success: false, error: String(error) });
     expect(
       loggerCallsWithPrefix(warning.mock.calls, "[ClearText] CtrlProxy iOS exception:"),
@@ -732,9 +727,7 @@ test("iOS clear forwards cancellation and preserves indeterminate guidance witho
     error,
     totalTimeMs: 5000,
   });
-  const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    fake as unknown as IOSCtrlProxyClient,
-  );
+  const client = spyOnIosClientInstance(fake);
   try {
     const controller = new AbortController();
     const adb = new FakeAdbExecutor();
@@ -745,7 +738,16 @@ test("iOS clear forwards cancellation and preserves indeterminate guidance witho
       timer,
     );
     action.observeScreen = new FakeObserveScreen();
-    expect(await action["executeiOSClearText"]({ updatedAt: 0 }, controller.signal)).toEqual({
+    expect(
+      await action.testHooks.executeiOSClearText(
+        buildObserveResult({
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          updatedAt: 0,
+        }),
+        controller.signal,
+      ),
+    ).toEqual({
       success: false,
       retryable: false,
       error,

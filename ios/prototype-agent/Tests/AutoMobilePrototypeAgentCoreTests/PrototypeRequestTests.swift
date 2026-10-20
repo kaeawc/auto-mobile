@@ -41,11 +41,11 @@ final class PrototypeRequestTests: XCTestCase {
             #""onSuccess":[{"type":"setState","key":"loaded","value":true}],"onError":[{"type":"emit","name":"failed"}]}]"#
 
     private func labels(_ events: [PrototypeEvent]) -> [String] {
-        events.map { "\($0.kind):\($0.name ?? "-")" }
+        events.map { "\($0.wireKind):\($0.name ?? "-")" }
     }
 
     private func requestEvent(_ events: [PrototypeEvent]) throws -> [String: JSONValue] {
-        let event = try XCTUnwrap(events.first { $0.kind == "emit" && $0.name == PrototypeRequestEvent.name })
+        let event = try XCTUnwrap(events.first { $0.wireKind == "emit" && $0.name == PrototypeRequestEvent.name })
         guard case let .object(payload) = event.payload else { throw XCTSkip("payload is not an object") }
         return payload
     }
@@ -450,6 +450,33 @@ final class PrototypeRequestTests: XCTestCase {
         XCTAssertEqual(job.url, "http://h/p?a=2&z=1")
     }
 
+    /// The shared number-to-text vectors (#12843): header and query values spell a JSON number as
+    /// JavaScript's `String(Number)` does, on every runtime.
+    func testHeaderAndQueryNumbersMatchTheSharedJavaScriptVectors() throws {
+        let file = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test/fixtures/prototype/request-number-text.json")
+        let vectors = try JSONDecoder().decode([[String: String]].self, from: Data(contentsOf: file))
+        XCTAssertGreaterThanOrEqual(vectors.count, 12)
+        for vector in vectors {
+            let json = try XCTUnwrap(vector["json"])
+            let text = try XCTUnwrap(vector["text"])
+            let tap = """
+            [{"type":"request","url":"http://h.test/p",
+              "headers":{"X-N":{"value":\(json)}},"query":{"n":{"value":\(json)}}}]
+            """
+            var (session, actions) = try shown(onTap: tap)
+            _ = session.run(actions)
+            guard case let .start(job)? = session.takeRequestCommands().first else {
+                return XCTFail("no request for \(json)")
+            }
+            XCTAssertEqual(job.headers["X-N"], text, "header \(json)")
+            let encoded = text.replacingOccurrences(of: "+", with: "%2B")
+            XCTAssertEqual(job.url, "http://h.test/p?n=\(encoded)", "query \(json)")
+        }
+    }
+
     func testTheHostFrameCarriesOnlyWhatTheFrameSchemaAllows() throws {
         var (session, actions) = try shown(onTap: feed)
         _ = session.run(actions)
@@ -589,6 +616,39 @@ final class PrototypeRequestTests: XCTestCase {
         for (tap, expected) in cases {
             XCTAssertEqual(rejection(tap), expected, tap)
         }
+    }
+
+    func testForbiddenHeadersAreRejectedDuringSpecValidation() {
+        for name in [
+            "hOsT",
+            "cOnNeCtIoN",
+            "uPgRaDe",
+            "tRaNsFeR-EnCoDiNg",
+            "cOnTeNt-LeNgTh",
+            "tE",
+            "tRaIlEr",
+            "kEeP-AlIvE",
+            "cOoKiE",
+            "eXpEcT",
+            "oRiGiN",
+            "pRoXy-AuThOrIzAtIoN",
+            "PrOxY-Custom",
+        ] {
+            XCTAssertNotNil(rejection(
+                #"[{"type":"request","url":"https://public.example/","headers":{"\#(name)":"x"}}]"#
+            ), name)
+        }
+    }
+
+    func testBlockedDestinationWireCodeIsPreserved() throws {
+        let decoded = try XCTUnwrap(PrototypeRequestWire.decodeResponse([
+            "type": "prototype_response", "requestId": "r-1", "ok": false,
+            "error": ["code": "blocked_destination", "message": "Blocked destination"], "durationMs": 0,
+        ]))
+        XCTAssertEqual(decoded.response, .failed(.init(.blockedDestination, "Blocked destination"), durationMs: 0))
+        XCTAssertEqual(PrototypeRequestError(.blockedDestination, "Blocked destination").json, .object([
+            "code": .string("blocked_destination"), "message": .string("Blocked destination"),
+        ]))
     }
 
     func testMoreThanSixteenHeadersAreRefused() {

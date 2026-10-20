@@ -6,7 +6,7 @@ import type {
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { Timer } from "../../../utils/SystemTimer";
-import { getDaemonDeviceDeletion, type DaemonDeviceDeletion } from "../../../server/deviceTools";
+import { getDaemonDeviceDeletion, type DaemonDeviceDeletion } from "../../daemonDeviceDeletion";
 import {
   isTeardownFailure,
   type TeardownToolResponse,

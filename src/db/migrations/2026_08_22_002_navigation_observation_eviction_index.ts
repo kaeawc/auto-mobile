@@ -49,7 +49,7 @@ import type { Kysely } from "kysely";
  */
 const TABLES = ["navigation_node_observations", "navigation_edge_observations"] as const;
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   for (const table of TABLES) {
     await db.schema
       .createIndex(`idx_${table}_seen_id`)
@@ -60,7 +60,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   for (const table of TABLES) {
     await db.schema.dropIndex(`idx_${table}_seen_id`).ifExists().execute();
   }

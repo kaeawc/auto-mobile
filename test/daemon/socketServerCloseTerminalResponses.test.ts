@@ -1,6 +1,6 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
+import { parseDaemonResponseLine } from "./helpers/parseDaemonResponseLine";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { expect, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import {
@@ -8,7 +8,6 @@ import {
   daemonShuttingDownMcpOutcome,
 } from "../../src/daemon/daemonShutdownOutcome";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
-import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Match the private shutdown bounds without exposing production-only constants.
@@ -35,33 +34,33 @@ test("shutdown tool results preserve only a true dispatch marker in the wire fai
   ).toEqual({ code: "daemon_shutting_down", retryable: true });
 });
 
-class TerminalSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
+class TerminalSocket extends FakeSocket {
   readonly events: string[] = [];
+  override writableLength = 0;
+  override throwOnWriteAfterDestroy = false;
 
   constructor(private readonly peerCloses = true) {
     super();
   }
 
-  setTimeout(_ms: number): this {
-    return this;
-  }
-
-  write(payload: string, callback: (error?: Error | null) => void): boolean {
-    const response = JSON.parse(payload) as DaemonResponse;
-    this.responses.push(response);
+  override write(
+    data: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+    const payload = typeof data === "string" ? data : Buffer.from(data).toString();
+    const response = parseDaemonResponseLine(payload);
     this.events.push(`write:${response.id}`);
     if (!this.peerCloses) {
+      super.write(payload);
       this.writableLength += Buffer.byteLength(payload);
       return false;
     }
-    callback();
-    return true;
+    return super.write(payload, callback);
   }
 
-  end(): this {
+  override end(): this {
     this.events.push("end");
     if (this.peerCloses) {
       this.destroy();
@@ -69,39 +68,26 @@ class TerminalSocket extends EventEmitter {
     return this;
   }
 
-  destroy(): this {
+  override destroy(): this {
     if (!this.destroyed) {
       this.events.push("destroy");
-      this.destroyed = true;
-      this.emit("close", false);
     }
-    return this;
+    return super.destroy();
   }
 
   /** Opt in to notifications so quiesce keeps this socket open, as a bound proxy's is. */
   subscribe(): void {
-    const frame = {
+    this.send({
       id: "subscribe",
       type: "mcp_request",
       method: DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-    };
-    this.emit("data", Buffer.from(`${JSON.stringify(frame)}\n`));
+      params: {},
+    });
   }
 
-  send(id: string): void {
-    this.emit(
-      "data",
-      Buffer.from(
-        `${JSON.stringify({ id, type: "mcp_request", method: "daemon/refreshDevices" })}\n`,
-      ),
-    );
+  sendRefresh(id: string): void {
+    this.send({ id, type: "mcp_request", method: "daemon/refreshDevices", params: {} });
   }
-}
-
-interface SocketServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
 }
 
 function createHarness(peerCloses = true) {
@@ -128,12 +114,19 @@ function createHarness(peerCloses = true) {
     }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
-  const server = createTestUnixSocketServer("unused", "http://localhost:0/mcp", state, timer);
-  const internals = server as unknown as SocketServerInternals;
+  const server = createHarnessServer("unused", state, timer);
   const socket = new TerminalSocket(peerCloses);
-  internals.acceptingRequests = true;
-  internals.handleConnection(socket as unknown as Socket);
-  return { server, internals, socket, timer, started, refresh, refreshStarts: () => refreshStarts };
+  server.allowRequests();
+  server.connect(socket);
+  return {
+    server,
+    internals: server.state,
+    socket,
+    timer,
+    started,
+    refresh,
+    refreshStarts: () => refreshStarts,
+  };
 }
 
 function expectShutdown(socket: TerminalSocket, id: string, possiblyDispatched: boolean): void {
@@ -151,7 +144,7 @@ function expectShutdown(socket: TerminalSocket, id: string, possiblyDispatched: 
 
 test("an admitted handler settling inside the drain writes its real response before end", async () => {
   const { server, socket, timer, started, refresh } = createHarness();
-  socket.send("settled");
+  socket.sendRefresh("settled");
   await started.promise;
   const close = server.close();
   timer.advanceTime(REQUEST_DRAIN_MS - 1);
@@ -172,7 +165,7 @@ test("an admitted handler settling inside the drain writes its real response bef
 
 test("a stalled admitted handler gets one possibly-dispatched shutdown frame before end", async () => {
   const { server, internals, socket, timer, started, refresh } = createHarness();
-  socket.send("stalled");
+  socket.sendRefresh("stalled");
   await started.promise;
   const handlers = [...internals.activeRequestHandlers];
   const close = server.close();
@@ -191,9 +184,9 @@ test("a stalled admitted handler gets one possibly-dispatched shutdown frame bef
 
 test("a queued successor gets one undispatched shutdown frame without reaching its handler", async () => {
   const { server, internals, socket, timer, started, refresh, refreshStarts } = createHarness();
-  socket.send("stalled");
+  socket.sendRefresh("stalled");
   await started.promise;
-  socket.send("queued");
+  socket.sendRefresh("queued");
   const handlers = [...internals.activeRequestHandlers];
   const close = server.close();
   expectShutdown(socket, "queued", false);
@@ -212,9 +205,9 @@ test("a queued successor gets one undispatched shutdown frame without reaching i
 test("a request queued before quiesce is refused as undispatched when the earlier request ends", async () => {
   const { server, internals, socket, timer, started, refresh, refreshStarts } = createHarness();
   socket.subscribe();
-  socket.send("running");
+  socket.sendRefresh("running");
   await started.promise;
-  socket.send("queued");
+  socket.sendRefresh("queued");
   const handlers = [...internals.activeRequestHandlers];
   const quiesce = server.quiesce();
   // The drain bound passes with the first request still running, as when session
@@ -242,7 +235,7 @@ test("a request queued before quiesce is refused as undispatched when the earlie
 test("a request already running when quiesce begins still completes with its real response", async () => {
   const { server, socket, started, refresh } = createHarness();
   socket.subscribe();
-  socket.send("running");
+  socket.sendRefresh("running");
   await started.promise;
   const quiesce = server.quiesce();
   refresh.resolve(3);
@@ -256,10 +249,10 @@ test("a request already running when quiesce begins still completes with its rea
 
 test("a request arriving during close is refused as undispatched without reaching its handler", async () => {
   const { server, socket, timer, started, refreshStarts } = createHarness();
-  socket.send("stalled");
+  socket.sendRefresh("stalled");
   await started.promise;
   const close = server.close();
-  socket.send("refused");
+  socket.sendRefresh("refused");
   await Promise.resolve();
   expectShutdown(socket, "refused", false);
   expect(refreshStarts()).toBe(1);
@@ -272,7 +265,7 @@ test("a request arriving during close is refused as undispatched without reachin
 
 test("an unread socket is force-destroyed at the injected write-drain bound", async () => {
   const { server, socket, timer, started } = createHarness(false);
-  socket.send("stalled");
+  socket.sendRefresh("stalled");
   await started.promise;
   const close = server.close();
   timer.advanceTime(REQUEST_DRAIN_MS);

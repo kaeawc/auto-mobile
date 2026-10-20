@@ -9,12 +9,16 @@ import {
   type AppFileFileSystem,
   type AppFileStats,
   createAppFileServiceForTesting,
-  executeAndroidAppFileCommand,
-  resolveAndroidTarget,
-  type AppFileProvider,
+  type AppFileListProvider,
+  type AppFileReadProvider,
   type AppFileWriteProvider,
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
+import { IosSimulatorAppFileProvider } from "../../src/server/IosSimulatorAppFileProvider";
+import {
+  executeAndroidAppFileCommand,
+  resolveAndroidTarget,
+} from "../../src/server/appFileSupport";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   APP_FILE_RESOURCE_TEMPLATES,
@@ -1932,7 +1936,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
     });
 
@@ -2164,18 +2168,14 @@ describe("AppFileService", () => {
       const fileSystem = new BatchFileSystem();
       const simctl = new FakeSimctl();
       simctl.setCommandResult(command, dataRoot);
+      // The service rejects duplicate destinations and accepts only one target per batch.
+      // Build the iOS app-container provider directly to exercise its batch contract.
+      const provider = new IosSimulatorAppFileProvider(() => simctl, fileSystem);
       const service = createAppFileServiceForTesting({
         simctlFactory: () => simctl,
         fileSystem,
+        providers: [provider],
       });
-      // The service rejects duplicate destinations and accepts only one target per batch.
-      // Reach the private provider to exercise its batch contract without exporting it.
-      const { writeProviders } = service as unknown as {
-        writeProviders: Map<string, AppFileWriteProvider>;
-      };
-      const provider = [...writeProviders.values()].find(
-        (entry) => entry.platform === "ios" && entry.domain === "app_containers",
-      )!;
       const putFiles = (requests: PutAppFileProviderRequest[]) =>
         provider.putFiles
           ? provider.putFiles(requests)
@@ -2569,7 +2569,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
     });
 
@@ -2615,7 +2615,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2664,7 +2664,7 @@ describe("AppFileService", () => {
         dataRoot,
       );
       const service = createAppFileServiceForTesting({
-        simctlFactory: () => simctl as any,
+        simctlFactory: () => simctl,
         fileSystem,
       });
       const sourceBytes = Buffer.from("from launch cwd");
@@ -2707,7 +2707,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2742,7 +2742,7 @@ describe("AppFileService", () => {
   test("returns clear iOS simulator-only errors without invoking simctl for physical devices", async () => {
     const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async (deviceId) => ({ deviceId, name: "iPhone", platform: "ios" }),
     });
@@ -2781,7 +2781,7 @@ describe("AppFileService", () => {
       ),
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2803,7 +2803,7 @@ describe("AppFileService", () => {
       new Error("No such device or device is shutdown"),
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2822,7 +2822,7 @@ describe("AppFileService", () => {
   test("does not let iOS app file paths escape the resolved app container", async () => {
     const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2844,7 +2844,7 @@ describe("AppFileService", () => {
   test("maps iOS externalFiles to explicit unsupported capability errors", async () => {
     const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async (deviceId) => ({ deviceId, name: "iPhone", platform: "ios" }),
     });
@@ -3417,7 +3417,9 @@ describe("Android app-file running candidates", () => {
     for (const userId of [0, 10]) {
       adb.setCommandResponse(
         `shell pm list packages --user ${userId}`,
-        execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+        execResult(
+          scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+        ),
       );
     }
     const foreground = new FakeForegroundAppLookup();
@@ -3462,7 +3464,9 @@ for (const operation of ["put", "list", "read"] as const) {
           // Constructed, not captured from a device: exact package-list entry or empty listing.
           adb.setCommandResponse(
             `shell pm list packages --user ${userId}`,
-            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+            execResult(
+              scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+            ),
           );
         }
         if (scenario.current !== undefined) {
@@ -3616,11 +3620,15 @@ describe("Android app-file resource user round trips", () => {
       test.each(scenarios)(`${operation} ${container}: $name URI round trip`, async (scenario) => {
         const adb = new AppFileUserAdb();
         const users = scenario.users ?? [0, 10];
-        adb.setUsers(users.map((userId) => ({ userId, name: `User ${userId}` })));
+        adb.setUsers(
+          users.map((userId) => ({ userId, name: `User ${userId}`, running: false, flags: 0 })),
+        );
         for (const userId of users) {
           adb.setCommandResponse(
             `shell pm list packages --user ${userId}`,
-            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+            execResult(
+              scenario.installed.some((id) => id === userId) ? "package:com.example.app\n" : "",
+            ),
           );
         }
         adb.setCommandResponse(
@@ -3717,8 +3725,8 @@ describe("Android app-file profile details", () => {
   test("default foreground lookup delegates to the operation's adb client", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: work app resumed, parent remains current.
     adb.setForegroundApp({ packageName: "com.example.app", userId: 10 });
@@ -3737,8 +3745,8 @@ describe("Android app-file profile details", () => {
   test("foreground lookup abort propagates without current-user fallback", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: both users have the package.
     adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
@@ -3786,8 +3794,8 @@ describe("Android app-file profile details", () => {
   test("putFiles batch resolves once even when foreground state could change", async () => {
     const adb = new AppFileUserAdb();
     adb.setUsers([
-      { userId: 0, name: "Owner" },
-      { userId: 10, name: "Work" },
+      { userId: 0, name: "Owner", running: false, flags: 0 },
+      { userId: 10, name: "Work", running: false, flags: 0 },
     ]);
     // Constructed, not captured from a device: both users have the package, current user changes.
     adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
@@ -3910,7 +3918,9 @@ describe("Android app-file profile details", () => {
   });
 });
 
-class RecordingAppFileProvider implements AppFileProvider {
+class RecordingAppFileProvider
+  implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
+{
   readonly putRequests: PutAppFileProviderRequest[] = [];
   readonly domain = "app_containers" as const;
 

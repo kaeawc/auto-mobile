@@ -5,7 +5,10 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { Client } from "@modelcontextprotocol/client";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import { parseDaemonResponseLine } from "./helpers/parseDaemonResponseLine";
 import type { SocketFrameTraceEvent } from "../../src/daemon/socketServer";
 import { DaemonClient } from "../../src/daemon/client";
 import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/socketRequest";
@@ -28,18 +31,54 @@ import {
   AdbClient,
   resetAdbDeviceListCache,
 } from "../../src/utils/android-cmdline-tools/AdbClient";
-import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import {
+  MultiPlatformDeviceManager,
+  type DeviceManagerSimCtl,
+} from "../../src/devices/deviceUtils";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import type { ExecResult } from "../../src/models";
 
-interface FakeMcpClient {
-  callTool: (...args: unknown[]) => Promise<unknown>;
-  listTools: () => Promise<{ tools: unknown[] }>;
-  listResources: () => Promise<{ resources: unknown[] }>;
-  readResource: (...args: unknown[]) => Promise<unknown>;
-  listResourceTemplates: () => Promise<{ resourceTemplates: unknown[] }>;
-  close: () => Promise<void>;
+/** An iOS simctl handle for a manager whose Android-only reads must never touch it. */
+class UnusedSimCtl implements DeviceManagerSimCtl {
+  private unused(operation: string): never {
+    throw new TypeError(`UnusedSimCtl.${operation} is not available in this test`);
+  }
+  isAvailable(): never {
+    return this.unused("isAvailable");
+  }
+  listSimulatorImages(): never {
+    return this.unused("listSimulatorImages");
+  }
+  getBootedSimulators(): never {
+    return this.unused("getBootedSimulators");
+  }
+  getBootedSimulatorsChecked(): never {
+    return this.unused("getBootedSimulatorsChecked");
+  }
+  startSimulator(): never {
+    return this.unused("startSimulator");
+  }
+  deleteSimulator(): never {
+    return this.unused("deleteSimulator");
+  }
+  killSimulator(): never {
+    return this.unused("killSimulator");
+  }
+  waitForSimulatorReady(): never {
+    return this.unused("waitForSimulatorReady");
+  }
+}
+
+/** A listed tool the SDK accepts: only its name matters to these forwards. */
+function stubTool(name: string): { name: string; inputSchema: { type: "object" } } {
+  return { name, inputSchema: { type: "object" } };
+}
+
+type CallToolParams = Parameters<Client["callTool"]>[0];
+
+/** The arguments a forwarded `tools/call` carried, `{}` when it carried none. */
+function forwardedArguments(call: CallToolParams | undefined): Record<string, unknown> {
+  return call?.arguments ?? {};
 }
 
 function createFakeSession(
@@ -60,6 +99,9 @@ function createFakeSession(
     heartbeatTimeoutMs: 10_000,
     heartbeatTimeoutSource: "default",
     hasReceivedHeartbeat: false,
+    activityGeneration: 0,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
   };
 }
 
@@ -84,6 +126,7 @@ function createFakeDaemonState(
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => sessionDevices.has(sessionId),
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
         return assignedDevice
@@ -103,6 +146,7 @@ function createFakeDaemonState(
       },
       releaseMcpSessionBindings: (mcpSessionId: string) => onMcpBindingsReleased?.(mcpSessionId),
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 
@@ -193,7 +237,7 @@ function sendTwoToolsCallsOnOneSocket(
         if (!line.trim()) {
           continue;
         }
-        responses.push(JSON.parse(line) as DaemonResponse);
+        responses.push(parseDaemonResponseLine(line));
         if (responses.length === 2) {
           defaultTimer.clearTimeout(deadline);
           client.destroy();
@@ -262,7 +306,7 @@ class PersistentSocketClient {
         if (this.onRawEvent) {
           this.onRawEvent({
             event: "data",
-            byteLength: data.byteLength,
+            byteLength: Buffer.byteLength(data),
             wallMs: performance.now(),
             completeLines: lines.length,
             residueLength: this.buffer.length,
@@ -273,14 +317,15 @@ class PersistentSocketClient {
           if (!line.trim()) {
             continue;
           }
-          const response = JSON.parse(line) as DaemonResponse;
+          const response = parseDaemonResponseLine(line);
           this.onFrameReceived?.(response);
-          const waiter = this.waiters.get(response.id);
+          const responseId = response.id ?? "";
+          const waiter = this.waiters.get(responseId);
           if (waiter) {
-            this.waiters.delete(response.id);
+            this.waiters.delete(responseId);
             waiter(response);
           } else {
-            this.responses.set(response.id, response);
+            this.responses.set(responseId, response);
           }
         }
       });
@@ -348,7 +393,7 @@ class PersistentSocketClient {
 
 describe("UnixSocketServer MCP forward serialization", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let sessionDevices: Map<string, string>;
   let sessionDeviceLabels: Map<string, DeviceLabelMap>;
@@ -363,9 +408,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDeviceLabels = new Map();
     mcpAutolockSessions = new Map();
     releasedMcpBindings = [];
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(
         sessionDevices,
         sessionDeviceLabels,
@@ -379,18 +423,15 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("round-trips structured tool output through the real daemon socket client", async () => {
-    server.mcpClientFactory = async () => ({
-      callTool: async () =>
-        createStructuredToolResponse({
-          count: 1,
-          devices: [{ deviceId: "emulator-5554", platform: "android" }],
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async () => ({
+          ...createStructuredToolResponse({
+            count: 1,
+            devices: [{ deviceId: "emulator-5554", platform: "android" }],
+          }),
         }),
-      listTools: async () => ({ tools: [] }),
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+      });
     const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
 
     try {
@@ -437,38 +478,32 @@ describe("UnixSocketServer MCP forward serialization", () => {
           }
           return adbDeviceListResult("emulator-5556");
         },
-        null,
-        undefined,
-        inventoryTimer,
+        { timer: inventoryTimer },
       );
-      const emulator = {
-        getBootedDevicesChecked: async (
-          _onlyEmulators: boolean,
-          _options: unknown,
-          signal?: AbortSignal,
-        ) => await adb.getBootedAndroidDevices({ throwOnMissingAdb: true, signal }),
-        listAvds: async () => [{ name: "Pixel_9", platform: "android", isRunning: false } as const],
-      } as unknown as AndroidEmulatorClient;
+      const emulator = createFakeAndroidEmulator({
+        getBootedDevicesChecked: async (_onlyEmulators, _options, signal) =>
+          await adb.getBootedAndroidDevices({ throwOnMissingAdb: true, signal }),
+        listAvds: async () => [{ name: "Pixel_9", platform: "android", isRunning: false }],
+      });
       const manager = new MultiPlatformDeviceManager(
         adb,
-        {} as SimCtlClient,
+        new UnusedSimCtl(),
         emulator,
         undefined,
         inventoryTimer,
       );
-      server.mcpClientFactory = async () => ({
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => await manager.getBootedDevicesDetailed("android"),
-        listResources: async () => ({ resources: [] }),
-        readResource: async (...args: unknown[]) => {
-          const uri = (args[0] as { uri: string }).uri;
-          return uri.includes("/images/")
-            ? await manager.getDeviceImagesDetailed("android")
-            : await manager.getBootedDevicesDetailed("android");
-        },
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      });
+      server.mcpClientFactory = async () =>
+        new StubMcpClient({
+          callTool: async () => ({
+            ...createStructuredToolResponse(await manager.getBootedDevicesDetailed("android")),
+          }),
+          readResource: async ({ uri }) => {
+            const discovery = uri.includes("/images/")
+              ? await manager.getDeviceImagesDetailed("android")
+              : await manager.getBootedDevicesDetailed("android");
+            return { contents: [{ uri, text: JSON.stringify(discovery) }] };
+          },
+        });
 
       const clients = Array.from(
         { length: 8 },
@@ -505,14 +540,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   );
 
   test("releases socket-scoped device-pool bindings when a client disconnects", async () => {
-    server.mcpClientFactory = async () => ({
-      callTool: async () => ({ content: [] }),
-      listTools: async () => ({ tools: [] }),
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () => new StubMcpClient({});
     const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
 
     await client.callTool("listDevices", { platform: "android" });
@@ -529,29 +557,25 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const diagnostic =
       `Session ${sessionUuid} is terminal after identity-recovery-target-busy and cannot be reused. ` +
       "Acquire a new device with getAndroid or getApple.";
-    server.mcpClientFactory = async () => ({
-      callTool: async () => ({
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              error: {
-                code: "session_ownership_lost",
-                message: diagnostic,
-                sessionUuid,
-                reason: "identity-recovery-target-busy",
-              },
-            }),
-          },
-        ],
-        isError: true,
-      }),
-      listTools: async () => ({ tools: [] }),
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: {
+                  code: "session_ownership_lost",
+                  message: diagnostic,
+                  sessionUuid,
+                  reason: "identity-recovery-target-busy",
+                },
+              }),
+            },
+          ],
+          isError: true,
+        }),
+      });
     const client = new DaemonClient(socketPath, 1_000, undefined, {}, null);
 
     try {
@@ -587,8 +611,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let maxInFlight = 0;
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -598,11 +621,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlight -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -623,9 +642,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     fakeTimer = new FakeTimer();
     sessionDevices.set("session-a", "device-a");
     const order: string[] = [];
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions, (sessionId) =>
         order.push(`heartbeat:${sessionId}`),
       ),
@@ -635,20 +653,16 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     const toolCallStarted = Promise.withResolvers<void>();
     const releaseToolCall = Promise.withResolvers<void>();
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async () => {
-        order.push("toolCall:start");
-        toolCallStarted.resolve();
-        await releaseToolCall.promise;
-        order.push("toolCall:end");
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async () => {
+          order.push("toolCall:start");
+          toolCallStarted.resolve();
+          await releaseToolCall.promise;
+          order.push("toolCall:end");
+          return { content: [] };
+        },
+      });
 
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
@@ -684,18 +698,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("forwards the socket timeout budget to IDE navigation graph calls", async () => {
-    let forwardedCall: unknown;
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async (request) => {
-        forwardedCall = request;
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    let forwardedCall: CallToolParams | undefined;
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async (request) => {
+          forwardedCall = request;
+          return { content: [] };
+        },
+      });
 
     const response = await sendRequest(socketPath, {
       id: randomUUID(),
@@ -719,9 +729,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-outer-deadline-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -730,21 +739,17 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const firstCallStarted = Promise.withResolvers<void>();
     const releaseFirstCall = Promise.withResolvers<void>();
     let callCount = 0;
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async () => {
-        callCount += 1;
-        if (callCount === 1) {
-          firstCallStarted.resolve();
-          await releaseFirstCall.promise;
-        }
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            firstCallStarted.resolve();
+            await releaseFirstCall.promise;
+          }
+          return { content: [] };
+        },
+      });
 
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
@@ -763,26 +768,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
         500,
       );
       for (let attempt = 0; attempt < 20; attempt++) {
-        const contexts = Array.from(
-          (
-            server as unknown as {
-              sessions: Map<string, { requestQueue: { pendingCount: number } }>;
-            }
-          ).sessions.values(),
-        );
-        if (contexts.some((context) => context.requestQueue.pendingCount > 0)) {
+        if (server.queuedRequestCount > 0) {
           break;
         }
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
-      const queuedRequestCount = Array.from(
-        (
-          server as unknown as {
-            sessions: Map<string, { requestQueue: { pendingCount: number } }>;
-          }
-        ).sessions.values(),
-      ).reduce((count, context) => count + context.requestQueue.pendingCount, 0);
-      expect(queuedRequestCount).toBe(1);
+      expect(server.queuedRequestCount).toBe(1);
 
       fakeTimer.advanceTime(501);
       releaseFirstCall.resolve();
@@ -810,9 +801,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.close();
     socketPath = join(tmpdir(), `${prefix}-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
       null,
@@ -828,18 +818,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
       ["device-2", Promise.withResolvers<void>()],
     ]);
     const release = Promise.withResolvers<void>();
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async (params: { arguments?: { deviceId?: string } }) => {
-        started.get(params.arguments?.deviceId ?? "")?.resolve();
-        await release.promise;
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async (params) => {
+          started.get(String(params.arguments?.deviceId ?? ""))?.resolve();
+          await release.promise;
+          return { content: [] };
+        },
+      });
 
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
@@ -868,22 +854,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const deviceStarted = Promise.withResolvers<void>();
     const inventoryStarted = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async (params: { name: string }) => {
-        if (params.name === "listDevices") {
-          inventoryStarted.resolve();
-        } else {
-          deviceStarted.resolve();
-        }
-        await release.promise;
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async (params) => {
+          if (params.name === "listDevices") {
+            inventoryStarted.resolve();
+          } else {
+            deviceStarted.resolve();
+          }
+          await release.promise;
+          return { content: [] };
+        },
+      });
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
     try {
@@ -911,26 +893,22 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const firstCallStarted = Promise.withResolvers<void>();
     const releaseFirstCall = Promise.withResolvers<void>();
     const calledDevices: string[] = [];
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async (params: { arguments?: { deviceId?: string } }) => {
-        const deviceId = params.arguments?.deviceId ?? "";
-        calledDevices.push(deviceId);
-        if (deviceId === "device-1") {
-          firstCallStarted.resolve();
-          await releaseFirstCall.promise;
-        }
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async (params) => {
+          const deviceId = String(params.arguments?.deviceId ?? "");
+          calledDevices.push(deviceId);
+          if (deviceId === "device-1") {
+            firstCallStarted.resolve();
+            await releaseFirstCall.promise;
+          }
+          return { content: [] };
+        },
+      });
 
     const client = new PersistentSocketClient(
       (response) => {
-        clientReceiveEvents.push({ atMs: fakeTimer.now(), requestId: response.id });
+        clientReceiveEvents.push({ atMs: fakeTimer.now(), requestId: response.id ?? "" });
       },
       (event) => clientRawEvents.push(event),
     );
@@ -975,9 +953,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
   }, 15_000);
 
   test("binds a generated selection profile to the socket and reuses it for discovery", async () => {
-    const clients: FakeMcpClient[] = [];
+    const clients: StubMcpClient[] = [];
     server.mcpClientFactory = async (_sessionUuid, toolSelectionProfileUuid) => {
-      const client: FakeMcpClient = {
+      const client = new StubMcpClient({
         callTool: async () => ({
           content: [
             {
@@ -987,13 +965,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
           ],
         }),
         listTools: async () => ({
-          tools: [{ name: `profile:${toolSelectionProfileUuid ?? "-"}` }],
+          tools: [stubTool(`profile:${toolSelectionProfileUuid ?? "-"}`)],
         }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       clients.push(client);
       return client;
     };
@@ -1010,7 +984,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       expect(set.success).toBe(true);
       // The generated profile stayed bound to the socket: the tools/list forward's client was
       // seeded with it instead of falling back to an unbound one.
-      expect(list.result).toEqual({ tools: [{ name: "profile:profile-a" }] });
+      expect(list.result).toEqual({ tools: [stubTool("profile:profile-a")] });
       expect(clients).toHaveLength(2);
     } finally {
       client.close();
@@ -1019,19 +993,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
   test("does not republish a generated profile when its owner disconnects before an abort-ignoring result", async () => {
     const forwardStarted = Promise.withResolvers<void>();
-    const lateResult = Promise.withResolvers<unknown>();
+    const lateResult = Promise.withResolvers<Awaited<ReturnType<Client["callTool"]>>>();
     server.mcpClientFactory = async () =>
-      ({
+      new StubMcpClient({
         callTool: async () => {
           forwardStarted.resolve();
           return await lateResult.promise;
         },
-        listTools: async () => ({ tools: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      }) as FakeMcpClient;
+      });
 
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
@@ -1042,14 +1011,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await forwardStarted.promise;
     client.close();
 
-    const internals = server as unknown as {
-      clientSockets: Map<string, unknown>;
-      boundMcpClientKeysBySocketSession: Map<string, unknown>;
-    };
-    for (let attempt = 0; attempt < 20 && internals.clientSockets.size > 0; attempt++) {
+    for (let attempt = 0; attempt < 20 && server.state.clientSockets.size > 0; attempt++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    expect(internals.clientSockets.size).toBe(0);
+    expect(server.state.clientSockets.size).toBe(0);
 
     // This is the same response shape that normally creates the socket's
     // generated tool-selection-profile binding.
@@ -1065,14 +1030,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
-    expect(internals.boundMcpClientKeysBySocketSession.size).toBe(0);
+    expect(server.boundClientSocketSessionIds).toHaveLength(0);
   });
 
   test("preserves a socket-bound selection profile for a later explicit device call", async () => {
     const factoryArguments: Array<[string | undefined, string | undefined]> = [];
     server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
       factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
-      return {
+      return new StubMcpClient({
         callTool: async () => ({
           content: [
             {
@@ -1081,12 +1046,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
             },
           ],
         }),
-        listTools: async () => ({ tools: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
     };
 
     const client = new PersistentSocketClient();
@@ -1115,14 +1075,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const factoryArguments: Array<[string | undefined, string | undefined]> = [];
     server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
       factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
-      return {
-        callTool: async () => ({ content: [] }),
-        listTools: async () => ({ tools: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      return new StubMcpClient({});
     };
 
     const response = await sendToolsCallWithArgs(socketPath, "executePlan", {
@@ -1139,14 +1092,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const factoryArguments: Array<[string | undefined, string | undefined]> = [];
     server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
       factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
-      return {
-        callTool: async () => ({ content: [] }),
-        listTools: async () => ({ tools: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      return new StubMcpClient({});
     };
 
     // The proxy reaffirms its connection profile as `sessionUuid` and carries
@@ -1169,14 +1115,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const factoryArguments: Array<[string | undefined, string | undefined]> = [];
     server.mcpClientFactory = async (sessionUuid, toolSelectionProfileUuid) => {
       factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
-      return {
-        callTool: async () => ({ content: [] }),
-        listTools: async () => ({ tools: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      return new StubMcpClient({});
     };
 
     const client = new PersistentSocketClient();
@@ -1214,33 +1153,28 @@ describe("UnixSocketServer MCP forward serialization", () => {
     socketPath = join(tmpdir(), `mcp-session-list-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     sessionDevices.set("session-a", "device-a");
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
     await server.start();
 
-    const clients: FakeMcpClient[] = [];
+    const clients: StubMcpClient[] = [];
     const forwardedCalls: Array<{ clientIndex: string; toolName: string | undefined }> = [];
     server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
       // Each forward opens its own client (#11820), labelled by what it was seeded with.
       const clientIndex = `${boundSessionUuid ?? "-"}|${toolSelectionProfileUuid ?? "-"}`;
-      const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [{ name: clientIndex }] }),
-        callTool: async (...args: unknown[]) => {
+      const client = new StubMcpClient({
+        listTools: async () => ({ tools: [stubTool(clientIndex)] }),
+        callTool: async (request) => {
           forwardedCalls.push({
             clientIndex,
-            toolName: (args[0] as { name?: string }).name,
+            toolName: request.name,
           });
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       clients.push(client);
       return client;
     };
@@ -1263,12 +1197,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const refreshedList = await client.request("tools/list", {});
 
       expect(initialList.success).toBe(true);
-      expect(initialList.result).toEqual({ tools: [{ name: "-|-" }] });
+      expect(initialList.result).toEqual({ tools: [stubTool("-|-")] });
       expect(call.success).toBe(true);
       expect(sessionlessCall.success).toBe(true);
       expect(navigationGraph.success).toBe(true);
       expect(refreshedList.success).toBe(true);
-      expect(refreshedList.result).toEqual({ tools: [{ name: "session-a|-" }] });
+      expect(refreshedList.result).toEqual({ tools: [stubTool("session-a|-")] });
       expect(forwardedCalls).toEqual([
         { clientIndex: "session-a|-", toolName: "observe" },
         { clientIndex: "session-a|-", toolName: "videoRecording" },
@@ -1295,9 +1229,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     socketPath = join(tmpdir(), `mcp-disconnect-admit-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     sessionDevices.set("session-a", "device-a");
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1315,10 +1248,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> =
       [];
     server.mcpClientFactory = async (createdWith?: string) => {
-      const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
-        callTool: async (...args: unknown[]) => {
-          const request = args[0] as { name?: string };
+      const client = new StubMcpClient({
+        callTool: async (request) => {
           // Socket A's blocker holds the device:device-a queue until released.
           if (request.name === "tapOn") {
             signalBlockerStarted();
@@ -1327,11 +1258,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           forwardedCalls.push({ createdWith, toolName: request.name });
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return client;
     };
 
@@ -1367,21 +1294,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
       // Simulate socket B's "close" handler: clear its bound client key while the
       // sessionless call is still queued behind socket A's op.
-      const boundClientKeysBySocketSession = (
-        server as unknown as {
-          boundMcpClientKeysBySocketSession: Map<string, unknown>;
-        }
-      ).boundMcpClientKeysBySocketSession;
-      const socketSessionId = boundClientKeysBySocketSession.keys().next().value as string;
-      expect(socketSessionId).toBeDefined();
+      const [socketSessionId] = server.boundClientSocketSessionIds;
+      if (socketSessionId === undefined) {
+        throw new Error("Expected socket B to hold a bound MCP client key");
+      }
       // Disconnect drops the transport binding, while the pool still owns the
       // live session. Keep its device scope so this exercises client retention.
       mcpAutolockSessions.set(socketSessionId, "session-a");
-      (
-        server as unknown as {
-          clearBoundMcpClientKey(socketSessionId: string): void;
-        }
-      ).clearBoundMcpClientKey(socketSessionId);
+      server.clearBoundClientKey(socketSessionId);
 
       // Release socket A's op so socket B's queued call runs post-disconnect.
       releaseBlocker();
@@ -1416,9 +1336,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     socketPath = join(tmpdir(), `mcp-release-requeue-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     sessionDevices.set("session-a", "device-a");
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1436,10 +1355,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const forwardedCalls: Array<{ createdWith: string | undefined; toolName: string | undefined }> =
       [];
     server.mcpClientFactory = async (createdWith?: string) => {
-      const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
-        callTool: async (...args: unknown[]) => {
-          const request = args[0] as { name?: string };
+      const client = new StubMcpClient({
+        callTool: async (request) => {
           if (request.name === "tapOn") {
             signalBlockerStarted();
             await blockerReleased;
@@ -1447,11 +1364,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           forwardedCalls.push({ createdWith, toolName: request.name });
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return client;
     };
 
@@ -1513,9 +1426,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-queue-timeout-idle-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1528,8 +1440,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       releaseBlockingRequest = resolve;
     });
     server.mcpClientFactory = async () =>
-      ({
-        listTools: async () => ({ tools: [] }),
+      new StubMcpClient({
         callTool: async () => {
           callCount += 1;
           if (callCount === 1) {
@@ -1537,13 +1448,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
           }
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
         close: async () => {
           closeCalls += 1;
         },
-      }) as FakeMcpClient;
+      });
 
     // First request blocks in callTool. tapOn has no per-tool timeout floor so
     // the second request's short timeout is honored verbatim.
@@ -1580,18 +1488,13 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("keeps tools/list isolated when two sockets bind different sessions on one device", async () => {
     sessionDevices.set("session-a", "device-a");
     sessionDevices.set("session-b", "device-a");
-    const clients: FakeMcpClient[] = [];
+    const clients: StubMcpClient[] = [];
     server.mcpClientFactory = async (boundSessionUuid) => {
-      const client: FakeMcpClient = {
+      const client = new StubMcpClient({
         listTools: async () => ({
-          tools: [{ name: boundSessionUuid ?? "unbound" }],
+          tools: [stubTool(boundSessionUuid ?? "unbound")],
         }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       clients.push(client);
       return client;
     };
@@ -1615,8 +1518,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
       expect(firstBoundCall.success).toBe(true);
       expect(secondBoundCall.success).toBe(true);
-      expect(firstList.result).toEqual({ tools: [{ name: "session-a" }] });
-      expect(secondList.result).toEqual({ tools: [{ name: "session-b" }] });
+      expect(firstList.result).toEqual({ tools: [stubTool("session-a")] });
+      expect(secondList.result).toEqual({ tools: [stubTool("session-b")] });
       expect(clients).toHaveLength(4);
     } finally {
       firstSocket.close();
@@ -1629,18 +1532,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const forwardedArguments: Array<Record<string, unknown>> = [];
     server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
-      return {
-        listTools: async () => ({ tools: [] }),
-        callTool: async (...args: unknown[]) => {
-          const request = args[0] as { arguments?: Record<string, unknown> };
+      return new StubMcpClient({
+        callTool: async (request) => {
           forwardedArguments.push(request.arguments ?? {});
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
     };
 
     const response = await sendToolsCallWithArgs(socketPath, "observe", {
@@ -1662,14 +1559,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const clientBindings: Array<string | undefined> = [];
     server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
-      return {
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      return new StubMcpClient({});
     };
 
     const response = await sendRequest(socketPath, {
@@ -1696,14 +1586,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const clientBindings: Array<[string | undefined, string | undefined]> = [];
     server.mcpClientFactory = async (boundSessionUuid, _profile, releasedSessionUuid) => {
       clientBindings.push([boundSessionUuid, releasedSessionUuid]);
-      return {
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      return new StubMcpClient({});
     };
 
     for (const method of ["resources/list", "resources/list-templates"]) {
@@ -1732,16 +1615,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const clientBindings: Array<string | undefined> = [];
     server.mcpClientFactory = async (boundSessionUuid) => {
       clientBindings.push(boundSessionUuid);
-      return {
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
+      return new StubMcpClient({
         readResource: async () => ({
           contents: [{ uri: "automobile:devices/booted", text: "[]" }],
         }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
     };
 
     const response = await sendRequest(socketPath, {
@@ -1763,10 +1641,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const clientBindings: Array<[string | undefined, string | undefined]> = [];
     server.mcpClientFactory = async (boundSessionUuid, _profile, releasedSessionUuid) => {
       clientBindings.push([boundSessionUuid, releasedSessionUuid]);
-      return {
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
+      return new StubMcpClient({
         readResource: async () => ({
           contents: [
             {
@@ -1776,9 +1651,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
             },
           ],
         }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
     };
 
     const response = await sendRequest(socketPath, {
@@ -1801,18 +1674,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDevices.set("session-a", "device-a");
     let closeCalls = 0;
     server.mcpClientFactory = async (boundSessionUuid) => {
-      return {
+      return new StubMcpClient({
         listTools: async () => ({
-          tools: [{ name: boundSessionUuid ?? "unbound" }],
+          tools: [stubTool(boundSessionUuid ?? "unbound")],
         }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
         close: async () => {
           closeCalls++;
         },
-      } as FakeMcpClient;
+      });
     };
 
     const client = new PersistentSocketClient();
@@ -1829,7 +1698,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       expect(boundCall.success).toBe(true);
       // Each forward closed its own client; the socket's binding outlived the idle window.
       expect(closeCalls).toBe(2);
-      expect(list.result).toEqual({ tools: [{ name: "session-a" }] });
+      expect(list.result).toEqual({ tools: [stubTool("session-a")] });
     } finally {
       client.close();
     }
@@ -1839,9 +1708,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-active-client-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1862,8 +1730,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     });
     let callCount = 0;
     server.mcpClientFactory = async () =>
-      ({
-        listTools: async () => ({ tools: [] }),
+      new StubMcpClient({
         callTool: async () => {
           callCount++;
           if (callCount === 2) {
@@ -1873,13 +1740,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
           }
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
         close: async () => {
           closeCalls++;
         },
-      }) as FakeMcpClient;
+      });
 
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
@@ -1893,18 +1757,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
         arguments: { sessionUuid: "session-a" },
       });
       await longCallStarted;
-      const boundClientKeysBySocketSession = (
-        server as unknown as {
-          boundMcpClientKeysBySocketSession: Map<string, unknown>;
-        }
-      ).boundMcpClientKeysBySocketSession;
-      const socketSessionId = boundClientKeysBySocketSession.keys().next().value;
-      expect(socketSessionId).toBeDefined();
-      (
-        server as unknown as {
-          clearBoundMcpClientKey(socketSessionId: string): void;
-        }
-      ).clearBoundMcpClientKey(socketSessionId);
+      const [socketSessionId] = server.boundClientSocketSessionIds;
+      if (socketSessionId === undefined) {
+        throw new Error("Expected the socket to hold a bound MCP client key");
+      }
+      server.clearBoundClientKey(socketSessionId);
       await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
 
       try {
@@ -1928,34 +1785,28 @@ describe("UnixSocketServer MCP forward serialization", () => {
     socketPath = join(tmpdir(), `mcp-session-list-error-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     sessionDevices.set("session-a", "device-a");
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
     await server.start();
 
-    const clients: FakeMcpClient[] = [];
+    const clients: StubMcpClient[] = [];
     const forwardedCalls: Array<{ clientIndex: string; toolName: string | undefined }> = [];
     server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
       // Each forward opens its own client (#11820), labelled by what it was seeded with.
       const clientIndex = `${boundSessionUuid ?? "-"}|${toolSelectionProfileUuid ?? "-"}`;
-      const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [{ name: clientIndex }] }),
-        callTool: async (...args: unknown[]) => {
-          const request = args[0] as { name?: string; arguments?: { sessionUuid?: string } };
+      const client = new StubMcpClient({
+        listTools: async () => ({ tools: [stubTool(clientIndex)] }),
+        callTool: async (request) => {
           forwardedCalls.push({ clientIndex, toolName: request.name });
           if (request.arguments?.sessionUuid === "session-b") {
             throw new Error("clipboard requires the 'clipboard' capability");
           }
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       clients.push(client);
       return client;
     };
@@ -1981,7 +1832,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       expect(boundCall.success).toBe(true);
       expect(failedCall.success).toBe(false);
       expect(sessionlessCall.success).toBe(true);
-      expect(refreshedList.result).toEqual({ tools: [{ name: "session-a|-" }] });
+      expect(refreshedList.result).toEqual({ tools: [stubTool("session-a|-")] });
       expect(forwardedCalls).toEqual([
         { clientIndex: "session-a|-", toolName: "observe" },
         { clientIndex: "session-b|-", toolName: "clipboard" },
@@ -1993,25 +1844,21 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("preserves a profile-only binding for sessionless follow-up calls", async () => {
-    const clients: FakeMcpClient[] = [];
+    const clients: StubMcpClient[] = [];
     const forwardedCalls: Array<{ clientIndex: string; toolName: string | undefined }> = [];
     server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
       // Each forward opens its own client (#11820), labelled by what it was seeded with.
       const clientIndex = `${boundSessionUuid ?? "-"}|${toolSelectionProfileUuid ?? "-"}`;
-      const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [{ name: clientIndex }] }),
-        callTool: async (...args: unknown[]) => {
+      const client = new StubMcpClient({
+        listTools: async () => ({ tools: [stubTool(clientIndex)] }),
+        callTool: async (request) => {
           forwardedCalls.push({
             clientIndex,
-            toolName: (args[0] as { name?: string }).name,
+            toolName: request.name,
           });
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       clients.push(client);
       return client;
     };
@@ -2036,7 +1883,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
         { clientIndex: "profile-only|-", toolName: "videoRecording" },
         { clientIndex: "profile-only|-", toolName: "exportPlan" },
       ]);
-      expect(refreshedList.result).toEqual({ tools: [{ name: "profile-only|-" }] });
+      expect(refreshedList.result).toEqual({ tools: [stubTool("profile-only|-")] });
     } finally {
       client.close();
     }
@@ -2044,25 +1891,20 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
   test("drops a bound client after its successful plan call releases the session", async () => {
     sessionDevices.set("session-a", "device-a");
-    const clients: FakeMcpClient[] = [];
+    const clients: StubMcpClient[] = [];
     const forwardedClientIndexes: number[] = [];
     server.mcpClientFactory = async () => {
       const clientIndex = clients.length;
-      const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
-        callTool: async (...args: unknown[]) => {
+      const client = new StubMcpClient({
+        listTools: async () => ({ tools: [stubTool(`client-${clientIndex}`)] }),
+        callTool: async (request) => {
           forwardedClientIndexes.push(clientIndex);
-          const request = args[0] as { name?: string; arguments?: { sessionUuid?: string } };
           if (request.name === "executePlan" && request.arguments?.sessionUuid === "session-a") {
             sessionDevices.delete("session-a");
           }
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       clients.push(client);
       return client;
     };
@@ -2081,11 +1923,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
       });
       const refreshedList = await client.request("tools/list", {});
 
-      expect(initialList.result).toEqual({ tools: [{ name: "client-0" }] });
+      expect(initialList.result).toEqual({ tools: [stubTool("client-0")] });
       expect(executePlan.success).toBe(true);
       expect(sessionlessCall.success).toBe(true);
       expect(forwardedClientIndexes).toEqual([1, 2]);
-      expect(refreshedList.result).not.toEqual({ tools: [{ name: "client-1" }] });
+      expect(refreshedList.result).not.toEqual({ tools: [stubTool("client-1")] });
     } finally {
       client.close();
     }
@@ -2096,8 +1938,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let maxInFlight = 0;
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -2107,11 +1948,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlight -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2138,8 +1975,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let maxInFlight = 0;
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -2149,11 +1985,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlight -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2176,8 +2008,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let maxInFlight = 0;
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -2187,11 +2018,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlight -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2214,8 +2041,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let maxInFlight = 0;
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -2225,11 +2051,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlight -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2265,10 +2087,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
     });
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async (request) => {
-          const args = (request as { arguments: Record<string, unknown> }).arguments;
+          const args = request.arguments ?? {};
           if (args.sessionUuid === "session-a" && !sessionDevices.has("session-a")) {
             resolveFirstSessionCallStarted();
             await firstSessionCallReleased;
@@ -2289,11 +2110,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlightAfterBind -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2332,10 +2149,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
     });
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async (request) => {
-          const args = (request as { arguments: Record<string, unknown> }).arguments;
+          const args = request.arguments ?? {};
           const mcpSessionId = String(args.__mcpSessionId);
           if (!mcpAutolockSessions.has(mcpSessionId) && !args.sessionUuid) {
             mcpAutolockSessions.set(mcpSessionId, "session-a");
@@ -2357,11 +2173,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlightAfterAutolock -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2392,8 +2204,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const bothInFlight = Promise.withResolvers<void>();
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -2404,11 +2215,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlight -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2431,10 +2238,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const bothInFlight = Promise.withResolvers<void>();
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async (request) => {
-          const args = (request as { arguments: Record<string, unknown> }).arguments;
+          const args = request.arguments ?? {};
           forwardedSessionIds.push(String(args.__mcpSessionId));
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
@@ -2445,11 +2251,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           inFlight -= 1;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2466,20 +2268,15 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("forwards the Unix socket session as the implicit autolock key", async () => {
-    const forwardedCalls: unknown[] = [];
+    const forwardedCalls: CallToolParams[] = [];
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async (request) => {
           forwardedCalls.push(request);
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2492,8 +2289,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(forwardedCalls).toHaveLength(2);
 
-    const firstArgs = (forwardedCalls[0] as { arguments: Record<string, unknown> }).arguments;
-    const secondArgs = (forwardedCalls[1] as { arguments: Record<string, unknown> }).arguments;
+    const firstArgs = forwardedArguments(forwardedCalls[0]);
+    const secondArgs = forwardedArguments(forwardedCalls[1]);
     expect(firstArgs.platform).toBe("android");
     expect(secondArgs.platform).toBe("android");
     expect(typeof firstArgs.__mcpSessionId).toBe("string");
@@ -2502,20 +2299,15 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("uses a stable implicit autolock key for multiple calls on one Unix socket", async () => {
-    const forwardedCalls: unknown[] = [];
+    const forwardedCalls: CallToolParams[] = [];
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async (request) => {
           forwardedCalls.push(request);
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2523,27 +2315,22 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     expect(responses.every((response) => response.success)).toBe(true);
     expect(forwardedCalls).toHaveLength(2);
-    const firstArgs = (forwardedCalls[0] as { arguments: Record<string, unknown> }).arguments;
-    const secondArgs = (forwardedCalls[1] as { arguments: Record<string, unknown> }).arguments;
+    const firstArgs = forwardedArguments(forwardedCalls[0]);
+    const secondArgs = forwardedArguments(forwardedCalls[1]);
     expect(typeof firstArgs.__mcpSessionId).toBe("string");
     expect(secondArgs.__mcpSessionId).toBe(firstArgs.__mcpSessionId);
   });
 
   test("adds the Unix socket session autolock key when tool arguments are omitted", async () => {
-    let forwardedCall: unknown;
+    let forwardedCall: CallToolParams | undefined;
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async (request) => {
           forwardedCall = request;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2551,7 +2338,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
     expect(response.success).toBe(true);
     expect(forwardedCall).toBeDefined();
-    const args = (forwardedCall as { arguments: Record<string, unknown> }).arguments;
+    const args = forwardedArguments(forwardedCall);
     expect(args).toEqual({
       __mcpSessionId: expect.any(String),
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
@@ -2562,21 +2349,16 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("anchors __mcpRequestDeadlineMs to the capture instant, not a later re-derived time (issue #6222 review, PRRT_kwDOP-GF5M6fuyts)", async () => {
-    let forwardedCall: unknown;
+    let forwardedCall: CallToolParams | undefined;
     const beforeNowMs = fakeTimer.now();
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async (request) => {
           forwardedCall = request;
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2584,9 +2366,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const afterNowMs = fakeTimer.now();
 
     expect(response.success).toBe(true);
-    const args = (forwardedCall as { arguments: Record<string, unknown> }).arguments;
-    const anchoredDeadlineMs = args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] as number;
-    const timeoutMs = args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM] as number;
+    const args = forwardedArguments(forwardedCall);
+    const anchoredDeadlineMs = Number(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM]);
+    const timeoutMs = Number(args[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]);
 
     // The anchored deadline must equal "now (at capture) + the remaining
     // budget forwarded alongside it" -- anchored to the SAME instant the
@@ -2605,8 +2387,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     });
 
     server.mcpClientFactory = async () => {
-      const fake: FakeMcpClient = {
-        listTools: async () => ({ tools: [] }),
+      const fake = new StubMcpClient({
         callTool: async () => {
           callCount++;
           if (callCount === 1) {
@@ -2614,11 +2395,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           }
           return { content: [] };
         },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      });
       return fake;
     };
 
@@ -2670,9 +2447,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
       await server.close();
       socketPath = join(tmpdir(), `mcp-overload-${randomUUID()}.sock`);
       fakeTimer = new FakeTimer();
-      server = new UnixSocketServer(
+      server = new UnixSocketServerHarness(
         socketPath,
-        "http://localhost:0/mcp",
         createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
         fakeTimer,
       );
@@ -2680,21 +2456,17 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const started = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       let readCount = 0;
-      server.mcpClientFactory = async () => ({
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => {
-          readCount += 1;
-          if (readCount === 1) {
-            started.resolve();
-            await release.promise;
-          }
-          return { contents: [] };
-        },
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      });
+      server.mcpClientFactory = async () =>
+        new StubMcpClient({
+          readResource: async () => {
+            readCount += 1;
+            if (readCount === 1) {
+              started.resolve();
+              await release.promise;
+            }
+            return { contents: [] };
+          },
+        });
 
       // Resolve only after each client socket emits "close" so Windows named-pipe
       // teardown cannot race this test's afterEach server.close().
@@ -2748,27 +2520,23 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const secondStarted = Promise.withResolvers<void>();
       const forwardedSignals: AbortSignal[] = [];
       let readCount = 0;
-      server.mcpClientFactory = async () => ({
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => ({ content: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async (...args: unknown[]) => {
-          readCount += 1;
-          const signal = (args[1] as { signal?: AbortSignal } | undefined)?.signal;
-          expect(signal).toBeDefined();
-          forwardedSignals.push(signal!);
-          if (readCount === 1) {
-            firstStarted.resolve();
-            return await new Promise<never>((_resolve, reject) => {
-              signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
-            });
-          }
-          secondStarted.resolve();
-          return { contents: [] };
-        },
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      });
+      server.mcpClientFactory = async () =>
+        new StubMcpClient({
+          readResource: async (_params, options) => {
+            readCount += 1;
+            const signal = options?.signal;
+            expect(signal).toBeDefined();
+            forwardedSignals.push(signal!);
+            if (readCount === 1) {
+              firstStarted.resolve();
+              return await new Promise<never>((_resolve, reject) => {
+                signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+              });
+            }
+            secondStarted.resolve();
+            return { contents: [] };
+          },
+        });
 
       const firstSocket = new Socket();
       await new Promise<void>((resolve, reject) => {
@@ -2796,7 +2564,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
       await expect(second).resolves.toMatchObject({ success: true });
       expect(forwardedSignals).toHaveLength(2);
       expect(forwardedSignals[0]?.aborted).toBe(true);
-      expect((forwardedSignals[0]?.reason as Error).message).toBe("Daemon MCP client disconnected");
+      expect(forwardedSignals[0]?.reason).toMatchObject({
+        message: "Daemon MCP client disconnected",
+      });
       expect(forwardedSignals[1]?.aborted).toBe(false);
       await firstSocketClosed;
       await secondClient.closeAndWait();
@@ -2808,20 +2578,16 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test.skipIf(process.platform === "win32")(
     "returns the original timeout as a structured request failure cause",
     async () => {
-      server.mcpClientFactory = async () => ({
-        listTools: async () => ({ tools: [] }),
-        callTool: async () => {
-          throw new McpTimeoutError({
-            toolName: "listDevices",
-            timeoutMs: 500,
-            origin: "inventory-test",
-          });
-        },
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      });
+      server.mcpClientFactory = async () =>
+        new StubMcpClient({
+          callTool: async () => {
+            throw new McpTimeoutError({
+              toolName: "listDevices",
+              timeoutMs: 500,
+              origin: "inventory-test",
+            });
+          },
+        });
 
       const response = await sendRequestAndDrainSocket(socketPath, {
         id: randomUUID(),
@@ -2847,7 +2613,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 // request deadline. Manual time: an auto-advancing timer would fire the wait bound early.
 describe("UnixSocketServer MCP forward execution-key rerouting (issue #6388)", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let sessionDevices: Map<string, string>;
   let blockers: Map<string, PromiseWithResolvers<void>>;
@@ -2891,28 +2657,23 @@ describe("UnixSocketServer MCP forward execution-key rerouting (issue #6388)", (
     sessionDevices = new Map();
     blockers = new Map();
     calls = [];
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, new Map(), new Map()),
       fakeTimer,
     );
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async (request: unknown) => {
-        const args = (request as { arguments: Record<string, unknown> }).arguments;
-        const deviceId = typeof args.deviceId === "string" ? args.deviceId : undefined;
-        calls.push(deviceId ? `device:${deviceId}` : `session:${String(args.sessionUuid)}`);
-        if (deviceId) {
-          await blockers.get(deviceId)?.promise;
-        }
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async (request) => {
+          const args = request.arguments ?? {};
+          const deviceId = typeof args.deviceId === "string" ? args.deviceId : undefined;
+          calls.push(deviceId ? `device:${deviceId}` : `session:${String(args.sessionUuid)}`);
+          if (deviceId) {
+            await blockers.get(deviceId)?.promise;
+          }
+          return { content: [] };
+        },
+      });
     await server.start();
   });
 
@@ -2988,23 +2749,18 @@ describe("UnixSocketServer MCP forward execution-key rerouting (issue #6388)", (
     churningDevices.has = (sessionId: string) => sessionId === "s1";
     await server.close();
     socketPath = join(tmpdir(), `mcp-rekey-churn-${randomUUID()}.sock`);
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(churningDevices, new Map(), new Map()),
       fakeTimer,
     );
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async () => {
-        calls.push("ran");
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async () => {
+          calls.push("ran");
+          return { content: [] };
+        },
+      });
     await server.start();
 
     const response = await toolsCall({ sessionUuid: "s1" });

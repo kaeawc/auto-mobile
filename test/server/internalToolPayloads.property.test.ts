@@ -1,6 +1,6 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import { narrowInternalToolEnvelope } from "../../src/server/internalToolPayloads";
+import { narrowInternalToolEnvelope } from "../../src/utils/internalToolPayloads";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
@@ -8,7 +8,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 const name = fc.constantFrom("swipeOn", "observe");
 const objectPayload = fc.dictionary(fc.string({ maxLength: 6 }), fc.jsonValue(), { maxKeys: 4 });
 // Envelopes: some carry a valid object structuredContent, some do not.
-const envelope = fc.oneof(
+const envelope: fc.Arbitrary<unknown> = fc.oneof(
   fc.record({ structuredContent: objectPayload }),
   fc.record({ structuredContent: fc.oneof(fc.constant(null), fc.string(), fc.integer()) }),
   fc.record({ other: fc.string() }),

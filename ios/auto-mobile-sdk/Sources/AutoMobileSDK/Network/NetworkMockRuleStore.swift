@@ -2,99 +2,6 @@
     import Foundation
     import os
 
-    struct NetworkMockRuleDTO: Codable, Equatable, Sendable {
-        let mockId: String
-        let host: String
-        let path: String
-        let method: String
-        let limit: Int?
-        let remaining: Int?
-        let statusCode: Int
-        let responseHeaders: [String: String]
-        let responseBody: String
-        let contentType: String
-    }
-
-    /// A mock rule the device's regex engine refused, with its reason (issue #10101).
-    struct RejectedMockRule: Codable, Equatable, Sendable {
-        let mockId: String
-        let reason: String
-    }
-
-    struct NetworkErrorSimulationDTO: Codable, Equatable, Sendable {
-        let enabled: Bool
-        let errorType: String?
-        let limit: Int?
-        let expiresAtEpochMs: Int64?
-        /// Time left on the simulation, measured on this device's monotonic clock. When present it decides
-        /// expiry and `expiresAtEpochMs` (a host-clock value, wrong on a skewed device) is ignored (#10062).
-        var remainingMs: Int64? = nil
-    }
-
-    public enum NetworkFaultTransport: String, Codable, Equatable, Sendable {
-        case urlSession
-        case webSocket
-        case nwConnection
-        case webView
-    }
-
-    public enum NetworkFaultAction: String, Codable, Equatable, Sendable {
-        case response
-        case status
-        case error
-        case latency
-        case bandwidth
-        case dropBytes
-        case closeConnection
-        case rejectFrame
-    }
-
-    public struct NetworkFaultRuleDTO: Codable, Equatable, Sendable {
-        public let faultId: String
-        public let transport: NetworkFaultTransport?
-        public let host: String?
-        public let port: Int?
-        public let scheme: String?
-        public let path: String?
-        public let method: String?
-        public let headers: [String: String]?
-        public let origin: String?
-        public let connectionId: String?
-        public let sessionId: String?
-        public let action: NetworkFaultAction
-        public let statusCode: Int?
-        public let responseHeaders: [String: String]?
-        public let responseBody: String?
-        public let contentType: String?
-        public let errorType: String?
-        public let delayMs: Int?
-        public let bandwidthBytesPerSecond: Int?
-        public let dropBytes: Int?
-        public let limit: Int?
-        public let expiresAtEpochMs: Int64?
-        public let scope: String?
-        public let dryRun: Bool
-
-        public init(
-            faultId: String, transport: NetworkFaultTransport?, host: String?, port: Int?,
-            scheme: String?, path: String?, method: String?, headers: [String: String]?,
-            origin: String?, connectionId: String?, sessionId: String?, action: NetworkFaultAction,
-            statusCode: Int?, responseHeaders: [String: String]?, responseBody: String?,
-            contentType: String?, errorType: String?, delayMs: Int?,
-            bandwidthBytesPerSecond: Int?, dropBytes: Int?, limit: Int?,
-            expiresAtEpochMs: Int64?, scope: String?, dryRun: Bool
-        ) {
-            self.faultId = faultId; self.transport = transport; self.host = host; self.port = port
-            self.scheme = scheme; self.path = path; self.method = method; self.headers = headers
-            self.origin = origin; self.connectionId = connectionId; self.sessionId = sessionId
-            self.action = action; self.statusCode = statusCode; self.responseHeaders = responseHeaders
-            self.responseBody = responseBody; self.contentType = contentType; self.errorType = errorType
-            self.delayMs = delayMs; self.bandwidthBytesPerSecond = bandwidthBytesPerSecond
-            self.dropBytes = dropBytes; self.limit = limit; self.expiresAtEpochMs = expiresAtEpochMs
-            self.scope = scope; self.dryRun = dryRun
-        }
-    }
-
     public final class NetworkMockRuleStore: Sendable {
         static let shared = NetworkMockRuleStore()
 
@@ -475,9 +382,9 @@
             }
         }
 
-        private static func consume(
-            rule: inout CompiledFaultRule, request: FaultRequest,
-            consumedConnections: inout Set<String>, consumedSessions: inout Set<String>
+        private static func canConsume(
+            rule: CompiledFaultRule, request: FaultRequest,
+            consumedConnections: Set<String>, consumedSessions: Set<String>
         )
             -> Bool
         {
@@ -497,6 +404,21 @@
             default:
                 break
             }
+            return true
+        }
+
+        private static func consume(
+            rule: inout CompiledFaultRule, request: FaultRequest,
+            consumedConnections: inout Set<String>, consumedSessions: inout Set<String>
+        )
+            -> Bool
+        {
+            guard canConsume(
+                rule: rule,
+                request: request,
+                consumedConnections: consumedConnections,
+                consumedSessions: consumedSessions
+            ) else { return false }
             if rule.scope == nil, let remaining = rule.remaining {
                 guard remaining > 0 else { return false }
                 rule.remaining = remaining - 1

@@ -10,7 +10,9 @@ import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const device = { platform: "ios" as const, deviceId: "00008030-001E28C11E", name: "iPhone" };
-type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+type RemoteRunner = NonNullable<
+  Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[0]["remoteRunner"]
+>;
 const restores: Array<() => void> = [];
 const timers: FakeTimer[] = [];
 afterEach(() => {
@@ -48,10 +50,11 @@ function fakeFixture() {
     fake,
     new FakeProcessExecutor(),
   );
-  manager["servicePort"] = 8765;
+  manager.testHooks.setState({ servicePort: 8765 });
   return { timer, fake, manager };
 }
-function realFixture(remoteMode = false) {
+function realFixture(remoteMode = false, fixtureDevice = device) {
+  const device = fixtureDevice;
   const timer = timerFixture();
   const events: string[] = [];
   const children: FakeChildProcess[] = [];
@@ -99,18 +102,18 @@ function realFixture(remoteMode = false) {
       return { success: true, data: { running: true } };
     },
   };
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+  const manager = IOSCtrlProxyManager.createForTestingWithDeps({
     device,
     timer,
-    undefined,
-    executor,
-    undefined,
-    undefined,
-    remote,
-    { isAvailable: async () => true },
-  );
-  manager["servicePort"] = 8765;
-  const isRunning = manager["isProcessRunning"].bind(manager);
+    builder: undefined,
+    processExecutor: executor,
+    signingManager: undefined,
+    deviceAppManager: undefined,
+    remoteRunner: remote,
+    hostPortAvailabilityChecker: { isAvailable: async () => true },
+  });
+  manager.testHooks.setState({ servicePort: 8765 });
+  const isRunning = manager.isProcessRunning.bind(manager);
   keep(
     spyOn(manager, "isProcessRunning").mockImplementation((pid) => {
       events.push(`running:${pid}`);
@@ -122,11 +125,11 @@ function realFixture(remoteMode = false) {
       events.push("port-check");
     }),
   );
-  const client = manager["tunnelClient"];
+  const client = manager.diagnostics.tunnelClient;
   if (!(client instanceof DefaultIosTunnelClient)) {
     throw new Error("Expected default tunnel");
   }
-  const supervisor = client["iproxySupervisor"];
+  const supervisor = client.diagnostics.supervisor;
   const start = supervisor.start.bind(supervisor);
   const stop = supervisor.stop.bind(supervisor);
   keep(
@@ -147,10 +150,10 @@ function realFixture(remoteMode = false) {
 describe("manager tunnel calls with FakeIosTunnelClient", () => {
   test("start, explicit undefined device port, restart and stop keep their arguments and order", async () => {
     const { manager, fake } = fakeFixture();
-    await manager["startIproxyTunnel"]({ devicePort: undefined });
-    manager["servicePort"] = 8766;
-    await manager["restartIproxyTunnel"]();
-    await manager["stopIproxyTunnel"]({ clearDevicePort: true });
+    await manager.startIproxyTunnel({ devicePort: undefined });
+    manager.testHooks.setState({ servicePort: 8766 });
+    await manager.restartIproxyTunnel();
+    await manager.stopIproxyTunnel({ clearDevicePort: true });
     expect(fake.calls).toEqual(["start", "start", "stop"]);
     expect(fake.starts).toEqual([
       { localPort: 8765, devicePort: 8765, udid: device.deviceId },
@@ -166,11 +169,12 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
   });
   test("remote start and restart preserve the computed device port when explicitly undefined", async () => {
     const { manager, fake } = fakeFixture();
-    keep(spyOn(manager, "useRemoteRunner").mockReturnValue(true));
+    keep(spyOn(manager.diagnostics.remoteRunner, "isEnabled").mockReturnValue(true));
+    keep(spyOn(manager.diagnostics.remoteRunner, "isRunningInDocker").mockReturnValue(true));
     fake.devicePort = 9100;
-    await manager["startIproxyTunnel"]({ devicePort: undefined });
-    manager["servicePort"] = 8766;
-    await manager["restartIproxyTunnel"]();
+    await manager.startIproxyTunnel({ devicePort: undefined });
+    manager.testHooks.setState({ servicePort: 8766 });
+    await manager.restartIproxyTunnel();
     expect(fake.calls).toEqual(["start", "start"]);
     expect(fake.starts).toEqual([
       { localPort: 8765, devicePort: 9100, udid: device.deviceId },
@@ -186,10 +190,11 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
   test("local undefined uses the service port and remote defined overrides the retained port", async () => {
     const { manager, fake } = fakeFixture();
     fake.devicePort = 9100;
-    await manager["startIproxyTunnel"]({ devicePort: undefined });
+    await manager.startIproxyTunnel({ devicePort: undefined });
     expect(fake.starts[0].devicePort).toBe(8765);
-    keep(spyOn(manager, "useRemoteRunner").mockReturnValue(true));
-    await manager["startIproxyTunnel"]({ devicePort: 9200 });
+    keep(spyOn(manager.diagnostics.remoteRunner, "isEnabled").mockReturnValue(true));
+    keep(spyOn(manager.diagnostics.remoteRunner, "isRunningInDocker").mockReturnValue(true));
+    await manager.startIproxyTunnel({ devicePort: 9200 });
     expect(fake.starts[1].devicePort).toBe(9200);
   });
   test.each(["start", "readiness"])(
@@ -202,7 +207,7 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
       } else {
         fake.readinessError = failure;
       }
-      await expect(manager["startIproxyTunnel"]()).rejects.toBe(failure);
+      await expect(manager.startIproxyTunnel()).rejects.toBe(failure);
       expect(fake.calls).toEqual(["start"]);
       expect(fake.starts).toEqual([{ localPort: 8765, devicePort: 8765, udid: device.deviceId }]);
       expect(fake.stops).toEqual([]);
@@ -211,10 +216,10 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
   );
   test("unexpected-exit restart callback delegates a single unsupervised start", async () => {
     const { manager, fake } = fakeFixture();
-    await manager["startIproxyTunnel"]();
+    await manager.startIproxyTunnel();
     fake.alive = false;
     fake.localPort = null;
-    await manager["restartIproxyTunnel"]();
+    await manager.restartIproxyTunnel();
     expect(fake.calls).toEqual(["start", "start"]);
     expect(fake.starts[1]).toEqual({
       localPort: 8765,
@@ -232,7 +237,7 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
         expect(fake.calls).toEqual(["prepareForcedStop"]);
       }),
     );
-    await manager["forceStopForShutdown"](5000);
+    await manager.forceStopForShutdown(5000);
     expect(fake.calls).toEqual(["prepareForcedStop", "forceKill"]);
     expect(fake.forcedStops).toBe(1);
   });
@@ -241,7 +246,7 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
 describe("manager with DefaultIosTunnelClient over fake processes", () => {
   test("local start and stop preserve spawn argv, stdio, supervision and kill order", async () => {
     const { manager, events, children, executor } = realFixture();
-    await manager["startIproxyTunnel"]({ devicePort: 9100 });
+    await manager.startIproxyTunnel({ devicePort: 9100 });
     const child = children[0];
     expect(events).toEqual([
       "unsupervise",
@@ -255,24 +260,24 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     expect(Object.values(manager)).not.toContain(child);
     expect(Object.values(manager)).not.toContain(child.pid);
     events.length = 0;
-    await manager["stopIproxyTunnel"]({ clearDevicePort: true });
+    await manager.stopIproxyTunnel({ clearDevicePort: true });
     expect(events).toEqual(["unsupervise", "kill:SIGTERM"]);
   });
   test.each([false, true])(
     "restart remote=%s preserves current local and original remote ports",
     async (remoteMode) => {
       const { manager, client, children, events } = realFixture(remoteMode);
-      await manager["startIproxyTunnel"]({ devicePort: 9100 });
-      manager["servicePort"] = 8766;
+      await manager.startIproxyTunnel({ devicePort: 9100 });
+      manager.testHooks.setState({ servicePort: 8766 });
       // The supervisor clears PID/child tracking before invoking the manager restart callback.
       if (remoteMode) {
-        client["iproxyProcessId"] = null;
+        client.setStateForTesting({ processId: null });
       } else {
         children[0].emit("exit", 1, null);
       }
       await flush();
       events.length = 0;
-      await manager["restartIproxyTunnel"]();
+      await manager.restartIproxyTunnel();
       expect(events).toEqual(
         remoteMode
           ? ["port-check", `remote-spawn:8766,9100,${device.deviceId}`, "status:123"]
@@ -283,14 +288,14 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
   );
   test("remote start and stop retain stop-port-spawn-poll-supervise order", async () => {
     const { manager, client, events, remote } = realFixture(true);
-    client["iproxyProcessId"] = 122;
-    client["iproxyDevicePort"] = 9100;
-    client["iproxyLocalPort"] = 8764;
+    client.setStateForTesting({ processId: 122 });
+    client.setStateForTesting({ devicePort: 9100 });
+    client.setStateForTesting({ localPort: 8764 });
     remote.getIproxyStatus = async ({ pid }) => {
       events.push(`status:${pid}`);
       return { success: true, data: { running: pid === 123 } };
     };
-    await manager["startIproxyTunnel"]({ devicePort: undefined });
+    await manager.startIproxyTunnel({ devicePort: undefined });
     expect(events).toEqual([
       "status:122",
       "unsupervise",
@@ -301,7 +306,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
       "supervise",
     ]);
     events.length = 0;
-    await manager["stopIproxyTunnel"]({ clearDevicePort: true });
+    await manager.stopIproxyTunnel({ clearDevicePort: true });
     expect(events).toEqual(["unsupervise", "remote-stop:123"]);
     expect(client.localPort).toBeNull();
     expect(client.devicePort).toBeNull();
@@ -314,7 +319,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     noPid.pid = undefined;
     noPid.simulateSpawn = () => {};
     keep(spyOn(executor, "spawn").mockReturnValue(noPid));
-    await expect(manager["startIproxyTunnel"]()).rejects.toEqual(
+    await expect(manager.startIproxyTunnel()).rejects.toEqual(
       new Error("Failed to start iproxy tunnel (no PID)"),
     );
     expect(events).toEqual(["unsupervise"]);
@@ -325,7 +330,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
         throw failure;
       }),
     );
-    await expect(manager["startIproxyTunnel"]()).rejects.toBe(failure);
+    await expect(manager.startIproxyTunnel()).rejects.toBe(failure);
     expect(events).toEqual(["unsupervise", "unsupervise"]);
   });
   test.each(["throws", "failed", "missing data"])(
@@ -340,7 +345,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
         }
         return branch === "failed" ? { success: false, error: failure.message } : { success: true };
       };
-      const starting = manager["startIproxyTunnel"]();
+      const starting = manager.startIproxyTunnel();
       if (branch === "throws") {
         await expect(starting).rejects.toBe(failure);
       } else {
@@ -367,7 +372,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
           throw failure;
         }),
       );
-      await expect(manager["startIproxyTunnel"]()).rejects.toBe(failure);
+      await expect(manager.startIproxyTunnel()).rejects.toBe(failure);
       expect(client.localPort).toBe(8765);
       expect(events.filter((event) => event === "unsupervise")).toEqual(["unsupervise"]);
       expect(events.at(-1)).toBe("supervision-failed");
@@ -380,8 +385,8 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
       events.push("status-failed");
       throw failure;
     };
-    await expect(manager["startIproxyTunnel"]()).rejects.toBe(failure);
-    expect(client["iproxyProcessId"]).toBe(123);
+    await expect(manager.startIproxyTunnel()).rejects.toBe(failure);
+    expect(client.diagnostics.processId).toBe(123);
     expect(client.localPort).toBe(8765);
     expect(events).toEqual([
       "unsupervise",
@@ -404,7 +409,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
       remote.stopIproxy = async () => {
         throw new Error("stop must not run");
       };
-      await expect(manager["startIproxyTunnel"]()).rejects.toBe(failure);
+      await expect(manager.startIproxyTunnel()).rejects.toBe(failure);
       expect(events).toEqual(
         remoteMode
           ? [
@@ -416,7 +421,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
           : ["unsupervise", `spawn:iproxy:8765,8765,${device.deviceId}`, "readiness-failed"],
       );
       expect(client.localPort).toBe(8765);
-      expect(client["iproxyProcessId"]).toBe(remoteMode ? 123 : children[0].pid);
+      expect(client.diagnostics.processId).toBe(remoteMode ? 123 : (children[0].pid ?? null));
       if (!remoteMode) {
         expect(children[0].killed).toBe(false);
       }
@@ -428,9 +433,9 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
       const { manager, client, remote, timer, children } = realFixture(remoteMode);
       timer.enableAutoAdvance();
       keep(spyOn(client, "getStartTimeoutMs").mockReturnValue(200));
-      keep(spyOn(manager["processClient"], "isRunning").mockResolvedValue(false));
+      keep(spyOn(manager.diagnostics.processClient, "isRunning").mockResolvedValue(false));
       remote.getIproxyStatus = async () => ({ success: true, data: { running: false } });
-      await expect(manager["startIproxyTunnel"]()).rejects.toEqual(
+      await expect(manager.startIproxyTunnel()).rejects.toEqual(
         new Error("iproxy failed to stay running within 200ms"),
       );
       expect(client.localPort).toBe(8765);
@@ -444,8 +449,8 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     "unexpected child exit consults manager stopping=%s",
     async (stopping) => {
       const { manager, children, timer, events } = realFixture();
-      await manager["startIproxyTunnel"]();
-      manager["isStopping"] = stopping;
+      await manager.startIproxyTunnel();
+      manager.testHooks.setState({ isStopping: stopping });
       events.length = 0;
       children[0].emit("exit", 1, null);
       await flush();
@@ -463,10 +468,10 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
   );
   test("supervise:false stop still reports an exit when manager is not stopping", async () => {
     const { manager, children, supervisor } = realFixture();
-    await manager["startIproxyTunnel"]();
+    await manager.startIproxyTunnel();
     const exited = spyOn(supervisor, "processExited");
     keep(exited);
-    await manager["stopIproxyTunnel"]({ stopSupervisor: false });
+    await manager.stopIproxyTunnel({ stopSupervisor: false });
     expect(exited).toHaveBeenCalledTimes(1);
     expect(children[0].killed).toBe(true);
   });
@@ -491,9 +496,9 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
           }),
         );
       }
-      const starting = manager["startIproxyTunnel"]();
+      const starting = manager.startIproxyTunnel();
       await entered.promise;
-      await manager["stopIproxyTunnel"]();
+      await manager.stopIproxyTunnel();
       expect(client.localPort).toBeNull();
       result.resolve(true);
       await starting;
@@ -529,9 +534,9 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
       return { success: true, data: { running: await result.promise } };
     };
     keep(spyOn(client, "getStartTimeoutMs").mockReturnValue(200));
-    const starting = manager["startIproxyTunnel"]();
+    const starting = manager.startIproxyTunnel();
     await entered.promise;
-    await manager["stopIproxyTunnel"]();
+    await manager.stopIproxyTunnel();
     timer.enableAutoAdvance();
     result.resolve(false);
     await expect(starting).rejects.toEqual(new Error("iproxy failed to stay running within 200ms"));
@@ -540,13 +545,13 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
   });
   test("forced local kill keeps the old debug message including Error stringification", async () => {
     const { manager, children } = realFixture();
-    await manager["startIproxyTunnel"]();
+    await manager.startIproxyTunnel();
     children[0].kill = () => {
       throw new Error("already exited");
     };
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     keep(debug);
-    await manager["forceStopForShutdown"](5000);
+    await manager.forceStopForShutdown(5000);
     expect(debug).toHaveBeenCalledWith(
       "[IOSCtrlProxy] Forced iproxy termination was already complete: Error: already exited",
     );
@@ -555,8 +560,8 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     "forced shutdown remote=%s preserves detach-release-kill order without warnings",
     async (remoteMode) => {
       const { manager, client, children, events, remote } = realFixture(remoteMode);
-      await manager["startIproxyTunnel"]();
-      manager["xcTestProcessId"] = 456;
+      await manager.startIproxyTunnel();
+      manager.testHooks.setState({ xcTestProcessId: 456 });
       keep(
         spyOn(PortManager, "release").mockImplementation(() => {
           expect(client.localPort).toBeNull();
@@ -565,10 +570,12 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
         }),
       );
       keep(
-        spyOn(manager, "isRunnerStillOwnedWithinShutdownDeadline").mockImplementation(async () => {
-          events.push("runner-ownership");
-          return false;
-        }),
+        spyOn(manager.diagnostics.processClient, "checkRunnerOwnership").mockImplementation(
+          async () => {
+            events.push("runner-ownership");
+            return "foreign";
+          },
+        ),
       );
       remote.stopIproxy = async () => {
         events.push("remote-stop:123");
@@ -577,7 +584,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       keep(warning);
       events.length = 0;
-      const stopping = manager["forceStopForShutdown"](5000);
+      const stopping = manager.forceStopForShutdown(5000);
       expect(events).toEqual(
         remoteMode
           ? ["unsupervise", "release-port", "runner-stop", "remote-stop:123"]
@@ -593,15 +600,17 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     },
   );
   test("simulator supervised probe returns before detection and disconnect uses manager identity before start", async () => {
-    const { manager, supervisor, events } = realFixture();
-    const detection = spyOn(manager["deviceDetector"], "isDeviceDetected").mockResolvedValue(false);
+    const simulatorDevice = { ...device, deviceId: "11111111-2222-3333-4444-555555555555" };
+    const { manager, supervisor, events } = realFixture(false, simulatorDevice);
+    const detection = spyOn(
+      manager.diagnostics.deviceDetector,
+      "isDeviceDetected",
+    ).mockResolvedValue(false);
     keep(detection);
-    const simulator = spyOn(manager, "isSimulator").mockReturnValue(true);
-    keep(simulator);
     expect(await supervisor.isAlive()).toBe(true);
     expect(detection).not.toHaveBeenCalled();
     expect(events).toEqual([]);
-    simulator.mockReturnValue(false);
+    simulatorDevice.deviceId = device.deviceId;
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     keep(warning);
     expect(await supervisor.isAlive()).toBe(true);

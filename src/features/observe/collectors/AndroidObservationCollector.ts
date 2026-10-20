@@ -19,8 +19,7 @@ import {
 import { deriveAndroidScreenIdentity } from "../android/AndroidScreenIdentity";
 import { displayTransitions } from "../DisplayTransition";
 import { resolveTargetDisplay } from "../DisplaySelection";
-import type { HierarchyCollector } from "./HierarchyCollector";
-import type { DeviceStateCollector } from "./DeviceStateCollector";
+import type { DeviceStateCollectorPort, HierarchyCollectorPort } from "./collectorPorts";
 
 export interface PlatformCollectionContext {
   result: ObserveResult;
@@ -45,8 +44,8 @@ export interface AndroidObservationCollector {
 }
 
 export interface AndroidObservationCollectorDeps {
-  hierarchyCollector: () => HierarchyCollector;
-  deviceStateCollector: () => DeviceStateCollector;
+  hierarchyCollector: () => HierarchyCollectorPort;
+  deviceStateCollector: () => DeviceStateCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
 }
@@ -80,19 +79,16 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
       readOptions,
     } = context;
     perf.serial("phase1_hierarchy");
-    await this.deps
-      .hierarchyCollector()
-      .collect(
-        result,
-        queryOptions,
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        signal,
-        readOnly,
-        capturedHierarchy,
-        readOptions,
-      );
+    await this.deps.hierarchyCollector().collect(result, {
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+      readOptions,
+    });
     perf.end();
 
     // Prefer accessibility-service-supplied metadata for screen/insets/rotation/wakefulness/foreground.

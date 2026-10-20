@@ -1,4 +1,5 @@
-import { expect, mock, spyOn, test } from "bun:test";
+import { createExecResult } from "../../../src/utils/execResult";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import {
   DefaultSendKeysCommandExecutor,
   SendKeys,
@@ -23,7 +24,11 @@ import { android, createSendKeysHarness, focused, observer } from "./SendKeysTes
 const priorIme = "com.example.keyboard/.Ime";
 const activate = `shell ime set ${AUTO_MOBILE_IME_ID}`;
 const restore = `shell ime set ${priorIme}`;
-const type = (text: string): SendKeysCommand => ({ action: "type", text, mode: "ime" });
+const type = (text: string): Extract<SendKeysCommand, { action: "type" }> => ({
+  action: "type",
+  text,
+  mode: "ime",
+});
 let serial = 0;
 
 function harness(observe: SendKeysObserver = observer, initialIme = priorIme) {
@@ -510,7 +515,7 @@ test.each([undefined, "auto", "ime"] as const)(
   "a clear-only call in %s mode deletes with key events when the IME cannot be activated (#10479)",
   async (mode) => {
     const h = fieldHarness();
-    h.adb.setCommandResponse(activate, { stdout: "", stderr: "selection failed" });
+    h.adb.setCommandResponse(activate, createExecResult("", "selection failed"));
     const result = await h.action.execute([{ action: "clear", ...(mode ? { mode } : {}) }]);
     expect(result.success).toBe(true);
     expect(h.clientCalls).toEqual([]);
@@ -535,9 +540,12 @@ test.each([true, false])(
   async (supported) => {
     const h = fieldHarness("hunter2", { password: "true" });
     h.client.supportsImeClearField = async () => supported;
-    const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
-      spyOn(logger, level),
-    );
+    const spies = [
+      spyOn(logger, "debug"),
+      spyOn(logger, "info"),
+      spyOn(logger, "warn"),
+      spyOn(logger, "error"),
+    ];
     try {
       const result = await h.action.execute([{ action: "clear" }]);
       expect(result.success).toBe(true);
@@ -743,19 +751,19 @@ test("an IME span pins a non-zero user once and restores that user after all com
   const h = harness();
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell am get-current-user", [
-    { stdout: "10", stderr: "" },
-    { stdout: "11", stderr: "" },
+    createExecResult("10", ""),
+    createExecResult("11", ""),
   ]);
-  adb.setCommandResponse("shell ime list --user 10 -a -s", {
-    stdout: `${priorIme}\n${AUTO_MOBILE_IME_ID}\n`,
-    stderr: "",
-  });
-  adb.setCommandResponse("shell ime list --user 10 -s", { stdout: priorIme, stderr: "" });
+  adb.setCommandResponse(
+    "shell ime list --user 10 -a -s",
+    createExecResult(`${priorIme}\n${AUTO_MOBILE_IME_ID}\n`, ""),
+  );
+  adb.setCommandResponse("shell ime list --user 10 -s", createExecResult(priorIme, ""));
   adb.setCommandResponseSequence("shell settings --user 10 get secure default_input_method", [
-    { stdout: priorIme, stderr: "" },
-    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
-    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
-    { stdout: priorIme, stderr: "" },
+    createExecResult(priorIme, ""),
+    createExecResult(AUTO_MOBILE_IME_ID, ""),
+    createExecResult(AUTO_MOBILE_IME_ID, ""),
+    createExecResult(priorIme, ""),
   ]);
   const fake = modelDeviceSideRestore(h);
   const adbFactory = { create: () => adb };
@@ -805,8 +813,8 @@ test.each([
     // Android drops a subtype the commit IME does not advertise, so a subtype restore
     // aimed at the commit IME itself could never verify.
     h.adb.setCommandResponseSequence("shell settings get secure selected_input_method_subtype", [
-      { stdout: "3", stderr: "" },
-      { stdout: "-1", stderr: "" },
+      createExecResult("3", ""),
+      createExecResult("-1", ""),
     ]);
     try {
       const first = await h.action.execute([...commands]);
@@ -852,9 +860,9 @@ test("multi-command restore failure reports original-keyboard recovery guidance"
   }
 });
 
-test.each([["a"], ["a", "b"]])(
+test.each([{ texts: ["a"] }, { texts: ["a", "b"] }])(
   "restore failure belongs to the last IME type rather than a trailing enter key (%j)",
-  async (...texts) => {
+  async ({ texts }) => {
     const h = harness();
     h.adb.setCommandError(restore, new Error("restore rejected"));
     try {
@@ -1244,4 +1252,8 @@ test("IME commit of a marked-up string stays verified when the field shows the h
   const h = harness(read);
   const result = await h.action.execute([type("*bold*")]);
   expect(result.success).toBe(true);
+});
+
+afterEach(() => {
+  mock.restore();
 });

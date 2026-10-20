@@ -26,7 +26,7 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
     bunDb = new BunDatabase(":memory:");
     bunDb.exec("PRAGMA foreign_keys = ON;");
     db = new Kysely<Database>({ dialect: new BunSqliteDialect({ database: bunDb }) });
-    await navGraphUp(db as unknown as Kysely<unknown>);
+    await navGraphUp(db);
   });
 
   afterEach(async () => {
@@ -80,7 +80,7 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
   }
 
   test("AC1: creates build-key + node/edge observation tables", async () => {
-    await provenanceUp(db as unknown as Kysely<unknown>);
+    await provenanceUp(db);
     const names = await tableNames();
     expect(names).toContain("navigation_build_keys");
     expect(names).toContain("navigation_node_observations");
@@ -89,7 +89,7 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
 
   test("AC4: backfills a default build key + one observation per existing node/edge (no data loss)", async () => {
     await seedLegacyGraph();
-    await provenanceUp(db as unknown as Kysely<unknown>);
+    await provenanceUp(db);
 
     // Existing rows are untouched.
     const nodes = await db.selectFrom("navigation_nodes").selectAll().execute();
@@ -150,7 +150,7 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
       })
       .execute();
 
-    await provenanceUp(db as unknown as Kysely<unknown>);
+    await provenanceUp(db);
 
     const obs = await db
       .selectFrom("navigation_node_observations")
@@ -165,8 +165,8 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
     // the top on restart. Re-running must not throw a duplicate-key error, and must
     // not duplicate the backfilled rows.
     await seedLegacyGraph();
-    await provenanceUp(db as unknown as Kysely<unknown>);
-    await provenanceUp(db as unknown as Kysely<unknown>); // rerun
+    await provenanceUp(db);
+    await provenanceUp(db); // rerun
 
     expect(await db.selectFrom("navigation_build_keys").selectAll().execute()).toHaveLength(1);
     expect(await db.selectFrom("navigation_node_observations").selectAll().execute()).toHaveLength(
@@ -178,8 +178,8 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
   });
 
   test("down() drops the provenance tables", async () => {
-    await provenanceUp(db as unknown as Kysely<unknown>);
-    await provenanceDown(db as unknown as Kysely<unknown>);
+    await provenanceUp(db);
+    await provenanceDown(db);
     const names = await tableNames();
     expect(names).not.toContain("navigation_build_keys");
     expect(names).not.toContain("navigation_node_observations");

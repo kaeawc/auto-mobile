@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, test, expect, beforeEach } from "bun:test";
 import {
   resolveConfiguredHomePackage,
@@ -10,6 +11,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const RESOLVE_HOME_PATTERN = "resolve-activity";
 
@@ -25,15 +27,9 @@ class SlowResolveAdbExecutor extends FakeAdbExecutor {
     super();
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     this.clock.setCurrentTime(this.clock.now() + this.elapsedMs);
-    return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return await super.executeCommand(command, options);
   }
 }
 
@@ -47,11 +43,13 @@ describe("androidLauncherPackages", () => {
 
   describe("resolveConfiguredHomePackage", () => {
     test("parses the package name out of resolve-activity --brief output", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout:
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult(
           "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\ncom.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+          "",
+        ),
+      );
 
       const result = await resolveConfiguredHomePackage(fakeAdb, "device-1");
 
@@ -59,10 +57,10 @@ describe("androidLauncherPackages", () => {
     });
 
     test("bounds the resolve command to the caller's remaining budget when smaller (#6289)", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
 
       // A shrinking home-verification deadline (e.g. 250ms left) must cap the
       // launcher resolve so it cannot spend the full RESOLVE_HOME_TIMEOUT_MS.
@@ -75,10 +73,10 @@ describe("androidLauncherPackages", () => {
     });
 
     test("clamps an exhausted remaining budget to a positive resolve timeout (#6289)", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
 
       await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, undefined, -5);
 
@@ -89,10 +87,10 @@ describe("androidLauncherPackages", () => {
     });
 
     test("rejects a cancelled resolve even when the HOME cache is warm (#6289)", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       // Warm the cache with a successful resolution.
       expect(await resolveConfiguredHomePackage(fakeAdb, "device-1")).toBe("com.example.launcher");
 
@@ -107,10 +105,10 @@ describe("androidLauncherPackages", () => {
     });
 
     test("rejects a cancelled resolve off the AMBIENT signal with a warm cache (#6289)", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       expect(await resolveConfiguredHomePackage(fakeAdb, "device-1")).toBe("com.example.launcher");
 
       const controller = new AbortController();
@@ -123,7 +121,7 @@ describe("androidLauncherPackages", () => {
     });
 
     test("returns null when the device cannot resolve a HOME launcher", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, createExecResult("", ""));
 
       const result = await resolveConfiguredHomePackage(fakeAdb, "device-1");
 
@@ -139,10 +137,10 @@ describe("androidLauncherPackages", () => {
     });
 
     test("caches a successful resolution per device, without re-querying", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
 
       const first = await resolveConfiguredHomePackage(fakeAdb, "device-1");
       const queriesAfterFirst = fakeAdb
@@ -169,26 +167,26 @@ describe("androidLauncherPackages", () => {
       // failure had been (incorrectly) cached, this call would return null
       // without ever reaching the new executor.
       const recoveredAdb = new FakeAdbExecutor();
-      recoveredAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      recoveredAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       const second = await resolveConfiguredHomePackage(recoveredAdb, "device-1");
       expect(second).toBe("com.example.launcher");
     });
 
     test("caches per-device independently", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       const deviceOne = await resolveConfiguredHomePackage(fakeAdb, "device-1");
 
       const otherAdb = new FakeAdbExecutor();
-      otherAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.miui.home/.Launcher",
-        stderr: "",
-      });
+      otherAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.miui.home/.Launcher", ""),
+      );
       const deviceTwo = await resolveConfiguredHomePackage(otherAdb, "device-2");
 
       expect(deviceOne).toBe("com.example.launcher");
@@ -204,10 +202,10 @@ describe("androidLauncherPackages", () => {
     test("serves the cached package within the TTL window", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.setCurrentTime(0);
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.a/.Main", ""),
+      );
 
       const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
       fakeTimer.setCurrentTime(29_000);
@@ -223,18 +221,18 @@ describe("androidLauncherPackages", () => {
     test("re-resolves a changed default HOME launcher once the TTL expires", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.setCurrentTime(0);
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.a/.Main", ""),
+      );
       const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
 
       // The user changes their default HOME app while the daemon keeps
       // running.
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.b/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.b/.Main", ""),
+      );
       fakeTimer.setCurrentTime(30_001);
       const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
 
@@ -248,34 +246,44 @@ describe("androidLauncherPackages", () => {
     test("isForegroundLauncher accepts the new launcher once the TTL expires", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.setCurrentTime(0);
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.a/.Main", ""),
+      );
       expect(
-        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, {
+          incarnationToken: "epoch-1",
+        }),
       ).toBe(true);
       expect(
-        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, {
+          incarnationToken: "epoch-1",
+        }),
       ).toBe(false);
 
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.b/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.b/.Main", ""),
+      );
       // Still within the TTL -- the stale cached value ("a") is still served.
       fakeTimer.setCurrentTime(10_000);
       expect(
-        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, {
+          incarnationToken: "epoch-1",
+        }),
       ).toBe(false);
 
       // Past the TTL -- the new default HOME launcher ("b") is now accepted.
       fakeTimer.setCurrentTime(30_001);
       expect(
-        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, {
+          incarnationToken: "epoch-1",
+        }),
       ).toBe(true);
       expect(
-        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, "epoch-1"),
+        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, {
+          incarnationToken: "epoch-1",
+        }),
       ).toBe(false);
     });
   });
@@ -290,10 +298,10 @@ describe("androidLauncherPackages", () => {
     test("serves the cache across one verification's retries when no epoch token is available", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.setCurrentTime(0);
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.a/.Main", ""),
+      );
 
       const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
       fakeTimer.setCurrentTime(1_500);
@@ -309,19 +317,19 @@ describe("androidLauncherPackages", () => {
     test("re-resolves well before the full TTL when no epoch token is available", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.setCurrentTime(0);
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.a/.Main", ""),
+      );
       const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
 
       // A reconnect (or a reused serial) hands the same deviceId to a
       // different runtime. With no epoch token to notice it, only the short
       // lifetime prevents the previous runtime's launcher being served.
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.b/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.b/.Main", ""),
+      );
       fakeTimer.setCurrentTime(2_001);
       const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer);
 
@@ -342,10 +350,10 @@ describe("androidLauncherPackages", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.setCurrentTime(0);
       const slowAdb = new SlowResolveAdbExecutor(fakeTimer, 1_900);
-      slowAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      slowAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.a/.Main", ""),
+      );
 
       const first = await resolveConfiguredHomePackage(slowAdb, "device-1", fakeTimer);
       // The resolve itself consumed 1,900ms, so the entry is 0ms old here and
@@ -363,10 +371,10 @@ describe("androidLauncherPackages", () => {
     test("keeps the full TTL once an epoch token IS available", async () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.setCurrentTime(0);
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.launcher.a/.Main", ""),
+      );
       await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
       fakeTimer.setCurrentTime(2_001);
       const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
@@ -386,10 +394,10 @@ describe("androidLauncherPackages", () => {
   // cache miss instead.
   describe("incarnation-aware cache key", () => {
     test("re-resolves instead of serving the stale entry when the incarnation token changes on the same deviceId", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       const first = await resolveConfiguredHomePackage(
         fakeAdb,
         "emulator-5554",
@@ -401,10 +409,10 @@ describe("androidLauncherPackages", () => {
       // A fresh AVD reincarnates the same serial within the TTL, with a
       // different configured HOME launcher.
       const reincarnatedAdb = new FakeAdbExecutor();
-      reincarnatedAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.other.launcher/.Main",
-        stderr: "",
-      });
+      reincarnatedAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.other.launcher/.Main", ""),
+      );
       const second = await resolveConfiguredHomePackage(
         reincarnatedAdb,
         "emulator-5554",
@@ -422,10 +430,10 @@ describe("androidLauncherPackages", () => {
     });
 
     test("still serves the cache within the TTL when the incarnation token is unchanged", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       await resolveConfiguredHomePackage(fakeAdb, "emulator-5554", undefined, "epoch-1");
       const second = await resolveConfiguredHomePackage(
         fakeAdb,
@@ -441,25 +449,21 @@ describe("androidLauncherPackages", () => {
     });
 
     test("isForegroundLauncher rejects the previous incarnation's launcher after a reincarnation", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       expect(
-        await isForegroundLauncher(
-          "com.example.launcher",
-          fakeAdb,
-          "emulator-5554",
-          undefined,
-          "epoch-1",
-        ),
+        await isForegroundLauncher("com.example.launcher", fakeAdb, "emulator-5554", undefined, {
+          incarnationToken: "epoch-1",
+        }),
       ).toBe(true);
 
       const reincarnatedAdb = new FakeAdbExecutor();
-      reincarnatedAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.other.launcher/.Main",
-        stderr: "",
-      });
+      reincarnatedAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.other.launcher/.Main", ""),
+      );
       // Same appId as before, but the new incarnation's configured launcher
       // is different -- must not still match on the stale "epoch-1" entry.
       expect(
@@ -468,7 +472,7 @@ describe("androidLauncherPackages", () => {
           reincarnatedAdb,
           "emulator-5554",
           undefined,
-          "epoch-2",
+          { incarnationToken: "epoch-2" },
         ),
       ).toBe(false);
       expect(
@@ -477,7 +481,7 @@ describe("androidLauncherPackages", () => {
           reincarnatedAdb,
           "emulator-5554",
           undefined,
-          "epoch-2",
+          { incarnationToken: "epoch-2" },
         ),
       ).toBe(true);
     });
@@ -504,10 +508,10 @@ describe("androidLauncherPackages", () => {
 
   describe("isForegroundLauncher", () => {
     test("matches the resolved configured HOME package exactly", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.oem.customlauncher/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.oem.customlauncher/.Main", ""),
+      );
 
       // A device whose selected HOME app is outside the old hardcoded list
       // (issue #6147 review, P1) must still verify successfully.
@@ -533,10 +537,10 @@ describe("androidLauncherPackages", () => {
 
   describe("deadline-bounding + cancellation (#6289)", () => {
     test("resolve-activity is deadline-bounded and receives the signal", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       const controller = new AbortController();
 
       await resolveConfiguredHomePackage(
@@ -555,10 +559,10 @@ describe("androidLauncherPackages", () => {
     });
 
     test("propagates an abort instead of swallowing it into a null downgrade", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       fakeAdb.setThrowOnAbortedSignal();
       const controller = new AbortController();
       controller.abort();
@@ -576,20 +580,15 @@ describe("androidLauncherPackages", () => {
     });
 
     test("isForegroundLauncher forwards the signal into the resolve read", async () => {
-      fakeAdb.setCommandResponse(RESOLVE_HOME_PATTERN, {
-        stdout: "com.example.launcher/.LauncherActivity",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        RESOLVE_HOME_PATTERN,
+        createExecResult("com.example.launcher/.LauncherActivity", ""),
+      );
       const controller = new AbortController();
 
-      await isForegroundLauncher(
-        "com.example.launcher",
-        fakeAdb,
-        "device-1",
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      await isForegroundLauncher("com.example.launcher", fakeAdb, "device-1", undefined, {
+        signal: controller.signal,
+      });
 
       const call = fakeAdb.getCommandCalls().find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
       expect(call?.signal).toBeDefined();

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
@@ -39,7 +38,7 @@ function spawnedSocketPath(manager: SafeDaemonManager): string {
 }
 
 describe("default Windows namespace owner probe", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("daemon-win32-probe-");
   const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
 
   function createManager(
@@ -47,8 +46,7 @@ describe("default Windows namespace owner probe", () => {
     table = new FakeDaemonProcessTable(),
     identityRecoveryIO?: IdentityRecoveryIO,
   ): ReadyWin32Manager {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-win32-probe-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     // The launch log is opened under the resolved AutoMobile data dir; keep it
     // off the developer's real ~/.auto-mobile.
     process.env.AUTOMOBILE_DATA_DIR = dir;
@@ -73,9 +71,6 @@ describe("default Windows namespace owner probe", () => {
       delete process.env.AUTOMOBILE_DATA_DIR;
     } else {
       process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
-    }
-    for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -178,7 +173,7 @@ describe("default Windows namespace owner probe", () => {
       return true;
     });
     spyOn(manager, "status").mockResolvedValue({ running: false });
-    const start = spyOn(manager, "start").mockResolvedValue(undefined);
+    const start = spyOn(manager, "start").mockResolvedValue("started");
     probe.mockClear();
 
     await manager.restart();
@@ -224,7 +219,7 @@ describe("default Windows namespace owner probe", () => {
 
     expect(manager.findOtherDaemonProcesses(undefined)).toEqual([452]);
     spyOn(manager, "status").mockResolvedValue({ running: false });
-    spyOn(manager, "start").mockResolvedValue(undefined);
+    spyOn(manager, "start").mockResolvedValue("started");
     table.script = () =>
       [452, 453].map((pid) => ({
         ...namespaceDaemonProcess(pid, pid === 452 ? socketPath : foreignPath),
@@ -260,7 +255,7 @@ describe("default Windows namespace owner probe", () => {
       (pid) => pid === process.pid || !manager.defaultSignals.some((sent) => sent.pid === pid),
     );
     spyOn(manager, "status").mockResolvedValue({ running: false });
-    const start = spyOn(manager, "start").mockResolvedValue(undefined);
+    const start = spyOn(manager, "start").mockResolvedValue("started");
 
     await manager.restart();
 

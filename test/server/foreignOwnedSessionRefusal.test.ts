@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -43,7 +43,7 @@ describe("a session another connection owns is not controlled by naming it (#113
         (error: unknown) => error as InputDeviceOwnedError,
       );
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -69,20 +69,26 @@ describe("a session another connection owns is not controlled by naming it (#113
     await pool.initializeWithDevices([held, free]);
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     tools = new RealToolCallPath([held, free]).install();
-    await pool.bindOrReuseDeviceSession(
-      SESSION,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
     );
-  });
+  }
 
   afterEach(() => {
     tools.uninstall();
@@ -99,12 +105,12 @@ describe("a session another connection owns is not controlled by naming it (#113
   });
 
   describe("the pool's ownership predicate", () => {
-    test("the session is foreign to every connection but the one that acquired it", () => {
+    arranged("the session is foreign to every connection but the one that acquired it", () => {
       expect(pool.isSessionOwnedByOtherConnection(SESSION, OTHER)).toBe(true);
       expect(pool.isSessionOwnedByOtherConnection(SESSION, OWNER)).toBe(false);
     });
 
-    test("a session nobody holds, or whose owner disconnected, is foreign to no one", () => {
+    arranged("a session nobody holds, or whose owner disconnected, is foreign to no one", () => {
       expect(pool.isSessionOwnedByOtherConnection("never-issued", OTHER)).toBe(false);
 
       pool.releaseMcpSessionBindings(OWNER);
@@ -112,46 +118,60 @@ describe("a session another connection owns is not controlled by naming it (#113
       expect(pool.isSessionOwnedByOtherConnection(SESSION, OTHER)).toBe(false);
     });
 
-    test("a caller with no connection identity is not treated as a stranger to an ordinary session", () => {
-      expect(pool.isSessionOwnedByOtherConnection(SESSION, undefined)).toBe(false);
-    });
+    arranged(
+      "a caller with no connection identity is not treated as a stranger to an ordinary session",
+      () => {
+        expect(pool.isSessionOwnedByOtherConnection(SESSION, undefined)).toBe(false);
+      },
+    );
   });
 
   describe("a control call", () => {
-    test("from another connection is refused with the typed code and the session's device", async () => {
-      const error = await refusal(() =>
-        refuseControlOnForeignOwnedSession("tapOn", SESSION, OTHER),
-      );
+    arranged(
+      "from another connection is refused with the typed code and the session's device",
+      async () => {
+        const error = await refusal(() =>
+          refuseControlOnForeignOwnedSession("tapOn", SESSION, OTHER),
+        );
 
-      expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect(error?.toPayload()).toEqual({
-        code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
-        deviceId: held.deviceId,
-        retryable: false,
-      });
-      expect(error?.message).toContain(`session ${SESSION} is owned by another connected client`);
-    });
+        expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect(error?.toPayload()).toEqual({
+          code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+          deviceId: held.deviceId,
+          retryable: false,
+        });
+        expect(error?.message).toContain(`session ${SESSION} is owned by another connected client`);
+      },
+    );
 
-    test("carrying force is told to leave sessionUuid out; any other call is not (#11555)", async () => {
-      const forced = await refusal(() =>
-        refuseControlOnForeignOwnedSession("killDevice", SESSION, OTHER, { force: true }),
-      );
-      const plain = await refusal(() =>
-        refuseControlOnForeignOwnedSession("killDevice", SESSION, OTHER, { force: false }),
-      );
+    arranged(
+      "carrying force is told to leave sessionUuid out; any other call is not (#11555)",
+      async () => {
+        const forced = await refusal(() =>
+          refuseControlOnForeignOwnedSession("killDevice", SESSION, OTHER, { force: true }),
+        );
+        const plain = await refusal(() =>
+          refuseControlOnForeignOwnedSession("killDevice", SESSION, OTHER, { force: false }),
+        );
 
-      expect(forced?.message).toContain(`session ${SESSION} is owned by another connected client`);
-      expect(forced?.message).toContain("leave sessionUuid out");
-      expect(plain?.message).not.toContain("force");
-    });
+        expect(forced?.message).toContain(
+          `session ${SESSION} is owned by another connected client`,
+        );
+        expect(forced?.message).toContain("leave sessionUuid out");
+        expect(plain?.message).not.toContain("force");
+      },
+    );
 
-    test("from the owner, from a caller with no identity, or naming no session is admitted", () => {
-      expect(() => refuseControlOnForeignOwnedSession("tapOn", SESSION, OWNER)).not.toThrow();
-      expect(() => refuseControlOnForeignOwnedSession("tapOn", SESSION, undefined)).not.toThrow();
-      expect(() => refuseControlOnForeignOwnedSession("tapOn", undefined, OTHER)).not.toThrow();
-    });
+    arranged(
+      "from the owner, from a caller with no identity, or naming no session is admitted",
+      () => {
+        expect(() => refuseControlOnForeignOwnedSession("tapOn", SESSION, OWNER)).not.toThrow();
+        expect(() => refuseControlOnForeignOwnedSession("tapOn", SESSION, undefined)).not.toThrow();
+        expect(() => refuseControlOnForeignOwnedSession("tapOn", undefined, OTHER)).not.toThrow();
+      },
+    );
 
-    test("is admitted once the owner has disconnected", () => {
+    arranged("is admitted once the owner has disconnected", () => {
       pool.releaseMcpSessionBindings(OWNER);
 
       expect(() => refuseControlOnForeignOwnedSession("tapOn", SESSION, OTHER)).not.toThrow();
@@ -159,7 +179,7 @@ describe("a session another connection owns is not controlled by naming it (#113
   });
 
   describe("setActiveDevice with autolock off", () => {
-    test("naming the session on its own device is refused", async () => {
+    arranged("naming the session on its own device is refused", async () => {
       const error = await refusal(() =>
         tools.call("setActiveDevice", {
           deviceId: held.deviceId,
@@ -172,7 +192,7 @@ describe("a session another connection owns is not controlled by naming it (#113
       expect(pool.isSessionOwnedByOtherConnection(SESSION, OTHER)).toBe(true);
     });
 
-    test("naming the session with another device is refused and moves nothing", async () => {
+    arranged("naming the session with another device is refused and moves nothing", async () => {
       const error = await refusal(() =>
         tools.call("setActiveDevice", {
           deviceId: free.deviceId,
@@ -188,7 +208,7 @@ describe("a session another connection owns is not controlled by naming it (#113
       expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
     });
 
-    test("the owner still selects with its own session", async () => {
+    arranged("the owner still selects with its own session", async () => {
       const result = await tools.call("setActiveDevice", {
         deviceId: held.deviceId,
         sessionUuid: SESSION,

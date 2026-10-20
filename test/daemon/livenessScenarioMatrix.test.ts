@@ -6,14 +6,15 @@ import { join } from "node:path";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import { FakeSocket } from "../fakes/FakeNetServer";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
+import { typedFrameSchema } from "../helpers/wireMessageSchemas";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
 } from "../../src/daemon/sessionManager";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
@@ -973,7 +974,8 @@ describe("host sleep longer than the idle window (#10661)", () => {
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(["cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
+      const idleExpiry: Array<string | undefined> = ["cleanup-expired"];
+      expect(idleExpiry).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }
@@ -1459,21 +1461,18 @@ class ObservationStreamForScenario extends DeviceDataStreamSocketServer {
     super("/fake/path/matrix.sock", timer, { authorize: () => {} });
   }
 
-  start(): void {
-    (this as unknown as { server: unknown }).server = { listening: true };
-    (this as unknown as { onServerStarted(): void }).onServerStarted();
+  override async start(): Promise<void> {
+    this.server = new FakeListeningNetServer();
+    this.onServerStarted();
   }
 
   stopListening(): void {
-    (this as unknown as { onServerClosing(): void }).onServerClosing();
-    (this as unknown as { server: unknown }).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   async viewerSubscribes(socket: FakeSocket, sessionUuid: string): Promise<void> {
-    await (this as unknown as { processLine(s: Socket, line: string): Promise<void> }).processLine(
-      socket as unknown as Socket,
-      JSON.stringify({ command: "subscribe", sessionUuid }),
-    );
+    await this.processLine(socket, JSON.stringify({ command: "subscribe", sessionUuid }));
   }
 }
 
@@ -1482,12 +1481,12 @@ describe("a viewer stream follows its observer registration (#11076, #11084)", (
   const DESKTOP_BEAT_MS = 2_000;
   // The stream's keepalive pings are not what is asserted on.
   const errorFrames = (socket: FakeSocket) =>
-    socket.getWrittenMessages().filter((message) => message.type === "error");
+    socket.getWrittenMessages(typedFrameSchema).filter((message) => message.type === "error");
 
   test("an observer that heartbeats keeps its observation stream; one that stops has it ended with session_ended", async () => {
     scenario = await LivenessScenario.start();
     const stream = new ObservationStreamForScenario(scenario.timer);
-    stream.start();
+    await stream.start();
     try {
       const registered = await scenario.daemonMethod("daemon/registerSession", {
         sessionId: OBSERVER,
@@ -1682,7 +1681,6 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     const socketPath = join(tmpdir(), `matrix-same-tick-${randomUUID()}.sock`);
     const server = createTestUnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       scenario.daemon.state as never,
       scenario.timer,
     );
@@ -1703,6 +1701,9 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       listResources: async () => ({ resources: [] }),
       readResource: async () => ({ contents: [] }),
       listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      request: async () => {
+        throw new Error("this scenario never issues a raw MCP request");
+      },
       close: async () => {},
     });
     await server.start();
@@ -2262,19 +2263,13 @@ test("a connected suspect holder has a truthful bind retry that disappears after
   const remaining = state.getSessionManager().getOwnerLeaseHold(holder)!.remainingMs;
   const clocks = [session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat];
   const bind = () =>
-    pool.bindOrReuseDeviceSession(
-      "rival",
-      DEVICE_A,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "rival-connection",
-    );
+    pool.bindOrReuseDeviceSession({
+      sessionId: "rival",
+      deviceId: DEVICE_A,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "rival-connection",
+    });
   const refused = await bind().catch((error: unknown) => error);
   expect(refused).toBeInstanceOf(InputDeviceOwnedError);
   if (!(refused instanceof InputDeviceOwnedError)) {

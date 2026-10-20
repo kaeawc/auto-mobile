@@ -1,8 +1,10 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import {
   OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
+  MISSING_SIMULATOR_DISCONNECT_BUDGET_MS,
   type OfflineEpisode,
 } from "../../src/daemon/disconnectMonitor";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
@@ -87,7 +89,13 @@ async function simulatorMonitor() {
   manager.bootedDevices = [HELD, UNHELD];
   await pool.addDevice(HELD, image(HELD));
   await pool.addDevice(UNHELD, image(UNHELD));
-  await pool.bindOrReuseDeviceSession(SESSION, HELD.deviceId, "ios", image(HELD), undefined, HELD);
+  await pool.bindOrReuseDeviceSession({
+    sessionId: SESSION,
+    deviceId: HELD.deviceId,
+    platform: "ios",
+    sourceImage: image(HELD),
+    expectedIdentity: HELD,
+  });
 
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
@@ -110,7 +118,7 @@ async function simulatorMonitor() {
   const pollFor = async (ms: number) => {
     for (let elapsed = 0; elapsed < ms; elapsed += POLL_MS) {
       if (sessions.getSession(SESSION)) {
-        sessions.recordHeartbeat(SESSION);
+        await deliverDaemonHeartbeat(sessions, SESSION);
       }
       timer.advanceTime(POLL_MS);
       await daemon.deviceDisconnectMonitor.run();
@@ -144,6 +152,61 @@ async function withMonitor(
 }
 
 describe("disconnect monitor: held simulator in a transitional simctl state (#11592)", () => {
+  test("missing, missing, source-unavailable, missing confirms simulator loss", async () => {
+    await withMonitor(async (h) => {
+      h.set(HELD, "Shutdown");
+      await h.pollFor(2 * POLL_MS);
+      h.failSimctl(true);
+      await h.pollFor(POLL_MS);
+      h.failSimctl(false);
+      await h.pollFor(POLL_MS);
+      expect(h.sessions.getSession(SESSION)).toBeNull();
+      expect(await h.releaseReason()).toStartWith(`device-disconnected:${HELD.deviceId}`);
+    });
+  });
+
+  test("unavailable then present resets simulator absence evidence", async () => {
+    await withMonitor(async (h) => {
+      h.set(HELD, "Shutdown");
+      await h.pollFor(2 * POLL_MS);
+      h.failSimctl(true);
+      await h.pollFor(POLL_MS);
+      h.failSimctl(false);
+      h.set(HELD, "Booted");
+      await h.pollFor(POLL_MS);
+      expect(h.daemon.deviceDisconnectMisses.has(HELD.deviceId)).toBe(false);
+      expect(h.daemon.offlineEpisodes.has(HELD.deviceId)).toBe(false);
+      h.set(HELD, "Shutdown");
+      await h.pollFor(2 * POLL_MS);
+      expect(h.held()).toBe(true);
+      await h.pollFor(POLL_MS);
+      expect(h.sessions.getSession(SESSION)).toBeNull();
+    });
+  });
+
+  test("a missing simulator followed by failed sweeps resolves at the time bound", async () => {
+    await withMonitor(async (h) => {
+      h.set(HELD, "Shutdown");
+      await h.pollFor(POLL_MS);
+      h.failSimctl(true);
+      await h.pollFor(MISSING_SIMULATOR_DISCONNECT_BUDGET_MS - POLL_MS);
+      expect(h.held()).toBe(true);
+      await h.pollFor(POLL_MS);
+      expect(h.sessions.getSession(SESSION)).toBeNull();
+      expect(await h.releaseReason()).toStartWith(`device-disconnected:${HELD.deviceId}`);
+    });
+  });
+
+  test("unavailable-only sweeps never confirm simulator loss", async () => {
+    await withMonitor(async (h) => {
+      h.failSimctl(true);
+      await h.pollFor(2 * MISSING_SIMULATOR_DISCONNECT_BUDGET_MS);
+      expect(h.held()).toBe(true);
+      expect(h.daemon.deviceDisconnectMisses.has(HELD.deviceId)).toBe(false);
+      expect(h.daemon.offlineEpisodes.size).toBe(0);
+    });
+  });
+
   test("a held simulator Booting for 20 s then Booted keeps its session", async () => {
     await withMonitor(async (h) => {
       await h.pollFor(POLL_MS);

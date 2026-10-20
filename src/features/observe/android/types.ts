@@ -1,3 +1,4 @@
+import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
 import type { PanelFingerprint } from "../../../models/DisplayPanel";
 /**
@@ -429,4 +430,18 @@ export interface NormalizedHighlightBounds {
   height: number;
   sourceWidth?: number | null;
   sourceHeight?: number | null;
+}
+
+/** Android TalkBack two-finger swipe, including transport and display fencing. */
+export interface TwoFingerSwipeRequest {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  duration?: number;
+  offset?: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  displayId?: number;
+  beforeSend?: () => void;
 }

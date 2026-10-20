@@ -13,6 +13,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AppPreferences } from "../../../src/features/preferences/AppPreferences";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../../src/models";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 // This module gives setKeyValue/removeKeyValue/clearKeyValueFile the same reachability
 // as the setPreference/getPreference tools for Android SharedPreferences (issue #6292):
@@ -118,11 +119,8 @@ describe("setAndroidKeyValueDirect", () => {
     await setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "probeB",
-      "hello",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "probeB", value: "hello", type: "STRING" },
     );
 
     const commands = adb.getExecutedCommands();
@@ -141,11 +139,8 @@ describe("setAndroidKeyValueDirect", () => {
     await setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "probeA",
-      "new",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "probeA", value: "new", type: "STRING" },
     );
 
     const writeCommand = commandText(
@@ -164,11 +159,8 @@ describe("setAndroidKeyValueDirect", () => {
     await setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "tags",
-      '["a","b"]',
-      "STRING_SET",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "tags", value: '["a","b"]', type: "STRING_SET" },
     );
 
     const writtenXml = decodeBase64WritePayload(
@@ -187,11 +179,8 @@ describe("setAndroidKeyValueDirect", () => {
       setAndroidKeyValueDirect(
         adb,
         "device-1",
-        "com.example.app",
-        "settings",
-        "tags",
-        "not-json",
-        "STRING_SET",
+        { appId: "com.example.app", fileName: "settings" },
+        { key: "tags", value: "not-json", type: "STRING_SET" },
       ),
     ).rejects.toThrow(ActionableError);
   });
@@ -204,11 +193,8 @@ describe("setAndroidKeyValueDirect", () => {
       setAndroidKeyValueDirect(
         adb,
         "device-1",
-        "com.example.app",
-        "settings",
-        "big",
-        "99999999999",
-        "INT",
+        { appId: "com.example.app", fileName: "settings" },
+        { key: "big", value: "99999999999", type: "INT" },
       ),
     ).rejects.toThrow(/32-bit range/);
   });
@@ -223,11 +209,8 @@ describe("setAndroidKeyValueDirect", () => {
     await setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "signed",
-      value,
-      type,
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "signed", value, type },
     );
 
     expect(
@@ -248,11 +231,8 @@ describe("setAndroidKeyValueDirect", () => {
       setAndroidKeyValueDirect(
         adb,
         "device-1",
-        "com.example.app",
-        "settings",
-        "signed",
-        value,
-        type,
+        { appId: "com.example.app", fileName: "settings" },
+        { key: "signed", value, type },
       ),
     ).rejects.toThrow(`Expected ${type}`);
   });
@@ -268,11 +248,8 @@ describe("setAndroidKeyValueDirect", () => {
       setAndroidKeyValueDirect(
         adb,
         "device-1",
-        "com.example.app",
-        "settings",
-        "probeA",
-        "1",
-        "STRING",
+        { appId: "com.example.app", fileName: "settings" },
+        { key: "probeA", value: "1", type: "STRING" },
       ),
     ).rejects.toThrow(/debuggable\/test build/);
   });
@@ -300,11 +277,8 @@ describe("setAndroidKeyValueDirect", () => {
       await setAndroidKeyValueDirect(
         adb,
         "device-1",
-        "com.example.app",
-        "settings",
-        "ratio",
-        value,
-        "FLOAT",
+        { appId: "com.example.app", fileName: "settings" },
+        { key: "ratio", value, type: "FLOAT" },
       );
 
       expect(
@@ -325,11 +299,8 @@ describe("setAndroidKeyValueDirect", () => {
         setAndroidKeyValueDirect(
           adb,
           "device-1",
-          "com.example.app",
-          "settings",
-          "enabled",
-          value,
-          "BOOLEAN",
+          { appId: "com.example.app", fileName: "settings" },
+          { key: "enabled", value, type: "BOOLEAN" },
         ),
       ).rejects.toThrow(/Expected BOOLEAN/);
     },
@@ -351,11 +322,8 @@ describe("removeAndroidKeyValueDirect", () => {
     await setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "probeA",
-      "1",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "probeA", value: "1", type: "STRING" },
     );
     await removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA");
 
@@ -446,13 +414,7 @@ class StatefulPrefsAdb extends FakeAdbExecutor {
     return this.readCount;
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     if (command.includes("cat shared_prefs/settings.xml")) {
       // Capture the snapshot at read time (as `cat` would), then yield a microtask so a
       // concurrent, unserialized mutation gets a chance to read the SAME stale snapshot.
@@ -472,7 +434,7 @@ class StatefulPrefsAdb extends FakeAdbExecutor {
       this.storedXml = decodeBase64WritePayload(command);
       return createExecResult("", "");
     }
-    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return super.executeCommand(command, options);
   }
 }
 
@@ -484,21 +446,15 @@ describe("direct mutation serialization (#6292)", () => {
     const first = setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "alpha",
-      "1",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "alpha", value: "1", type: "STRING" },
     );
     await gate.readStarted;
     const second = setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "beta",
-      "2",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "beta", value: "2", type: "STRING" },
     );
     await Promise.resolve();
     expect(adb.reads()).toBe(1);
@@ -516,22 +472,16 @@ describe("direct mutation serialization (#6292)", () => {
     await setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "existing",
-      "0",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "existing", value: "0", type: "STRING" },
     );
 
     await Promise.all([
       setAndroidKeyValueDirect(
         adb,
         "device-1",
-        "com.example.app",
-        "settings",
-        "added",
-        "9",
-        "STRING",
+        { appId: "com.example.app", fileName: "settings" },
+        { key: "added", value: "9", type: "STRING" },
       ),
       removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "existing"),
     ]);
@@ -550,21 +500,15 @@ describe("direct mutation serialization (#6292)", () => {
     const first = setAndroidKeyValueDirect(
       firstDeviceAdb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "alpha",
-      "1",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "alpha", value: "1", type: "STRING" },
     );
     await firstGate.readStarted;
     const second = setAndroidKeyValueDirect(
       secondDeviceAdb,
       "device-2",
-      "com.example.app",
-      "settings",
-      "beta",
-      "2",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "beta", value: "2", type: "STRING" },
     );
 
     await secondGate.readStarted;
@@ -592,11 +536,8 @@ describe("direct mutation serialization (#6292)", () => {
     const directWrite = setAndroidKeyValueDirect(
       adb,
       "device-1",
-      "com.example.app",
-      "settings",
-      "direct",
-      "two",
-      "STRING",
+      { appId: "com.example.app", fileName: "settings" },
+      { key: "direct", value: "two", type: "STRING" },
     );
 
     // The direct route must not begin its stale read while the legacy route owns
@@ -642,7 +583,12 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
     [
       "setAndroidKeyValueDirect",
       (adb, userId) =>
-        setAndroidKeyValueDirect(adb, "device-1", APP, "settings", "k", "v", "STRING", userId),
+        setAndroidKeyValueDirect(
+          adb,
+          "device-1",
+          { appId: APP, fileName: "settings", userId },
+          { key: "k", value: "v", type: "STRING" },
+        ),
     ],
     [
       "removeAndroidKeyValueDirect",
@@ -721,7 +667,12 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
     );
 
     await expect(
-      setAndroidKeyValueDirect(adb, "device-1", APP, "settings", "k", "v", "STRING"),
+      setAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        { appId: APP, fileName: "settings" },
+        { key: "k", value: "v", type: "STRING" },
+      ),
     ).rejects.toThrow(/Pass userId to choose one/);
     expect(runAsCommands(adb)).toHaveLength(0);
   });
@@ -733,7 +684,12 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
     };
     adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult(STORED_XML, ""));
 
-    await setAndroidKeyValueDirect(adb, "device-1", APP, "settings", "k", "v", "STRING");
+    await setAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      { appId: APP, fileName: "settings" },
+      { key: "k", value: "v", type: "STRING" },
+    );
 
     expect(runAsCommands(adb)[0]).toBe(`shell run-as ${APP} cat shared_prefs/settings.xml`);
   });

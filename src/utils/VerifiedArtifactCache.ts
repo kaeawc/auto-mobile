@@ -1,4 +1,3 @@
-import * as fs from "node:fs/promises";
 import { ActionableError } from "../models/ActionableError";
 import {
   type ChecksumCalculator,
@@ -9,6 +8,7 @@ import { errorMessage } from "./describeUnknownError";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { logger } from "./logger";
 import { type Timer, defaultTimer } from "./SystemTimer";
+import { NodeVerifiedArtifactFileSystem } from "./NodeVerifiedArtifactFileSystem";
 
 /** The filesystem surface the cache workflow itself touches (metadata sidecar + cleanup). */
 export interface VerifiedArtifactFileSystem {
@@ -19,30 +19,6 @@ export interface VerifiedArtifactFileSystem {
   remove(path: string): Promise<void>;
   /** Atomic move; replaces an existing destination. */
   rename(from: string, to: string): Promise<void>;
-}
-
-export class NodeVerifiedArtifactFileSystem implements VerifiedArtifactFileSystem {
-  async readText(path: string): Promise<string | null> {
-    try {
-      return await fs.readFile(path, "utf8");
-    } catch (error) {
-      // Missing metadata is the normal cold-cache case.
-      logger.debug(`Unreadable cache file ${path}: ${errorMessage(error)}`);
-      return null;
-    }
-  }
-
-  async writeText(path: string, content: string, mode?: number): Promise<void> {
-    await fs.writeFile(path, content, mode === undefined ? "utf8" : { encoding: "utf8", mode });
-  }
-
-  async remove(path: string): Promise<void> {
-    await fs.rm(path, { force: true });
-  }
-
-  async rename(from: string, to: string): Promise<void> {
-    await fs.rename(from, to);
-  }
 }
 
 /** Every cache sidecar records the SHA-256 of the downloaded release asset. */

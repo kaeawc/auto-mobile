@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 extension CommandHandler {
@@ -16,7 +17,7 @@ extension CommandHandler {
         }
         return SetNetworkMockRulesResponse(
             requestId: request.requestId,
-            ok: outcome.ok,
+            ok: outcome.success,
             totalTimeMs: totalTimeMs(from: startTime),
             rejectedMockIds: outcome.rejectedMockIds,
             rejectedReasons: outcome.rejectedReasons

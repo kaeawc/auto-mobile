@@ -1,4 +1,10 @@
-import { expect, test } from "bun:test";
+import {
+  ElementResolver,
+  type ResolutionIntent,
+} from "../../../src/features/utility/ElementResolver";
+import type { ViewHierarchyResult } from "../../../src/models";
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { SetUIState } from "../../../src/features/action/SetUIState";
@@ -93,7 +99,12 @@ test("production observe identification passes the Duo flag on an unstamped cach
     throw new Error("Expected real observe feature");
   }
   observe["identifyCapture"](
-    { viewHierarchy: hierarchy, screenSize: { width: 951, height: 669 } },
+    buildObserveResult({
+      updatedAt: 1,
+      systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+      viewHierarchy: hierarchy,
+      screenSize: { width: 951, height: 669 },
+    }),
     "cached-ok",
   );
   expect(getHierarchySnapshot(hierarchy)?.hierarchy.screenWidth).toBe(951);
@@ -116,9 +127,9 @@ test("single iPhone uses runner geometry and Android uses capture display metada
         }
         // owner decision D43 (#6523): one screen-size source. Android formerly
         // used root/pixel heuristics; now metadata. iOS root/pixels are unchanged.
-        expect(selector["viewport"](hierarchy)).toEqual(
+        expect(viewportUsedBySelector(selector, hierarchy)).toEqual(
           device.platform === "ios"
-            ? extractHierarchyScreenSize(hierarchy)
+            ? (extractHierarchyScreenSize(hierarchy) ?? undefined)
             : { width: hierarchy.screenWidth!, height: hierarchy.screenHeight! },
         );
       }
@@ -151,7 +162,28 @@ test.each([false, true])(
       if (!(selector instanceof ResolverElementSelector)) {
         throw new Error("Expected production resolver selector");
       }
-      expect(selector["viewport"](hierarchy)).toEqual(extractHierarchyScreenSize(hierarchy));
+      expect(viewportUsedBySelector(selector, hierarchy)).toEqual(
+        extractHierarchyScreenSize(hierarchy) ?? undefined,
+      );
     }
   },
 );
+
+/** Observe viewport routing through the public resolver collaborator, without matching a target. */
+function viewportUsedBySelector(selector: ResolverElementSelector, hierarchy: ViewHierarchyResult) {
+  const intents: ResolutionIntent[] = [];
+  resolverSpy.mockImplementation((_snapshot, _query, intent = { action: "inspect" }) => {
+    intents.push(intent);
+    return { chosen: null, candidates: [], matches: [], matchMode: "exact" };
+  });
+  selector.selectByText(hierarchy, "viewport-probe", { intentAction: "inspect" });
+  return intents[0]?.viewport;
+}
+
+let resolverSpy: ReturnType<typeof spyOn<typeof ElementResolver.prototype, "resolve">>;
+beforeEach(() => {
+  resolverSpy = spyOn(ElementResolver.prototype, "resolve");
+});
+afterEach(() => {
+  resolverSpy.mockRestore();
+});

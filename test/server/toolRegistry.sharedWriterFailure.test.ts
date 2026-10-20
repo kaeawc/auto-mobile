@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "node:path";
 import { DefaultAfterToolCallHandler } from "../../src/server/toolRegistry";
-import {
-  JsonToolOutputArtifactWriter,
-  type ToolOutputArtifactFileSystem,
-} from "../../src/server/toolOutputArtifactWriter";
+import { JsonToolOutputArtifactWriter } from "../../src/server/toolOutputArtifactWriter";
+import { type ToolOutputArtifactFileSystem } from "../../src/server/nodeToolOutputArtifactFileSystem";
 import {
   buildToolOutputArtifactFilename,
   ToolOutputArtifactLedger,
@@ -66,6 +64,7 @@ describe("shared artifact writer after a failed write (#10079 + #10080)", () => 
   const tapOn = async () => {
     const result = await handler.handle({
       name: "tapOn",
+      outputSchema: undefined,
       args: {},
       device: undefined,
       internalCall: false,

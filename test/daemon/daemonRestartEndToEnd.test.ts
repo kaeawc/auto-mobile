@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { DaemonShuttingDownError } from "../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { RestartScenario, type ShutdownKind } from "../helpers/daemonRestartScenario";
 import { warmedTests } from "../helpers/warmedTests";
 
@@ -166,19 +166,13 @@ describe("restart matrix: a plan's derived label session, an observer and a view
           const { manager, pool } = run.scenario.daemon;
           const close = manager.openPlanLabelMints(base, { A: base, B: label });
           try {
-            await pool.bindOrReuseDeviceSession(
-              label,
-              B,
-              "android",
-              undefined,
-              undefined,
-              undefined,
-              false,
-              undefined,
-              undefined,
-              undefined,
-              run.scenario.proxyConnection,
-            );
+            await pool.bindOrReuseDeviceSession({
+              sessionId: label,
+              deviceId: B,
+              platform: "android",
+              allowSessionRebind: false,
+              mcpSessionId: run.scenario.proxyConnection,
+            });
           } finally {
             close();
           }

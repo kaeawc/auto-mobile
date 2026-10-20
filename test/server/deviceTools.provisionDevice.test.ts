@@ -1,3 +1,16 @@
+import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import {
+  BindingReconciler,
+  DefaultManagedSpecResolver,
+} from "../../src/daemon/sessionBroker/provisioning/reconciler";
+import { ToolBindingProvisioner } from "../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
+import {
+  FakeClaims,
+  FakeDeleter,
+  FakeInventory,
+  FakeMatcher,
+} from "../daemon/sessionBroker/registry/fixtures/reconcilerFakes";
 import * as buildIdentity from "../../src/daemon/buildIdentity";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -10,7 +23,7 @@ import {
   type RefusalWireResult,
 } from "../helpers/refusalWireFixtures";
 import { AvdCreateInterruptedError } from "../../src/utils/android-cmdline-tools/AvdManagerClient";
-import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
+import { provisionCancellationOutcomes } from "../../src/daemon/provisionCancellationOutcomes";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
   DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS,
@@ -20,7 +33,7 @@ import {
   DeviceTransportOfflineError,
   DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
   SessionCreationTimeoutError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -52,7 +65,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { ChildProcess } from "node:child_process";
+import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -67,16 +80,19 @@ import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts"
 import {
   RunnerReadinessError,
   RunnerReadinessService,
+  type ReadinessAndroidManager,
 } from "../../src/ctrlProxy/RunnerReadinessService";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
-import type { BootedDevice, SomePlatform } from "../../src/models";
+import type { DeviceInfo, BootedDevice, SomePlatform } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
@@ -84,7 +100,7 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 
 /** Exact provision response body from the registered production handler, with deterministic dependencies. */
@@ -107,6 +123,12 @@ function assertProvisionSurface(name: string, payload: unknown): void {
   }
   expect(readFileSync(path, "utf8")).toBe(bytes);
 }
+
+const toolResponseSchema = z.object({
+  isError: z.boolean().optional(),
+  structuredContent: z.unknown().optional(),
+  content: z.array(z.object({ text: z.string() })),
+});
 
 isolateToolRegistry();
 
@@ -137,6 +159,11 @@ const autolockEnv = new Proxy<Record<string, string | undefined>>(
     },
   },
 );
+
+/** Validates the MCP response members read by these tests. */
+function asToolResponse(response: unknown) {
+  return toolResponseSchema.parse(response);
+}
 
 async function provisionResponseText(args: Record<string, unknown>): Promise<string> {
   const tool = ToolRegistry.getTool("provisionDevice");
@@ -178,7 +205,9 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
         runtimeId: request.spec.runtime,
         runtime: request.spec.runtime,
         deviceType: request.spec.deviceType,
-        ...(request.platform === "android" && request.spec.configuration
+        ...(request.platform === "android" &&
+        "configuration" in request.spec &&
+        request.spec.configuration
           ? {
               screenWidth: request.spec.configuration.screenWidth,
               screenHeight: request.spec.configuration.screenHeight,
@@ -186,8 +215,8 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
             }
           : {}),
         capabilityInventory: {
-          schemaVersion: 2,
-          capabilities: [{ id: "test.fake.capability", state: "available" }],
+          schemaVersion: 1,
+          capabilities: [{ id: "test.fake.capability", source: "platform", state: "available" }],
         },
       },
       resolvedSpec: {
@@ -300,29 +329,36 @@ function provisionedTestDevice(
   };
 }
 
+/** A cold-boot handle whose `kill` stops the booted device and emits `exit`. */
+class ProvisionBootProcess extends FakeChildProcess {
+  constructor(private readonly onKill: () => void) {
+    super();
+  }
+
+  override kill(): boolean {
+    this.exitCode = 0;
+    this.onKill();
+    this.emit("exit");
+    return true;
+  }
+}
+
+/** A handle whose exit-listener registration throws, so unowned cold-boot settlement rejects. */
+class ThrowingOnceProcess extends FakeChildProcess {
+  override once(): never {
+    throw new Error("exit listener registration failed");
+  }
+}
+
 function configureProvisionBootAndTeardown(
   manager: FakeDeviceUtils,
   platform: ProvisionTestPlatform,
 ): void {
   const deviceName = provisionTestArgs(platform).device.name;
-  let exitListener: (() => void) | undefined;
-  const processHandle: any = {
-    exitCode: null,
-    signalCode: null,
-    once: (event: string, listener: () => void) => {
-      if (event === "exit") {
-        exitListener = listener;
-      }
-      return processHandle;
-    },
-    kill: () => {
-      processHandle.exitCode = 0;
-      manager.setBootedDevices(platform, []);
-      exitListener?.();
-      return true;
-    },
-  };
-  manager.setMockChildProcess(deviceName, processHandle as any);
+  manager.setMockChildProcess(
+    deviceName,
+    new ProvisionBootProcess(() => manager.setBootedDevices(platform, [])),
+  );
   const originalWaitForDeviceReady = manager.waitForDeviceReady.bind(manager);
   manager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
     const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
@@ -477,7 +513,7 @@ describe("provisionDevice handler", () => {
         deadlineMs: timer.now() + (resources.requests[0]!.deadlineMs - timer.now()) / 2,
         signal: resources.requests[0]!.signal,
       });
-      const payload = JSON.parse((response as any).content[0].text);
+      const payload = JSON.parse(asToolResponse(response).content[0].text);
       expect(payload.resources?.observed).toEqual(resourceObserver.result);
       expect(resources.requests[0]!.device.platform).toBe(platform);
       expect(payload).toMatchObject({
@@ -510,7 +546,7 @@ describe("provisionDevice handler", () => {
       "identity_conflict.adoption",
       JSON.parse((response as RefusalWireResult).content[0].text),
     );
-    expect((response as any).isError).toBe(true);
+    expect(asToolResponse(response).isError).toBe(true);
     expect(JSON.stringify(response)).toContain("identity_conflict");
     expect(JSON.stringify(response)).toContain("emulator-5554");
     expect(JSON.stringify(response)).toContain("emulator-5556");
@@ -531,7 +567,7 @@ describe("provisionDevice handler", () => {
       provisionTestArgs("android"),
     );
 
-    expect((response as any).isError).toBe(true);
+    expect(asToolResponse(response).isError).toBe(true);
     expect(JSON.stringify(response)).toContain("identity_conflict");
     expect(JSON.stringify(response)).toContain("emulator-5554");
     expect(JSON.stringify(response)).toContain("emulator-5556");
@@ -547,7 +583,7 @@ describe("provisionDevice handler", () => {
       provisionTestArgs("android"),
     );
 
-    expect((response as any).isError).toBe(true);
+    expect(asToolResponse(response).isError).toBe(true);
     expect(JSON.stringify(response)).toContain("discovery_incomplete");
     expect(JSON.stringify(response)).toContain('\\"retryable\\":true');
     expect(JSON.stringify(response)).not.toContain("identity_conflict");
@@ -555,21 +591,163 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  test("boots a newly created AVD despite an unresolved sibling emulator", async () => {
+    const timer = new FakeTimer();
+    const provisioned = provisionedTestDevice("android", true);
+    exactProvisioner.provision = async () => provisioned;
+    deviceManager.setDeviceImages("android", [provisioned.device]);
+    deviceManager.setBootedDevices("android", [
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({ timer, ensureCtrlProxyReady: async () => {} });
+
+    const payload = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(payload.error).toBeUndefined();
+    expect(payload).toMatchObject({ created: true, lifecycleState: "ready" });
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(true);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("adopts an existing AVD after one bounded wait resolves its sibling identity", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    const target: BootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    deviceManager.setBootedDevices("android", [
+      target,
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    const discover = deviceManager.getBootedDevicesDetailed.bind(deviceManager);
+    deviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      const observation = await discover(platform, options);
+      deviceManager.setBootedDevices("android", [
+        target,
+        { name: "other-avd", platform: "android", deviceId: "emulator-5556" },
+      ]);
+      return observation;
+    };
+    setDeviceToolsDependencies({
+      timer,
+      provisionAndroidIdentityBackoff: fixedBackoff(375),
+      ensureCtrlProxyReady: async () => {},
+    });
+
+    const payload = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(payload.error).toBeUndefined();
+    expect(payload).toMatchObject({ created: false, adopted: true });
+    expect(timer.getSleepHistory()).toEqual([375]);
+    const calls = deviceManager.getBootedDevicesDetailedCalls();
+    expect(calls).toHaveLength(3); // Two identity observations, then the boot service's adoption check.
+    expect(calls.slice(0, 2).every(({ options }) => options.bypassAndroidDeviceListCache)).toBe(
+      true,
+    );
+    expect(calls[1].options.signal).toBe(calls[0].options.signal);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test.each([1_000, 1_001])(
+    "refuses unresolved adoption when the next %sms wait leaves no discovery budget",
+    async (delayMs) => {
+      const timer = new FakeTimer();
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      deviceManager.setBootedDevices("android", [
+        { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+      ]);
+      setDeviceToolsDependencies({ timer, provisionAndroidIdentityBackoff: fixedBackoff(delayMs) });
+
+      const payload = JSON.parse(
+        await provisionResponseText({
+          ...provisionTestArgs("android"),
+          timeoutMs: 1_000,
+        }),
+      );
+
+      expect(payload.error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(payload.error.message).toContain("unresolved: emulator-5556");
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(1);
+      expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+    },
+  );
+
+  test("cancels unresolved identity waiting without another discovery", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    setDeviceToolsDependencies({ timer });
+
+    const pending = ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android"),
+      undefined,
+      controller.signal,
+    );
+    await flushMicrotasks();
+    expect(timer.getPendingSleeps()).toEqual([250]);
+    controller.abort(new Error("caller disconnected during discovery wait"));
+    const payload = JSON.parse(asToolResponse(await pending).content[0].text);
+    expect(payload.error.code).toBe("request_cancelled");
+    timer.advanceTime(250);
+    await flushMicrotasks();
+    expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(1);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("stops identity retries when a repeated Android discovery fails", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    const discover = deviceManager.getBootedDevicesDetailed.bind(deviceManager);
+    deviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      const observation = await discover(platform, options);
+      deviceManager.failedPlatforms.add("android");
+      return observation;
+    };
+    setDeviceToolsDependencies({ timer });
+
+    const payload = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(payload.error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+    expect(payload.error.message).toContain("booted-device discovery did not complete");
+    expect(timer.getSleepHistory()).toEqual([250]);
+    expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(2);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
   test("rejects adoption when a running emulator identity is unresolved", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
     deviceManager.setBootedDevices("android", [
       { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
       { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+      { name: "emulator-5558", platform: "android", deviceId: "emulator-5558" },
     ]);
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
       provisionTestArgs("android"),
     );
 
-    expect((response as any).isError).toBe(true);
+    expect(asToolResponse(response).isError).toBe(true);
     expect(JSON.stringify(response)).toContain("discovery_incomplete");
     expect(JSON.stringify(response)).toContain('\\"retryable\\":true');
     expect(JSON.stringify(response)).toContain("AVD identity has not resolved yet; retry");
+    expect(JSON.stringify(response)).toContain("unresolved: emulator-5556, emulator-5558");
+    expect(timer.getSleepHistory()).toEqual([250, 250, 250]);
+    expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(4);
     expect(JSON.stringify(response)).not.toContain('"success":true');
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
@@ -577,6 +755,8 @@ describe("provisionDevice handler", () => {
 
   test("quarantines a stale pooled identity before rejecting unresolved adoption", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       isolatedPoolDependencies(sessionManager, "daemon-session", {
@@ -604,7 +784,7 @@ describe("provisionDevice handler", () => {
         provisionTestArgs("android"),
       );
 
-      expect((response as any).isError).toBe(true);
+      expect(asToolResponse(response).isError).toBe(true);
       expect(JSON.stringify(response)).toContain("discovery_incomplete");
       expect(JSON.stringify(response)).toContain('\\"retryable\\":true');
       expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
@@ -652,7 +832,7 @@ describe("provisionDevice handler", () => {
     const response = await responsePromise;
     expect(discoverySignal?.aborted).toBe(true);
     expect(requestController.signal.aborted).toBe(false);
-    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(asToolResponse(response).content[0].text)).toMatchObject({
       success: false,
       error: { code: "timeout" },
     });
@@ -748,7 +928,7 @@ describe("provisionDevice handler", () => {
       provisionTestArgs("android"),
     );
 
-    expect((response as any).isError).not.toBe(true);
+    expect(asToolResponse(response).isError).not.toBe(true);
     expect(JSON.stringify(response)).not.toContain("identity_conflict");
   });
 
@@ -768,8 +948,8 @@ describe("provisionDevice handler", () => {
       provisionTestArgs("android"),
     );
 
-    expect((response as any).isError).not.toBe(true);
-    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+    expect(asToolResponse(response).isError).not.toBe(true);
+    expect(JSON.parse(asToolResponse(response).content[0].text)).toMatchObject({
       created: false,
       adopted: true,
       device: {
@@ -794,10 +974,12 @@ describe("provisionDevice handler", () => {
       deviceResourceControllerFactory: () => controller,
       ensureCtrlProxyReady: async () => {},
     });
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android"),
-      resources: { wallpaperRendering: "disabled" },
-    });
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("android"),
+        resources: { wallpaperRendering: "disabled" },
+      }),
+    );
     expect(response.isError).toBe(true);
     expect(JSON.parse(response.content[0].text)).toMatchObject({
       success: false,
@@ -828,13 +1010,15 @@ describe("provisionDevice handler", () => {
         readinessCalls++;
       },
     });
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      {
-        ...provisionTestArgs("android"),
-        resources: { wallpaperRendering: "disabled" },
-      },
-      undefined,
-      abort.signal,
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler(
+        {
+          ...provisionTestArgs("android"),
+          resources: { wallpaperRendering: "disabled" },
+        },
+        undefined,
+        abort.signal,
+      ),
     );
     expect(response.isError).toBe(true);
     expect(readinessCalls).toBe(0);
@@ -870,8 +1054,8 @@ describe("provisionDevice handler", () => {
       resources: { wallpaperRendering: "disabled" },
     });
     expect(readinessBudget).toBeGreaterThan(0);
-    expect((response as any).isError).toBe(true);
-    const payload = JSON.parse((response as any).content[0].text);
+    expect(asToolResponse(response).isError).toBe(true);
+    const payload = JSON.parse(asToolResponse(response).content[0].text);
     expect(Object.hasOwn(payload, "sessionUuid")).toBe(false);
     expect(Object.hasOwn(payload, "sessionId")).toBe(true);
     expect(payload).toMatchObject({
@@ -917,8 +1101,8 @@ describe("provisionDevice handler", () => {
     const lease = await teardown;
     lease?.release();
     expect(readinessCalls).toBe(0);
-    expect((response as any).isError).toBe(true);
-    expect(JSON.parse((response as any).content[0].text).sessionId).toBeUndefined();
+    expect(asToolResponse(response).isError).toBe(true);
+    expect(JSON.parse(asToolResponse(response).content[0].text).sessionId).toBeUndefined();
   });
 
   test("unsupported resources return an explicit error while preserving the provisioned identity", async () => {
@@ -938,8 +1122,8 @@ describe("provisionDevice handler", () => {
       readiness: "none",
       resources: { wallpaperRendering: "disabled" },
     });
-    expect((response as any).isError).toBe(true);
-    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+    expect(asToolResponse(response).isError).toBe(true);
+    expect(JSON.parse(asToolResponse(response).content[0].text)).toMatchObject({
       success: false,
       device: { runtime: expect.objectContaining({ deviceId: "emulator-5554" }) },
       resources: { resources: { wallpaperRendering: { state: "unsupported" } } },
@@ -995,10 +1179,12 @@ describe("provisionDevice handler", () => {
     resourceObserver.result.resources.widgets = { state: "enabled" };
     const harness = setupSimulator(false, resources);
 
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("ios"),
-      resources: { wallpaperRendering: "disabled", widgets: "disabled" },
-    });
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios"),
+        resources: { wallpaperRendering: "disabled", widgets: "disabled" },
+      }),
+    );
 
     expect(response.isError).toBe(true);
     const payload = JSON.parse(response.content[0].text);
@@ -1055,10 +1241,12 @@ describe("provisionDevice handler", () => {
     });
     registerDeviceTools();
 
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("ios"),
-      resources: { wallpaperRendering: "disabled" },
-    });
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios"),
+        resources: { wallpaperRendering: "disabled" },
+      }),
+    );
 
     expect(response.isError).toBe(true);
     const payload = JSON.parse(response.content[0].text);
@@ -1087,7 +1275,9 @@ describe("provisionDevice handler", () => {
       resources: { wallpaperRendering: "disabled" as const },
     };
 
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler(args),
+    );
 
     const payload = JSON.parse(response.content[0].text);
     expect(payload.error.retryable).toBe(true);
@@ -1103,15 +1293,17 @@ describe("provisionDevice handler", () => {
     ["unsupported", { state: "unsupported" }],
   ] as const)(
     "iOS simulator profile (#11028): an observed %s never overrides a state the controller proved",
-    async (_name, observed) => {
+    async (...[_name, observed]) => {
       const resources = new FakeDeviceResourceController();
       resourceObserver.result.resources.wallpaperRendering = observed;
       const harness = setupSimulator(false, resources);
 
-      const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs("ios"),
-        resources: { wallpaperRendering: "disabled" },
-      });
+      const response = toolResponseSchema.parse(
+        await ToolRegistry.getTool("provisionDevice")!.handler({
+          ...provisionTestArgs("ios"),
+          resources: { wallpaperRendering: "disabled" },
+        }),
+      );
 
       expect(response.isError).not.toBe(true);
       expect(JSON.parse(response.content[0].text).sessionId).toEqual(expect.any(String));
@@ -1124,10 +1316,12 @@ describe("provisionDevice handler", () => {
     resourceObserver.result.resources.wallpaperRendering = { state: "disabled" };
     const harness = setupSimulator(false, resources);
 
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("ios"),
-      resources: { wallpaperRendering: "disabled" },
-    });
+    const response = toolResponseSchema.parse(
+      await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios"),
+        resources: { wallpaperRendering: "disabled" },
+      }),
+    );
 
     expect(response.isError).not.toBe(true);
     const payload = JSON.parse(response.content[0].text);
@@ -1268,10 +1462,10 @@ describe("provisionDevice handler", () => {
     ],
   ] as const)(
     "rejects %s through the provisionDevice product handler before provisioning",
-    async (_description, input) => {
+    async (...[_description, input]) => {
       const response = await ToolRegistry.getTool("provisionDevice")!.handler(input);
 
-      expect((response as any).isError).toBe(true);
+      expect(asToolResponse(response).isError).toBe(true);
       expect(exactProvisioner.requests).toHaveLength(0);
     },
   );
@@ -1280,19 +1474,22 @@ describe("provisionDevice handler", () => {
     ["system-images;android-36;google_apis_playstore;x86_64", 2048],
     ["system-images;android-36.1;google_apis_playstore;x86_64", 2048],
     ["system-images;android-36.1;google_apis;x86_64", 1024],
-  ] as const)("accepts supported memory for Android image %s", (runtime, memoryMb) => {
-    expect(
-      provisionDeviceSchema.parse({
-        device: {
-          platform: "android",
-          name: "phone-api-36",
-          spec: {
-            runtime,
-            deviceType: "pixel_9",
-            configuration: { memoryMb },
-          },
+  ] as const)("accepts supported memory for Android image %s", (...[runtime, memoryMb]) => {
+    const parsed = provisionDeviceSchema.parse({
+      device: {
+        platform: "android",
+        name: "phone-api-36",
+        spec: {
+          runtime,
+          deviceType: "pixel_9",
+          configuration: { memoryMb },
         },
-      }).device.spec.configuration?.memoryMb,
+      },
+    });
+    expect(
+      "configuration" in parsed.device.spec
+        ? parsed.device.spec.configuration?.memoryMb
+        : undefined,
     ).toBe(memoryMb);
   });
 
@@ -1323,16 +1520,16 @@ describe("provisionDevice handler", () => {
     };
 
     const first = JSON.parse(
-      (
-        (await tool.handler({
+      asToolResponse(
+        await tool.handler({
           ...args,
           __mcpSessionId: "mcp-session-5434",
           __executionId: "execution-5434",
           __executionStartTime: 0,
-        } as any)) as any
+        }),
       ).content[0].text,
     );
-    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const second = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
 
     expect(exactProvisioner.requests).toHaveLength(2);
     expect(exactProvisioner.requests[0]).toMatchObject({
@@ -1371,7 +1568,7 @@ describe("provisionDevice handler", () => {
   });
 
   test("provisionDevice.device preserves the configured display and capability inventory", async () => {
-    const image = {
+    const image: DeviceInfo = {
       name: "phone-api-36-parity",
       platform: "android" as const,
       isRunning: false,
@@ -1382,8 +1579,10 @@ describe("provisionDevice handler", () => {
       screenHeight: 2400,
       screenDensity: 420,
       capabilityInventory: {
-        schemaVersion: 2,
-        capabilities: [{ id: "test.fake.capability", state: "available" as const }],
+        schemaVersion: 1,
+        capabilities: [
+          { id: "test.fake.capability", source: "platform", state: "available" as const },
+        ],
       },
     };
     deviceManager.setDeviceImages("android", [image]);
@@ -1392,8 +1591,8 @@ describe("provisionDevice handler", () => {
     ]);
     const provisionTool = ToolRegistry.getTool("provisionDevice")!;
     const provisioned = JSON.parse(
-      (
-        (await provisionTool.handler({
+      asToolResponse(
+        await provisionTool.handler({
           device: {
             platform: "android",
             name: image.name,
@@ -1401,11 +1600,11 @@ describe("provisionDevice handler", () => {
           },
           boot: true,
           readiness: "none",
-        })) as any
+        }),
       ).content[0].text,
     );
     const listed = JSON.parse(
-      ((await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" })) as any)
+      asToolResponse(await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" }))
         .content[0].text,
     );
 
@@ -1520,8 +1719,8 @@ describe("provisionDevice handler", () => {
     }
 
     const result = JSON.parse(
-      (
-        (await tool.handler({
+      asToolResponse(
+        await tool.handler({
           device: {
             platform: "android",
             name: "phone-api-36-a",
@@ -1532,7 +1731,7 @@ describe("provisionDevice handler", () => {
           },
           boot: true,
           readiness: "automation",
-        })) as any
+        }),
       ).content[0].text,
     );
 
@@ -1569,11 +1768,11 @@ describe("provisionDevice handler", () => {
       ]);
 
       const response = JSON.parse(
-        (
-          (await ToolRegistry.getTool("provisionDevice")!.handler({
+        asToolResponse(
+          await ToolRegistry.getTool("provisionDevice")!.handler({
             ...provisionTestArgs(platform),
             readiness: "none",
-          })) as any
+          }),
         ).content[0].text,
       );
 
@@ -1587,12 +1786,12 @@ describe("provisionDevice handler", () => {
     "does not expose a session for boot:false %s provisioning",
     async (platform) => {
       const response = JSON.parse(
-        (
-          (await ToolRegistry.getTool("provisionDevice")!.handler({
+        asToolResponse(
+          await ToolRegistry.getTool("provisionDevice")!.handler({
             ...provisionTestArgs(platform),
             boot: false,
             readiness: "none",
-          })) as any
+          }),
         ).content[0].text,
       );
 
@@ -1626,7 +1825,7 @@ describe("provisionDevice handler", () => {
       }
 
       const response = JSON.parse(
-        ((await tool.handler(provisionTestArgs(platform))) as any).content[0].text,
+        asToolResponse(await tool.handler(provisionTestArgs(platform))).content[0].text,
       );
 
       expect(response).toMatchObject({
@@ -1666,7 +1865,7 @@ describe("provisionDevice handler", () => {
       }
 
       const response = JSON.parse(
-        ((await tool.handler(provisionTestArgs(platform))) as any).content[0].text,
+        asToolResponse(await tool.handler(provisionTestArgs(platform))).content[0].text,
       );
 
       expect(response).toMatchObject({
@@ -1713,7 +1912,7 @@ describe("provisionDevice handler", () => {
       }
 
       const response = JSON.parse(
-        ((await tool.handler(provisionTestArgs(platform))) as any).content[0].text,
+        asToolResponse(await tool.handler(provisionTestArgs(platform))).content[0].text,
       );
 
       expect(response).toMatchObject({
@@ -1780,8 +1979,8 @@ describe("provisionDevice handler", () => {
       }
       const args = provisionTestArgs(platform);
 
-      const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-      const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+      const failed = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
+      const retried = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
 
       expect(failed).toMatchObject({
         success: false,
@@ -1850,11 +2049,11 @@ describe("provisionDevice handler", () => {
     releaseFirst.resolve();
     const [firstResponse, secondResponse] = await Promise.all([first, second]);
 
-    expect(JSON.parse((firstResponse as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(asToolResponse(firstResponse).content[0].text)).toMatchObject({
       created: true,
       adopted: false,
     });
-    expect(JSON.parse((secondResponse as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(asToolResponse(secondResponse).content[0].text)).toMatchObject({
       created: false,
       adopted: true,
     });
@@ -1908,8 +2107,8 @@ describe("provisionDevice handler", () => {
     expect(secondSettled).toBe(false);
 
     failFirstReadiness.resolve();
-    const firstResponse = JSON.parse(((await first) as any).content[0].text);
-    const secondResponse = JSON.parse(((await second) as any).content[0].text);
+    const firstResponse = JSON.parse(asToolResponse(await first).content[0].text);
+    const secondResponse = JSON.parse(asToolResponse(await second).content[0].text);
 
     expect(firstResponse).toMatchObject({
       success: false,
@@ -1941,7 +2140,7 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      ((await tool.handler(provisionTestArgs("android"))) as any).content[0].text,
+      asToolResponse(await tool.handler(provisionTestArgs("android"))).content[0].text,
     );
 
     expect(response).toMatchObject({
@@ -1983,7 +2182,7 @@ describe("provisionDevice handler", () => {
                 return { success: true, message: "created", avdName: name };
               },
             },
-            androidConfigReader: { readConfig: async () => undefined },
+            androidConfigReader: { readConfig: async () => null },
             androidConfigWriter: { setMemoryMb: async () => {} },
             iosSimulator: {
               createSimulator: async () => {
@@ -2039,7 +2238,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: {
             setMemoryMb: async () => {
@@ -2095,7 +2294,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: {
             setMemoryMb: async () => {
@@ -2160,7 +2359,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: configWriter,
           iosSimulator: {
@@ -2192,7 +2391,7 @@ describe("provisionDevice handler", () => {
     const responsePromise = ToolRegistry.getTool("provisionDevice")!.handler(args);
     await readStarted.promise;
     timer.advanceTime(1_000);
-    const response = JSON.parse(((await responsePromise) as any).content[0].text);
+    const response = JSON.parse(asToolResponse(await responsePromise).content[0].text);
 
     expect(response).toMatchObject({
       success: false,
@@ -2249,7 +2448,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: configWriter,
           iosSimulator: {
@@ -2302,7 +2501,7 @@ describe("provisionDevice handler", () => {
     expect(responseSettled).toBe(false);
     expect(replacementAcquired).toBe(false);
     releaseWrite.resolve();
-    const response = JSON.parse(((await responsePromise) as any).content[0].text);
+    const response = JSON.parse(asToolResponse(await responsePromise).content[0].text);
     expect(response).toMatchObject({
       success: false,
       error: { code: "timeout" },
@@ -2369,7 +2568,7 @@ describe("provisionDevice handler", () => {
       await Promise.resolve();
     }
     timer.advanceTime(60_000);
-    const response = JSON.parse(((await responsePromise) as any).content[0].text);
+    const response = JSON.parse(asToolResponse(await responsePromise).content[0].text);
 
     expect(response).toMatchObject({
       success: false,
@@ -2554,7 +2753,7 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      ((await tool.handler(provisionTestArgs("android"))) as any).content[0].text,
+      asToolResponse(await tool.handler(provisionTestArgs("android"))).content[0].text,
     );
 
     // Session + pool ownership are already committed by the time the
@@ -2573,7 +2772,10 @@ describe("provisionDevice handler", () => {
         .getExecutedOperations()
         .filter((operation) => operation.startsWith("destroyDevice:")),
     ).toEqual([]);
-    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+    // The configured boot step starts the committed device, so it lists as running.
+    expect(await deviceManager.listDeviceImages("android")).toEqual([
+      { ...created.device, isRunning: true },
+    ]);
   });
 
   test.each(["android", "ios"] as const)(
@@ -2595,12 +2797,12 @@ describe("provisionDevice handler", () => {
       registerDeviceTools();
 
       const response = JSON.parse(
-        (
-          (await ToolRegistry.getTool("provisionDevice")!.handler({
+        asToolResponse(
+          await ToolRegistry.getTool("provisionDevice")!.handler({
             ...provisionTestArgs(platform),
             boot: false,
             readiness: "none",
-          })) as any
+          }),
         ).content[0].text,
       );
 
@@ -2650,7 +2852,7 @@ describe("provisionDevice handler", () => {
     try {
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(responseSettled).toBe(true);
-      expect(JSON.parse(((await request) as any).content[0].text)).toMatchObject({
+      expect(JSON.parse(asToolResponse(await request).content[0].text)).toMatchObject({
         created: true,
         lifecycleState: "created",
       });
@@ -2683,7 +2885,7 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      ((await tool.handler(provisionTestArgs("ios"))) as any).content[0].text,
+      asToolResponse(await tool.handler(provisionTestArgs("ios"))).content[0].text,
     );
 
     // The rollback target is resolved by re-reading the simulator inventory,
@@ -2782,7 +2984,7 @@ describe("provisionDevice handler", () => {
       new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning"),
     );
 
-    const failed = JSON.parse(((await first) as any).content[0].text);
+    const failed = JSON.parse(asToolResponse(await first).content[0].text);
     expect(failed).toMatchObject({
       success: false,
       error: {
@@ -2809,7 +3011,7 @@ describe("provisionDevice handler", () => {
 
     // #11065: the retry is a fresh provision that adopts the AVD the
     // interrupted request created, instead of creating another.
-    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const retried = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
     expect(retried).toMatchObject({
       created: false,
       adopted: true,
@@ -2852,7 +3054,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: configWriter,
           iosSimulator: {
@@ -2890,7 +3092,7 @@ describe("provisionDevice handler", () => {
     requestController.abort(
       new DaemonHandoffInterruptionError("daemon shutdown interrupted provisioning"),
     );
-    const response = JSON.parse(((await responsePromise) as any).content[0].text);
+    const response = JSON.parse(asToolResponse(await responsePromise).content[0].text);
     expect(response).toMatchObject({
       success: false,
       error: {
@@ -2971,8 +3173,8 @@ describe("provisionDevice handler", () => {
     }
     const args = provisionTestArgs("android");
 
-    const initial = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const initial = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
+    const retried = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
 
     expect(initial).toMatchObject({
       success: false,
@@ -3023,9 +3225,9 @@ describe("provisionDevice handler", () => {
     }
     const args = provisionTestArgs("android");
 
-    const initial = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const initial = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
     deviceManager.setDeviceImages("android", [replacement.device]);
-    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const retried = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
 
     expect(initial).toMatchObject({
       success: false,
@@ -3075,8 +3277,8 @@ describe("provisionDevice handler", () => {
     }
 
     const result = JSON.parse(
-      (
-        (await tool.handler({
+      asToolResponse(
+        await tool.handler({
           device: {
             platform: "android",
             name: "phone-api-36-a",
@@ -3087,7 +3289,7 @@ describe("provisionDevice handler", () => {
           },
           boot: true,
           readiness: "none",
-        })) as any
+        }),
       ).content[0].text,
     );
 
@@ -3138,6 +3340,10 @@ describe("provisionDevice handler", () => {
             deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
           },
           resolvedSpec: {
+            displayCutout: classifyDisplayCutout(
+              "ios",
+              "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            ),
             runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
             deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
           },
@@ -3154,8 +3360,8 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      (
-        (await tool.handler({
+      asToolResponse(
+        await tool.handler({
           device: {
             platform: "ios",
             name: "phone-api-36-a",
@@ -3167,7 +3373,7 @@ describe("provisionDevice handler", () => {
           },
           boot: true,
           readiness: "none",
-        })) as any
+        }),
       ).content[0].text,
     );
 
@@ -3226,7 +3432,7 @@ describe("provisionDevice handler", () => {
       await Promise.resolve();
     }
     timer.advanceTime(60_001);
-    const response = JSON.parse(((await pending) as any).content[0].text);
+    const response = JSON.parse(asToolResponse(await pending).content[0].text);
     blocker.release();
 
     expect(response).toMatchObject({
@@ -3243,8 +3449,8 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      (
-        (await tool.handler({
+      asToolResponse(
+        await tool.handler({
           device: {
             platform: "ios",
             name: "iPhone 17",
@@ -3255,7 +3461,7 @@ describe("provisionDevice handler", () => {
           },
           boot: false,
           readiness: "none",
-        })) as any
+        }),
       ).content[0].text,
     );
 
@@ -3286,10 +3492,8 @@ describe("provisionDevice handler", () => {
     deviceManager.setAndroidDiscoveryIncomplete("adb devices failed during boot discovery");
 
     const response = JSON.parse(
-      (
-        (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android"),
-        )) as any
+      asToolResponse(
+        await ToolRegistry.getTool("provisionDevice")!.handler(provisionTestArgs("android")),
       ).content[0].text,
     );
 
@@ -3317,10 +3521,8 @@ describe("provisionDevice handler", () => {
     };
 
     const response = JSON.parse(
-      (
-        (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android"),
-        )) as any
+      asToolResponse(
+        await ToolRegistry.getTool("provisionDevice")!.handler(provisionTestArgs("android")),
       ).content[0].text,
     );
 
@@ -3348,10 +3550,8 @@ describe("provisionDevice handler", () => {
       throw new Error("platform delete failed");
     };
     const response = JSON.parse(
-      (
-        (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android"),
-        )) as any
+      asToolResponse(
+        await ToolRegistry.getTool("provisionDevice")!.handler(provisionTestArgs("android")),
       ).content[0].text,
     );
 
@@ -3470,8 +3670,8 @@ describe("provisionDevice handler", () => {
       ).toEqual([]);
 
       releaseReadiness();
-      const provisionResult = await provision;
-      const teardownResult = await teardown;
+      const provisionResult = toolResponseSchema.parse(await provision);
+      const teardownResult = toolResponseSchema.parse(await teardown);
       expect(deviceManager.getExecutedOperations()).toContainEqual(
         expect.stringContaining("getBootedDevices:ios"),
       );
@@ -3479,7 +3679,9 @@ describe("provisionDevice handler", () => {
       // simulator it created; the racing teardown then finds it already gone.
       expect(provisionResult.isError).toBe(true);
       expect(deviceManager.getExecutedOperations()).toContain("destroyDevice:ios:created-udid");
-      expect(teardownResult.structuredContent).toMatchObject({ state: "already_absent" });
+      expect(teardownResult.structuredContent).toMatchObject({
+        state: "already_absent",
+      });
     } finally {
       iosCtrlProxyManager.mockRestore();
     }
@@ -3527,8 +3729,8 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
     const response = JSON.parse(
-      (
-        (await tool.handler({
+      asToolResponse(
+        await tool.handler({
           device: {
             platform: "android",
             name: "phone-api-36-a",
@@ -3539,7 +3741,7 @@ describe("provisionDevice handler", () => {
           },
           boot: true,
           readiness: "none",
-        })) as any
+        }),
       ).content[0].text,
     );
 
@@ -3590,8 +3792,8 @@ describe("provisionDevice handler", () => {
         throw new Error("provisionDevice not registered");
       }
       const response = JSON.parse(
-        (
-          (await tool.handler({
+        asToolResponse(
+          await tool.handler({
             device: {
               platform: "android",
               name: "phone-api-36-a",
@@ -3602,7 +3804,7 @@ describe("provisionDevice handler", () => {
             },
             boot: true,
             readiness: "none",
-          })) as any
+          }),
         ).content[0].text,
       );
       const sessionId = response.sessionId as string;
@@ -3721,8 +3923,8 @@ describe("provisionDevice handler", () => {
       readiness: "automation" as const,
     };
 
-    const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const failed = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
+    const retried = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
 
     expect(failed).toMatchObject({
       success: false,
@@ -3785,7 +3987,7 @@ describe("provisionDevice handler", () => {
     // no client owns.
     expect(provisionSignal?.aborted).toBe(true);
     expect(observedAbort).toBe(true);
-    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(asToolResponse(response).content[0].text)).toMatchObject({
       success: false,
       error: { code: "request_cancelled" },
       recovery: {
@@ -3852,6 +4054,7 @@ describe("provisionDevice handler", () => {
     const reserved: string[] = [];
     const released: string[] = [];
     const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: (...args) => inner.isReserved(...args),
       reserve: async (identity, options) => {
         const lease = await inner.reserve(identity, options);
         const key = JSON.stringify(lease.identity);
@@ -3877,14 +4080,7 @@ describe("provisionDevice handler", () => {
     // Registering the exit listener throws, so the unowned cold-boot
     // settlement promise REJECTS. A lease release deferred onto it with a bare
     // `.then()` would never run.
-    deviceManager.setMockChildProcess(provisioned.device.name, {
-      exitCode: null,
-      signalCode: null,
-      once: () => {
-        throw new Error("exit listener registration failed");
-      },
-      kill: () => true,
-    } as any);
+    deviceManager.setMockChildProcess(provisioned.device.name, new ThrowingOnceProcess());
     setDeviceToolsDependencies({
       timer,
       lifecycleCoordinator,
@@ -3959,7 +4155,7 @@ describe("provisionDevice handler", () => {
     expect(provisionCalls).toBe(1);
 
     timer.advanceTime(5_000);
-    const cancelled = JSON.parse(((await call) as any).content[0].text);
+    const cancelled = JSON.parse(asToolResponse(await call).content[0].text);
     expect(cancelled).toMatchObject({
       error: { code: "request_cancelled" },
       recovery: {
@@ -3975,7 +4171,7 @@ describe("provisionDevice handler", () => {
     for (let drain = 0; drain < 25; drain++) {
       await Promise.resolve();
     }
-    const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const retried = JSON.parse(asToolResponse(await tool.handler(args)).content[0].text);
     expect(retried.error?.code).not.toBe("request_cancelled");
     expect(retried.error).toBeUndefined();
     expect(retried).toMatchObject({ created: true });
@@ -4054,7 +4250,7 @@ describe("provisionDevice handler", () => {
         ...provisionTestArgs(platform),
         timeoutMs: 180_000,
       });
-      const payload = JSON.parse((response as any).content[0].text);
+      const payload = JSON.parse(asToolResponse(response).content[0].text);
       expect(payload.error.code).toBe("timeout");
       expect(payload.error.message).toContain("provisionDevice timeout exhausted");
       expect(payload.error.message).toContain("waiting for device boot readiness");
@@ -4106,7 +4302,7 @@ describe("provisionDevice handler", () => {
           ...provisionTestArgs("android"),
           timeoutMs: 1_000,
         });
-        const payload = JSON.parse((response as any).content[0].text);
+        const payload = JSON.parse(asToolResponse(response).content[0].text);
         expect(releaseRequested).toBe(true);
         if (failReadiness) {
           expect(payload.error.message).toContain("original readiness failure");
@@ -4151,7 +4347,7 @@ describe("provisionDevice handler", () => {
       ...provisionTestArgs("android"),
       timeoutMs: 1_000,
     });
-    const payload = JSON.parse((response as any).content[0].text);
+    const payload = JSON.parse(asToolResponse(response).content[0].text);
     expect(payload.error.code).toBe("timeout");
     expect(payload.error.message).toContain("binding the device session");
     expect(sessionManager.getAllSessionIds()).toEqual([]);
@@ -4203,7 +4399,7 @@ describe("provisionDevice handler", () => {
     expect(provisionSignal).toBeInstanceOf(AbortSignal);
     timer.advanceTime(1_000);
 
-    expect(JSON.parse(((await response) as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(asToolResponse(await response).content[0].text)).toMatchObject({
       success: false,
       error: {
         code: "timeout",
@@ -4229,7 +4425,7 @@ describe("provisionDevice handler", () => {
     ["__mcpLiveDeadlineKey", "live-deadline-1"],
   ] as const)(
     "strips the internal %s param before re-parsing against the strict schema",
-    async (param, value) => {
+    async (...[param, value]) => {
       const tool = ToolRegistry.getTool("provisionDevice");
       if (!tool) {
         throw new Error("provisionDevice not registered");
@@ -4240,10 +4436,10 @@ describe("provisionDevice handler", () => {
         boot: false,
         readiness: "none",
         [param]: value,
-      } as any);
+      });
 
-      expect((response as any).isError).toBeUndefined();
-      expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      expect(asToolResponse(response).isError).toBeUndefined();
+      expect(JSON.parse(asToolResponse(response).content[0].text)).toMatchObject({
         lifecycleState: "created",
       });
     },
@@ -4260,10 +4456,10 @@ describe("provisionDevice handler", () => {
       boot: false,
       readiness: "none",
       totallyUnknownKey: "nope",
-    } as any);
+    });
 
-    expect((response as any).isError).toBe(true);
-    const payload = JSON.parse((response as any).content[0].text);
+    expect(asToolResponse(response).isError).toBe(true);
+    const payload = JSON.parse(asToolResponse(response).content[0].text);
     expect(payload.error.code).toBe("invalid_arguments");
     expect(payload.error.message).toContain("provisionDevice");
   });
@@ -4313,7 +4509,7 @@ describe("provisionDevice handler", () => {
       ...provisionTestArgs("android"),
       timeoutMs: 60_000,
     });
-    expect((response as any).isError).toBe(true);
+    expect(asToolResponse(response).isError).toBe(true);
 
     let leaseGranted = false;
     const contender = coordinator
@@ -4354,7 +4550,7 @@ describe("provisionDevice handler", () => {
       });
       const provisioned = provisionedTestDevice("android", kind === "created-deadline");
       deviceManager.setDeviceImages("android", [provisioned.device]);
-      deviceManager.setMockChildProcess(provisioned.device.name, child as unknown as ChildProcess);
+      deviceManager.setMockChildProcess(provisioned.device.name, child);
       exactProvisioner.provision = async () => provisioned;
       setDeviceToolsDependencies({
         timer,
@@ -4404,7 +4600,7 @@ describe("provisionDevice handler", () => {
       timeoutMs: 60_000,
     });
 
-    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(asToolResponse(response).content[0].text)).toMatchObject({
       error: { code: "timeout", retryable: true },
     });
   });
@@ -4461,7 +4657,7 @@ describe("provisionDevice handler", () => {
       exactProvisioner.provision = async () => provisionedTestDevice("android", false);
       const service = new RunnerReadinessService({
         timer,
-        getAndroidManager: () => ({
+        getAndroidManager: (): ReadinessAndroidManager => ({
           isInstalled: async () => {
             throw failure;
           },
@@ -4469,6 +4665,7 @@ describe("provisionDevice handler", () => {
           isVersionCompatible: async () => true,
           enable: async () => {},
           resetSetupState: () => {},
+          reopenSetupGate: () => {},
           setup: async () => ({ success: true, message: "ready" }),
           ensureCompatibleVersion: async () => ({ status: "compatible" }),
         }),
@@ -4557,7 +4754,7 @@ describe("provisionDevice handler", () => {
     ],
   ] as const)(
     "a typed acquisition refusal %# is a retryable %s failure with its hints",
-    async (refusal, code, extra) => {
+    async (...[refusal, code, extra]) => {
       deviceManager.setBootedDevices("android", [
         { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
       ]);
@@ -4579,7 +4776,8 @@ describe("provisionDevice handler", () => {
   test.each([
     [new DeviceTransportOfflineError("emulator-5554", "offline"), "device_offline", true],
     [new ActionableError("device unavailable"), "platform_command_failed", false],
-  ] as const)("bind refusal %# maps to %s with retryable=%s", async (refusal, code, retryable) => {
+  ] as const)("bind refusal %# maps to %s with retryable=%s", async (...row) => {
+    const [refusal, code, retryable] = row;
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -4682,10 +4880,172 @@ describe("provisionDevice handler", () => {
       provisionTestArgs("android"),
     );
 
-    expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+    expect(JSON.parse(asToolResponse(response).content[0].text)).toMatchObject({
       success: false,
       error: { code: "identity_conflict", retryable: false },
     });
+  });
+
+  test("public provisionDevice schema does not expose binding rollback control", () => {
+    expect(
+      provisionDeviceSchema.safeParse({
+        ...provisionTestArgs("ios"),
+        rollbackOnRetryableReadiness: false,
+      }).success,
+    ).toBe(false);
+  });
+
+  test.each([
+    { context: true, optOut: false, retryable: true, deadline: true, retained: false },
+    { context: true, optOut: true, retryable: true, deadline: true, retained: true },
+    { context: true, optOut: true, retryable: false, deadline: true, retained: false },
+    { context: true, optOut: true, retryable: true, deadline: false, retained: false },
+    { context: false, optOut: true, retryable: true, deadline: true, retained: false },
+  ])(
+    "iOS readiness rollback policy: %j",
+    async ({ context, optOut, retryable, deadline, retained }) => {
+      const created = provisionedTestDevice("ios", true);
+      configureProvisionBootAndTeardown(deviceManager, "ios");
+      exactProvisioner.provision = async (request) => {
+        request.onBeforeCreate?.();
+        deviceManager.setDeviceImages("ios", [created.device]);
+        return created;
+      };
+      setDeviceToolsDependencies({
+        exactDeviceProvisionerFactory: () => exactProvisioner,
+        ensureCtrlProxyReady: async () => {
+          if (!retryable) {
+            throw new ProvisionDeviceError("timeout", "terminal readiness timeout", false);
+          }
+          throw new RunnerReadinessError("readiness deadline", false, deadline, "runner-connect");
+        },
+        idGenerator: new FakeIdGenerator(["readiness-policy"]),
+      });
+      registerDeviceTools();
+      const invoke = () =>
+        provisionResponseText({
+          ...provisionTestArgs("ios"),
+          ...(optOut ? { rollbackOnRetryableReadiness: false } : {}),
+        });
+      const response = JSON.parse(
+        await (context
+          ? runAsBindingReconciler({ scopeKey: "test-binding", bindingIndex: 0 }, invoke)
+          : invoke()),
+      );
+      expect(response).toMatchObject({
+        success: false,
+        error: {
+          code: deadline ? "timeout" : "platform_command_failed",
+          retryable: retryable && deadline,
+        },
+        lifecycle: {
+          state: retained ? "created_not_ready" : "removed",
+          device: { platform: "ios", stableId: "SIM-123" },
+        },
+      });
+      expect((await deviceManager.listDeviceImages("ios")).length).toBe(retained ? 1 : 0);
+      expect((await deviceManager.getBootedDevices("ios")).length).toBe(retained ? 1 : 0);
+      expect(
+        deviceManager
+          .getExecutedOperations()
+          .some((operation) => operation.startsWith("destroyDevice:")),
+      ).toBe(!retained);
+    },
+  );
+
+  test("binding readiness retry preserves and reuses the real provision handler's simulator", async () => {
+    const timer = new FakeTimer();
+    const registry = new FakeBindingRegistry(timer);
+    const inventory = new FakeInventory();
+    const deleter = new FakeDeleter(inventory);
+    const scope = await registry.ensureScope({
+      managedHostScope: "fake-host",
+      runnerNamespace: "retry",
+      runnerIncarnation: "one",
+    });
+    if (scope.kind !== "ready") {
+      throw new Error("scope setup failed");
+    }
+    const key = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
+    configureProvisionBootAndTeardown(deviceManager, "ios");
+    let creates = 0;
+    let readinessCalls = 0;
+    exactProvisioner.provision = async (request) => {
+      const existing = inventory.devices.find((device) => device.name === request.name);
+      const device = existing ?? {
+        ...provisionedTestDevice("ios", true).device,
+        name: request.name,
+      };
+      if (!existing) {
+        request.onBeforeCreate?.();
+        creates++;
+        inventory.devices.push(device);
+        deviceManager.setDeviceImages("ios", [device]);
+        deviceManager.setMockChildProcess(
+          device.name,
+          new ProvisionBootProcess(() => deviceManager.setBootedDevices("ios", [])),
+        );
+      }
+      return { ...provisionedTestDevice("ios", !existing), device };
+    };
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      exactDeviceProvisionerFactory: () => exactProvisioner,
+      ensureCtrlProxyReady: async () => {
+        if (++readinessCalls === 1) {
+          throw new RunnerReadinessError("readiness deadline", false, true, "runner-connect");
+        }
+      },
+    });
+    const provisioner = new ToolBindingProvisioner({
+      invokeTool: async (name, args, signal) =>
+        await ToolRegistry.getTool(name)!.handler(args, undefined, signal),
+      deviceManager,
+      androidConfigReader: { readConfig: async () => null },
+      timer,
+      releaseSession: async () => {},
+    });
+    const reconciler = new BindingReconciler({
+      registry,
+      inventory,
+      matcher: new FakeMatcher(),
+      resolver: new DefaultManagedSpecResolver(),
+      provisioner,
+      deleter,
+      claims: new FakeClaims(),
+      timer,
+      idGenerator: new FakeIdGenerator(),
+    });
+    const request = {
+      key,
+      role: "app",
+      platform: "ios" as const,
+      requestedSpec: provisionTestArgs("ios").device.spec,
+      deadlineMs: 60_000,
+    };
+    expect(await runAsBindingReconciler(key, () => reconciler.reconcile(request))).toMatchObject({
+      outcome: "failed",
+      failure: { retryable: true, provision: { code: "timeout" } },
+    });
+    expect(await registry.listOpenBindingJournal(key)).toMatchObject([
+      { phase: "created", target: { newStableId: "SIM-123" } },
+    ]);
+    expect(await deviceManager.getBootedDevices("ios")).toHaveLength(1);
+    expect(
+      deviceManager
+        .getExecutedOperations()
+        .some((operation) => operation.startsWith("destroyDevice:")),
+    ).toBe(false);
+    expect(await runAsBindingReconciler(key, () => reconciler.reconcile(request))).toMatchObject({
+      outcome: "ready",
+      disposition: "reused",
+      assignment: { stableDeviceId: "SIM-123", state: "ready" },
+    });
+    expect(creates).toBe(1);
+    expect(readinessCalls).toBe(2);
+    expect(await registry.listOpenBindingJournal(key)).toEqual([]);
+    expect(deleter.calls).toEqual([]);
   });
 
   test("keeps a timeout retryable after successful rollback", async () => {
@@ -4698,10 +5058,8 @@ describe("provisionDevice handler", () => {
     };
 
     const response = JSON.parse(
-      (
-        (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android"),
-        )) as any
+      asToolResponse(
+        await ToolRegistry.getTool("provisionDevice")!.handler(provisionTestArgs("android")),
       ).content[0].text,
     );
 
@@ -4733,7 +5091,7 @@ describe("provisionDevice handler", () => {
     const args = provisionTestArgs("android");
 
     const first = JSON.parse(
-      ((await ToolRegistry.getTool("provisionDevice")!.handler(args)) as any).content[0].text,
+      asToolResponse(await ToolRegistry.getTool("provisionDevice")!.handler(args)).content[0].text,
     );
     const lifecycle = {
       state: "removed",
@@ -4760,7 +5118,9 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionCalls).toBe(1);
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
-    const followUp = DeviceSessionManager.createInstance({} as any);
+    const followUp = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), deviceManager),
+    );
     await expect(followUp.ensureDeviceReady("android", "emulator-5554")).rejects.toMatchObject({
       code: "device_lost",
       deviceId: "emulator-5554",
@@ -4788,10 +5148,8 @@ describe("provisionDevice handler", () => {
     };
 
     const response = JSON.parse(
-      (
-        (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android"),
-        )) as any
+      asToolResponse(
+        await ToolRegistry.getTool("provisionDevice")!.handler(provisionTestArgs("android")),
       ).content[0].text,
     );
 
@@ -4854,7 +5212,7 @@ describe("provisionDevice handler", () => {
       timeoutMs: 60_000,
     });
 
-    const payload = JSON.parse((response as any).content[0].text);
+    const payload = JSON.parse(asToolResponse(response).content[0].text);
     // Either boot stayed inside its share and readiness kept a usable budget, or
     // boot overran its share and the request failed as a timeout. What must not
     // happen is readiness running with a starved budget.
@@ -4908,11 +5266,11 @@ describe("provisionDevice handler", () => {
       const args = { ...provisionTestArgs("android"), timeoutMs: 60_000 };
 
       const first = JSON.parse(
-        ((await tool.handler({ ...args, __mcpSessionId: "client-a" })) as any).content[0].text,
+        asToolResponse(await tool.handler({ ...args, __mcpSessionId: "client-a" })).content[0].text,
       );
       const firstSessionId: string = first.sessionId;
       const second = JSON.parse(
-        ((await tool.handler({ ...args, __mcpSessionId: "client-b" })) as any).content[0].text,
+        asToolResponse(await tool.handler({ ...args, __mcpSessionId: "client-b" })).content[0].text,
       );
 
       expect(first.lifecycleState).toBe("ready");
@@ -4989,7 +5347,7 @@ describe("provisionDevice handler", () => {
         readinessCalls: 0,
         resourceRequests: 0,
       });
-      expect((response as any).isError).toBe(true);
+      expect(asToolResponse(response).isError).toBe(true);
     } finally {
       sessionManager.stopCleanupTimer();
       if (originalAutolock === undefined) {
@@ -5054,6 +5412,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       timer,
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async () => ({
           signal: new AbortController().signal,
           identity: { kind: "stable", platform: "android", stableId: booted.name },
@@ -5081,7 +5440,7 @@ describe("provisionDevice handler", () => {
 
       await timer.advanceTimeAsync(500);
       const response = await request;
-      expect((response as any).isError).toBe(true);
+      expect(asToolResponse(response).isError).toBe(true);
       await releaseStarted.promise;
       expect(readinessReleases).toBe(0);
       expect(lifecycleReleases).toBe(0);
@@ -5159,6 +5518,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       timer,
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async () => ({
           signal: new AbortController().signal,
           identity: { kind: "stable", platform: "android", stableId: booted.name },
@@ -5186,7 +5546,7 @@ describe("provisionDevice handler", () => {
 
       await timer.advanceTimeAsync(500);
       const response = await request;
-      expect((response as any).isError).toBe(true);
+      expect(asToolResponse(response).isError).toBe(true);
       expect(readinessReleases).toBe(0);
       expect(lifecycleReleases).toBe(0);
 
@@ -5243,9 +5603,8 @@ describe("provisionDevice handler", () => {
     };
     deviceManager.setBootedDevices("android", [booted]);
     deviceManager.setDeviceImages("android", [avdInfo]);
-    await pool.initializeWithDevices([booted]);
     // `trackStableName` only fires for an emulator whose pooled AVD name matches.
-    (pool as any).devices.get("emulator-5554").avdName = "phone-api-36-a";
+    await pool.addDevice(booted, avdInfo);
     DaemonState.getInstance().initialize(sessionManager, pool);
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
     setDeviceToolsDependencies({
@@ -5262,8 +5621,8 @@ describe("provisionDevice handler", () => {
       timeoutMs: 60_000,
     });
 
-    expect((response as any).isError).toBeFalsy();
-    const payload = JSON.parse((response as any).content[0].text);
+    expect(asToolResponse(response).isError).toBeFalsy();
+    const payload = JSON.parse(asToolResponse(response).content[0].text);
     expect(payload.error).toBeUndefined();
     expect(payload).toMatchObject({
       lifecycleState: "ready",

@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import org.jetbrains.skia.Image
@@ -158,10 +159,11 @@ class NavigationScreenshotLoader(
 
       bitmap
     } catch (e: McpConnectionException) {
-      // MCP not available
+      LoggerFactory.getLogger("NavigationScreenshotLoader")
+        .warn("Screenshot resource unavailable: $uri", e)
       null
-    } catch (e: Exception) {
-      // Decoding or other error
+    } catch (e: IllegalArgumentException) {
+      LoggerFactory.getLogger("NavigationScreenshotLoader").warn("Invalid screenshot data: $uri", e)
       null
     }
   }

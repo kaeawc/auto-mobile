@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
-# shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+# shellcheck source=scripts/lib/file-selection.sh
 source "$ROOT/scripts/lib/file-selection.sh"
 
 base_ref="${AUTOMOBILE_INTEGRATION_TEST_BASE_REF:-origin/main}"

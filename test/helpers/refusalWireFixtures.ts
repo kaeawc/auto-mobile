@@ -1,15 +1,21 @@
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
-import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
+import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { SessionConfigError } from "../../src/devices/sessionConfig";
+import { AndroidIdentityUnresolvedError } from "../../src/devices/AndroidIdentityUnresolvedError";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
+import { SdkCapabilityQueryError } from "../../src/features/observe/ios/SdkCapabilityQueryError";
 import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
 import {
   deviceSessionErrorFields,
@@ -32,7 +38,7 @@ import {
   SessionCreationTimeoutError,
   RetryableDeviceAcquisitionError,
   SessionReleasedDuringCreationError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { unsupportedIosButtonResult } from "../../src/features/action/PressButton";
@@ -42,24 +48,17 @@ import {
   McpTimeoutError,
   McpOverloadError,
 } from "../../src/daemon/McpTimeoutError";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
 import {
-  DaemonRestartDeferredError,
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
-} from "../../src/daemon/daemonRestartAdmission";
+} from "../../src/daemon/daemonRestartPending";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  daemonResponseError,
-  DaemonHandshakeMismatchError,
-  DaemonBoundSessionLostError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  DaemonRequestNotDeliveredError,
-} from "../../src/daemon/client";
+import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
-import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
@@ -115,20 +114,23 @@ import {
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
-import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+} from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import { PlanExecutionInProgressError } from "../../src/daemon/planExecutionInProgressRefusal";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import {
   createToolErrorResponse,
   PooledAvdIdentityError,
   ProvisionDeviceRollbackError,
 } from "../../src/server/deviceTools";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import {
+  noActiveDeviceSessionPayload,
+  sessionOwnershipLostPayload,
+} from "../../src/daemon/deviceSessionResult";
 import {
   mcpOverloadResult,
   noActiveDeviceSessionResult,
-  noActiveDeviceSessionPayload,
   deviceControlTransportFailureResult,
   ambiguousSessionSelectorResult,
 } from "../../src/server/proxyServer";
@@ -138,8 +140,8 @@ import {
 } from "../../src/devices/exactDeviceProvisioning";
 import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { deviceLossOutcomeFromError } from "../../src/server/deviceLossOutcome";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { deviceLossOutcomeFromError } from "../../src/utils/deviceLossOutcome";
 import { logger } from "../../src/utils/logger";
 
 /** How a runner reacts to a refusal; the vocabulary of `expectations.json`. */
@@ -226,16 +228,31 @@ function shaped(error: unknown): RefusalWireResult {
   }
 }
 
-/** The error the boot admission gate throws for an Android boot refused at capacity. */
-function bootCapacityRefusal(platform: "android" | "ios" = "android"): unknown {
+/** The error the boot admission gate throws for a boot refused at capacity. */
+function bootCapacityRefusal(platform: "android" | "ios" = "android", heldOnly = false): unknown {
   const ios = platform === "ios";
-  const decision = atCapacityDecision(2, { maxBooted: 2, source: "default" }, 5_000, {
+  const decision = atCapacityDecision(2, { maxBooted: 2, source: "derived" }, 5_000, {
     noun: ios ? "simulator" : "emulator",
     envName: ios ? IOS_SIM_MAX_BOOTED_ENV : "AUTO_MOBILE_MAX_BOOTED",
-    externalDevices: [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    externalDevices: heldOnly
+      ? []
+      : [ios ? "9A1B2C3D-0000-4000-8000-000000000001" : "emulator-5560"],
+    ...(ios
+      ? {
+          heldDevices: heldOnly
+            ? ["9A1B2C3D-0000-4000-8000-000000000001", "9A1B2C3D-0000-4000-8000-000000000002"]
+            : ["9A1B2C3D-0000-4000-8000-000000000002"],
+        }
+      : {}),
   });
   try {
-    assertBootCapacityGranted({ decision: decision! }, platform, ios ? "simulator" : "emulator");
+    if (!decision) {
+      throw new Error("expected a refusal at capacity");
+    }
+    // The captured wire contract predates the source label's rename to "derived".
+    // Preserve that historical message while constructing a valid current capacity decision.
+    decision.message = decision.message.replace("(derived)", "(default)");
+    assertBootCapacityGranted({ decision }, platform, ios ? "simulator" : "emulator");
   } catch (error) {
     return error;
   }
@@ -257,9 +274,12 @@ function provisionEnvelope(failure: ProvisionDeviceError): RefusalWireResult {
   driven(failure);
   // The provisionDevice failure envelope (`provisionDeviceErrorResponse` in
   // deviceToolsProvisioning) around the real ProvisionDeviceError.
-  return createToolErrorResponse(failure.code, failure.message, {
-    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
-  });
+  return {
+    ...createToolErrorResponse(failure.code, failure.message, {
+      error: { code: failure.code, message: failure.message, retryable: failure.retryable },
+    }),
+    isError: true,
+  };
 }
 
 type FixtureEntry = readonly [string, string, () => RefusalWireResult];
@@ -368,6 +388,17 @@ const BUILDERS: readonly FixtureEntry[] = [
       ),
   ],
   [
+    "device_transport_unavailable",
+    "AdbDeviceTransportUnavailableError via shapeToolCallError",
+    () =>
+      shaped(
+        new AdbDeviceTransportUnavailableError(
+          DEVICE,
+          new Error(`adb: device '${DEVICE}' not found`),
+        ),
+      ),
+  ],
+  [
     "session_released_during_creation",
     "SessionReleasedDuringCreationError via shapeToolCallError",
     () => shaped(new SessionReleasedDuringCreationError(SESSION)),
@@ -376,6 +407,38 @@ const BUILDERS: readonly FixtureEntry[] = [
     "timeout.iosHomeLaunch",
     "IosHomeLaunchTimeoutError via shapeToolCallError",
     () => shaped(new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget")),
+  ],
+  [
+    "cancelled.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled")),
+  ],
+  [
+    "timeout.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () => shaped(new SdkCapabilityQueryError("timeout", "SDK capability query timed out")),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "not_connected",
+          "SDK capability query not connected to CtrlProxy",
+        ),
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    "SdkCapabilityQueryError via shapeToolCallError",
+    () =>
+      shaped(
+        new SdkCapabilityQueryError(
+          "sdk_capability_query_failed",
+          "SDK capability query failed: invalid capability reply",
+        ),
+      ),
   ],
   [
     "provision_device.platform_command_failed.create_rejected",
@@ -498,6 +561,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(bootCapacityRefusal("ios")),
   ],
   [
+    "capacity_exhausted.ios.held_only",
+    "assertBootCapacityGranted via shapeToolCallError",
+    () => shaped(bootCapacityRefusal("ios", true)),
+  ],
+  [
     "discovery_incomplete.ios",
     "ProvisionDeviceError via createToolErrorResponse",
     () => provisionFailure(iosInventoryIncomplete()),
@@ -597,8 +665,6 @@ const BUILDERS: readonly FixtureEntry[] = [
           holder: "session_broker",
           scopeKey: "0123abcd",
           bindingIndex: 0,
-          scopeState: "valid",
-          execSessionUuid: null,
         }),
       ),
   ],
@@ -884,6 +950,30 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     "timeout.iosHomeLaunch",
     () => new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget"),
   ],
+  [
+    "cancelled.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled"),
+  ],
+  [
+    "timeout.sdkCapabilityQuery",
+    () => new SdkCapabilityQueryError("timeout", "SDK capability query timed out"),
+  ],
+  [
+    "not_connected.sdkCapabilityQuery",
+    () =>
+      new SdkCapabilityQueryError(
+        "not_connected",
+        "SDK capability query not connected to CtrlProxy",
+      ),
+  ],
+  [
+    "sdk_capability_query_failed",
+    () =>
+      new SdkCapabilityQueryError(
+        "sdk_capability_query_failed",
+        "SDK capability query failed: invalid capability reply",
+      ),
+  ],
   ["timeout.boot", () => new DeviceBootTimeoutError("boot", "readiness", 1_000, 1_000, DEVICE)],
   [
     "daemon_handoff_interrupted",
@@ -925,6 +1015,7 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     () => new BindingOwnershipLostError(SESSION),
   ],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
+  ["capacity_exhausted.ios.held_only", () => bootCapacityRefusal("ios", true) as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
   [
     "device_outside_broker_grant",
@@ -1093,6 +1184,10 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "daemon_restart_deferred",
   "viewer_read_only",
   "target_identity_unresolved",
+  "cancelled",
+  "timeout",
+  "not_connected",
+  "sdk_capability_query_failed",
 ];
 
 /** Every exported Error in the coded-refusal modules is covered or has an honest, reviewable gap. */
@@ -1100,6 +1195,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   Error["constructor"],
   string
 >([
+  [
+    AndroidIdentityUnresolvedError,
+    "shared base for the AVD and device identity refusals; it is only ever constructed through those two subclasses, which both have fixtures.",
+  ],
   [
     UnknownToolError,
     "daemon socket frame code (`daemon_unknown_tool`) only; clients still get the unchanged `Unknown tool:` text, not a typed refusal body.",

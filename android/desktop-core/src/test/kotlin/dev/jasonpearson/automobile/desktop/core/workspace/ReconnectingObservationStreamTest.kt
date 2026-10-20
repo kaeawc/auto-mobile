@@ -33,11 +33,13 @@ class ReconnectingObservationStreamTest {
       setContent {
         CompositionLocalProvider(LocalDeviceSessionSupersededHandler provides { forwarded += it }) {
           rememberReconnectingObservationState(
-            deviceId = "dev-1",
-            deviceSessionUuid = "epoch-a",
-            streamFactory = { fake },
-            backoffDelay = {},
-            socketAvailable = { true },
+            dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+              deviceId = "dev-1",
+              deviceSessionUuid = "epoch-a",
+              streamFactory = { fake },
+              backoffDelay = {},
+              socketAvailable = { true },
+            ),
           )
         }
       }
@@ -64,10 +66,12 @@ class ReconnectingObservationStreamTest {
       setContent {
         val observation =
           rememberReconnectingObservationState(
-            deviceId = "dev-1",
-            streamFactory = { fake },
-            backoffDelay = {},
-            socketAvailable = { true },
+            dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+              deviceId = "dev-1",
+              streamFactory = { fake },
+              backoffDelay = {},
+              socketAvailable = { true },
+            ),
           )
         LaunchedEffect(observation.connectionGeneration) {
           generations += observation.connectionGeneration
@@ -123,10 +127,12 @@ class ReconnectingObservationStreamTest {
       val backoff = GatedBackoff()
       setContent {
         rememberReconnectingObservationStream(
-          deviceId = "dev-1",
-          streamFactory = { fake },
-          backoffDelay = backoff.seam,
-          socketAvailable = { true },
+          dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+            deviceId = "dev-1",
+            streamFactory = { fake },
+            backoffDelay = backoff.seam,
+            socketAvailable = { true },
+          ),
         )
       }
       waitForIdle()
@@ -152,11 +158,13 @@ class ReconnectingObservationStreamTest {
     val backoff = GatedBackoff()
     setContent {
       rememberReconnectingObservationStream(
-        deviceId = "dev-1",
-        deviceSessionUuid = "epoch-a",
-        streamFactory = { fake },
-        backoffDelay = backoff.seam,
-        socketAvailable = { true },
+        dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+          deviceId = "dev-1",
+          deviceSessionUuid = "epoch-a",
+          streamFactory = { fake },
+          backoffDelay = backoff.seam,
+          socketAvailable = { true },
+        ),
       )
     }
     waitForIdle()
@@ -184,10 +192,12 @@ class ReconnectingObservationStreamTest {
     setContent {
       if (visible.value) {
         rememberReconnectingObservationStream(
-          deviceId = "dev-1",
-          streamFactory = { fake },
-          backoffDelay = backoff.seam,
-          socketAvailable = { true },
+          dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+            deviceId = "dev-1",
+            streamFactory = { fake },
+            backoffDelay = backoff.seam,
+            socketAvailable = { true },
+          ),
         )
       }
     }
@@ -214,10 +224,12 @@ class ReconnectingObservationStreamTest {
       val socketUp = mutableStateOf(false)
       setContent {
         rememberReconnectingObservationStream(
-          deviceId = "dev-1",
-          streamFactory = { fake },
-          backoffDelay = backoff.seam,
-          socketAvailable = { socketUp.value },
+          dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+            deviceId = "dev-1",
+            streamFactory = { fake },
+            backoffDelay = backoff.seam,
+            socketAvailable = { socketUp.value },
+          ),
         )
       }
       waitForIdle()
@@ -243,10 +255,12 @@ class ReconnectingObservationStreamTest {
     val backoff = GatedBackoff()
     setContent {
       rememberReconnectingObservationStream(
-        deviceId = "dev-1",
-        streamFactory = { fake },
-        backoffDelay = backoff.seam,
-        socketAvailable = { true },
+        dev.jasonpearson.automobile.desktop.core.workspace.ReconnectingObservationOptions(
+          deviceId = "dev-1",
+          streamFactory = { fake },
+          backoffDelay = backoff.seam,
+          socketAvailable = { true },
+        ),
       )
     }
     waitForIdle()

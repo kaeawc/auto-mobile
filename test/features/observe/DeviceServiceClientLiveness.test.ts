@@ -1,5 +1,8 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { DeviceServiceClient } from "../../../src/features/observe/DeviceServiceClient";
+import {
+  DeviceServiceClient,
+  type WebSocketFactory,
+} from "../../../src/features/observe/DeviceServiceClient";
 import { FakeWebSocket, createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
@@ -15,6 +18,7 @@ import type WebSocket from "ws";
  * arrives within a bounded deadline.
  */
 class TestDeviceServiceClient extends DeviceServiceClient {
+  cancelScreenshotBackoff(): void {}
   protected readonly logTag = "TestLivenessClient";
   connectionEstablishedCount = 0;
   connectionClosedCount = 0;
@@ -22,7 +26,7 @@ class TestDeviceServiceClient extends DeviceServiceClient {
 
   constructor(
     timer: FakeTimer,
-    wsFactory: (url: string) => WebSocket,
+    wsFactory: WebSocketFactory,
     config: { healthCheckIntervalMs?: number } = {},
   ) {
     super(timer, wsFactory, config);

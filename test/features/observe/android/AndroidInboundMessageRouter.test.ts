@@ -44,11 +44,14 @@ class RecordingContext implements Context {
       ...args: Parameters<NonNullable<Context["_hierarchy"]>["rejectPendingHierarchy"]>
     ) => {
       this.calls.push({ name: "hierarchyRejection", args });
+      return true;
     },
   };
   certificates: Context["certificates"] = { handleCaCertRemovalResult: () => false };
   focus: Context["focus"] = { convertAccessibilityNodeToElement: () => null };
   prototypes: Context["prototypes"] = {
+    handlePrototypeRequest: async () => {},
+    handlePrototypeRequestCancel: () => {},
     handlePrototypeEvent: (...args) => {
       this.calls.push({ name: "prototype", args });
     },

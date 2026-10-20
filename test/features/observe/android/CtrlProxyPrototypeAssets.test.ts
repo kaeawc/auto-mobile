@@ -26,7 +26,7 @@ async function harness(commands: string[] | null = ASSET_COMMANDS) {
   const timer = new FakeTimer();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "asset-test", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "asset-test", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,
@@ -36,7 +36,7 @@ async function harness(commands: string[] | null = ASSET_COMMANDS) {
   );
   clients.push(client);
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
   const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
   if (commands !== null) {
@@ -246,7 +246,7 @@ describe("CtrlProxy prototype assets", () => {
       commands: ["full_command_set_v1", "show_prototype", "dismiss_prototype"],
     },
   ])("older device ($label) is never sent an asset request", async ({ commands }) => {
-    const { client, socket } = await harness(commands);
+    const { client, socket } = await harness([...commands]);
     const send = spyOn(socket, "send");
     await expect(client.requestPutPrototypeAsset(asset)).rejects.toBeInstanceOf(ActionableError);
     await expect(client.requestPutPrototypeAsset(asset)).rejects.toThrow(

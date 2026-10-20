@@ -8,9 +8,8 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { ChildProcess } from "child_process";
-import { EventEmitter } from "events";
-import { Readable } from "stream";
+import type { SpawnFn } from "../../../src/utils/HostCommandExecutor";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 
 // Launch reservations are process-wide and outlive a test whose child never
@@ -53,9 +52,7 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
 });
 
 /** Prevent ensureEmulatorPath from running real filesystem/shell detection */
-function skipEmulatorPathDetection(client: AndroidEmulatorClient): void {
-  (client as any).ensureEmulatorPath = async () => "emulator";
-}
+const emulatorPathLocator = async () => "emulator";
 
 describe("resolveHeadlessMode", () => {
   test("AUTOMOBILE_EMULATOR_HEADLESS=true forces headless on any platform", () => {
@@ -119,12 +116,11 @@ describe("AndroidEmulatorClient detectDisplayError", () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
     const fakeFactory = new TestAdbClientFactory(fakeAdb);
-    client = new AndroidEmulatorClient(
-      async () => createExecResult("", ""),
-      null,
-      fakeTimer,
-      fakeFactory,
-    );
+    client = new AndroidEmulatorClient({
+      execAsync: async () => createExecResult("", ""),
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
   });
 
   test("detects 'could not connect to display'", () => {
@@ -188,32 +184,19 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     }
   }
 
-  function createFakeChildProcess(): ChildProcess & EventEmitter {
-    const emitter = new EventEmitter() as ChildProcess & EventEmitter;
-    emitter.stdout = new Readable({ read() {} }) as any;
-    emitter.stderr = new Readable({ read() {} }) as any;
-    emitter.killed = false;
-    emitter.pid = 1234;
-    emitter.kill = () => {
-      emitter.killed = true;
-      return true;
-    };
-    return emitter;
-  }
-
   test.each(["true", "false"])("headless mode respects independent audio=%s", async (audio) => {
     process.env.AUTOMOBILE_EMULATOR_HEADLESS = "true";
     process.env.AUTOMOBILE_EMULATOR_AUDIO = audio;
     let capturedArgs: string[] = [];
-    const fakeChild = createFakeChildProcess();
+    const fakeChild = new FakeChildProcess();
 
-    const spawnFn = ((_cmd: string, args: string[]) => {
+    const spawnFn: SpawnFn = (_cmd, args) => {
       capturedArgs = args;
       process.nextTick(() => {
-        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+        fakeChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
       });
       return fakeChild;
-    }) as any;
+    };
 
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.join(" ").includes("-list-avds")) {
@@ -223,14 +206,14 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
+      emulatorPathLocator,
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
-    skipEmulatorPathDetection(client);
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
 
     try {
       await client.startEmulator("Pixel_9_Pro");
@@ -248,15 +231,15 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
   test("does not pass -no-window when explicitly disabled", async () => {
     process.env.AUTOMOBILE_EMULATOR_HEADLESS = "false";
     let capturedArgs: string[] = [];
-    const fakeChild = createFakeChildProcess();
+    const fakeChild = new FakeChildProcess();
 
-    const spawnFn = ((_cmd: string, args: string[]) => {
+    const spawnFn: SpawnFn = (_cmd, args) => {
       capturedArgs = args;
       process.nextTick(() => {
-        fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+        fakeChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
       });
       return fakeChild;
-    }) as any;
+    };
 
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.join(" ").includes("-list-avds")) {
@@ -266,14 +249,14 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
+      emulatorPathLocator,
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
-    skipEmulatorPathDetection(client);
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
 
     try {
       await client.startEmulator("Pixel_9_Pro");
@@ -285,15 +268,15 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
 
   test("rejects with actionable display error when emulator dies windowed on a headless host", async () => {
     process.env.AUTOMOBILE_EMULATOR_HEADLESS = "false"; // force windowed to exercise the failure path
-    const fakeChild = createFakeChildProcess();
+    const fakeChild = new FakeChildProcess();
 
-    const spawnFn = ((_cmd: string, _args: string[]) => {
+    const spawnFn: SpawnFn = () => {
       process.nextTick(() => {
-        fakeChild.stderr!.emit(
+        fakeChild.stderr.emit(
           "data",
           Buffer.from("Warning: could not connect to display  (:0, )\n"),
         );
-        fakeChild.stderr!.emit(
+        fakeChild.stderr.emit(
           "data",
           Buffer.from(
             'Info: Could not load the Qt platform plugin "xcb" in "" even though it was found.\n',
@@ -304,7 +287,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
         fakeChild.emit("close", null);
       });
       return fakeChild;
-    }) as any;
+    };
 
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.join(" ").includes("-list-avds")) {
@@ -314,14 +297,14 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
+      emulatorPathLocator,
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
-    skipEmulatorPathDetection(client);
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
 
     try {
       // REWRITE-5: expectRejection fails loudly if startEmulator resolves,
@@ -344,14 +327,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       return createExecResult("");
     };
 
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
+      emulatorPathLocator,
       execAsync,
-      null,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
-    skipEmulatorPathDetection(client);
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
 
     await expect(client.startEmulator("Missing_Device")).rejects.toThrow(
       "AVD 'Missing_Device' not found. Available AVDs: Pixel_9_Pro, Medium_Phone_API_35",

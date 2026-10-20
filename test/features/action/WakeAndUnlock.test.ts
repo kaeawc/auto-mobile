@@ -1,3 +1,4 @@
+import type { ActionCall } from "../../../src/features/action/ActionCall";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -209,6 +210,9 @@ describe("WakeAndUnlock", () => {
         expect(result).toMatchObject({ success: true, unlocked: true, wasLocked: true });
         expect(result).toHaveProperty("warning");
         const warning = result.warning;
+        if (warning === undefined) {
+          throw new Error("Expected recovery warning");
+        }
         expect(warning).toContain(`runner recovery ${outcome}`);
         expect(warning).toContain("next observe");
         expect(warn).toHaveBeenCalledWith(expect.stringContaining(warning));
@@ -1500,8 +1504,16 @@ const executeForOutputSchema = WakeAndUnlock.prototype.execute;
 let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
 beforeOutputSchema(() => {
   executeOutputSchemaSpy = spyOnOutputSchema(WakeAndUnlock.prototype, "execute").mockImplementation(
-    async function (this: WakeAndUnlock, ...args: Parameters<WakeAndUnlock["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
+    async function (
+      this: WakeAndUnlock,
+      pin?: string,
+      callOrDeadline?: ActionCall | number,
+      signal?: AbortSignal,
+    ) {
+      const result =
+        typeof callOrDeadline === "object"
+          ? await executeForOutputSchema.bind(this)(pin, callOrDeadline)
+          : await executeForOutputSchema.call(this, pin, callOrDeadline, signal);
       const payload = { message: "Result", ...result };
       expect(wakeAndUnlockResultSchema.parse(payload)).toBeDefined();
       const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {

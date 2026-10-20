@@ -29,10 +29,9 @@ export function createTestUnixSocketServer(
     args[1],
     args[2],
     args[3],
-    args[4],
-    { mcpDispatcher: unreachableMcpDispatcher, ...args[5] },
-    args[6],
-    { bindLock: fakeBindLock, ...(args[7] ?? {}) },
-    args[8],
+    { mcpDispatcher: unreachableMcpDispatcher, ...args[4] },
+    args[5],
+    { bindLock: fakeBindLock, ...(args[6] ?? {}) },
+    args[7],
   );
 }

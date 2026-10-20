@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
 import { matchesDeviceCriteria, describeDisplayRequirements } from "../../src/utils/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import {
   canonicalReleaseVersionsByApiLevel,
   versionToApiLevelRange,
@@ -589,7 +590,12 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       screenHeight: 2400,
       [displayInventoryOutcome]: { kind: "unreadable", reason: "display service offline" },
     });
-    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "default" }]) {
+    const requirements: DeviceMatchCriteria["requires"][] = [
+      { panels: 1 },
+      { panels: 2 },
+      { posture: "opened" },
+    ];
+    for (const requires of requirements) {
       expect(
         matcher.matchBootedDevice({ platform: "android", requires }, [fold], "LATEST"),
       ).toBeNull();

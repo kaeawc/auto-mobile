@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { CtrlProxyCertificates } from "../../../src/features/observe/android/CtrlProxyCertificates";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
@@ -31,17 +30,17 @@ async function harness() {
   const timer = new FakeTimer();
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "client-send-command", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "client-send-command", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
     },
   );
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     ...ANDROID_CAPABILITY_GATED_COMMANDS,
     "request_activate_accessibility_link",
@@ -108,7 +107,13 @@ const methods: Method[] = [
     name: "accessibility link",
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestActivateAccessibilityLink("link", 0, undefined, 50, perf, signal),
+      h.client.requestActivateAccessibilityLink({
+        text: "link",
+        occurrence: 0,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   ...(["copy", "paste", "get", "clear"] as const).map((action): Method => ({
     name: `clipboard ${action}`,
@@ -131,40 +136,95 @@ const methods: Method[] = [
     name: "tap",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestTapCoordinates(1, 2, 0, 50, perf, undefined, signal),
+      h.client.testHooks.gestures().requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 0,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "double tap",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestDoubleTapCoordinates(1, 2, undefined, { signal }),
+      h.client.testHooks.gestures().requestDoubleTapCoordinates(1, 2, undefined, { signal }),
   },
   {
     name: "swipe",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestSwipe(1, 2, 3, 4, 50, 50, perf, undefined, undefined, signal),
+      h.client.testHooks.gestures().requestSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 50,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "drag",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestDrag(1, 2, 3, 4, 10, 20, 30, 50, undefined, signal),
+      h.client.testHooks.gestures().requestDrag({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        pressDurationMs: 10,
+        dragDurationMs: 20,
+        holdDurationMs: 30,
+        timeoutMs: 50,
+        signal,
+      }),
   },
   {
     name: "pinch",
     signal: true,
-    invoke: (h, signal) => h.client["gestures"].requestPinch(1, 2, 3, 4, 0, 20, 50, perf, signal),
+    invoke: (h, signal) =>
+      h.client.testHooks.gestures().requestPinch({
+        centerX: 1,
+        centerY: 2,
+        distanceStart: 3,
+        distanceEnd: 4,
+        rotationDegrees: 0,
+        duration: 20,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "two finger swipe",
-    invoke: (h) => h.client["gestures"].requestTwoFingerSwipe(1, 2, 3, 4, 20, 10, 50),
+    invoke: (h) =>
+      h.client.testHooks.gestures().requestTwoFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 20,
+        offset: 10,
+        timeoutMs: 50,
+      }),
   },
-  { name: "gesture start", invoke: (h) => h.client["gestures"].requestGestureStart("g", 1, 2, 50) },
-  { name: "gesture move", invoke: (h) => h.client["gestures"].requestGestureMove("g", 1, 2, 50) },
+  {
+    name: "gesture start",
+    invoke: (h) =>
+      h.client.testHooks
+        .gestures()
+        .requestGestureStart({ gestureId: "g", x: 1, y: 2, timeoutMs: 50 }),
+  },
+  {
+    name: "gesture move",
+    invoke: (h) => h.client.testHooks.gestures().requestGestureMove("g", 1, 2, 50),
+  },
   {
     name: "gesture end",
-    invoke: (h) => h.client["gestures"].requestGestureEnd("g", 1, 2, false, 50),
+    invoke: (h) => h.client.testHooks.gestures().requestGestureEnd("g", 1, 2, false, 50),
   },
   {
     name: "set text",
@@ -288,7 +348,7 @@ const methods: Method[] = [
     invoke: (h) =>
       h.client["highlights"].requestAddHighlight(
         "h",
-        { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } },
+        { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } },
         50,
       ),
   },

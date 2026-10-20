@@ -2,17 +2,23 @@ import { promises as fsPromises } from "node:fs";
 import { ActionableError } from "../../src/models/ActionableError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  CtrlProxyStaleRunnerCacheError,
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
   IosCtrlProxyBuilder,
 } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/CtrlProxyStaleRunnerCacheError";
 import {
   RELEASE_CHECKSUM_REGISTRY,
   resolveAssetVersion,
   resolvePinnedVersion,
 } from "../../src/constants/release";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
+import {
+  DefaultCtrlProxyCodesignVerifier,
+  type CodesignExec,
+  type CodesignExecOutput,
+} from "../../src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { getSharedAutoMobileDir, getTempDir } from "../../src/utils/tempDir";
@@ -80,7 +86,8 @@ describe("IosCtrlProxyBuilder", function () {
     const cached = path.join(tempDir, "stale.xctestrun");
     builder["cachedXctestrunPath"].set("any", cached);
     const access = spyOn(fs, "access").mockRejectedValue(new Error("removed"));
-    const listing = spyOn(fsPromises, "readdir").mockResolvedValue(["fresh.xctestrun"]);
+    const directoryReader: { readdir: (target: string) => Promise<string[]> } = fsPromises;
+    const listing = spyOn(directoryReader, "readdir").mockResolvedValue(["fresh.xctestrun"]);
     const log = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       expect(await builder.getXctestrunPath()).toBe(
@@ -1761,6 +1768,133 @@ describe("IosCtrlProxyBuilder", function () {
         true,
       );
     });
+
+    test.each([false, true])(
+      "cache requires an unchanged bundle during inspection (mutate=%s)",
+      async (mutate) => {
+        if (process.platform !== "darwin") {
+          return;
+        }
+        const { builder, verifier } = await buildForCodesign();
+        process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+        const appPath = await builder.getRunnerAppPath("simulator");
+        if (!appPath) {
+          throw new Error("missing fixture app");
+        }
+        const resource = path.join(appPath, "cache-race-resource");
+        await fs.writeFile(resource, "tampered");
+        const checking = spyOn(verifier, "verifyAppBundle").mockImplementation(async () => {
+          if (mutate) {
+            await fs.writeFile(resource, "good");
+          }
+          return verifier.outcome;
+        });
+        try {
+          await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+          // Restore the pre-check tree: a poisoned cache would accept it here.
+          await fs.writeFile(resource, "tampered");
+          if (mutate) {
+            verifier.outcome = {
+              verified: false,
+              notarized: false,
+              teamId: null,
+              detail: "tampered",
+            };
+            await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+              "Refusing to launch",
+            );
+          } else {
+            await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+          }
+          expect(checking).toHaveBeenCalledTimes(mutate ? 2 : 1);
+        } finally {
+          checking.mockRestore();
+        }
+      },
+    );
+
+    test("unchanged signed bundle executes 3 then 0 commands; changed resources and signatures reverify", async () => {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder } = await buildForCodesign();
+      let calls = 0;
+      const exec: CodesignExec = async () => {
+        calls++;
+        return { code: 0, stdout: "", stderr: "TeamIdentifier=ABCDE12345" };
+      };
+      IosCtrlProxyBuilder.configure({
+        codesignVerifier: new DefaultCtrlProxyCodesignVerifier(exec, new FakeTimer()),
+      });
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(3);
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(3);
+      const appPath = await builder.getRunnerAppPath("simulator");
+      if (!appPath) {
+        throw new Error("missing fixture app");
+      }
+      await fs.writeFile(path.join(appPath, "Info.plist"), "updated resource");
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(6);
+      await fs.mkdir(path.join(appPath, "_CodeSignature"), { recursive: true });
+      await fs.writeFile(path.join(appPath, "_CodeSignature", "CodeResources"), "new seal");
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      expect(calls).toBe(9);
+      // A cached raw success must still obey policy changes between launches.
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+      process.env.AUTOMOBILE_IOS_HELPER_TEAM_ID = "OTHERTEAM";
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "Team ID mismatch",
+      );
+      expect(calls).toBe(9);
+    });
+
+    test("failed assessments retry and still refuse when required mode is enabled later", async () => {
+      if (process.platform !== "darwin") {
+        return;
+      }
+      const { builder, verifier } = await buildForCodesign();
+      verifier.outcome = { verified: false, notarized: false, teamId: null, detail: "rejected" };
+      await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+      process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+      await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+        "Refusing to launch",
+      );
+      expect(verifier.verifiedPaths).toHaveLength(2);
+    });
+
+    test.each(["--verify", "-dvv", "--assess"])(
+      "hung %s warns by default, refuses when required, and is never cached",
+      async (flag) => {
+        if (process.platform !== "darwin") {
+          return;
+        }
+        const { builder } = await buildForCodesign();
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        let hangs = 0;
+        const exec: CodesignExec = async (_file, args) => {
+          if (args[0] === flag) {
+            hangs++;
+            return new Promise<CodesignExecOutput>(() => {});
+          }
+          return { code: 0, stdout: "", stderr: "TeamIdentifier=ABCDE12345" };
+        };
+        IosCtrlProxyBuilder.configure({
+          codesignVerifier: new DefaultCtrlProxyCodesignVerifier(exec, timer),
+        });
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+        expect(timer.now()).toBe(15_000);
+        process.env.AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN = "1";
+        await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
+          `${flag} timed out after 15000ms`,
+        );
+        expect(timer.now()).toBe(30_000);
+        expect(hangs).toBe(2);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
 
     test("codesign verification is skipped (exec seam never invoked) on non-darwin (#4760)", async function () {
       if (process.platform === "darwin") {

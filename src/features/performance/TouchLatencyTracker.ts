@@ -14,6 +14,8 @@ import { calculateMedian } from "../shared/MetricsUtils";
 import { shellQuote } from "../../utils/shellQuote";
 
 // Samples are spaced to avoid overlapping touch measurements.
+// Poll gfxinfo every 10ms while waiting for the touch frame, for a quick response.
+const FRAME_STATS_POLL_INTERVAL_MS = 10;
 const TOUCH_LATENCY_SAMPLE_INTERVAL_MS = 100;
 
 /**
@@ -159,7 +161,7 @@ export class TouchLatencyTracker {
    * @param windowBounds - The audited app's actual window rect, if known
    * @returns Touch coordinates (x, y)
    */
-  private selectSafeTouchLocation(
+  selectSafeTouchLocation(
     screenSize: ScreenSize,
     touchPoint?: { x: number; y: number },
     windowBounds?: ElementBounds,
@@ -225,10 +227,9 @@ export class TouchLatencyTracker {
     perf: PerformanceTracker,
   ): Promise<number | null> {
     const startTime = this.timer.now();
-    const pollIntervalMs = 10; // Poll every 10ms for quick response
 
     while (this.timer.now() - startTime < maxWaitMs) {
-      await this.timer.sleep(pollIntervalMs);
+      await this.timer.sleep(FRAME_STATS_POLL_INTERVAL_MS);
 
       try {
         const { stdout } = await perf.track("adbGfxinfoCheck", () =>

@@ -37,7 +37,7 @@ export interface InMemoryNavManagerHarness {
 export async function installInMemoryNavManager(): Promise<InMemoryNavManagerHarness> {
   const db = await createTestDatabase();
   const navRepo = new NavigationRepository(db);
-  const coverageRepo = new TestCoverageRepository(undefined, db);
+  const coverageRepo = new TestCoverageRepository(db);
   const manager = NavigationGraphManager.createForTesting(navRepo, coverageRepo);
   NavigationGraphManager.setInstanceForTesting(manager);
 

@@ -1,5 +1,6 @@
+import { CtrlProxyRunnerExitedDuringStartupError } from "../../src/ctrlProxy/ios/CtrlProxyRunnerExitedDuringStartupError";
+import { CtrlProxyLaunchTimeoutError } from "../../src/ctrlProxy/ios/CtrlProxyLaunchTimeoutError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -9,7 +10,7 @@ import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import { logger } from "../../src/utils/logger";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
-import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { SimctlCommandTimeoutError } from "../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import os from "os";
 import {
@@ -18,7 +19,33 @@ import {
   installIosManagerSuiteHooks,
   tunnel,
 } from "../helpers/iosCtrlProxyManagerHarness";
-import { asIosCtrlProxyBuilder, createStartableBuilder } from "../helpers/iosCtrlProxyBuilderFake";
+import {
+  fakeIosCtrlProxyBuilder,
+  createStartableBuilder,
+} from "../helpers/iosCtrlProxyBuilderFake";
+
+type BundleHashLookupOptions = { signal?: AbortSignal; throwOnLookupTimeout?: boolean };
+
+/** A DeviceAppManager whose installed-bundle hash lookup is scripted by the test. */
+class ScriptedBundleHashDeviceAppManager extends DeviceAppManager {
+  constructor(
+    private readonly lookup: (options?: BundleHashLookupOptions) => Promise<string | null>,
+  ) {
+    super();
+  }
+
+  override async getInstalledAppBundleHash(
+    _deviceUdid: string,
+    _bundleId: string,
+    _isSimulator = false,
+    options?: BundleHashLookupOptions,
+  ): Promise<string | null> {
+    return this.lookup(options);
+  }
+}
+
+const noInstalledBundle = (): DeviceAppManager =>
+  new ScriptedBundleHashDeviceAppManager(async () => null);
 
 describe("IOSCtrlProxyManager", function () {
   let testDevice: BootedDevice;
@@ -52,6 +79,36 @@ describe("IOSCtrlProxyManager", function () {
       warn.mockRestore();
     }
   });
+
+  test.each([
+    [new CtrlProxyRunnerExitedDuringStartupError(), true],
+    [new CtrlProxyLaunchTimeoutError("launch deadline"), true],
+    [new Error("missing runner artifact"), false],
+  ] as const)(
+    "setup preserves typed startup retry eligibility for %s",
+    async (failure, retryable) => {
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: new FakeProcessExecutor(),
+        steps: { uninstallLegacyAppIfPresent: async () => {} },
+      });
+      const running = spyOn(manager, "isRunning").mockResolvedValue(false);
+      const start = spyOn(manager, "start").mockRejectedValue(failure);
+      try {
+        const result = await manager.setup();
+        expect(result).toMatchObject({
+          success: false,
+          error: failure.message,
+        });
+        expect(result.retryableStartupFailure).toBe(retryable ? true : undefined);
+      } finally {
+        running.mockRestore();
+        start.mockRestore();
+      }
+    },
+  );
 
   describe("setup fail-closed on unverifiable pin", function () {
     test("returns failure for an unknown pin before any reuse short-circuit (#2746)", async function () {
@@ -117,7 +174,7 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   test("returns the persisted runner bundle identity from its builder", async function () {
-    const builder = asIosCtrlProxyBuilder({
+    const builder = fakeIosCtrlProxyBuilder({
       getInstalledBundleVersion: async () => "2026.9.13",
     });
     const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer, builder);
@@ -191,12 +248,12 @@ describe("IOSCtrlProxyManager", function () {
       installHealthFakes({
         8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 }),
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBe(8765);
     });
@@ -208,12 +265,12 @@ describe("IOSCtrlProxyManager", function () {
       });
       // A non-default service port leaves 8765 as a distinct fallback candidate.
       PortManager.reserve(testDevice.deviceId, 8767);
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBe(8765);
     });
@@ -224,12 +281,12 @@ describe("IOSCtrlProxyManager", function () {
       });
       // A non-default service port leaves 8765 as a distinct fallback candidate.
       PortManager.reserve(testDevice.deviceId, 8767);
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
@@ -244,12 +301,12 @@ describe("IOSCtrlProxyManager", function () {
       });
       // A non-default service port leaves 8765 as a distinct fallback candidate.
       PortManager.reserve(testDevice.deviceId, 8767);
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
@@ -258,12 +315,12 @@ describe("IOSCtrlProxyManager", function () {
       installHealthFakes({
         8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 70000 }),
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
@@ -272,24 +329,24 @@ describe("IOSCtrlProxyManager", function () {
       installHealthFakes({
         8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }),
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
 
     test("returns null when no runner answers the health endpoint", async function () {
       installHealthFakes({});
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
@@ -305,12 +362,12 @@ describe("IOSCtrlProxyManager", function () {
       });
       // A non-default service port leaves 8765 as a distinct fallback candidate.
       PortManager.reserve(testDevice.deviceId, 8767);
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBe(8767);
     });
@@ -321,12 +378,12 @@ describe("IOSCtrlProxyManager", function () {
       installHealthFakes({
         8765: `{"status":"ok","deviceId":"${testDevice.deviceId}","port":87`,
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
@@ -349,12 +406,12 @@ describe("IOSCtrlProxyManager", function () {
 
     test("isRunning() is false when the service port answers for a different device", async function () {
       installHealthBody(JSON.stringify({ status: "ok", deviceId: "OTHER-UDID", port: 8765 }));
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.isRunning()).toBe(false);
     });
@@ -363,36 +420,36 @@ describe("IOSCtrlProxyManager", function () {
       installHealthBody(
         JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 }),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.isRunning()).toBe(true);
     });
 
     test("isRunning() is false when the responder omits device identity", async function () {
       installHealthBody(JSON.stringify({ status: "ok", port: 8765 }));
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.isRunning()).toBe(false);
     });
 
     test("checkRunningWithReason() rejects a responder that omits device identity", async function () {
       installHealthBody('{"status":"ok"}');
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.checkRunningWithReason()).toEqual({ ok: false, reason: "unhealthy" });
       expect(await manager.isRunning()).toBe(false);
@@ -400,12 +457,12 @@ describe("IOSCtrlProxyManager", function () {
 
     test("isRunning() is false for the Android runner's plain-text 'OK' body reached via the same port", async function () {
       installHealthBody("OK");
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.isRunning()).toBe(false);
     });
@@ -419,12 +476,12 @@ describe("IOSCtrlProxyManager", function () {
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("", ""));
       const fakeBuilder = createStartableBuilder("/tmp/CtrlProxy.xctestrun");
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        fakeBuilder,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: fakeBuilder,
+        processExecutor: fakeExecutor,
+      });
       fakeTimer.enableAutoAdvance();
 
       await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
@@ -474,12 +531,12 @@ describe("IOSCtrlProxyManager", function () {
           "",
         ),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.isRunning()).toBe(false); // probes, caches false
       healthy = true;
@@ -504,12 +561,12 @@ describe("IOSCtrlProxyManager", function () {
           "",
         ),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.isAvailable()).toBe(true); // installed(true)+running(true) → running cached positive
       healthy = false;
@@ -529,12 +586,12 @@ describe("IOSCtrlProxyManager", function () {
           "",
         ),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       expect(await manager.isRunning()).toBe(false);
       healthy = true;
@@ -557,29 +614,27 @@ describe("IOSCtrlProxyManager", function () {
         throw new Error("runner is no longer running");
       });
 
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async () => null,
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = noInstalledBundle();
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           launchCount++;
           runnerHealthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-        undefined,
-        fakeDeviceAppManager,
-        undefined,
-        undefined,
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        signingManager: undefined,
+        deviceAppManager: fakeDeviceAppManager,
+        remoteRunner: undefined,
+        hostPortAvailabilityChecker: undefined,
         xcodebuild,
-      );
+      });
       fakeTimer.enableAutoAdvance();
 
       expect((await manager.setup()).success).toBe(true);
@@ -607,31 +662,29 @@ describe("IOSCtrlProxyManager", function () {
         ),
       );
       let legacyProbeCount = 0;
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async () => {
-          legacyProbeCount++;
-          return null;
-        },
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = new ScriptedBundleHashDeviceAppManager(async () => {
+        legacyProbeCount++;
+        return null;
+      });
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-        undefined,
-        fakeDeviceAppManager,
-        undefined,
-        undefined,
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        signingManager: undefined,
+        deviceAppManager: fakeDeviceAppManager,
+        remoteRunner: undefined,
+        hostPortAvailabilityChecker: undefined,
         xcodebuild,
-      );
+      });
       fakeTimer.enableAutoAdvance();
 
       const first = await manager.setup();
@@ -657,31 +710,29 @@ describe("IOSCtrlProxyManager", function () {
         throw new Error("runner is no longer running");
       });
       let legacyProbeCount = 0;
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async () => {
-          legacyProbeCount++;
-          return null;
-        },
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = new ScriptedBundleHashDeviceAppManager(async () => {
+        legacyProbeCount++;
+        return null;
+      });
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-        undefined,
-        fakeDeviceAppManager,
-        undefined,
-        undefined,
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        signingManager: undefined,
+        deviceAppManager: fakeDeviceAppManager,
+        remoteRunner: undefined,
+        hostPortAvailabilityChecker: undefined,
         xcodebuild,
-      );
+      });
       fakeTimer.enableAutoAdvance();
 
       expect((await manager.setup()).success).toBe(true);
@@ -709,36 +760,29 @@ describe("IOSCtrlProxyManager", function () {
         throw new Error("runner is no longer running");
       });
       const lookupOptions: unknown[] = [];
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async (
-          _deviceId: string,
-          _bundleId: string,
-          _simulator: boolean,
-          options?: unknown,
-        ) => {
-          lookupOptions.push(options);
-          return lookup(lookupOptions.length);
-        },
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = new ScriptedBundleHashDeviceAppManager(async (options) => {
+        lookupOptions.push(options);
+        return lookup(lookupOptions.length);
+      });
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-        undefined,
-        fakeDeviceAppManager,
-        undefined,
-        undefined,
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        signingManager: undefined,
+        deviceAppManager: fakeDeviceAppManager,
+        remoteRunner: undefined,
+        hostPortAvailabilityChecker: undefined,
         xcodebuild,
-      );
+      });
       fakeTimer.enableAutoAdvance();
       return {
         manager,
@@ -802,18 +846,18 @@ describe("IOSCtrlProxyManager", function () {
           "",
         ),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        asIosCtrlProxyBuilder({
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
         }),
-        fakeExecutor,
-        undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
-      );
+        processExecutor: fakeExecutor,
+        signingManager: undefined,
+        deviceAppManager: noInstalledBundle(),
+      });
 
       // First pass through the gate: attemptedSetup becomes true and the
       // runner is genuinely up.
@@ -846,18 +890,18 @@ describe("IOSCtrlProxyManager", function () {
           "",
         ),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        asIosCtrlProxyBuilder({
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
         }),
-        fakeExecutor,
-        undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
-      );
+        processExecutor: fakeExecutor,
+        signingManager: undefined,
+        deviceAppManager: noInstalledBundle(),
+      });
 
       expect((await manager.setup()).success).toBe(true);
       expect((await manager.setup()).success).toBe(true);
@@ -879,18 +923,18 @@ describe("IOSCtrlProxyManager", function () {
           "",
         ),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        asIosCtrlProxyBuilder({
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
         }),
-        fakeExecutor,
-        undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
-      );
+        processExecutor: fakeExecutor,
+        signingManager: undefined,
+        deviceAppManager: noInstalledBundle(),
+      });
 
       expect((await manager.setup()).success).toBe(true);
       expect((await manager.setup()).success).toBe(true);
@@ -924,12 +968,12 @@ describe("IOSCtrlProxyManager", function () {
     test("starts iproxy for physical devices with device-specific port", async function () {
       const fakeProcess = new FakeChildProcess();
       fakeExecutor.setNextSpawnProcess(fakeProcess);
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        physicalDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: physicalDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       await manager.startIproxyTunnel();
 
@@ -954,31 +998,31 @@ describe("IOSCtrlProxyManager", function () {
         }
         return true;
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        physicalDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
-      tunnel(manager)["iproxyProcessId"] = fakeProcess.pid;
-      tunnel(manager)["iproxyProcess"] = fakeProcess as unknown as ChildProcess;
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: physicalDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
+      tunnel(manager).setStateForTesting({ processId: fakeProcess.pid });
+      tunnel(manager).setStateForTesting({ process: fakeProcess });
 
       fakeTimer.enableAutoAdvance();
       await tunnel(manager).stop();
 
       expect(signals).toEqual([undefined, "SIGKILL"]);
-      expect(tunnel(manager)["iproxyProcessId"]).toBeNull();
+      expect(tunnel(manager).diagnostics.processId).toBeNull();
     });
 
     test("restarts iproxy after unexpected exit", async function () {
       const fakeProcess = new FakeChildProcess();
       fakeExecutor.setNextSpawnProcess(fakeProcess);
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        physicalDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: physicalDevice,
+        timer: fakeTimer,
+        builder: undefined,
+        processExecutor: fakeExecutor,
+      });
 
       await manager.startIproxyTunnel();
 
@@ -1004,12 +1048,12 @@ describe("IOSCtrlProxyManager", function () {
         const newProcess = new FakeChildProcess();
         newProcess.pid = 2222;
         eventExecutor.setNextSpawnProcess(oldProcess);
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          physicalDevice,
-          eventTimer,
-          undefined,
-          eventExecutor,
-        );
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+          device: physicalDevice,
+          timer: eventTimer,
+          builder: undefined,
+          processExecutor: eventExecutor,
+        });
 
         await manager.startIproxyTunnel();
         await tunnel(manager).stop();
@@ -1025,8 +1069,8 @@ describe("IOSCtrlProxyManager", function () {
           await Promise.resolve();
         }
 
-        expect(tunnel(manager)["iproxyProcessId"]).toBe(2222);
-        expect(tunnel(manager)["iproxyProcess"]).toBe(newProcess);
+        expect(tunnel(manager).diagnostics.processId).toBe(2222);
+        expect(tunnel(manager).diagnostics.process).toBe(newProcess);
         expect(eventTimer.getPendingTimeoutCount()).toBe(0);
         expect(eventExecutor.getSpawnedProcesses().length).toBe(2);
       }

@@ -1,3 +1,4 @@
+import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -194,6 +195,18 @@ export class OpenURL extends BaseVisualChange {
     this.devicectl = devicectl;
   }
 
+  /** @internal Typed view of the per-platform dispatch paths for unit tests; not part of the public API. */
+  get testHooks(): {
+    executeAndroidOpenURL: OpenURL["executeAndroidOpenURL"];
+    executeiOSOpenURL: OpenURL["executeiOSOpenURL"];
+  } {
+    return {
+      executeAndroidOpenURL: (url, signal) => this.executeAndroidOpenURL(url, signal),
+      executeiOSOpenURL: (url, previousObservation, signal) =>
+        this.executeiOSOpenURL(url, previousObservation, signal),
+    };
+  }
+
   async execute(url: string, call?: ActionCall): Promise<OpenURLResult>;
   /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(url: string, signal?: AbortSignal): Promise<OpenURLResult>;
@@ -265,6 +278,7 @@ export class OpenURL extends BaseVisualChange {
         }
       } catch (error) {
         throwIfAborted(signal);
+        rethrowDeviceTransportUnavailable(error);
         logger.warn(
           `[OpenURL] Exception while launching app ${packageName}: ${errorMessage(error)}`,
           error,

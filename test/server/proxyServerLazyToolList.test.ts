@@ -1,4 +1,4 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -8,7 +8,11 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { createToolCatalogResourceHandler } from "../../src/server/toolCatalogResource";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Issue #5879: the proxy MCP server serves tools/list from the static tool
 // registry without connecting to the daemon, so a wedged/absent daemon never
@@ -141,6 +145,51 @@ describe("proxy server lazy tools/list", () => {
       const result = await client.callTool({ name: "listDevices", arguments: {} });
       expect(result.isError).toBeFalsy();
       expect(fakeClient.callToolCalls.some((call) => call.toolName === "listDevices")).toBe(true);
+    } finally {
+      await client.close();
+      await proxy.close();
+    }
+  });
+
+  test("default-off tools (pinchOn, prototype) are unlisted yet callable, and discovery points at the catalog (#13092)", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const fakeClient = new FakeDaemonClient();
+    const manager = new FakeDaemonManager();
+    manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => fakeClient,
+        daemonManager: manager,
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "default-off-test-client", version: "0.0.1" });
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const tools = (await client.listTools()).tools;
+      const names = tools.map((tool) => tool.name);
+      // Intended gating: default-off tools stay out of the per-connection view...
+      expect(names).not.toContain("pinchOn");
+      expect(names).not.toContain("prototype");
+      // ...are named in the catalog resource an agent can read without a device...
+      const handler = createToolCatalogResourceHandler({
+        sessionToolSelectionService: { isEnabled: async (_s, _n, d) => d ?? true },
+      });
+      const catalog = JSON.parse((await handler()).text ?? "{}") as {
+        tools: Array<{ name: string; enabledWithoutSession: boolean }>;
+      };
+      for (const name of ["pinchOn", "prototype"]) {
+        expect(catalog.tools.find((tool) => tool.name === name)?.enabledWithoutSession).toBe(false);
+      }
+      // ...and the tool that controls discovery says where that catalog is.
+      const setToolEnabled = tools.find((tool) => tool.name === "setToolEnabled");
+      expect(setToolEnabled?.description).toContain("automobile:tools");
+      // Callable by name regardless of discovery.
+      await client.callTool({ name: "pinchOn", arguments: {} });
+      expect(fakeClient.callToolCalls.some((call) => call.toolName === "pinchOn")).toBe(true);
     } finally {
       await client.close();
       await proxy.close();

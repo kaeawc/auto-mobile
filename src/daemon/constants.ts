@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { platform } from "node:os";
+import { platform, tmpdir } from "node:os";
+import { win32 } from "node:path";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
@@ -8,6 +9,8 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
 } from "./sessionLivenessWindows";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
+export const DAEMON_LAUNCH_NONCE_ENV = ENV.DAEMON_LAUNCH_NONCE.name;
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
 /**
@@ -18,7 +21,7 @@ export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 function getUserId(): string {
   if (platform() === "win32") {
     // Windows doesn't have UIDs, use username as fallback
-    return process.env.USERNAME || "default";
+    return readEnvRaw(AMBIENT_ENV.USERNAME) || "default";
   }
   // Unix systems: use actual UID
   return process.getuid?.()?.toString() || "default";
@@ -27,7 +30,7 @@ function getUserId(): string {
 const uid = getUserId();
 
 /**
- * Isolation namespace suffix for the daemon's /tmp state files (socket, pid, lock).
+ * Isolation namespace suffix for the daemon's state files (socket, pid, lock, token).
  *
  * A private daemon started with `AUTOMOBILE_AUX_SOCKET_DIR` must not share the
  * resident daemon's `/tmp/auto-mobile-daemon-<uid>.*` files, or it would bind (or
@@ -38,54 +41,83 @@ const uid = getUserId();
  * per-file `AUTOMOBILE_DAEMON_*_PATH` override still wins. Unset/blank aux dir
  * yields "" (the resident, unsuffixed names).
  */
-export function resolveDaemonIsolationSuffix(env: NodeJS.ProcessEnv = process.env): string {
-  const auxDir = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+export function resolveDaemonIsolationSuffix(
+  env: NodeJS.ProcessEnv = process.env,
+  targetPlatform: NodeJS.Platform = process.platform,
+): string {
+  const auxDir = readEnvRaw(ENV.AUX_SOCKET_DIR, env)?.trim();
   if (!auxDir) {
     return "";
   }
-  const resolved = resolvePathFromDaemonLaunchWorkingDirectory(auxDir, env);
+  const resolved = resolveDaemonPath(auxDir, env, targetPlatform);
   return `-${createHash("sha256").update(resolved).digest("hex").slice(0, 10)}`;
 }
 
-/** Default `/tmp` state-file path for this uid, isolated per `AUTOMOBILE_AUX_SOCKET_DIR`. */
+function resolveDaemonPath(
+  filePath: string,
+  env: NodeJS.ProcessEnv,
+  targetPlatform: NodeJS.Platform,
+): string {
+  if (targetPlatform !== "win32") {
+    return resolvePathFromDaemonLaunchWorkingDirectory(filePath, env);
+  }
+  return win32.isAbsolute(filePath)
+    ? filePath
+    : win32.resolve(readEnvRaw(ENV.DAEMON_LAUNCH_CWD, env)?.trim() || process.cwd(), filePath);
+}
+
+/** Default state-file path, isolated per `AUTOMOBILE_AUX_SOCKET_DIR`. */
 export function resolveIsolatedDaemonStatePath(
-  extension: "sock" | "pid" | "lock",
+  extension: "sock" | "pid" | "lock" | "token",
   env: NodeJS.ProcessEnv = process.env,
   userId: string = uid,
+  targetPlatform: NodeJS.Platform = process.platform,
 ): string {
-  return `/tmp/auto-mobile-daemon-${userId}${resolveDaemonIsolationSuffix(env)}.${extension}`;
+  const suffix = resolveDaemonIsolationSuffix(env, targetPlatform);
+  if (extension === "token" && targetPlatform === "win32") {
+    return win32.join(
+      readEnvRaw(AMBIENT_ENV.LOCALAPPDATA, env) ?? tmpdir(),
+      "auto-mobile",
+      `daemon${suffix}.token`,
+    );
+  }
+  return `/tmp/auto-mobile-daemon-${userId}${suffix}.${extension}`;
 }
 
 function readDaemonStatePathOverride(
-  extension: "sock" | "pid" | "lock",
+  extension: "sock" | "pid" | "lock" | "token",
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   switch (extension) {
     case "sock":
-      return env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
+      return readEnvRaw(ENV.DAEMON_SOCKET_PATH, env);
     case "pid":
-      return env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
+      return readEnvRaw(ENV.DAEMON_PID_FILE_PATH, env);
     case "lock":
-      return env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
+      return readEnvRaw(ENV.DAEMON_LOCK_FILE_PATH, env);
+    case "token":
+      return readEnvRaw(ENV.DAEMON_TOKEN_FILE_PATH, env);
   }
 }
 
 /**
  * Effective daemon state-file path: an explicit `AUTOMOBILE_DAEMON_*_PATH` override
  * (resolved against the daemon launch directory) first, then the
- * `AUTOMOBILE_AUX_SOCKET_DIR`-isolated `/tmp` default. The JUnit runner, desktop
+ * `AUTOMOBILE_AUX_SOCKET_DIR`-isolated default (per-user on Windows for tokens,
+ * `/tmp` otherwise). The JUnit runner, desktop
  * app and XCTestRunner port this rule; `test/fixtures/daemon-isolation-paths.json`
  * holds the shared vectors all of them are tested against (#10906).
  */
 export function resolveDaemonStatePath(
-  extension: "sock" | "pid" | "lock",
+  extension: "sock" | "pid" | "lock" | "token",
   env: NodeJS.ProcessEnv = process.env,
   userId: string = uid,
+  targetPlatform: NodeJS.Platform = process.platform,
 ): string {
   const override = readDaemonStatePathOverride(extension, env);
   return override
-    ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
-    : resolveIsolatedDaemonStatePath(extension, env, userId);
+    ? resolveDaemonPath(override, env, targetPlatform)
+    : resolveIsolatedDaemonStatePath(extension, env, userId, targetPlatform);
 }
 
 /**
@@ -175,7 +207,7 @@ export const INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM = "__acceptanceDiscoveryO
 export const INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM = "__acceptanceDiscoveryCapability";
 
 /** Environment variable carrying the live-acceptance discovery capability. */
-export const ACCEPTANCE_DISCOVERY_CAPABILITY_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY";
+export const ACCEPTANCE_DISCOVERY_CAPABILITY_ENV = ENV.ACCEPTANCE_DISCOVERY_CAPABILITY.name;
 
 /**
  * Port range to try if default port is unavailable
@@ -223,7 +255,7 @@ export const LOCK_FILE_PATH = resolveDaemonStatePath("lock");
  * daemon publishes this in its PID record so log retention can associate a
  * specific `daemon-launch-*.log` with its actual child owner.
  */
-export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
+export const DAEMON_LAUNCH_LOG_PATH_ENV = ENV.DAEMON_LAUNCH_LOG_PATH.name;
 
 /**
  * Connection timeout in milliseconds
@@ -233,8 +265,8 @@ export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
  */
 export function resolveConnectionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_DAEMON_TIMEOUT_MS",
-    "AUTO_MOBILE_DAEMON_TIMEOUT_MS",
+    ENV.DAEMON_TIMEOUT_MS.name,
+    ENV.DAEMON_TIMEOUT_MS.legacyName,
     { fallback: 120000 },
     env,
   );
@@ -252,8 +284,8 @@ const MAX_DAEMON_STARTUP_TIMEOUT_MS = 2_147_483_647;
 export function resolveDaemonStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return Math.min(
     readEnvPositiveInteger(
-      "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",
-      "AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS",
+      ENV.DAEMON_STARTUP_TIMEOUT_MS.name,
+      ENV.DAEMON_STARTUP_TIMEOUT_MS.legacyName,
       { fallback: 30000 },
       env,
     ),
@@ -294,8 +326,8 @@ export function resolveExistingDaemonReachabilityTimeoutMs(
 ): number {
   return Math.min(
     readEnvPositiveInteger(
-      "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
-      "AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
+      ENV.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS.name,
+      ENV.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS.legacyName,
       { fallback: 10000 },
       env,
     ),
@@ -493,21 +525,6 @@ export function deleteInternalToolParams(params: Record<string, unknown>): void 
   }
 }
 
-/** Copy replayable navigation arguments, excluding request-local metadata and device routing. */
-export function stripNavigationToolParams(args: Record<string, unknown>): Record<string, unknown> {
-  const clean = { ...args };
-  deleteInternalToolParams(clean);
-  delete clean.platform;
-  delete clean.deviceId;
-  delete clean.device;
-  for (const key of Object.keys(clean)) {
-    if (key.startsWith("__") || key === "sessionUuid") {
-      delete clean[key];
-    }
-  }
-  return clean;
-}
-
 /** Loopback-only header for a released session's inactive resource-read capability. */
 export const DAEMON_RELEASED_SESSION_HEADER = "x-auto-mobile-released-session-uuid";
 
@@ -644,8 +661,8 @@ export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
  */
 export function getCliSessionIdleTimeoutMs(): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
-    "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+    ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name,
+    ENV.CLI_SESSION_IDLE_TIMEOUT_MS.legacyName,
     {
       fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
       min: MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
@@ -695,11 +712,7 @@ export const DAEMON_RELINQUISH_DEVICE_LEASE_METHOD = "daemon/relinquishDeviceLea
  * mismatched client must be allowed through during an incident. Clients that
  * declare no handshake fields are always allowed regardless of this flag.
  */
-const handshakeDisableOverride = (
-  process.env.AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE ??
-  process.env.AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE ??
-  ""
-)
+const handshakeDisableOverride = (readEnvRaw(ENV.DAEMON_DISABLE_HANDSHAKE) ?? "")
   .trim()
   .toLowerCase();
 export const DAEMON_HANDSHAKE_ENABLED = !(

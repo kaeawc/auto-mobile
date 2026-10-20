@@ -1,12 +1,13 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { IosLockScreenUnlocker } from "../../../src/features/action/IosLockScreenUnlocker";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../src/models";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const device: BootedDevice = { deviceId: "ios-unlock-real-swipe", platform: "ios", name: "iOS" };
 
@@ -21,16 +22,16 @@ afterEach(() => {
 async function unlockWith(swipeResult: Parameters<FakeIOSCtrlProxy["setSwipeResult"]>[0]) {
   const proxy = new FakeIOSCtrlProxy();
   proxy.setSwipeResult(swipeResult);
-  clientSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    proxy as unknown as IOSCtrlProxyClient,
-  );
+  clientSpy = spyOnIosClientInstance(proxy);
   const observe = new FakeObserveScreen();
-  observe.setObserveResult({
-    timestamp: 0,
-    screenSize: { width: 1000, height: 2000 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
-  });
+  observe.setObserveResult(
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1000, height: 2000 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+    }),
+  );
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const lockPhases: Array<string | undefined> = [];
@@ -61,6 +62,7 @@ async function unlockWith(swipeResult: Parameters<FakeIOSCtrlProxy["setSwipeResu
 describe("iOS lock-screen swipe lost to a closed connection (real SwipeOn path)", () => {
   test("the indeterminate marker survives SwipeOn, so no fallback swipe follows", async () => {
     const { result, swipes, lockPhases } = await unlockWith({
+      totalTimeMs: 0,
       success: false,
       error: "WebSocket connection closed",
       dispatched: true,
@@ -99,6 +101,7 @@ describe("iOS lock-screen swipe lost to a closed connection (real SwipeOn path)"
 
   test("a definite runner refusal keeps the fallback swipe", async () => {
     const { result, swipes } = await unlockWith({
+      totalTimeMs: 0,
       success: false,
       error: "runner refused the swipe",
     });

@@ -11,7 +11,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -142,7 +142,7 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
     restore();
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -171,21 +171,19 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
     tools = new RealToolCallPath([held, free, spare]).install();
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     manager.setDeviceReadiness(HOLDER, "automationReady");
-    await pool.bindOrReuseDeviceSession(OWNERLESS, free.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: OWNERLESS,
+      deviceId: free.deviceId,
+      platform: "android",
+    });
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
     // The server registered its real tools. A plain tool's handler is its device work: stub it,
@@ -199,7 +197,32 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
         return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
       };
     }
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each([...table])(
+        name,
+        async (row: T) => {
+          await arrangeHarness();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
 
   afterEach(async () => {
     await fixture?.teardown();
@@ -219,40 +242,49 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
     }
   });
 
-  test("the table covers every plain tool the server registers, with schema-valid calls", () => {
-    const registered = plainTools();
+  arranged(
+    "the table covers every plain tool the server registers, with schema-valid calls",
+    () => {
+      const registered = plainTools();
 
-    expect(Object.keys(PLAIN_TOOL_CALLS).sort()).toEqual(
-      registered.map((tool) => tool.name).sort(),
-    );
-    const invalid = registered.flatMap((tool) =>
-      PLAIN_TOOL_CALLS[tool.name]
-        .filter((args) => !tool.schema.safeParse(args).success)
-        .map((args) => `${tool.name} ${JSON.stringify(args)}`),
-    );
-    expect(invalid).toEqual([]);
-  });
+      expect(Object.keys(PLAIN_TOOL_CALLS).sort()).toEqual(
+        registered.map((tool) => tool.name).sort(),
+      );
+      const invalid = registered.flatMap((tool) =>
+        PLAIN_TOOL_CALLS[tool.name]
+          .filter((args) => !tool.schema.safeParse(args).success)
+          .map((args) => `${tool.name} ${JSON.stringify(args)}`),
+      );
+      expect(invalid).toEqual([]);
+    },
+  );
 
   describe("from a connection that does not own the session", () => {
-    test.each(PLAIN_TOOL_CASES)("$title neither extends nor binds it", async ({ name, args }) => {
-      const before = clocks();
-      timer.advanceTime(60_000);
+    arrangedEach(PLAIN_TOOL_CASES)(
+      "$title neither extends nor binds it",
+      async ({ name, args }) => {
+        const before = clocks();
+        timer.advanceTime(60_000);
 
-      await call(name, args, OTHER);
+        await call(name, args, OTHER);
 
-      expect(clocks()).toEqual(before);
-      expect(pool.isSessionOwnedByOtherConnection(HOLDER, OTHER)).toBe(true);
-      expect(pool.isSessionOwnedByOtherConnection(HOLDER, OWNER)).toBe(false);
-    });
+        expect(clocks()).toEqual(before);
+        expect(pool.isSessionOwnedByOtherConnection(HOLDER, OTHER)).toBe(true);
+        expect(pool.isSessionOwnedByOtherConnection(HOLDER, OWNER)).toBe(false);
+      },
+    );
 
-    test("setToolEnabled still runs: editing another session's tool profile is intended", async () => {
-      const result = await call("setToolEnabled", { toolName: "tapOn", enabled: false }, OTHER);
+    arranged(
+      "setToolEnabled still runs: editing another session's tool profile is intended",
+      async () => {
+        const result = await call("setToolEnabled", { toolName: "tapOn", enabled: false }, OTHER);
 
-      expect(result.isError).not.toBe(true);
-      expect(handled).toEqual(["setToolEnabled"]);
-    });
+        expect(result.isError).not.toBe(true);
+        expect(handled).toEqual(["setToolEnabled"]);
+      },
+    );
 
-    test("every device read runs and neither extends nor binds it", async () => {
+    arranged("every device read runs and neither extends nor binds it", async () => {
       const reads = ToolRegistry.getEveryRegisteredTool().filter(
         (tool) => tool.requiresDevice && tool.deviceReadOnly === true,
       );
@@ -279,7 +311,7 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
   });
 
   describe("the session's own use still counts", () => {
-    test.each(["setToolEnabled", "killDevice", "exportPlan"])(
+    arrangedEach(["setToolEnabled", "killDevice", "exportPlan"])(
       "the owner's %s naming its session restarts the idle window",
       async (name) => {
         const before = clocks();
@@ -293,17 +325,20 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
       },
     );
 
-    test("a session no connection owns is still used by a call that names it, as before", async () => {
-      expect(pool.isSessionOwnedByOtherConnection(OWNERLESS, OTHER)).toBe(false);
-      const before = clocks(OWNERLESS);
-      timer.advanceTime(60_000);
+    arranged(
+      "a session no connection owns is still used by a call that names it, as before",
+      async () => {
+        expect(pool.isSessionOwnedByOtherConnection(OWNERLESS, OTHER)).toBe(false);
+        const before = clocks(OWNERLESS);
+        timer.advanceTime(60_000);
 
-      await call("setToolEnabled", PLAIN_TOOL_CALLS.setToolEnabled[0], OTHER, OWNERLESS);
+        await call("setToolEnabled", PLAIN_TOOL_CALLS.setToolEnabled[0], OTHER, OWNERLESS);
 
-      expect(clocks(OWNERLESS).lastUsedAt).toBe(before.lastUsedAt + 60_000);
-    });
+        expect(clocks(OWNERLESS).lastUsedAt).toBe(before.lastUsedAt + 60_000);
+      },
+    );
 
-    test("a caller with no connection identity is not told apart from the owner", async () => {
+    arranged("a caller with no connection identity is not told apart from the owner", async () => {
       const before = clocks();
       timer.advanceTime(60_000);
 
@@ -479,7 +514,7 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
       }
     };
 
-    test.each(REFUSED_CALLS)("refused: $title moves nothing", async (row) => {
+    arrangedEach(REFUSED_CALLS)("refused: $title moves nothing", async (row) => {
       timer.advanceTime(60_000);
       const leave = await row.arrange?.();
       const before = clocks();
@@ -504,7 +539,7 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
       expect(clocks()).toEqual(before);
     });
 
-    test.each(FAILED_AFTER_ADMISSION)("admitted, then failed: $title is use", async (row) => {
+    arrangedEach(FAILED_AFTER_ADMISSION)("admitted, then failed: $title is use", async (row) => {
       const before = clocks();
       timer.advanceTime(60_000);
       const leave = await row.arrange?.();
@@ -546,7 +581,7 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
         },
       ];
 
-    test.each(ADMITTED_CALLS)(
+    arrangedEach(ADMITTED_CALLS)(
       "admitted: $title is stamped when admitted and when it ends",
       async ({ name, args, connection }) => {
         const before = clocks();
@@ -575,40 +610,43 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
       },
     );
 
-    test("a nested step is judged alone: a refused one moves nothing, an admitted one stamps", async () => {
-      const before = clocks();
-      timer.advanceTime(60_000);
-      let nested = false;
-      const steps: Array<{ refusal?: string; lastUsedAt: number }> = [];
-      tools.setBody(async () => {
-        if (!nested) {
-          nested = true;
-          for (const deviceId of [spare.deviceId, held.deviceId]) {
-            timer.advanceTime(5_000);
-            const refusal = await ToolRegistry.callInternal("homeScreen", {
-              sessionUuid: HOLDER,
-              platform: "android",
-              deviceId,
-            }).then(
-              () => undefined,
-              (error: { code?: string }) => error.code ?? String(error),
-            );
-            steps.push({ refusal, lastUsedAt: clocks().lastUsedAt });
+    arranged(
+      "a nested step is judged alone: a refused one moves nothing, an admitted one stamps",
+      async () => {
+        const before = clocks();
+        timer.advanceTime(60_000);
+        let nested = false;
+        const steps: Array<{ refusal?: string; lastUsedAt: number }> = [];
+        tools.setBody(async () => {
+          if (!nested) {
+            nested = true;
+            for (const deviceId of [spare.deviceId, held.deviceId]) {
+              timer.advanceTime(5_000);
+              const refusal = await ToolRegistry.callInternal("homeScreen", {
+                sessionUuid: HOLDER,
+                platform: "android",
+                deviceId,
+              }).then(
+                () => undefined,
+                (error: { code?: string }) => error.code ?? String(error),
+              );
+              steps.push({ refusal, lastUsedAt: clocks().lastUsedAt });
+            }
           }
-        }
-        return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
-      });
+          return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
+        });
 
-      await call("homeScreen", { platform: "android" }, OWNER);
+        await call("homeScreen", { platform: "android" }, OWNER);
 
-      const admittedAt = before.lastUsedAt + 60_000;
-      expect(steps).toEqual([
-        // Refused 5 s into the outer call: still the outer call's admission stamp.
-        { refusal: "device_outside_bound_session", lastUsedAt: admittedAt },
-        // Admitted 10 s in: stamped then.
-        { refusal: undefined, lastUsedAt: admittedAt + 10_000 },
-      ]);
-      expect(tools.runs.map((run) => run.deviceId)).toEqual([held.deviceId, held.deviceId]);
-    });
+        const admittedAt = before.lastUsedAt + 60_000;
+        expect(steps).toEqual([
+          // Refused 5 s into the outer call: still the outer call's admission stamp.
+          { refusal: "device_outside_bound_session", lastUsedAt: admittedAt },
+          // Admitted 10 s in: stamped then.
+          { refusal: undefined, lastUsedAt: admittedAt + 10_000 },
+        ]);
+        expect(tools.runs.map((run) => run.deviceId)).toEqual([held.deviceId, held.deviceId]);
+      },
+    );
   });
 });

@@ -79,7 +79,7 @@ describe("DB concurrency RMW audit", () => {
 
     const timer = new FakeTimer();
     timer.setCurrentTime(3000);
-    const failures = new FailureAnalyticsRepository(timer, db);
+    const failures = new FailureAnalyticsRepository(db, timer);
     await runConcurrentSameKeyStress({
       count: N,
       act: (index) =>
@@ -101,7 +101,7 @@ describe("DB concurrency RMW audit", () => {
     expect(failureGroups[0].unique_sessions).toBe(N);
     expect(failureOccurrences).toHaveLength(N);
 
-    const coverage = new TestCoverageRepository(timer, db);
+    const coverage = new TestCoverageRepository(db, timer);
     const sessions = await runConcurrentSameKeyStress({
       count: N,
       act: () => coverage.getOrCreateSession("coverage-session", "com.example.audit"),

@@ -1,6 +1,5 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import type { McpServer } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerAppFileResources } from "../../src/server/appFileResources";
 import { registerAppResources } from "../../src/server/appResources";
@@ -174,7 +173,7 @@ describe("every registered resource template tolerates a malformed percent-escap
 
   test("the read handler never surfaces a URIError either", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
+    ResourceRegistry.registerWithServer(server, () => ({}));
     const readHandler = server.server.handlersBySchema.get("resources/read");
     expect(readHandler).toBeDefined();
 
@@ -204,7 +203,7 @@ describe("registry maps a contract parser's malformed-segment error to invalid p
       async (params) => ({ uri: "automobile:test", text: decodeSegmentOrThrow(params.name) }),
     );
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
+    ResourceRegistry.registerWithServer(server, () => ({}));
     const readHandler = server.server.handlersBySchema.get("resources/read")!;
     const uri = "automobile:test/contract/%E0%A4%A";
 
@@ -235,7 +234,7 @@ describe("registry backstop for a handler that decodes a capture unguarded (#101
       async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
     );
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
+    ResourceRegistry.registerWithServer(server, () => ({}));
     const readHandler = server.server.handlersBySchema.get("resources/read")!;
 
     const error = await readHandler(
@@ -265,7 +264,7 @@ describe("registry backstop for a handler that decodes a capture unguarded (#101
       },
     );
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
+    ResourceRegistry.registerWithServer(server, () => ({}));
     const readHandler = server.server.handlersBySchema.get("resources/read")!;
 
     const error = await readHandler(

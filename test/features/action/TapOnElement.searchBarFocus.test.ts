@@ -2,14 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
-import type {
-  BootedDevice,
-  Element,
-  ObserveResult,
-  ViewHierarchyResult,
-} from "../../../src/models";
+import type { BootedDevice, Element, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { ResultFaker } from "../../fakes/ResultFaker";
 
 const device: BootedDevice = {
   deviceId: "fixture-ios",
@@ -71,16 +67,8 @@ function verifySelectedField(
   options: TapOnElementOptions = { text: "Search videos", action: "focus" },
 ): boolean {
   const tap = new TapOnElement(device, null, { timer: new FakeTimer() });
-  const verifier = tap as unknown as {
-    verifyFocusedInputTarget: (
-      options: TapOnElementOptions,
-      target: Element,
-      observation: ObserveResult,
-      labelText?: string,
-    ) => boolean;
-  };
-  const observation = { viewHierarchy: hierarchy } as ObserveResult;
-  return verifier.verifyFocusedInputTarget(options, target, observation, "Search videos");
+  const observation = ResultFaker.observeResult({ viewHierarchy: hierarchy });
+  return tap.testHooks.verifyFocusedInputTarget(options, target, observation, "Search videos");
 }
 
 describe("iOS search bar focus fixture", () => {
@@ -117,8 +105,12 @@ describe("iOS search bar focus fixture", () => {
   test("keeps a duplicated field's indexed identity when focus is on its parent", () => {
     const hierarchy = fixture(3);
     for (const bar of hierarchy.hierarchy.node!.node!.slice(0, 3)) {
-      bar.node![0].$["view-id"] = "search-field";
-      bar.node![0].$.role = "textfield";
+      const field = bar.node?.[0];
+      if (!bar.$ || !field?.$) {
+        throw new Error("Expected search bar attributes");
+      }
+      field.$["view-id"] = "search-field";
+      field.$.role = "textfield";
     }
     const inner = new SearchableHierarchy()
       .project(hierarchy)
@@ -133,9 +125,16 @@ describe("iOS search bar focus fixture", () => {
     const hierarchy = fixture(3);
     const bars = hierarchy.hierarchy.node!.node!.slice(0, 3);
     for (const [index, bar] of bars.entries()) {
+      if (!bar.$) {
+        throw new Error("Expected search bar attributes");
+      }
       bar.$.focused = index === 1;
-      bar.node![0].$["view-id"] = "search-field";
-      bar.node![0].$.role = "textfield";
+      const field = bar.node?.[0];
+      if (!bar.$ || !field?.$) {
+        throw new Error("Expected search bar attributes");
+      }
+      field.$["view-id"] = "search-field";
+      field.$.role = "textfield";
     }
     const inner = new SearchableHierarchy()
       .project(hierarchy)
@@ -167,9 +166,13 @@ describe("iOS search bar focus fixture", () => {
     }).element!;
     const root = hierarchy.hierarchy.node!;
     const bar = root.node![0];
+    const field = bar.node?.[0];
+    if (!bar.$ || !field?.$) {
+      throw new Error("Expected search bar attributes");
+    }
     bar.$.focused = false;
-    bar.node![0].$.focused = true;
-    bar.node![0].$.role = "textfield";
+    field.$.focused = true;
+    field.$.role = "textfield";
     expect(
       verifySelectedField(hierarchy, { ...parent, class: "UISearchBar", role: "textfield" }),
     ).toBe(true);

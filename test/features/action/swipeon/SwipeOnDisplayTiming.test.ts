@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../../helpers/observedInteractionStub";
 import { BaseVisualChange } from "../../../../src/features/action/BaseVisualChange";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -30,7 +31,7 @@ const device: BootedDevice = {
 };
 const observation: ObserveResult = {
   observationId: "timing",
-  timestamp: 1,
+  updatedAt: 1,
   displayRevision: 0,
   display: { key: "external", role: "external", posture: "unknown", generation: 1 },
   screenSize: { width: 200, height: 200 },
@@ -83,7 +84,7 @@ function harness({
     displayTransitions: transitions,
   });
   // Isolate dispatch timing from BaseVisualChange's unrelated post-observe polling.
-  action.observedInteraction = async (run) => run(platformObservation);
+  action.observedInteraction = runBlockWith(platformObservation);
   const commands = () => adb.getAllCommands().filter((command) => command.includes("touchscreen"));
   const legs = () =>
     route === "ctrlproxy"
@@ -341,7 +342,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     test("forward failure stops return", async () => {
       const h = harness({ route });
       if (route === "ctrlproxy") {
-        h.ctrl.setSwipeResult({ success: false, error: "forward failed" });
+        h.ctrl.setSwipeResult({ success: false, totalTimeMs: 0, error: "forward failed" });
       } else {
         h.adb.setCommandResult(
           "shell input touchscreen -d 2 swipe 100 160 100 40 300",
@@ -397,7 +398,7 @@ test("iOS display boomerang falls through with config to the existing default ex
     returnSpeed: 2,
   });
   expect(result.success).toBe(true);
-  expect(executor.mock.calls[0]?.[8]).toEqual({ apexPauseMs: 25, returnSpeed: 2 });
+  expect(executor.mock.calls[0]?.[0].boomerang).toEqual({ apexPauseMs: 25, returnSpeed: 2 });
   expect(h.gesture.getSwipeCalls().map((leg) => leg.options?.duration)).toEqual([100, 50]);
   expect(h.timer.getSleepHistory()).toEqual([25]);
 });

@@ -132,6 +132,26 @@ interface DragAndDropDeps extends DisplayFenceDependencies {
   visionAnalyzer?: VisionAnalyzer;
 }
 
+/** One resolved drag dispatch handed to the platform client. */
+export interface DragDispatchRequest {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  pressDurationMs: number;
+  dragDurationMs: number;
+  holdDurationMs: number;
+  signal?: AbortSignal;
+}
+
+/** Result of a drag dispatch. */
+export interface DragDispatchOutcome {
+  success: boolean;
+  error?: string;
+  a11yTotalTimeMs?: number;
+  a11yGestureTimeMs?: number;
+}
+
 export class DragAndDrop extends BaseVisualChange {
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private selector: ElementSelector;
@@ -197,23 +217,22 @@ export class DragAndDrop extends BaseVisualChange {
         result = await awaitWhileRequestIsLive(
           Promise.resolve().then(() => {
             throwIfAborted(signal);
-            return this.accessibilityService.requestDrag(
-              start.x,
-              start.y,
-              end.x,
-              end.y,
+            return this.accessibilityService.requestDrag({
+              x1: start.x,
+              y1: start.y,
+              x2: end.x,
+              y2: end.y,
               pressDurationMs,
-              duration,
+              dragDurationMs: duration,
               holdDurationMs,
-              getIosDragTimeoutMs(pressDurationMs, duration, holdDurationMs),
-              undefined,
+              timeoutMs: getIosDragTimeoutMs(pressDurationMs, duration, holdDurationMs),
               signal,
-              target.displayId === 0 ? undefined : target.displayId,
-              target.assertCurrent,
-              () => {
+              displayId: target.displayId === 0 ? undefined : target.displayId,
+              beforeSend: target.assertCurrent,
+              onDispatch: () => {
                 dispatched = true;
               },
-            );
+            });
           }),
           signal,
         );
@@ -265,9 +284,11 @@ export class DragAndDrop extends BaseVisualChange {
           options.display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         if (this.device.platform === "android") {
           return await this.observedInteraction(
@@ -379,16 +400,16 @@ export class DragAndDrop extends BaseVisualChange {
 
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
-          const dragResult = await this.executeDrag(
-            sourcePoint.x,
-            sourcePoint.y,
-            targetPoint.x,
-            targetPoint.y,
+          const dragResult = await this.dispatchDrag({
+            startX: sourcePoint.x,
+            startY: sourcePoint.y,
+            endX: targetPoint.x,
+            endY: targetPoint.y,
             pressDurationMs,
             dragDurationMs,
             holdDurationMs,
             signal,
-          );
+          });
 
           if (this.device.platform === "ios" && dragResult.success) {
             iosDispatchTimestamp = this.timer.now();
@@ -466,8 +487,7 @@ export class DragAndDrop extends BaseVisualChange {
             searchCriteria,
             this.visionConfig,
             finalErrorMessage,
-            signal,
-            this.visionAnalyzer,
+            { signal, visionAnalyzer: this.visionAnalyzer },
           );
         }
       }
@@ -571,6 +591,11 @@ export class DragAndDrop extends BaseVisualChange {
       );
     }
     return safe;
+  }
+
+  /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
+  get testHooks() {
+    return { resolveTarget: this.resolveTarget.bind(this) };
   }
 
   private resolveTarget(
@@ -684,21 +709,27 @@ export class DragAndDrop extends BaseVisualChange {
     return value >= min && value <= max;
   }
 
-  private async executeDrag(
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    signal?: AbortSignal,
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    a11yTotalTimeMs?: number;
-    a11yGestureTimeMs?: number;
-  }> {
+  private dispatchDrag: (request: DragDispatchRequest) => Promise<DragDispatchOutcome> = (
+    request,
+  ) => this.executeDrag(request);
+
+  /** Replaces the platform dispatch so tests can observe the resolved drag request. */
+  setDragDispatchForTesting(
+    dispatch: (request: DragDispatchRequest) => Promise<DragDispatchOutcome>,
+  ): void {
+    this.dispatchDrag = dispatch;
+  }
+
+  private async executeDrag({
+    startX,
+    startY,
+    endX,
+    endY,
+    pressDurationMs,
+    dragDurationMs,
+    holdDurationMs,
+    signal,
+  }: DragDispatchRequest): Promise<DragDispatchOutcome> {
     throwIfAborted(signal);
 
     const timeoutMs = getIosDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);
@@ -713,34 +744,30 @@ export class DragAndDrop extends BaseVisualChange {
       const request = Promise.resolve().then(() => {
         throwIfAborted(signal);
         return this.device.platform === "ios"
-          ? IOSCtrlProxyClient.getInstance(this.device).requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
+          ? IOSCtrlProxyClient.getInstance(this.device).requestDrag({
+              x1: startX,
+              y1: startY,
+              x2: endX,
+              y2: endY,
               pressDurationMs,
               dragDurationMs,
               holdDurationMs,
               timeoutMs,
-              undefined,
               signal,
               onDispatch,
-            )
-          : this.accessibilityService.requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
+            })
+          : this.accessibilityService.requestDrag({
+              x1: startX,
+              y1: startY,
+              x2: endX,
+              y2: endY,
               pressDurationMs,
               dragDurationMs,
               holdDurationMs,
               timeoutMs,
-              undefined,
               signal,
-              undefined,
-              undefined,
               onDispatch,
-            );
+            });
       });
       result = await awaitWhileRequestIsLive(request, signal);
       throwIfAborted(signal);

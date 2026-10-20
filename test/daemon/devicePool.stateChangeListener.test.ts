@@ -40,7 +40,11 @@ describe("DevicePool state-change listener", () => {
     });
     holder.pool = pool;
     try {
-      const sessionId = await pool.bindOrReuseDeviceSession("s1", handset.deviceId, "android");
+      const sessionId = await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: handset.deviceId,
+        platform: "android",
+      });
       expect(seen).toEqual([["android", sessionId, "busy"]]);
 
       await pool.releaseDevice(handset.deviceId, sessionId);
@@ -70,7 +74,11 @@ describe("DevicePool state-change listener", () => {
       throw new Error("observer boom");
     });
     try {
-      const sessionId = await pool.bindOrReuseDeviceSession("s1", handset.deviceId, "android");
+      const sessionId = await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: handset.deviceId,
+        platform: "android",
+      });
       expect(pool.getDevice(handset.deviceId)?.sessionId).toBe(sessionId);
     } finally {
       sessions.stopCleanupTimer();

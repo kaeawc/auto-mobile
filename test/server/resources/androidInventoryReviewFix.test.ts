@@ -190,20 +190,17 @@ test("inventory discovery expires at 2s with retry hints while the pool shares 5
       await timer.sleep(5_000);
       return createExecResult("List of devices attached\nemulator-5554\tdevice\n", "");
     },
-    null,
-    undefined,
-    timer,
+    { timer },
   );
   const fake = new FakeAdbExecutor();
   fake.getBootedAndroidDevices = (options) => adb.getBootedAndroidDevices(options);
   fake.setCommandResponse("emu avd name", createExecResult("Pixel_9\nOK", ""));
-  const emulator = new AndroidEmulatorClient(
-    async () => createExecResult("Pixel_9", ""),
-    null,
+  const emulator = new AndroidEmulatorClient({
+    execAsync: async () => createExecResult("Pixel_9", ""),
     timer,
-    new FakeAdbClientFactory(fake),
-    new FakeAvdConfigReader(),
-  );
+    adbFactory: new FakeAdbClientFactory(fake),
+    avdConfigReader: new FakeAvdConfigReader(),
+  });
   const manager = new MultiPlatformDeviceManager(fake, null, emulator);
   const inventory = manager.getBootedDevicesDetailed("android", {
     coalesceInventoryEnrichment: true,

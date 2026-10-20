@@ -1,7 +1,8 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
-import { createJSONToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import { highlightResultSchema } from "./highlightToolOutputSchemas";
 import {
   ActionableError,
   BootedDevice,
@@ -11,8 +12,12 @@ import {
   Platform,
   ViewHierarchyResult,
 } from "../models";
-import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
-import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
+import { highlightShapeSchema } from "../features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../features/debug/VisualHighlightClient";
+import {
+  generateHighlightId,
+  recordVideoRecordingHighlightAdded,
+} from "../daemon/videoRecordingManager";
 import type { HierarchyCapture, HierarchySnapshot } from "../features/observe/HierarchyCapture";
 import {
   createDeviceHierarchyCapture,
@@ -33,7 +38,7 @@ import {
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
   validateElementIdTextSelector,
-} from "./elementSelectorSchemas";
+} from "../models/elementSelectorSchemas";
 import { logger } from "../utils/logger";
 import { boundsEqual } from "../utils/bounds";
 
@@ -119,7 +124,7 @@ export type HighlightArgs = z.infer<typeof highlightSchema>;
 
 const toHighlightResponse = (result: HighlightOperationResult) =>
   withIsErrorOnFailure(
-    createJSONToolResponse({
+    createStructuredToolResponse({
       success: result.success,
       error: result.error ?? undefined,
     }),
@@ -128,7 +133,10 @@ const toHighlightResponse = (result: HighlightOperationResult) =>
 
 const toHighlightErrorResponse = (error: unknown) => {
   const message = error instanceof ActionableError ? error.message : String(error);
-  return withIsErrorOnFailure(createJSONToolResponse({ success: false, error: message }), false);
+  return withIsErrorOnFailure(
+    createStructuredToolResponse({ success: false, error: message }),
+    false,
+  );
 };
 
 const DEFAULT_HIERARCHY_TIMEOUT_MS = 10000;
@@ -307,7 +315,7 @@ const resolveSourceDimensions = (
 
 interface HighlightToolDependencies {
   hierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
-  highlightClientFactory?: () => VisualHighlightClient;
+  highlightClientFactory?: () => Pick<VisualHighlightClient, "addHighlight">;
   viewHierarchyClientFactory?: (device: BootedDevice) => HierarchySyncClient;
   generateHighlightId?: () => string;
 }
@@ -370,6 +378,6 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
     "Draw a red hand-drawn circle around a UI element.",
     highlightSchema,
     highlightHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: highlightResultSchema },
   );
 }

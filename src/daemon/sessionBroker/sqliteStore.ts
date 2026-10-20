@@ -1,4 +1,15 @@
+import { countSessionAdmissions } from "./sqliteAdmissions";
+import { SessionRequestOwnerMismatchError } from "./SessionRequestOwnerMismatchError";
+import { SessionBrokerInvariantError } from "./SessionBrokerInvariantError";
 import type { Kysely, Selectable, Transaction } from "kysely";
+import {
+  readExport,
+  acknowledgeExport,
+  linkRequestExport,
+  linkExport,
+  pruneTerminalRequests,
+  deleteUnreferencedTombstones,
+} from "./sqliteReceipts";
 import {
   SESSION_OWNER_EXITED_CODE,
   SESSION_OWNER_EXITED_MESSAGE,
@@ -18,6 +29,8 @@ import {
 } from "./requestIdentity";
 import {
   destructionTicket,
+  type BrokerExportIdentity,
+  type BrokerExportRecord,
   type BrokerAbandonment,
   type BrokerAdmission,
   type BrokerAdmissionInput,
@@ -29,8 +42,6 @@ import {
 } from "./store";
 
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
-
-const TERMINAL_REQUEST_STATES = ["released", "failed"] as const;
 
 function isTerminalState(state: BrokerRequestsTable["state"] | undefined): boolean {
   return state === "released" || state === "failed";
@@ -103,7 +114,7 @@ function ownerIdentity(owner: BindingProcessIdentity): BindingProcessIdentity {
 
 function requireValue<T>(value: T | undefined | null, message: string): T {
   if (value === undefined || value === null) {
-    throw new ActionableError(message);
+    throw new SessionBrokerInvariantError(message);
   }
   return value;
 }
@@ -141,6 +152,25 @@ export class SqliteSessionBrokerStore {
     return this.readRequest(this.db, requestId);
   }
 
+  getExport(prepareId: string): Promise<BrokerExportRecord | undefined> {
+    return readExport(this.db, prepareId);
+  }
+
+  acknowledgeExport(
+    prepareId: string,
+    now = this.clock.now(),
+  ): Promise<BrokerExportRecord | undefined> {
+    return acknowledgeExport(this.db, prepareId, now);
+  }
+
+  linkRequestExport(
+    requestId: string,
+    fingerprint: string,
+    identity: BrokerExportIdentity,
+  ): Promise<void> {
+    return linkRequestExport(this.db, this.clock.now(), requestId, fingerprint, identity);
+  }
+
   async getSession(sessionId: string): Promise<BrokerRequestRecord | undefined> {
     const row = await this.db
       .selectFrom("session_broker_requests")
@@ -150,8 +180,21 @@ export class SqliteSessionBrokerStore {
     return row && requestRecord(row);
   }
 
-  async listResources(): Promise<BrokerResourceRecord[]> {
+  async listResources(resourceId?: string): Promise<BrokerResourceRecord[]> {
+    if (resourceId !== undefined) {
+      const resource = await this.readResource(this.db, resourceId);
+      return resource ? [resource] : [];
+    }
     return this.readResources(this.db);
+  }
+
+  async getResource(resourceId: string): Promise<BrokerResourceRecord | undefined> {
+    // Preserve the receipt-read failure/race injection seam while querying only this row.
+    return (await this.listResources(resourceId))[0];
+  }
+
+  listLiveResources(): Promise<BrokerResourceRecord[]> {
+    return this.readResources(this.db, true);
   }
 
   async listRequests(): Promise<BrokerRequestRecord[]> {
@@ -194,87 +237,20 @@ export class SqliteSessionBrokerStore {
     return rows.map(requestRecord);
   }
 
-  /**
-   * Deletes terminal receipts that became terminal at least `retentionMs` ago and hold no
-   * undestroyed resource, oldest first, at most `limit` per call. Their destroyed resource
-   * tombstones go with them unless a retained receipt still names that resource. A receipt with
-   * no terminal time (written before retention existed) is stamped now instead, so it gets a
-   * full window. A pruned identity answers as unknown, exactly as one never seen.
-   */
-  async pruneTerminalRequests(retentionMs: number, limit: number): Promise<number> {
-    if (!Number.isFinite(retentionMs) || retentionMs < 0 || !Number.isInteger(limit) || limit < 1) {
-      throw new ActionableError(
-        "Receipt retention needs a non-negative window and a positive limit",
-      );
-    }
-    return this.db.transaction().execute(async (trx) => {
-      const now = this.clock.now();
-      await trx
-        .updateTable("session_broker_requests")
-        .set({ terminal_at_ms: now })
-        .where("state", "in", TERMINAL_REQUEST_STATES)
-        .where("terminal_at_ms", "is", null)
-        .execute();
-      const expired = await trx
-        .selectFrom("session_broker_requests")
-        .select("request_id")
-        .where("state", "in", TERMINAL_REQUEST_STATES)
-        .where("terminal_at_ms", "<=", now - retentionMs)
-        .where(({ not, exists, selectFrom }) =>
-          not(
-            exists(
-              selectFrom("session_broker_resources")
-                .select("session_broker_resources.resource_id")
-                .whereRef(
-                  "session_broker_resources.request_id",
-                  "=",
-                  "session_broker_requests.request_id",
-                )
-                .where("session_broker_resources.state", "!=", "destroyed"),
-            ),
-          ),
-        )
-        .orderBy("terminal_at_ms")
-        .orderBy("request_id")
-        .limit(limit)
-        .execute();
-      const ids = expired.map((row) => row.request_id);
-      if (ids.length === 0) {
-        return 0;
-      }
-      // Tombstones still named by a retained receipt keep answering its profile.
-      await trx
-        .deleteFrom("session_broker_resources")
-        .where("request_id", "in", ids)
-        .where("state", "=", "destroyed")
-        .where(({ not, exists, selectFrom }) =>
-          not(
-            exists(
-              selectFrom("session_broker_requests")
-                .select("session_broker_requests.request_id")
-                .whereRef(
-                  "session_broker_requests.resource_id",
-                  "=",
-                  "session_broker_resources.resource_id",
-                )
-                .where("session_broker_requests.request_id", "not in", ids),
-            ),
-          ),
-        )
-        .execute();
-      await trx
-        .updateTable("session_broker_resources")
-        .set({ request_id: null })
-        .where("request_id", "in", ids)
-        .execute();
-      await trx.deleteFrom("session_broker_requests").where("request_id", "in", ids).execute();
-      return ids.length;
-    });
+  pruneTerminalRequests(
+    retentionMs: number,
+    limit: number,
+    exportRetentionMs?: number,
+  ): Promise<number> {
+    return pruneTerminalRequests(this.db, this.clock, retentionMs, limit, exportRetentionMs);
   }
 
   /** A failed catalog/default lookup consumes its operation identity without consuming capacity. */
   async recordPreAdmissionFailure(
-    input: Pick<BrokerAdmissionInput, "requestId" | "fingerprint" | "parameters" | "owner">,
+    input: Pick<
+      BrokerAdmissionInput,
+      "requestId" | "fingerprint" | "parameters" | "owner" | "export"
+    >,
     failure: SessionBrokerFailure,
   ): Promise<BrokerRequestRecord> {
     if (!input.requestId.trim() || !input.fingerprint.trim()) {
@@ -288,6 +264,7 @@ export class SqliteSessionBrokerStore {
             "Session request identity was already used with different parameters",
           );
         }
+        await linkExport(trx, input.requestId, input.export, this.clock.now());
         return previous;
       }
       const row = await trx
@@ -307,6 +284,7 @@ export class SqliteSessionBrokerStore {
         })
         .returningAll()
         .executeTakeFirstOrThrow();
+      await linkExport(trx, input.requestId, input.export, this.clock.now());
       return requestRecord(row);
     });
   }
@@ -323,6 +301,7 @@ export class SqliteSessionBrokerStore {
             "Session request identity was already used with different parameters",
           );
         }
+        await linkExport(trx, input.requestId, input.export, this.clock.now());
         return { kind: "existing", request: previous };
       }
       const row = await trx
@@ -342,6 +321,7 @@ export class SqliteSessionBrokerStore {
         })
         .returningAll()
         .executeTakeFirstOrThrow();
+      await linkExport(trx, input.requestId, input.export, this.clock.now());
       return this.reserve(trx, requestRecord(row), input);
     });
   }
@@ -394,7 +374,7 @@ export class SqliteSessionBrokerStore {
         };
       }
       if (!sameOwner(previous.owner, owner)) {
-        throw new ActionableError("Session request belongs to another daemon process generation");
+        throw new SessionRequestOwnerMismatchError(previous.restartHandoff === true);
       }
       let ticket: DestructionTicket | undefined;
       if (previous.resourceId) {
@@ -521,7 +501,9 @@ export class SqliteSessionBrokerStore {
       }
       const resource = await this.ownedResource(trx, request);
       if (request.state !== "releasing" || resource.state !== "resetting") {
-        throw new ActionableError("Only a joined, resetting session can return a clean device");
+        throw new SessionBrokerInvariantError(
+          "Only a joined, resetting session can return a clean device",
+        );
       }
       const binding = await trx
         .selectFrom("slot_assignments")
@@ -536,12 +518,13 @@ export class SqliteSessionBrokerStore {
         binding.exec_session_uuid ||
         journal
       ) {
-        throw new ActionableError(
+        throw new SessionBrokerInvariantError(
           "Physical device still has execution or journal work; it cannot enter the idle pool",
         );
       }
-      const resources = await this.readResources(trx);
-      const idleOrder = Math.max(0, ...resources.map((entry) => entry.idleOrder)) + 1;
+      const resources = await this.readResources(trx, true);
+      const idleOrder =
+        resources.reduce((latest, entry) => Math.max(latest, entry.idleOrder), 0) + 1;
       await this.updateResource(trx, resource, {
         state: "idle",
         request_id: null,
@@ -660,7 +643,7 @@ export class SqliteSessionBrokerStore {
       if (await this.physicalWorkPending(trx, resource)) {
         return false;
       }
-      // Keep the revision so replaying exactly this confirmed destruction is idempotent.
+      // Retained receipts still need the profile and idempotent destruction revision.
       await trx
         .updateTable("session_broker_resources")
         .set({ state: "destroyed" })
@@ -668,6 +651,8 @@ export class SqliteSessionBrokerStore {
         .execute();
       if (resource.requestId) {
         await this.settleRequestAfterDestruction(trx, resource);
+      } else {
+        await deleteUnreferencedTombstones(trx, resource.resourceId);
       }
       return true;
     });
@@ -797,25 +782,8 @@ export class SqliteSessionBrokerStore {
     request: BrokerRequestRecord,
     input: BrokerAdmissionInput,
   ): Promise<BrokerAdmission> {
-    const resources = await this.readResources(trx);
-    const active = await trx
-      .selectFrom("session_broker_requests")
-      .select(["request_id", "state", "resource_id"])
-      .where("state", "!=", "released")
-      .where("request_id", "!=", request.requestId)
-      .execute();
-    // A failed request may still have a live native session or ambiguous creation. Retain its
-    // session admission as well as its device admission until cleanup is confirmed.
-    const sessionCount = active.filter(
-      (entry) =>
-        entry.state !== "failed" ||
-        resources.some(
-          (resource) =>
-            resource.resourceId === entry.resource_id &&
-            resource.requestId === entry.request_id &&
-            resource.state !== "destroyed",
-        ),
-    ).length;
+    const resources = await this.readResources(trx, true);
+    const sessionCount = await countSessionAdmissions(trx, request.requestId);
     const decision = selectAdmission(
       {
         activeOrAcquiringSessions: sessionCount,
@@ -888,7 +856,7 @@ export class SqliteSessionBrokerStore {
     trx: Transaction<BindingRegistryDatabase>,
     limits: BrokerLimits,
   ): Promise<DestructionTicket[]> {
-    const resources = await this.readResources(trx);
+    const resources = await this.readResources(trx, true);
     const selected = chooseIdleEvictions(
       { activeOrAcquiringSessions: 0, resources: occupiedResources(resources) },
       limits,
@@ -973,10 +941,11 @@ export class SqliteSessionBrokerStore {
     return row && resourceRecord(row);
   }
 
-  private async readResources(db: Executor): Promise<BrokerResourceRecord[]> {
+  private async readResources(db: Executor, liveOnly = false): Promise<BrokerResourceRecord[]> {
     const rows = await db
       .selectFrom("session_broker_resources")
       .selectAll()
+      .$if(liveOnly, (query) => query.where("state", "!=", "destroyed"))
       .orderBy("allocation_index")
       .execute();
     return rows.map(resourceRecord);
@@ -989,7 +958,7 @@ export class SqliteSessionBrokerStore {
   ): Promise<BrokerRequestRecord> {
     const request = requireValue(await this.readRequest(db, id), "Unknown session request");
     if (!sameOwner(request.owner, owner)) {
-      throw new ActionableError("Session request belongs to another daemon process generation");
+      throw new SessionRequestOwnerMismatchError(request.restartHandoff === true);
     }
     return request;
   }
@@ -1006,7 +975,9 @@ export class SqliteSessionBrokerStore {
       "Request resource disappeared",
     );
     if (resource.requestId !== request.requestId) {
-      throw new ActionableError("Session request no longer owns this device reservation");
+      throw new SessionBrokerInvariantError(
+        "Session request no longer owns this device reservation",
+      );
     }
     return resource;
   }

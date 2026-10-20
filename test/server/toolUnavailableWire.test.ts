@@ -1,11 +1,11 @@
-import { McpError } from "../../src/server/mcpError";
+import { ProtocolError } from "@modelcontextprotocol/client";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { DAEMON_TOOL_UNAVAILABLE_CODE, DAEMON_UNKNOWN_TOOL_CODE } from "../../src/daemon/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { isToolUnavailableWireError } from "../../src/server/toolUnavailableError";
+import { isToolUnavailableWireError } from "../../src/daemon/toolUnavailableError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 
@@ -54,21 +54,21 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
     restoreHermeticServer();
   });
 
-  async function callError(name: string): Promise<McpError> {
+  async function callError(name: string): Promise<ProtocolError> {
     const { client } = fixture.getContext();
     try {
       await client.callTool({ name, arguments: {} });
     } catch (error) {
-      expect(error).toBeInstanceOf(McpError);
-      return error as McpError;
+      expect(error).toBeInstanceOf(ProtocolError);
+      return error as ProtocolError;
     }
     throw new Error(`${name} unexpectedly succeeded`);
   }
 
-  test.each(GATED)("$name: gate reason text unchanged, marker on the wire", async (gated) => {
+  test.each([...GATED])("$name: gate reason text unchanged, marker on the wire", async (gated) => {
     const error = await callError(gated.name);
     expect(error.code).toBe(-32603);
-    expect(error.message).toBe(`MCP error -32603: Unknown tool: ${gated.name}. ${gated.reason}`);
+    expect(error.message).toBe(`Unknown tool: ${gated.name}. ${gated.reason}`);
     expect(error.data).toEqual({ code: DAEMON_TOOL_UNAVAILABLE_CODE, toolName: gated.name });
     expect(isToolUnavailableWireError(error)).toBe(true);
   });
@@ -76,7 +76,7 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
   test("a name the registry never registered carries the unknown-tool code, not the unavailable marker", async () => {
     const error = await callError("__never_registered__");
     expect(error.code).toBe(-32603);
-    expect(error.message).toBe("MCP error -32603: Unknown tool: __never_registered__");
+    expect(error.message).toBe("Unknown tool: __never_registered__");
     expect(error.data).toEqual({
       code: DAEMON_UNKNOWN_TOOL_CODE,
       toolName: "__never_registered__",

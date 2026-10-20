@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolRegistry } from "../server/toolRegistry";
+import { daemonToolRegistry } from "./toolRegistryPort";
 
 /**
  * Param schemas for the `ide/*` routes that validate their own params (#11813), replacing the
@@ -44,7 +44,7 @@ export const parseSetSessionToolEnabledParams = ideParser(
   z.object({
     sessionUuid: truthy(SESSION_TOOL_MESSAGE),
     toolName: z.custom<string>(
-      (value) => Boolean(value) && ToolRegistry.isUserConfigurableTool(value as string),
+      (value) => Boolean(value) && daemonToolRegistry().isUserConfigurableTool(value as string),
       { message: SESSION_TOOL_MESSAGE },
     ),
     enabled: z.custom<boolean>((value) => typeof value === "boolean", {

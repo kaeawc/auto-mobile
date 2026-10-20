@@ -1,4 +1,4 @@
-import type { PlanHealthWriter } from "../../src/server/planHealthSummary";
+import type { PlanHealthWriter } from "../../src/server/filePlanHealthWriter";
 import type { PlanHealthSummary } from "../../src/models/ExecutePlanResult";
 
 export class FakePlanHealthWriter implements PlanHealthWriter {

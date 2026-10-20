@@ -1,6 +1,6 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -14,6 +14,28 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 describe("ToolRegistry.registerWithServer", () => {
   let server: McpServer;
   let client: Client;
+
+  // The SDK builds its request handlers and schema validators on first use. That
+  // one-time cost belongs to the process, not to whichever test runs first (or
+  // runs alone in the budget's isolated re-run), so pay it before the timed tests.
+  beforeAll(async () => {
+    ToolRegistry.clearTools();
+    ToolRegistry.register("warmup", "Warm the SDK paths", z.object({}), async () => ({
+      content: [{ type: "text", text: "ok" }],
+    }));
+    const warmServer = new McpServer({ name: "warmup", version: "0.0.1" });
+    const warmClient = new Client({ name: "warmup-client", version: "0.0.1" });
+    ToolRegistry.registerWithServer(warmServer);
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    await warmServer.connect(serverTransport);
+    await warmClient.connect(clientTransport);
+    await warmClient.listTools();
+    await warmClient.callTool({ name: "warmup", arguments: {} });
+    await warmClient.close();
+    await warmServer.close();
+    ToolRegistry.clearServersForTesting();
+    ToolRegistry.clearTools();
+  });
 
   beforeEach(() => {
     ToolRegistry.clearTools();

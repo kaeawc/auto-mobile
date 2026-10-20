@@ -1,5 +1,5 @@
 import { spyOn } from "bun:test";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
   createFakeDaemonState as createDrainDaemonState,
@@ -11,11 +11,16 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import type { CtrlProxySyncedHierarchy } from "../../src/features/observe/ios/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+import type { DragRequest } from "../../src/utils/interfaces/DragRequest";
+import type { SwipeRequest } from "../../src/utils/interfaces/SwipeRequest";
+import { createIosTestClient } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -26,9 +31,13 @@ import {
   sendRequestAfterConnect,
 } from "./helpers/inputSocketHarness";
 
+async function emptySyncedHierarchy(): Promise<CtrlProxySyncedHierarchy> {
+  return { hierarchy: { updatedAt: 0, packageName: "", hierarchy: {} } };
+}
+
 describe("UnixSocketServer input/swipe", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let originalAndroidGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
@@ -63,25 +72,18 @@ describe("UnixSocketServer input/swipe", () => {
   });
 
   test("routes Android coordinate swipes without forwarding through tools/call", async () => {
-    const requestSwipe = mock(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        args[8]?.();
-        return { success: true };
-      },
-    );
+    const requestSwipe = mock(async (request: SwipeRequest) => {
+      request.onDispatch?.();
+      return { success: true, totalTimeMs: 0 };
+    });
     const createMcpClient = mock(async () => {
       throw new Error("input/swipe should not create an MCP client");
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
     );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -110,39 +112,35 @@ describe("UnixSocketServer input/swipe", () => {
       end: { x: 56.75, y: 78.5 },
       durationMs: 420,
     });
-    expect(requestSwipe).toHaveBeenCalledWith(
-      12.5,
-      34.25,
-      56.75,
-      78.5,
-      420,
-      1234,
-      undefined,
-      undefined,
-      expect.any(Function),
-      expect.any(AbortSignal),
-    );
+    expect(requestSwipe).toHaveBeenCalledWith({
+      x1: 12.5,
+      y1: 34.25,
+      x2: 56.75,
+      y2: 78.5,
+      duration: 420,
+      timeoutMs: 1234,
+      contextOptions: undefined,
+      onDispatch: expect.any(Function),
+      signal: expect.any(AbortSignal),
+    });
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
   test("LEGACY iOS swipe (no runner scale metadata) passes coordinates through unchanged", async () => {
-    const requestDrag = mock(async (...args: Parameters<IOSCtrlProxyClient["requestDrag"]>) => {
-      args[10]?.();
-      return { success: true };
+    const requestDrag = mock(async (request: DragRequest) => {
+      request.onDispatch?.();
+      return { success: true, totalTimeMs: 0 };
     });
-    const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      requestDrag,
-      getScreenScaleMetadata: () => null,
-      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
+    const fetchHierarchy = mock(emptySyncedHierarchy); // success, no metadata => legacy
+    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      createIosTestClient(iosDevice, {
+        requestDrag,
+        getScreenScaleMetadata: () => null,
+        requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+      }),
     );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -165,38 +163,35 @@ describe("UnixSocketServer input/swipe", () => {
       end: { x: 80, y: 90 },
       durationMs: 750,
     });
-    expect(requestDrag).toHaveBeenCalledWith(
-      20,
-      30,
-      80,
-      90,
-      0,
-      750,
-      0,
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestDrag).toHaveBeenCalledWith({
+      x1: 20,
+      y1: 30,
+      x2: 80,
+      y2: 90,
+      pressDurationMs: 0,
+      dragDurationMs: 750,
+      holdDurationMs: 0,
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("canonical-pixel iOS swipe divides each endpoint by nativeScale before dispatch", async () => {
     // px frame (#4549): endpoints arrive in pixels, divided by nativeScale=3 to runner points.
-    const requestDrag = mock(async (...args: Parameters<IOSCtrlProxyClient["requestDrag"]>) => {
-      args[10]?.();
-      return { success: true };
+    const requestDrag = mock(async (request: DragRequest) => {
+      request.onDispatch?.();
+      return { success: true, totalTimeMs: 0 };
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      requestDrag,
-      getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
+    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      createIosTestClient(iosDevice, {
+        requestDrag,
+        getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
+      }),
     );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -212,38 +207,35 @@ describe("UnixSocketServer input/swipe", () => {
     expect(response.success).toBe(true);
     // Echoed endpoints stay in the client's px space; only the runner dispatch is converted.
     expect(response.result).toMatchObject({ start: { x: 300, y: 600 }, end: { x: 900, y: 1500 } });
-    expect(requestDrag).toHaveBeenCalledWith(
-      100,
-      200,
-      300,
-      500,
-      0,
-      750,
-      0,
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestDrag).toHaveBeenCalledWith({
+      x1: 100,
+      y1: 200,
+      x2: 300,
+      y2: 500,
+      pressDurationMs: 0,
+      dragDurationMs: 750,
+      holdDurationMs: 0,
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
-    const requestSwipe = mock(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        args[8]?.();
-        return { success: true };
-      },
+    const requestSwipe = mock(async (request: SwipeRequest) => {
+      request.onDispatch?.();
+      return { success: true, totalTimeMs: 0 };
+    });
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const session = createFakeSession("session-1", "emulator-5554", "android");
     const autolockSessions = new Map([[session.sessionId, session]]);
     const mcpAutolockSessions = new Map<string, string>();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
     );
@@ -264,9 +256,7 @@ describe("UnixSocketServer input/swipe", () => {
         },
       },
       () => {
-        const socketSessionId = [
-          ...(server as unknown as { sessions: Map<string, unknown> }).sessions.keys(),
-        ][0];
+        const socketSessionId = server.sessionIds[0];
         mcpAutolockSessions.set(socketSessionId, session.sessionId);
       },
     );
@@ -278,18 +268,17 @@ describe("UnixSocketServer input/swipe", () => {
       start: { x: 1, y: 2 },
       end: { x: 3, y: 4 },
     });
-    expect(requestSwipe).toHaveBeenCalledWith(
-      1,
-      2,
-      3,
-      4,
-      300,
-      30_000,
-      undefined,
-      undefined,
-      expect.any(Function),
-      expect.any(AbortSignal),
-    );
+    expect(requestSwipe).toHaveBeenCalledWith({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      duration: 300,
+      timeoutMs: 30_000,
+      contextOptions: undefined,
+      onDispatch: expect.any(Function),
+      signal: expect.any(AbortSignal),
+    });
   });
 
   test("serializes concurrent swipes for the same device across socket clients", async () => {
@@ -302,19 +291,14 @@ describe("UnixSocketServer input/swipe", () => {
         fakeTimer.setTimeout(resolve, 40);
       });
       inFlight -= 1;
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const [first, second] = await Promise.all([
@@ -354,18 +338,13 @@ describe("UnixSocketServer input/swipe", () => {
       if (callCount === 1) {
         await blockingPromise;
       }
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
     );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const first = sendRequest(socketPath, "input/swipe", {
@@ -412,12 +391,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("surfaces platform discovery failures before device targeting errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([], new Set()));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -435,12 +409,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("rejects missing and non-numeric coordinates with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/swipe", {
@@ -469,12 +438,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("rejects duration outside the supported bounds", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const zero = await sendRequest(socketPath, "input/swipe", {
@@ -519,30 +483,26 @@ describe("UnixSocketServer input/swipe", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-    spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
-    const deviceRequest = spyOn(client, "requestSwipe").mockImplementation(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        args[9]?.throwIfAborted();
-        args[8]?.();
-        sent = true;
-        operationStarted.resolve();
-        await releaseOperation.promise;
-        return { success: true, totalTimeMs: 1 };
-      },
+    const deviceRequest = mock(async (request: SwipeRequest) => {
+      request.signal?.throwIfAborted();
+      request.onDispatch?.();
+      sent = true;
+      operationStarted.resolve();
+      await releaseOperation.promise;
+      return { success: true, totalTimeMs: 1 };
+    });
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, {
+        getScreenScaleMetadata: () => null,
+        requestSwipe: deviceRequest,
+      }),
     );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-swipe-after-dispatch-session";
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/swipe", {
       platform: "android",
@@ -583,30 +543,26 @@ describe("UnixSocketServer input/swipe", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-    spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
-    const deviceRequest = spyOn(client, "requestSwipe").mockImplementation(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        operationStarted.resolve();
-        await releaseOperation.promise;
-        args[9]?.throwIfAborted();
-        args[8]?.();
-        sent = true;
-        return { success: true, totalTimeMs: 1 };
-      },
+    const deviceRequest = mock(async (request: SwipeRequest) => {
+      operationStarted.resolve();
+      await releaseOperation.promise;
+      request.signal?.throwIfAborted();
+      request.onDispatch?.();
+      sent = true;
+      return { success: true, totalTimeMs: 1 };
+    });
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, {
+        getScreenScaleMetadata: () => null,
+        requestSwipe: deviceRequest,
+      }),
     );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-swipe-before-dispatch-session";
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/swipe", {
       platform: "android",

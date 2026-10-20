@@ -5,7 +5,7 @@ set -euo pipefail
 HADOLINT_VERSION="2.12.0" # Change this to the desired version
 
 # Shared colors + command_exists + detect_os/detect_arch (issue #2822).
-# shellcheck source=scripts/lib/tool-install.sh disable=SC1091
+# shellcheck source=scripts/lib/tool-install.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/tool-install.sh"
 
 # Install hadolint on macOS
@@ -19,22 +19,22 @@ install_linux() {
     echo -e "${YELLOW}Installing hadolint on Linux...${NC}"
 
     # Check for package managers in order of preference
-    if command_exists apt-get; then
+    if command -v apt-get >/dev/null 2>&1; then
         echo -e "${YELLOW}APT package manager detected, but hadolint may not be available in default repositories.${NC}"
         echo -e "${YELLOW}Falling back to manual installation...${NC}"
         install_manual
         return $?
-    elif command_exists yum; then
+    elif command -v yum >/dev/null 2>&1; then
         echo -e "${YELLOW}YUM package manager detected, but hadolint may not be available in default repositories.${NC}"
         echo -e "${YELLOW}Falling back to manual installation...${NC}"
         install_manual
         return $?
-    elif command_exists dnf; then
+    elif command -v dnf >/dev/null 2>&1; then
         echo -e "${YELLOW}DNF package manager detected, but hadolint may not be available in default repositories.${NC}"
         echo -e "${YELLOW}Falling back to manual installation...${NC}"
         install_manual
         return $?
-    elif command_exists pacman; then
+    elif command -v pacman >/dev/null 2>&1; then
         echo -e "${YELLOW}Pacman package manager detected, but hadolint may not be available in default repositories.${NC}"
         echo -e "${YELLOW}Falling back to manual installation...${NC}"
         install_manual
@@ -50,15 +50,15 @@ install_linux() {
 install_windows() {
     echo -e "${YELLOW}Installing hadolint on Windows...${NC}"
 
-    if command_exists scoop; then
+    if command -v scoop >/dev/null 2>&1; then
         echo -e "${GREEN}Using Scoop to install hadolint${NC}"
         scoop install hadolint
         return $?
-    elif command_exists choco; then
+    elif command -v choco >/dev/null 2>&1; then
         echo -e "${YELLOW}Chocolatey detected, but hadolint may not be available. Falling back to manual installation...${NC}"
         install_manual
         return $?
-    elif command_exists winget; then
+    elif command -v winget >/dev/null 2>&1; then
         echo -e "${YELLOW}Winget detected, but hadolint may not be available. Falling back to manual installation...${NC}"
         install_manual
         return $?
@@ -133,14 +133,14 @@ install_manual() {
     trap 'rm -rf "$temp_dir"' EXIT
 
     # Download the binary
-    if command_exists curl; then
+    if command -v curl >/dev/null 2>&1; then
         # -f/--fail: treat HTTP errors (e.g. 404) as failures instead of
         # silently saving the error page as the "binary". (#3641)
         if ! curl -fsSL -o "$temp_dir/hadolint" "$download_url"; then
             echo -e "${RED}Failed to download hadolint binary${NC}"
             return 1
         fi
-    elif command_exists wget; then
+    elif command -v wget >/dev/null 2>&1; then
         if ! wget -q -O "$temp_dir/hadolint" "$download_url"; then
             echo -e "${RED}Failed to download hadolint binary${NC}"
             return 1
@@ -171,7 +171,7 @@ install_manual() {
 verify_installation() {
     echo -e "${YELLOW}Verifying hadolint installation...${NC}"
 
-    if command_exists hadolint; then
+    if command -v hadolint >/dev/null 2>&1; then
         echo -e "${GREEN}hadolint is installed and available in PATH${NC}"
         hadolint --version
         return 0
@@ -187,7 +187,7 @@ main() {
     echo -e "${GREEN}============================${NC}"
 
     # Check if hadolint is already installed
-    if command_exists hadolint; then
+    if command -v hadolint >/dev/null 2>&1; then
         echo -e "${GREEN}hadolint is already installed${NC}"
         hadolint --version
         echo -e "${YELLOW}To reinstall, remove the existing installation first${NC}"

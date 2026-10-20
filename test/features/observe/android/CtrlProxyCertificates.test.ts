@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 /**
  * Wire-driven tests for the CtrlProxyCertificates delegate, exercised through AndroidCtrlProxyClient.
  *
@@ -41,13 +42,12 @@ describe("CtrlProxyCertificates (Android)", function () {
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
 
     testDevice = {
       deviceId: "test-device-certs",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -586,7 +586,9 @@ describe("CtrlProxyCertificates (Android)", function () {
         process.on("unhandledRejection", onUnhandled);
         const { client, socket, sent, resultPromise } = await beginFileInstall();
         try {
-          const success = {
+          const success: Awaited<
+            ReturnType<AndroidCtrlProxyClient["requestInstallCaCertificate"]>
+          > = {
             success: true,
             action: "install",
             alias: "user-ca-cert",

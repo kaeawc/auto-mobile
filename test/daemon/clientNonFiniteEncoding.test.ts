@@ -3,6 +3,7 @@ import { Duplex } from "node:stream";
 import { DaemonClient } from "../../src/daemon/client";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 // Issue #5854 §2: a non-finite tool-call argument must reach the daemon as a
 // JSON-safe sentinel, not `null`, so the request log and schema see the real
@@ -19,16 +20,10 @@ function createCapturingSocket(writes: string[]): Duplex {
 }
 
 function createConnectedClient(fakeTimer: FakeTimer, writes: string[]): DaemonClient {
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    fakeTimer,
-    {},
-    null,
-    new CountingIdGenerator("req"),
-  );
-  (client as unknown as { connected: boolean }).connected = true;
-  (client as unknown as { socket: Duplex }).socket = createCapturingSocket(writes);
+  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator: new CountingIdGenerator("req"),
+  });
+  client.testHooks.attachSocket(createCapturingSocket(writes));
   return client;
 }
 

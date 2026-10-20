@@ -1,5 +1,5 @@
+import { z } from "zod/v4";
 import { fakeServerContext } from "../../helpers/fakeServerContext";
-import type { McpServer } from "@modelcontextprotocol/server";
 import {
   afterAll,
   afterEach,
@@ -20,7 +20,7 @@ import {
   type ResourceContent,
   type ResourceReadContext,
 } from "../../../src/server/resourceRegistry";
-import { ResourceUpdatedBroadcaster } from "../../../src/server/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../../src/daemon/listChangedBroadcast";
 import {
   registerNavigationResources,
   setNavigationGraphProvider,
@@ -63,7 +63,7 @@ async function payload(uri: string, context: ResourceReadContext = {}) {
 
 async function connect(context: ResourceReadContext): Promise<FakeMcpServer> {
   const server = new FakeMcpServer();
-  ResourceRegistry.registerWithServer(server as unknown as McpServer, () => context);
+  ResourceRegistry.registerWithServer(server, () => context);
   for (const uri of [graphUri, "automobile:navigation/history", "automobile:navigation/apps"]) {
     await server.server.handlersBySchema.get("resources/subscribe")!({ params: { uri } });
   }
@@ -86,7 +86,7 @@ describe("navigation resource session resolution", () => {
     const make = (id: string) =>
       NavigationGraphManager.createForTesting(
         new NavigationRepository(harness.db),
-        new TestCoverageRepository(undefined, harness.db),
+        new TestCoverageRepository(harness.db),
         new FakeTimer(),
         id,
       );
@@ -307,7 +307,9 @@ describe("navigation resource session resolution", () => {
     await a.setCurrentApp("app.a.sole-update");
     await timer.advanceTimeAsync(1000);
     expect(
-      server.server.notifications.map((notification) => notification.params?.uri).sort(),
+      server.server.notifications
+        .map((notification) => z.object({ uri: z.string() }).parse(notification.params).uri)
+        .sort(),
     ).toEqual([graphUri, "automobile:navigation/history", "automobile:navigation/apps"].sort());
     server.server.notifications.length = 0;
     sessions.sessionIds = ["A", "B"];

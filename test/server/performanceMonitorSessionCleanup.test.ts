@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
-import { registerPerformanceMonitorSessionCleanup } from "../../src/server/performanceMonitorSessionCleanup";
+import { registerPerformanceMonitorSessionCleanup } from "../../src/daemon/performanceMonitorSessionCleanup";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
@@ -19,9 +19,12 @@ describe("registerPerformanceMonitorSessionCleanup", () => {
     timer = new FakeTimer();
     adb = new FakeAdbClient();
     adb.setCommandResult("shell pidof 'com.example.app'", "12345\n");
-    monitor = new PerformanceMonitor(timer, new FakeAdbClientFactory(adb), () => ({
-      pushPerformanceData: () => undefined,
-    }));
+    monitor = new PerformanceMonitor(timer, {
+      adbClientFactory: new FakeAdbClientFactory(adb),
+      serverGetter: () => ({
+        pushPerformanceData: () => undefined,
+      }),
+    });
     monitor.start();
     monitor.startMonitoring(deviceId, "com.example.app");
     manager = new FakeSessionCleanupManager();

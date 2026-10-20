@@ -27,15 +27,16 @@ describe("extractClientHandshake", () => {
 
   test("ignores non-string fields", () => {
     const handshake = extractClientHandshake({
-      clientVersion: 42 as unknown as string,
-      clientBuildId: null as unknown as string,
+      clientVersion: 42,
+      clientBuildId: null,
     });
     expect(handshake.clientVersion).toBeUndefined();
     expect(handshake.clientBuildId).toBeUndefined();
   });
 
   test("returns empty handshake for a legacy request", () => {
-    const handshake = extractClientHandshake({ id: "1", method: "tools/call" });
+    const legacyRequest: Record<string, unknown> = { id: "1", method: "tools/call" };
+    const handshake = extractClientHandshake(legacyRequest);
     expect(hasClientHandshake(handshake)).toBe(false);
   });
 });

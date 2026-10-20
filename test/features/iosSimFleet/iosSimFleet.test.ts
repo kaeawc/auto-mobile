@@ -16,8 +16,8 @@ import {
 import {
   CommandFleetHostSource,
   parseMemoryPressureLevel,
-  readHostProcessTable,
 } from "../../../src/features/iosSimFleet/FleetHostSource";
+import { readHostProcessTable } from "../../../src/devices/bootAdmission/readHostProcessTable";
 import {
   IOS_SIM_MAX_BOOTED_ENV,
   estimatePerSimulatorBytes,
@@ -28,7 +28,7 @@ import {
   PS_SNAPSHOT_MAX_BUFFER_BYTES,
   attributeSimulatorProcesses,
   parsePsSnapshot,
-} from "../../../src/features/iosSimFleet/psSnapshot";
+} from "../../../src/devices/bootAdmission/psSnapshot";
 import { parseSimctlInventory } from "../../../src/features/iosSimFleet/simctlInventory";
 import { formatFleetReport } from "../../../src/features/iosSimFleet/fleetReport";
 import type { HostResources, HostSnapshot } from "../../../src/features/iosSimFleet/types";
@@ -557,7 +557,7 @@ describe("capacity gate boot target and external devices (#11282)", () => {
     expect((error as BootCapacityExhaustedError).details.externalDevices?.sort()).toEqual(
       [IOS27, IOS18].sort(),
     );
-    expect((error as Error).message).toContain("not started by AutoMobile");
+    expect((error as Error).message).toContain("have no AutoMobile owner");
   });
 
   test("simulators this gate started are not named external", async () => {

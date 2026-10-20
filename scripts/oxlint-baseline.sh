@@ -9,12 +9,13 @@
 # external gate -- exactly like scripts/typecheck-baseline.sh does for `tsc`.
 #
 # The rules gated here are the ones .oxlintrc.json sets to "warn" because they
-# carry pre-existing violations (complexity, max-depth, max-params,
-# max-lines-per-function,
-# auto-mobile/catch-convention, and the two type-aware promise rules, whose
-# baseline is currently zero but which stay here because the fast `oxlint` stage
-# does not run `--type-aware`). Every OTHER rule is "error" in the config and is
-# gated directly by `oxlint` (a non-zero exit), so it does not belong here. The
+# carry pre-existing violations (historically complexity, max-depth, max-params,
+# max-lines-per-function, auto-mobile/catch-convention, ...), plus the two
+# type-aware promise rules. Those are "error" in the config with a zero baseline,
+# but they only run under `--type-aware`, which the fast `oxlint` stage does not
+# use, so this gate is what enforces them (any diagnostic is a new violation).
+# Every OTHER rule is "error" in the config and is gated directly by `oxlint` (a
+# non-zero exit), so it does not belong here. The
 # promise rules need type information, so this gate runs oxlint with
 # `--type-aware` (tsgolint) -- which is why the main `oxlint --fix` does not, and
 # CI type-checks only once. As these are burned down the baseline shrinks; it is
@@ -67,6 +68,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASELINE="${OXLINT_BASELINE:-$ROOT/scripts/oxlint-baseline.txt}"
 cd "$ROOT"
 
+# shellcheck source=scripts/lib/host-heavy-run.sh
+source "$ROOT/scripts/lib/host-heavy-run.sh"
+
 MODE="check"
 ALLOW_GROW="false"
 for arg in "$@"; do
@@ -85,10 +89,11 @@ if [[ "$ALLOW_GROW" == "true" && "$MODE" != "update" ]]; then
 fi
 
 # The oxlint rule codes gated by this ratchet (including max-params and
-# max-lines-per-function). Kept in lock-step with the "warn"
-# rules in .oxlintrc.json. The two typescript(no-*-promises) codes have a zero
-# baseline; they stay here because only this stage runs `--type-aware`.
-RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) eslint(max-classes-per-file) auto-mobile(max-class-lines) auto-mobile(catch-convention) typescript(no-floating-promises) typescript(no-misused-promises)"
+# max-lines-per-function). Kept in lock-step with the burned-down
+# rules in .oxlintrc.json. The two typescript(no-*-promises) codes are "error" with
+# a zero baseline; they stay here because only this stage runs `--type-aware`,
+# so removing them would leave them unenforced.
+RATCHET_CODES="typescript(no-floating-promises) typescript(no-misused-promises)"
 
 # Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the
 # BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED
@@ -100,7 +105,11 @@ run_oxlint_json() {
   if [[ -n "${OXLINT_JSON_CMD:-}" ]]; then
     eval "$OXLINT_JSON_CMD" || true
   else
-    bunx oxlint --type-aware --format json 2>/dev/null || true
+    # The exit status is deliberately ignored (see above). `set +e` instead of `|| true` keeps
+    # errexit from being disabled inside host_heavy_run.
+    set +e
+    host_heavy_run host_heavy_oxlint_type_aware
+    set -e
   fi
 }
 

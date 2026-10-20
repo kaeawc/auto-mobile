@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { ActionableError, type BootedDevice } from "../../../src/models";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 
 describe("ExecuteGesture", () => {
   const androidDevice: BootedDevice = {
@@ -30,16 +31,14 @@ describe("ExecuteGesture", () => {
 
   test("iOS swipe forwards lockScreen through the existing context options slot", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
-    const requestSwipe = spyOn(fakeClient as unknown as IOSCtrlProxyClient, "requestSwipe");
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeClient as unknown as IOSCtrlProxyClient,
-    );
+    const requestSwipe = spyOn(fakeClient, "requestSwipe");
+    getInstanceSpy = spyOnIosClientInstance(fakeClient);
     const gesture = new ExecuteGesture(iosDevice, null, new FakeTimer());
     await gesture.swipe(1, 2, 3, 4, { lockScreen: true, timeoutMs: 4200 });
-    expect(requestSwipe.mock.calls[0]?.[5]).toBe(4200);
-    expect(requestSwipe.mock.calls[0]?.[7]).toEqual({ lockScreen: true });
+    expect(requestSwipe.mock.calls[0]?.[0].timeoutMs).toBe(4200);
+    expect(requestSwipe.mock.calls[0]?.[0].contextOptions).toEqual({ lockScreen: true });
     await gesture.swipe(1, 2, 3, 4);
-    expect(requestSwipe.mock.calls[1]?.[7]).toBeUndefined();
+    expect(requestSwipe.mock.calls[1]?.[0].contextOptions).toBeUndefined();
   });
 
   describe("iOS swipe answered with the runner's deadline error (#10161)", () => {
@@ -51,9 +50,7 @@ describe("ExecuteGesture", () => {
     async function swipeWith(reply: { error: string; errorCode?: string }) {
       const fakeClient = new FakeIOSCtrlProxy();
       fakeClient.setSwipeResult({ success: false, totalTimeMs: 5000, ...reply });
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeClient as unknown as IOSCtrlProxyClient,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeClient);
       return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe(1, 2, 3, 4);
     }
 
@@ -93,9 +90,7 @@ describe("ExecuteGesture", () => {
     async function swipeWith(reply: { error: string; errorCode?: string }) {
       const fakeClient = new FakeIOSCtrlProxy();
       fakeClient.setSwipeResult({ success: false, totalTimeMs: 4500, ...reply });
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeClient as unknown as IOSCtrlProxyClient,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeClient);
       return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe(1, 2, 3, 4);
     }
 
@@ -167,8 +162,7 @@ describe("ExecuteGesture", () => {
         10,
         10,
         {},
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(adb.getExecutedCommands()).toHaveLength(1);
@@ -182,17 +176,16 @@ describe("ExecuteGesture", () => {
   // a11y-mode gesture on a fresh device.
   test("passes the AdbClientFactory (not AdbExecutor) to AndroidCtrlProxyClient.getInstance in a11y mode (regression for #2225)", async () => {
     const factory = new FakeAdbClientFactory();
-    const fakeClient = {
-      requestSwipe: async () => ({
-        success: true,
-        totalTimeMs: 1,
-        gestureTimeMs: 1,
-      }),
-    };
+    const fakeClient = new FakeCtrlProxy();
+    spyOn(fakeClient, "requestSwipe").mockImplementation(async () => ({
+      success: true,
+      totalTimeMs: 1,
+      gestureTimeMs: 1,
+    }));
 
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
 
-    const gesture = new ExecuteGesture(androidDevice, factory as any);
+    const gesture = new ExecuteGesture(androidDevice, factory);
     const result = await gesture.swipe(0, 0, 100, 100, { scrollMode: "a11y" });
 
     expect(result.success).toBe(true);
@@ -223,9 +216,12 @@ describe("ExecuteGesture", () => {
   test("reports both a11y and ADB failures when the fallback command fails", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("shell input swipe", new Error("ADB device offline"));
-    const fakeClient = {
-      requestSwipe: async () => ({ success: false, error: "a11y dispatch rejected" }),
-    };
+    const fakeClient = new FakeCtrlProxy();
+    spyOn(fakeClient, "requestSwipe").mockImplementation(async () => ({
+      success: false,
+      totalTimeMs: 0,
+      error: "a11y dispatch rejected",
+    }));
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
     const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100, {
       scrollMode: "a11y",
@@ -238,9 +234,7 @@ describe("ExecuteGesture", () => {
 
   test("delegates iOS multi-finger FingerPath gestures to CtrlProxy with supplied spacing", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeClient as unknown as IOSCtrlProxyClient,
-    );
+    getInstanceSpy = spyOnIosClientInstance(fakeClient);
 
     const gesture = new ExecuteGesture(iosDevice, null);
     const result = await gesture.execute(
@@ -284,9 +278,7 @@ describe("ExecuteGesture", () => {
       error: "XCTest private multi-touch event synthesis classes are unavailable",
       totalTimeMs: 1,
     });
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeClient as unknown as IOSCtrlProxyClient,
-    );
+    getInstanceSpy = spyOnIosClientInstance(fakeClient);
 
     const gesture = new ExecuteGesture(iosDevice, null);
 
@@ -322,9 +314,7 @@ describe("ExecuteGesture", () => {
     ];
 
     function iosGesture(fakeClient: FakeIOSCtrlProxy): ExecuteGesture {
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeClient as unknown as IOSCtrlProxyClient,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeClient);
       return new ExecuteGesture(iosDevice, null);
     }
 
@@ -387,9 +377,7 @@ describe("ExecuteGesture", () => {
 
   test("rejects iOS multi-finger paths CtrlProxy cannot preserve", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeClient as unknown as IOSCtrlProxyClient,
-    );
+    getInstanceSpy = spyOnIosClientInstance(fakeClient);
 
     const gesture = new ExecuteGesture(iosDevice, null);
 
@@ -419,9 +407,7 @@ describe("ExecuteGesture", () => {
 
   test("rejects under-specified iOS multi-finger paths", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeClient as unknown as IOSCtrlProxyClient,
-    );
+    getInstanceSpy = spyOnIosClientInstance(fakeClient);
 
     const gesture = new ExecuteGesture(iosDevice, null);
 

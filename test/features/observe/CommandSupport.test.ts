@@ -1,3 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
+import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import {
@@ -18,7 +20,6 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 const androidDevice: BootedDevice = {
   deviceId: "command-support-android",
   platform: "android",
-  isEmulator: true,
   name: "Android",
 };
 const iosDevice: BootedDevice = {
@@ -56,11 +57,7 @@ async function sendWithClientContext(client: AndroidCtrlProxyClient, messageType
   const context: DelegateContext = {
     ...actualContext,
     ensureConnected: async () => true,
-    getWebSocket: () =>
-      ({
-        readyState: WebSocket.OPEN,
-        send: (data: string) => sent.push(data),
-      }) as unknown as WebSocket,
+    getWebSocket: () => new FakeOpenSocket((frame) => sent.push(frame)),
   };
   const result = await sendCommand<{ success: boolean; totalTimeMs: number; error?: string }>(
     context,
@@ -78,12 +75,12 @@ async function sendWithClientContext(client: AndroidCtrlProxyClient, messageType
 
 function androidClient(): AndroidCtrlProxyClient {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setScreenState(true);
   const timer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();
   return AndroidCtrlProxyClient.createForTesting(androidDevice, adb, {
-    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
   });
 }
@@ -94,7 +91,7 @@ function iosClient(): IOSCtrlProxyClient {
   return IOSCtrlProxyClient.createForTesting(
     iosDevice,
     8765,
-    (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
   );
 }
@@ -130,6 +127,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("tap_double_v1")).toBe(true);
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_select_all",
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
@@ -144,7 +142,7 @@ describe("CtrlProxy command support", () => {
         "show_prototype",
         "dismiss_prototype",
         // Newer than the old-APK fixture: no older APK advertises it.
-        "prototype_display_id_v1",
+        "prototype_display_id_v2",
         "prototype_window_options_v1",
         "prototype_persistence_replay_v1",
         "prototype_show_in_place_v1",
@@ -224,6 +222,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_future_command")).toBe(false);
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_set_text",
     });
     expect(context.isCommandSupported?.("request_set_text")).toBe(false);
@@ -299,6 +298,7 @@ describe("CtrlProxy command support", () => {
     const context = client["createDelegateContext"]();
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_select_all",
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
@@ -313,6 +313,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
     client["processMessage"]({
       type: "error",
+      success: false,
       requestId: "unknown-command",
       error: "Unknown command type: request_select_all",
     });

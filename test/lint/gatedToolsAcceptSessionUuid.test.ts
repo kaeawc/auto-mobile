@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Gated tools are callable from the CLI after it enables them. The CLI forwards

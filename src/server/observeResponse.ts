@@ -18,7 +18,10 @@ import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySel
 import { type DeviceObservationAccess } from "./deviceObservationAccess";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
+import {
+  snapshotReferences,
+  type SnapshotReferenceStore,
+} from "../features/observe/SnapshotReferenceStore";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
 import { BootedDevice, ObserveResult, ObserveToolPayload } from "../models";
@@ -30,7 +33,7 @@ import {
 } from "../features/observe/hierarchyLayer";
 import type { HierarchyLayer } from "../models/HierarchyLayer";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { logger } from "../utils/logger";
 import { type ScreenshotMode } from "../features/observe/automaticScreenshotPolicy";
 import { inlineScreenshotImage } from "../features/observe/screenshot/inlineScreenshotImage";
@@ -47,6 +50,7 @@ import type { ObserveArgs } from "./observeTools";
 import { assertActiveWindowWaitForSupportedOnPlatform } from "../features/observe/wait/WaitForSchemas";
 
 export interface ObserveToolDependencies {
+  snapshotReferences?: Pick<SnapshotReferenceStore, "capture">;
   crop?: ObserveCropDependencies;
   pathProtection?: ScreenshotPathProtection;
   timer?: Timer;
@@ -120,11 +124,10 @@ export function screenForObserve(
     onAvailabilityLost:
       device.platform === "android"
         ? (reason) => {
-            const daemonState = DaemonState.getInstance();
-            if (args.sessionUuid && daemonState.isInitialized()) {
-              daemonState
-                .getSessionManager()
-                .invalidateAutomationReadiness(args.sessionUuid, reason);
+            if (args.sessionUuid) {
+              defaultDaemonContext
+                .sessionManager()
+                ?.invalidateAutomationReadiness(args.sessionUuid, reason);
             }
           }
         : undefined,
@@ -188,8 +191,12 @@ function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined 
   return args.crop || args.includeScreenshotImage ? "settled" : args.screenshot;
 }
 
-export function attachSnapshotReference(deviceId: string, result: ObserveResult): void {
-  const capture = snapshotReferences.capture(deviceId, result);
+export function attachSnapshotReference(
+  deviceId: string,
+  result: ObserveResult,
+  references: Pick<SnapshotReferenceStore, "capture"> = snapshotReferences,
+): void {
+  const capture = references.capture(deviceId, result);
   if (capture.status === "captured") {
     result.snapshotReference = capture.reference;
     delete result.snapshotReferenceUnavailable;

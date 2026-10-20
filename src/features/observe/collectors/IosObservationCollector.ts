@@ -53,7 +53,7 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     try {
       sdkScreenIdentity = await this.deps
         .viewHierarchy()
-        .getScreenIdentity?.(result.viewHierarchy?.packageName);
+        .getScreenIdentity?.(result.viewHierarchy?.packageName, result.viewHierarchy?.updatedAt);
     } catch (error) {
       // The hierarchy remains valid when the optional SDK refresh fails.
       logger.debug(`[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`);

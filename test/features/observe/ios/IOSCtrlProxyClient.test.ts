@@ -5461,12 +5461,22 @@ describe("IOSCtrlProxyClient", function () {
       };
       const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = createFetchMock(async () => ({
-        ok: true,
-        json: async () => [
-          { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encoded }] },
-        ],
-      }));
+      let polls = 0;
+      globalThis.fetch = createFetchMock(async () => {
+        polls++;
+        return {
+          ok: true,
+          json: async () =>
+            polls === 1
+              ? [
+                  {
+                    bundleId: "com.example.ios",
+                    events: [{ eventType: "navigation", payload: encoded }],
+                  },
+                ]
+              : [],
+        };
+      });
 
       try {
         const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5482,6 +5492,17 @@ describe("IOSCtrlProxyClient", function () {
             presentation: "push",
           },
         });
+        testClient.getSdkCapabilityTestHooks().seedForTesting("com.example.ios", []);
+        testClient["lastForegroundBundleId"] = "com.example.ios";
+        expect(await testClient.refreshSdkScreenIdentity("com.example.ios", 4242)).toEqual(
+          identity,
+        );
+        expect(polls).toBe(2);
+        // A capability snapshot for a different foreground app cannot enable the fast path.
+        testClient["lastForegroundBundleId"] = "com.example.other";
+        const before = fakeTimer.now();
+        await testClient.refreshSdkScreenIdentity("com.example.ios", 4242);
+        expect(fakeTimer.now() - before).toBe(100);
       } finally {
         globalThis.fetch = originalFetch;
         await testClient.close();

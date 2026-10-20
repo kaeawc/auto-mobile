@@ -459,9 +459,16 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
     resolveWebSocketHost: () => this.resolveWebSocketHost(),
     pollSdkEvents: () => this.pollSdkEvents(),
     getSdkScreenIdentity: (appId) => this.getSdkScreenIdentity(appId),
+    getSdkAvailability: (appId) =>
+      appId && appId === this.lastForegroundBundleId
+        ? this.sdkCapability.getSdkAvailability(appId)
+        : undefined,
   });
-  public refreshSdkScreenIdentity(appId?: string): Promise<ScreenIdentity | undefined> {
-    return this.sdkEvents.refreshSdkScreenIdentity(appId);
+  public refreshSdkScreenIdentity(
+    appId?: string,
+    capturedAt?: number,
+  ): Promise<ScreenIdentity | undefined> {
+    return this.sdkEvents.refreshSdkScreenIdentity(appId, capturedAt);
   }
   public pollSdkEvents(): Promise<SdkEventPollResult> {
     return this.sdkEvents.pollSdkEvents();

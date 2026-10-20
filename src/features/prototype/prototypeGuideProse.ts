@@ -401,9 +401,9 @@ post real content without the agent answering each tap. It requires \`prototype_
 (\`prototype_network_device_v1\` as well for \`via: "device"\`); a show or patch result containing
 one is refused on a device without them.
 
-- \`url\` is any absolute \`http\` or \`https\` URL (at most 2048 characters). There is no host
-  allowlist: localhost, loopback and private addresses are allowed. It takes the text placeholders of
-  any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
+- \`url\` is an absolute \`http\` or \`https\` URL (at most 2048 characters). Host requests apply an
+  egress policy: local destinations and daemon ports on private addresses are not permitted.
+  It takes the text placeholders of any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
   placeholder it must parse as an http(s) URL; with one, it must start with a literal \`http://\` or
   \`https://\`. (\`{state:key}\` is not a placeholder: write \`{key}\`.)
 - \`method\` is GET (default), POST, PUT, PATCH, DELETE or HEAD. A GET or HEAD cannot have a \`body\`.
@@ -438,7 +438,7 @@ a sibling whose key is the last segment of \`into\` plus \`__meta\` (\`/data/fee
 failure. A non-2xx status leaves \`into\` untouched, writes the metadata with
 \`error: {code: "http_error", message: "HTTP 404"}\` and counts as an error. If the metadata would not fit
 the data write limit, \`headers\` is dropped. Other \`error.code\` values: \`timeout\`, \`too_large\`,
-\`connection_refused\`, \`cancelled\`, \`invalid_url\`, \`invalid_request\`, \`network\`, \`too_many_in_flight\`,
+\`connection_refused\`, \`blocked_destination\` (the destination is not permitted), \`cancelled\`, \`invalid_url\`, \`invalid_request\`, \`network\`, \`too_many_in_flight\`,
 \`invalid_response\`.
 
 **Order.** On completion the device writes \`into\`, then \`<into>__meta\`, then \`statusKey\`, then sends the

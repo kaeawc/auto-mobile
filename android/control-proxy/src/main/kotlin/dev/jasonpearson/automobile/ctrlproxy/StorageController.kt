@@ -17,13 +17,21 @@ import kotlinx.serialization.json.Json
  * subscription manager and the late-bound WebSocket server supplied through accessors.
  */
 internal class StorageController(
-  private val manager: () -> StorageSubscriptionManager,
-  private val asyncActionRunner: AsyncActionRunner,
-  private val resultBroadcaster: ResultBroadcaster,
+  manager: () -> StorageSubscriptionManager,
+  asyncActionRunner: AsyncActionRunner,
+  resultBroadcaster: ResultBroadcaster,
   private val timeProvider: TimeProvider,
   private val jsonCompact: Json,
   private val responseSender: ResponseSender,
-) {
+) :
+  StorageRequests(
+    manager,
+    asyncActionRunner,
+    resultBroadcaster,
+    timeProvider,
+    jsonCompact,
+    responseSender,
+  ) {
   /** Keeps the service's late-bound WebSocket server behind one seam. */
   interface ResponseSender {
     fun isRunning(): Boolean
@@ -35,6 +43,49 @@ internal class StorageController(
 
   companion object {
     private const val TAG = "CtrlProxy"
+  }
+
+  suspend fun broadcastStorageChange(
+    event: PreferenceChangeEvent,
+  ) {
+    if (!responseSender.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping storage change broadcast")
+      return
+    }
+
+    try {
+      // Build the wire payload via the extracted, unit-tested encoder. It emits the
+      // prior value so the TS telemetry ingest can skip its per-insert previous-value
+      // lookup (#3000), quoting it by its OWN type so a removed/type-changed STRING
+      // stays valid JSON. An absent prior value is emitted as JSON null.
+      val message =
+        buildStorageChangedMessage(
+          event,
+          timeProvider.currentTimeMillis(),
+          jsonCompact,
+        )
+      responseSender.broadcast(message)
+      Log.d(TAG, "Broadcasted storage change to ${responseSender.connectionCount()} clients")
+    } catch (e: CancellationException) {
+      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
+      throw e
+    } catch (e: Exception) {
+      Log.e(TAG, "Error broadcasting storage change", e)
+    }
+  }
+}
+
+/** Dispatches storage requests while retaining the async error and correlation guards. */
+internal open class StorageRequests(
+  private val manager: () -> StorageSubscriptionManager,
+  private val asyncActionRunner: AsyncActionRunner,
+  resultBroadcaster: ResultBroadcaster,
+  timeProvider: TimeProvider,
+  jsonCompact: Json,
+  responseSender: StorageController.ResponseSender,
+) : StorageResponses(resultBroadcaster, timeProvider, jsonCompact, responseSender) {
+  private companion object {
+    const val TAG = "CtrlProxy"
   }
 
   fun handleListPreferenceFiles(requestId: String?, packageName: String) {
@@ -238,8 +289,20 @@ internal class StorageController(
       )
     }
   }
+}
 
-  private suspend fun broadcastPreferenceFilesResult(
+/** Encodes and broadcasts correlated storage request results. */
+internal open class StorageResponses(
+  private val resultBroadcaster: ResultBroadcaster,
+  private val timeProvider: TimeProvider,
+  private val jsonCompact: Json,
+  private val responseSender: StorageController.ResponseSender,
+) {
+  private companion object {
+    const val TAG = "CtrlProxy"
+  }
+
+  protected suspend fun broadcastPreferenceFilesResult(
     requestId: String?,
     packageName: String,
     files: List<PreferenceFileInfo>?,
@@ -271,7 +334,7 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastPreferencesResult(
+  protected suspend fun broadcastPreferencesResult(
     requestId: String?,
     packageName: String,
     fileName: String,
@@ -305,7 +368,7 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastSubscribeStorageResult(
+  protected suspend fun broadcastSubscribeStorageResult(
     requestId: String?,
     packageName: String,
     fileName: String,
@@ -346,7 +409,7 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastUnsubscribeStorageResult(
+  protected suspend fun broadcastUnsubscribeStorageResult(
     requestId: String?,
     packageName: String,
     fileName: String,
@@ -378,7 +441,7 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastGetPreferenceResult(outcome: GetPreferenceOutcome) {
+  protected suspend fun broadcastGetPreferenceResult(outcome: GetPreferenceOutcome) {
     if (!responseSender.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping get preference broadcast")
       return
@@ -420,7 +483,7 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastSetPreferenceResult(
+  protected suspend fun broadcastSetPreferenceResult(
     requestId: String?,
     packageName: String,
     fileName: String,
@@ -458,7 +521,7 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastRemovePreferenceResult(
+  protected suspend fun broadcastRemovePreferenceResult(
     requestId: String?,
     packageName: String,
     fileName: String,
@@ -496,7 +559,7 @@ internal class StorageController(
     }
   }
 
-  private suspend fun broadcastClearPreferencesResult(
+  protected suspend fun broadcastClearPreferencesResult(
     requestId: String?,
     packageName: String,
     fileName: String,
@@ -529,35 +592,6 @@ internal class StorageController(
         TAG,
         "Broadcasted clear preferences result to ${responseSender.connectionCount()} clients",
       )
-    }
-  }
-
-  suspend fun broadcastStorageChange(
-    event: PreferenceChangeEvent,
-  ) {
-    if (!responseSender.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping storage change broadcast")
-      return
-    }
-
-    try {
-      // Build the wire payload via the extracted, unit-tested encoder. It emits the
-      // prior value so the TS telemetry ingest can skip its per-insert previous-value
-      // lookup (#3000), quoting it by its OWN type so a removed/type-changed STRING
-      // stays valid JSON. An absent prior value is emitted as JSON null.
-      val message =
-        buildStorageChangedMessage(
-          event,
-          timeProvider.currentTimeMillis(),
-          jsonCompact,
-        )
-      responseSender.broadcast(message)
-      Log.d(TAG, "Broadcasted storage change to ${responseSender.connectionCount()} clients")
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting storage change", e)
     }
   }
 }

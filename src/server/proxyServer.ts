@@ -49,7 +49,11 @@ import {
   type ToolCall,
 } from "./toolCallDispatch";
 import { shapeToolCallError } from "../daemon/shapeToolCallError";
-import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
+import {
+  DAEMON_STALLED_CODE,
+  livenessHandoverPayload,
+  type LivenessHandover,
+} from "../daemon/proxyLivenessRecovery";
 import { SESSION_EXPERIMENTAL_CAPABILITY } from "../devices/sessionConfig";
 import type { SessionBrokerResult } from "../devices/sessionBrokerResult";
 import { idleReleaseField } from "../daemon/releaseReasons";
@@ -151,6 +155,10 @@ function localBrokerSessionEndedResult(
   error: unknown,
   session: SessionBrokerResult | undefined,
 ): CallToolResult | undefined {
+  if (error instanceof DaemonSessionStalledError && error.handover.code === DAEMON_STALLED_CODE) {
+    // StallProbe can resume this session; preserve the retryable handover instead of relaunching.
+    return undefined;
+  }
   return error instanceof DaemonBoundSessionExpiredError && session
     ? brokerSessionEndedToolResult(session, error)
     : undefined;

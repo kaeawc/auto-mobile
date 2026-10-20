@@ -31,7 +31,6 @@
 2426	src/server/deviceSnapshotManager.ts
 1636	src/server/finalizeToolResponse.ts
 1323	src/server/planExecutionOrchestrator.ts
-1894	src/server/toolOutputSchemas.ts
 2185	src/server/videoRecordingManager.ts
 1427	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts

@@ -22,7 +22,7 @@ import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   RECORDING_TEARDOWN_RETRY_BUDGET_MS,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../../src/utils/NetworkState";

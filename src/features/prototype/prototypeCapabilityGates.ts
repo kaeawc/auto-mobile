@@ -200,3 +200,8 @@ export function prototypeRequiredCapabilities(spec: unknown): {
       : [{ capability: gate.capability, fields, unsupportedMessage: gate.unsupportedMessage }];
   });
 }
+
+/** Capability names required by a spec, for the native-code resource's renderer contract. */
+export function requiredPrototypeCapabilities(spec: unknown): string[] {
+  return [...new Set(prototypeRequiredCapabilities(spec).map((gate) => gate.capability))].sort();
+}

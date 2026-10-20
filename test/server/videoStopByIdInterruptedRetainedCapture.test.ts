@@ -6,8 +6,8 @@ import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoC
 import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { FakeHostRecorderProcessControl } from "../fakes/FakeHostRecorderProcessControl";
 import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
-import * as videoManager from "../../src/server/videoRecordingManager";
-import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+import * as videoManager from "../../src/daemon/videoRecordingManager";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/daemon/recordingTeardownRedrive";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -33,7 +33,7 @@ import {
   startVideoRecording,
   forceStopVideoRecording,
   heldVideoRecordingOwner,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,

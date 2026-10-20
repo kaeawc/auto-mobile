@@ -441,13 +441,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "PooledDevice LRU order on autolock assignment, not a session idle clock.",
   },
-  "src/server/webrtcStreamManager.ts acquireLease": {
+  "src/daemon/webrtcStreamManager.ts acquireLease": {
     writes: 2,
     reason:
       "WebRTC stream subscription lease expiry (renewed, or stored with a new lease), unrelated " +
       "to device sessions.",
   },
-  "src/server/webrtcStreamManager.ts endLease": {
+  "src/daemon/webrtcStreamManager.ts endLease": {
     writes: 1,
     reason: "WebRTC stream end-of-lease record expiry, unrelated to device sessions.",
   },
@@ -459,7 +459,7 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 2,
     reason: "Installed-apps resource cache TTL, unrelated to device sessions.",
   },
-  "src/server/webrtcStreamQueries.ts WebRtcStreamQueries.describeRecord": {
+  "src/daemon/webrtcStreamQueries.ts WebRtcStreamQueries.describeRecord": {
     writes: 1,
     reason:
       "WebRTC stream descriptor reporting its subscription lease expiry, not a session clock.",

@@ -54,6 +54,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // registrationTeardownGuard.test.ts walks these four for listener leaks.
     "android/auto-mobile-sdk/src/main/kotlin/**",
     "android/control-proxy/src/main/kotlin/**",
+    "android/prototype-compose/src/main/kotlin/**",
     "ios/auto-mobile-sdk/Sources/**",
     "ios/control-proxy/Sources/**",
     // ctrlProxyProtocol.test.ts reads the @SerialName set from this tree.

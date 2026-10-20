@@ -10,7 +10,7 @@ import {
   createOwnerlessRecordingAcquisitionCleanup,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
-} from "../../src/server/recordingSessionCleanup";
+} from "../../src/daemon/recordingSessionCleanup";
 import {
   adoptOwnerlessActiveVideoRecordings,
   getVideoRecordingMetadata,
@@ -19,7 +19,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import {
   hasSegmentedVideoRecordingsForOwner,
   resetSegmentedSessions,

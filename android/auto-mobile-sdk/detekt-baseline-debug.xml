@@ -47,21 +47,17 @@
     <ID>TooGenericExceptionCaught:SdkEventAckCapability.kt:SdkEventAckCapability$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkEventBroadcaster.kt:SdkEventBroadcaster$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkEventBroadcaster.kt:SdkEventBroadcaster$retryError: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkEventBuffer.kt:SdkEventBuffer$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SdkEventBuffer.kt:SdkEventDelivery$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SharedPreferencesDriverImpl.kt:SharedPreferencesDriverImpl$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$e: Exception</ID>
     <ID>TooManyFunctions:AutoMobileLog.kt:AutoMobileLog</ID>
     <ID>TooManyFunctions:AutoMobileNetwork.kt:AutoMobileNetwork</ID>
     <ID>TooManyFunctions:AutoMobileNotifications.kt:AutoMobileNotifications</ID>
-    <ID>TooManyFunctions:AutoMobileOsEvents.kt:AutoMobileOsEvents</ID>
     <ID>TooManyFunctions:AutoMobileSDK.kt:AutoMobileSDK</ID>
     <ID>TooManyFunctions:DatabaseInspectorProvider.kt:DatabaseInspectorProvider : ContentProvider</ID>
-    <ID>TooManyFunctions:EventPersistence.kt:FileEventPersistence : EventPersistence</ID>
-    <ID>TooManyFunctions:FrameMetricsCollector.kt:FrameMetricsCollector</ID>
     <ID>TooManyFunctions:NetworkMockRuleStore.kt:NetworkMockRuleStore</ID>
     <ID>TooManyFunctions:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver : DatabaseDriver</ID>
     <ID>TooManyFunctions:SdkCapabilities.kt:SdkCapabilityRegistry</ID>
-    <ID>TooManyFunctions:SdkEventBuffer.kt:SdkEventBuffer</ID>
     <ID>TooManyFunctions:SharedPreferencesDriverImpl.kt:SharedPreferencesDriverImpl : SharedPreferencesDriver</ID>
     <ID>TooManyFunctions:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider : ContentProvider</ID>
   </CurrentIssues>

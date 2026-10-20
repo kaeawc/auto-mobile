@@ -3,9 +3,9 @@ import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository
 import {
   resetDeviceSnapshotManagerDependencies,
   setDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { registerDeviceSnapshotResources } from "../../src/server/deviceSnapshotResources";
-import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/server/deviceSnapshotResourceUris";
+import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/daemon/deviceSnapshotResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";

@@ -17,7 +17,6 @@ import { parseGuardSource, relativePosix, typeScriptFiles, readGuardFile } from 
  * other in-flight lanes (navigation, interaction, device tools).
  */
 const BASELINE: Readonly<Record<string, number>> = {
-  "deviceSnapshotManager.ts": 2,
   "interactionToolTypes.ts": 1,
   "navigationTools.ts": 3,
   "setActiveDevice.ts": 2,

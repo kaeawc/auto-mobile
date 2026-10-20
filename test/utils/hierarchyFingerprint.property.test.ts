@@ -1,7 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
+import { NodeCryptoService } from "../../src/utils/crypto";
+import { logger } from "../../src/utils/logger";
 import fc from "fast-check";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../src/models";
-import { hierarchyChanged, hierarchyFingerprint } from "../../src/utils/hierarchyFingerprint";
+import {
+  createHierarchyFingerprinter,
+  hierarchyChanged,
+  hierarchyFingerprint,
+} from "../../src/utils/hierarchyFingerprint";
 import { computeHierarchyFingerprint } from "../../src/utils/scrollIdle";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
@@ -53,6 +59,48 @@ const perturbTree = (
 };
 
 describe("hierarchyFingerprint properties", () => {
+  test("hashes once per result object while preserving the canonical structural hash", () => {
+    const hash = mock((serialized: string) => NodeCryptoService.generateCacheKey(serialized));
+    const fingerprint = createHierarchyFingerprinter(hash);
+    const first: ViewHierarchyResult = { hierarchy: { node: { text: "first" } } };
+    const expected = NodeCryptoService.generateCacheKey(JSON.stringify(first.hierarchy));
+    expect(fingerprint(first)).toBe(expected);
+    expect(fingerprint(first)).toBe(expected);
+    first.updatedAt = 42;
+    expect(fingerprint(first)).toBe(expected);
+    expect(hash).toHaveBeenCalledTimes(1);
+    // Even a new wrapper sharing the same structural tree is a separate capture.
+    expect(fingerprint({ ...first })).toBe(expected);
+    expect(hash).toHaveBeenCalledTimes(2);
+    const changed: ViewHierarchyResult = { hierarchy: { node: { text: "second" } } };
+    expect(fingerprint(changed)).not.toBe(expected);
+    expect(fingerprint(changed)).toBe(
+      NodeCryptoService.generateCacheKey(JSON.stringify(changed.hierarchy)),
+    );
+    expect(hash).toHaveBeenCalledTimes(3);
+    expect(fingerprint(null)).toBeNull();
+    expect(fingerprint(undefined)).toBeNull();
+    expect(hash).toHaveBeenCalledTimes(3);
+  });
+
+  test("caches a cyclic capture's null verdict after logging the failure once", () => {
+    const hash = mock((serialized: string) => NodeCryptoService.generateCacheKey(serialized));
+    const fingerprint = createHierarchyFingerprinter(hash);
+    const attributes: Record<string, unknown> = {};
+    attributes.self = attributes;
+    const cyclic: ViewHierarchyResult = { hierarchy: { node: { $: attributes } } };
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(fingerprint(cyclic)).toBeNull();
+      expect(fingerprint(cyclic)).toBeNull();
+      expect(hash).not.toHaveBeenCalled();
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning.mock.calls[0]?.[0]).toContain("Failed to fingerprint view hierarchy");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   test("is invariant under capture metadata (updatedAt, receivedAt, frameContext, fresh)", () => {
     fc.assert(
       fc.property(treeArb, metadataArb, metadataArb, (tree, first, second) => {

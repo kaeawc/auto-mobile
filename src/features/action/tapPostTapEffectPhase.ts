@@ -1,3 +1,4 @@
+import type { TapOnCall } from "./ActionCall";
 import type { ObserveResult, TapOnElementResult, ViewHierarchyResult } from "../../models";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
@@ -79,9 +80,16 @@ export class TapPostTapEffectPhase {
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult,
     signal?: AbortSignal,
+    call?: Pick<TapOnCall, "settlePostTapEffect">,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.host.deriveTapEffect(previousObservation, currentObservation);
-    if (!this.host.settlesPostTapChange() || !previousObservation) {
+    // Retry verification already ran during gesture dispatch. Only the optional
+    // destination-effect polling is skipped; retain the final observed capture.
+    if (
+      call?.settlePostTapEffect === false ||
+      !this.host.settlesPostTapChange() ||
+      !previousObservation
+    ) {
       return { effect: immediateEffect, observation: currentObservation };
     }
 

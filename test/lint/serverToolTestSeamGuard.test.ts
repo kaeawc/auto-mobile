@@ -7,11 +7,8 @@ import { join } from "node:path";
 const ALLOWLIST: Record<string, number> = {
   "appTools.ts": 0,
   "deviceReadinessProxyProvider.ts": 1,
-  "deviceSnapshotManager.ts": 1,
   "deviceTools.ts": 2,
-  "videoRecordingManager.ts": 1,
   "videoRecordingSegments.ts": 1,
-  "webrtcStreamManager.ts": 1,
 };
 const SERVER_DIR = join(import.meta.dir, "../../src/server");
 

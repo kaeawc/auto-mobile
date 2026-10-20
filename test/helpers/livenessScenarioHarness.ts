@@ -23,7 +23,7 @@ import {
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
-import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
+import { defaultRecordingSessionCleanupDeps } from "../../src/daemon/recordingSessionCleanup";
 import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";

@@ -12,6 +12,16 @@ enum PrototypeRequestValidator {
     private static let headerName = try? NSRegularExpression(pattern: "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
     private static let templatedURL = try? NSRegularExpression(pattern: "^https?://", options: .caseInsensitive)
 
+    private static let forbiddenHeaders: Set<String> = [
+        "host", "connection", "upgrade", "transfer-encoding", "content-length", "te", "trailer",
+        "keep-alive", "cookie", "origin", "expect",
+    ]
+
+    static func isForbiddenHeader(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return forbiddenHeaders.contains(lower) || lower.hasPrefix("proxy-")
+    }
+
     /// Throws the first request rule the authored `root` breaks. `state` is the spec's declared state.
     static func validate(_ root: JSONValue, state: [String: JSONValue]) throws {
         try scan(root, path: "root", state: state)
@@ -159,6 +169,9 @@ enum PrototypeRequestValidator {
         var seenHeaders = Set<String>()
         for name in fields.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
             let entryPath = PrototypeLimits.dataMemberPath(path, key: name)
+            if isHeader, isForbiddenHeader(name) {
+                throw fail(entryPath, "Forbidden request header")
+            }
             let range = NSRange(name.startIndex..., in: name)
             // Header names are case-insensitive, so `X-Test` and `x-test` are one header given twice.
             if isHeader, !seenHeaders.insert(name.lowercased()).inserted {

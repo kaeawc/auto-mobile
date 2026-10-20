@@ -28,7 +28,7 @@ import {
   defaultRecordingSessionCleanupDeps,
   takeRecordingIdsFinalizedByRelease,
   registerRecordingSessionCleanup,
-} from "../server/recordingSessionCleanup";
+} from "./recordingSessionCleanup";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import {

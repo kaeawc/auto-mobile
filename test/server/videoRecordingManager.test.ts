@@ -1,4 +1,4 @@
-import * as videoRecordingManager from "../../src/server/videoRecordingManager";
+import * as videoRecordingManager from "../../src/daemon/videoRecordingManager";
 import { warmedTests } from "../helpers/warmedTests";
 import {
   afterAll,
@@ -52,14 +52,14 @@ import {
   stopVideoRecording,
   stopVideoRecordingUnattended,
   type VideoRetentionPolicy,
-} from "../../src/server/videoRecordingManager";
+} from "../../src/daemon/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
 import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
 import {
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
   resetDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
@@ -88,7 +88,7 @@ import { displayTransitions } from "../../src/features/observe/DisplayTransition
 import {
   buildVideoArchiveItemUri,
   VIDEO_RESOURCE_URIS,
-} from "../../src/server/videoRecordingResourceUris";
+} from "../../src/daemon/videoRecordingResourceUris";
 
 describe("videoRecordingManager", () => {
   let fakeTimer: FakeTimer;

@@ -4,6 +4,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
+import { ClientRequestCancellation } from "../../../src/daemon/socketServerParts/ClientRequestCancellation";
+import * as brokerSupport from "../../../src/daemon/sessionBroker/brokerSupport";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -34,6 +36,42 @@ function config(requestId: string): SessionConfig {
     },
   };
 }
+
+describe("preparationFailureError", () => {
+  test("preserves an untyped error when preparation was not aborted", () => {
+    const error = new Error("native preparation failed");
+    expect(brokerSupport.preparationFailureError(error, new AbortController().signal)).toBe(error);
+  });
+
+  test.each([new Error("broker stopped"), "broker stopped"])(
+    "types aborted preparation using the signal reason %p",
+    (reason) => {
+      const controller = new AbortController();
+      controller.abort(reason);
+      const error = brokerSupport.preparationFailureError(
+        new Error("native error"),
+        controller.signal,
+      );
+      expect(error).toBeInstanceOf(SessionBrokerFailureError);
+      expect(brokerSupport.failureFor(error)).toEqual({
+        code: "cancelled",
+        retryable: true,
+        message: "Session preparation was cancelled: broker stopped",
+      });
+    },
+  );
+
+  test("preserves a typed failure object even when preparation was aborted", () => {
+    const controller = new AbortController();
+    controller.abort(new Error("broker stopped"));
+    const error = new SessionBrokerFailureError({
+      code: "timeout",
+      retryable: true,
+      message: "native preparation timeout",
+    });
+    expect(brokerSupport.preparationFailureError(error, controller.signal)).toBe(error);
+  });
+});
 
 describe("session-only broker lifecycle", () => {
   let registry: SqliteBindingRegistry;
@@ -152,6 +190,79 @@ describe("session-only broker lifecycle", () => {
       outcome: "failed",
       failure: { code: "session_preparation_failed", retryable: false },
     });
+  });
+
+  test("caller cancellation after device preparation persists a retryable receipt and cleans up", async () => {
+    const controller = new AbortController();
+    const prepare = devices.prepare.bind(devices);
+    spyOn(devices, "prepare").mockImplementationOnce(async (...args) => {
+      const prepared = await prepare(...args);
+      controller.abort(new ClientRequestCancellation("client cancelled prepare"));
+      return prepared;
+    });
+    const failed = await broker.prepare(
+      config("cancel-checkpoint"),
+      "owner-token",
+      controller.signal,
+    );
+    expect(failed).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+      failure: {
+        code: "cancelled",
+        retryable: true,
+        message: "Session preparation was cancelled: client cancelled prepare",
+      },
+    });
+    expect(await broker.status("cancel-checkpoint")).toEqual(failed);
+    expect(await broker.prepare(config("cancel-checkpoint"), "owner-token")).toEqual(failed);
+    expect(devices.prepared).toHaveLength(1);
+    expect(devices.destroyed).toEqual(devices.prepared);
+    expect(devices.released).toEqual(["session-1"]);
+    expect(devices.sessions.size).toBe(0);
+  });
+
+  test("caller cancellation mid-acquire types an untyped native rejection using the abort reason", async () => {
+    const controller = new AbortController();
+    const entered = Promise.withResolvers<void>();
+    devices.prepareHook = async ({ signal }) => {
+      const aborted = Promise.withResolvers<void>();
+      signal!.addEventListener("abort", () => aborted.resolve(), { once: true });
+      entered.resolve();
+      await aborted.promise;
+      throw new Error("native acquisition interrupted");
+    };
+    const pending = broker.prepare(config("cancel-acquire"), "owner-token", controller.signal);
+    await entered.promise;
+    controller.abort(new ClientRequestCancellation("RPC was cancelled"));
+    const failed = await pending;
+    expect(failed).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+      failure: {
+        code: "cancelled",
+        retryable: true,
+        message: "Session preparation was cancelled: RPC was cancelled",
+      },
+    });
+    expect(await broker.status("cancel-acquire")).toEqual(failed);
+    expect(await broker.prepare(config("cancel-acquire"), "owner-token")).toEqual(failed);
+    expect(devices.prepared).toHaveLength(1);
+    expect(devices.destroyed).toEqual(devices.prepared);
+    expect(devices.sessions.size).toBe(0);
+  });
+
+  test("typed preparation failures keep their own failure when the signal is aborted", async () => {
+    const controller = new AbortController();
+    const failure = { code: "spec_unsupported", retryable: false, message: "unsupported device" };
+    devices.prepareHook = async () => {
+      controller.abort(new ClientRequestCancellation("RPC was cancelled"));
+      throw new SessionBrokerFailureError(failure);
+    };
+    const failed = await broker.prepare(config("typed-abort"), "owner-token", controller.signal);
+    expect(failed).toMatchObject({ outcome: "failed", failure });
+    expect(await broker.status("typed-abort")).toEqual(failed);
+    expect(await broker.prepare(config("typed-abort"), "owner-token")).toEqual(failed);
   });
 
   test("recoverable restart handoff and return preserve the active UUID until expiry", async () => {
@@ -637,7 +748,11 @@ describe("session-only broker lifecycle", () => {
     await aborted.promise;
     expect(closed).toBe(false);
     complete.resolve();
-    expect(await pending).toMatchObject({ outcome: "failed", cleanupPending: false });
+    expect(await pending).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+      failure: { code: "cancelled", retryable: true },
+    });
     await close;
     expect(devices.sessions.size).toBe(0);
     await expect(broker.prepare(config("late"), "owner-token")).rejects.toThrow("stopping");
